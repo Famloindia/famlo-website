@@ -463,7 +463,7 @@ export function HomeHostDashboard({
       .order("created_at", { ascending: false })
       .limit(1);
 
-    let conversationId = bookingConversationId || conversationRows?.[0]?.id ?? null;
+    let conversationId = bookingConversationId || (conversationRows?.[0]?.id ?? null);
 
     if (!conversationId) {
       const { data: insertedConversation } = await conversationsTable
