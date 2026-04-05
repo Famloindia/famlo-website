@@ -6,12 +6,12 @@ import { createAdminSupabaseClient } from "@/lib/supabase";
 import type { FamilyProfile, HostOnboardingDraft } from "@/lib/types";
 
 interface HostDashboardPageProps {
-  searchParams?: {
+  searchParams?: Promise<{
     draft?: string;
     family?: string;
     section?: string;
     welcome?: string;
-  };
+  }>;
 }
 
 export const dynamic = "force-dynamic";
@@ -103,10 +103,11 @@ async function loadFamilyDashboardData(
 export default async function HostDashboardPage({
   searchParams
 }: Readonly<HostDashboardPageProps>): Promise<JSX.Element> {
-  let draftId = searchParams?.draft;
+  const resolvedSearchParams = (await searchParams) ?? {};
+  let draftId = resolvedSearchParams.draft;
   const cookieStore = cookies();
   const cookieFamilyId = cookieStore.get("famlo_host_family_id")?.value;
-  const familyIdFromQuery = searchParams?.family ?? cookieFamilyId;
+  const familyIdFromQuery = resolvedSearchParams.family ?? cookieFamilyId;
   const allowedSections = new Set([
     "overview",
     "bookings",
@@ -116,8 +117,8 @@ export default async function HostDashboardPage({
     "profile",
     "compliance"
   ]);
-  const initialSection = allowedSections.has(String(searchParams?.section ?? ""))
-    ? (String(searchParams?.section) as
+  const initialSection = allowedSections.has(String(resolvedSearchParams.section ?? ""))
+    ? (String(resolvedSearchParams.section) as
         | "overview"
         | "bookings"
         | "schedule"
@@ -126,7 +127,7 @@ export default async function HostDashboardPage({
         | "profile"
         | "compliance")
     : "overview";
-  const welcomeMode = searchParams?.welcome === "1";
+  const welcomeMode = resolvedSearchParams.welcome === "1";
   const supabase = createAdminSupabaseClient();
   let draft: HostOnboardingDraft | null = null;
   let family: FamilyProfile | null = null;

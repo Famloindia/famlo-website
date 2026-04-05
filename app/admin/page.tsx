@@ -14,9 +14,9 @@ import { createAdminSupabaseClient } from "@/lib/supabase";
 import type { FamilyApplication, FriendApplication } from "@/lib/types";
 
 interface AdminPageProps {
-  searchParams?: {
+  searchParams?: Promise<{
     error?: string;
-  };
+  }>;
 }
 
 async function loadHomeApplications(): Promise<FamilyApplication[]> {
@@ -71,6 +71,8 @@ async function loadPausedListingCount(): Promise<number> {
 export default async function AdminPage({
   searchParams
 }: Readonly<AdminPageProps>): Promise<JSX.Element> {
+  const resolvedSearchParams = (await searchParams) ?? {};
+
   async function login(formData: FormData): Promise<void> {
     "use server";
 
@@ -120,7 +122,7 @@ export default async function AdminPage({
               required
               className="w-full rounded-2xl border border-[#e5e7eb] px-4 py-3 text-sm outline-none"
             />
-            {searchParams?.error ? (
+            {resolvedSearchParams.error ? (
               <p className="text-sm text-[#9f1239]">Invalid admin password.</p>
             ) : null}
             <button

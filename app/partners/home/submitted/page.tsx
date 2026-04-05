@@ -4,9 +4,9 @@ import { createAdminSupabaseClient } from "@/lib/supabase";
 import type { HostOnboardingDraft } from "@/lib/types";
 
 interface SubmittedPageProps {
-  searchParams?: {
+  searchParams?: Promise<{
     draft?: string;
-  };
+  }>;
 }
 
 function asString(value: unknown): string {
@@ -16,7 +16,8 @@ function asString(value: unknown): string {
 export default async function SubmittedPage({
   searchParams
 }: Readonly<SubmittedPageProps>): Promise<JSX.Element> {
-  const draftId = searchParams?.draft;
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const draftId = resolvedSearchParams.draft;
   let draft: HostOnboardingDraft | null = null;
 
   if (draftId) {
