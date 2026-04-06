@@ -8,7 +8,7 @@ import {
 import { createAdminSupabaseClient } from "../../../../lib/supabase";
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const cookieStore = await cookies();
+  const cookieStore = cookies();
   const isAuthenticated = verifyAdminSessionToken(
     cookieStore.get(getAdminCookieName())?.value
   );

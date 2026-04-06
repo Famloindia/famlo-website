@@ -5,18 +5,17 @@ import { SubmitButton } from "@/app/_components/SubmitButton";
 import { submitHommiePartnerApplication } from "@/app/partners/actions";
 
 interface PartnerHommiesPageProps {
-  searchParams?: Promise<{
+  searchParams?: {
     submitted?: string;
     error?: string;
-  }>;
+  };
 }
 
-export default async function PartnerHommiesPage({
+export default function PartnerHommiesPage({
   searchParams
-}: Readonly<PartnerHommiesPageProps>): Promise<JSX.Element> {
-  const resolvedSearchParams = (await searchParams) ?? {};
-  const submitted = resolvedSearchParams.submitted === "1";
-  const error = resolvedSearchParams.error;
+}: Readonly<PartnerHommiesPageProps>): JSX.Element {
+  const submitted = searchParams?.submitted === "1";
+  const error = searchParams?.error;
 
   return (
     <PartnerFormShell

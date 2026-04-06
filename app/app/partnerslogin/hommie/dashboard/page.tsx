@@ -5,17 +5,16 @@ import { createAdminSupabaseClient } from "@/lib/supabase";
 import type { Hommie, HommieBookingRequest } from "@/lib/types";
 
 interface HommieDashboardPageProps {
-  searchParams?: Promise<{
+  searchParams?: {
     slug?: string;
-  }>;
+  };
 }
 
 export default async function HommieDashboardPage({
   searchParams
 }: Readonly<HommieDashboardPageProps>): Promise<JSX.Element> {
   const supabase = createAdminSupabaseClient();
-  const resolvedSearchParams = (await searchParams) ?? {};
-  const slug = resolvedSearchParams.slug;
+  const slug = searchParams?.slug;
 
   let hommie: Hommie | null = null;
 

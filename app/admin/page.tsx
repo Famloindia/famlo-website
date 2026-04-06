@@ -14,9 +14,9 @@ import { createAdminSupabaseClient } from "@/lib/supabase";
 import type { FamilyApplication, FriendApplication } from "@/lib/types";
 
 interface AdminPageProps {
-  searchParams?: Promise<{
+  searchParams?: {
     error?: string;
-  }>;
+  };
 }
 
 async function loadHomeApplications(): Promise<FamilyApplication[]> {
@@ -71,13 +71,11 @@ async function loadPausedListingCount(): Promise<number> {
 export default async function AdminPage({
   searchParams
 }: Readonly<AdminPageProps>): Promise<JSX.Element> {
-  const resolvedSearchParams = (await searchParams) ?? {};
-
   async function login(formData: FormData): Promise<void> {
     "use server";
 
     const password = String(formData.get("password") ?? "");
-    const cookieStore = await cookies();
+    const cookieStore = cookies();
 
     if (!verifyAdminPassword(password)) {
       redirect("/admin?error=invalid-password");
@@ -95,7 +93,7 @@ export default async function AdminPage({
     redirect("/admin");
   }
 
-  const cookieStore = await cookies();
+  const cookieStore = cookies();
   const isAuthenticated = verifyAdminSessionToken(
     cookieStore.get(getAdminCookieName())?.value
   );
@@ -122,7 +120,7 @@ export default async function AdminPage({
               required
               className="w-full rounded-2xl border border-[#e5e7eb] px-4 py-3 text-sm outline-none"
             />
-            {resolvedSearchParams.error ? (
+            {searchParams?.error ? (
               <p className="text-sm text-[#9f1239]">Invalid admin password.</p>
             ) : null}
             <button

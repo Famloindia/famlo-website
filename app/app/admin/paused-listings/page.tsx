@@ -14,7 +14,7 @@ function hasDoc(value: unknown): boolean {
 }
 
 export default async function PausedListingsPage(): Promise<JSX.Element> {
-  const cookieStore = await cookies();
+  const cookieStore = cookies();
   const isAuthenticated = verifyAdminSessionToken(
     cookieStore.get(getAdminCookieName())?.value
   );
