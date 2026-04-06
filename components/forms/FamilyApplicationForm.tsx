@@ -214,6 +214,9 @@ export function FamilyApplicationForm(): JSX.Element {
         cultural_offerings:
           formState.culturalOfferings.length > 0 ? formState.culturalOfferings : [],
         photo_url: photoUrl,
+        google_maps_link: null,
+        latitude: null,
+        longitude: null,
         review_notes: null,
         status: "pending",
         reviewed_at: null

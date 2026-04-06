@@ -105,7 +105,7 @@ export default async function HostDashboardPage({
 }: Readonly<HostDashboardPageProps>): Promise<JSX.Element> {
   const resolvedSearchParams = (await searchParams) ?? {};
   let draftId = resolvedSearchParams.draft;
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const cookieFamilyId = cookieStore.get("famlo_host_family_id")?.value;
   const familyIdFromQuery = resolvedSearchParams.family ?? cookieFamilyId;
   const allowedSections = new Set([

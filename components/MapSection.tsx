@@ -117,14 +117,18 @@ export function MapSection({
 
       <div className="h-[540px]">
         <MapContainer
-          center={mapCenter}
-          zoom={11}
-          className="h-full w-full"
-          zoomControl={false}
+          {...({
+            center: mapCenter,
+            zoom: 11,
+            className: "h-full w-full",
+            zoomControl: false
+          } as any)}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            {...({
+              attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+              url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            } as any)}
           />
 
           <MapFocus listing={selectedListing} />
@@ -132,13 +136,15 @@ export function MapSection({
           {listings.map((listing) => (
             <Marker
               key={listing.id}
-              position={[listing.latitude, listing.longitude]}
-              icon={createPriceIcon(listing.priceFrom, listing.id === selectedListingId)}
-              eventHandlers={{
-                click: () => onSelect(listing)
-              }}
+              {...({
+                position: [listing.latitude, listing.longitude],
+                icon: createPriceIcon(listing.priceFrom, listing.id === selectedListingId),
+                eventHandlers: {
+                  click: () => onSelect(listing)
+                }
+              } as any)}
             >
-              <Popup className="famlo-map-popup" closeButton={false}>
+              <Popup {...({ className: "famlo-map-popup", closeButton: false } as any)}>
                 <div className="w-[220px] space-y-3">
                   <div>
                     <p className="text-[14px] font-medium text-[#1A1A2E]">

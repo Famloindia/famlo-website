@@ -77,7 +77,7 @@ export default async function AdminPage({
     "use server";
 
     const password = String(formData.get("password") ?? "");
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
 
     if (!verifyAdminPassword(password)) {
       redirect("/admin?error=invalid-password");
@@ -95,7 +95,7 @@ export default async function AdminPage({
     redirect("/admin");
   }
 
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const isAuthenticated = verifyAdminSessionToken(
     cookieStore.get(getAdminCookieName())?.value
   );

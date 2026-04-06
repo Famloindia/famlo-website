@@ -373,7 +373,7 @@ async function provisionApprovedAccount(
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const isAuthenticated = verifyAdminSessionToken(
       cookieStore.get(getAdminCookieName())?.value
     );
