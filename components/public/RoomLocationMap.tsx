@@ -27,7 +27,8 @@ export function RoomLocationMap({ roomName, areaLabel, lat, lng }: Readonly<Room
     if (!mounted || !mapRef.current || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
     const init = async (): Promise<void> => {
-      const L = (await import("leaflet")).default;
+      const leafletModule = await import("leaflet");
+      const L = ((leafletModule as any).default ?? leafletModule) as any;
       if (!mapRef.current) return;
 
       if (!mapInstance.current) {

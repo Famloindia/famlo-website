@@ -29,7 +29,8 @@ const LocationPrivacyMap: React.FC<LocationPrivacyMapProps> = ({
     if (!isMounted || !mapRef.current) return;
 
     const initMap = async () => {
-      const L = (await import("leaflet")).default;
+      const leafletModule = await import("leaflet");
+      const L = ((leafletModule as any).default ?? leafletModule) as any;
       if (!mapRef.current) return;
 
       if (!mapInstance.current) {

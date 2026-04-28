@@ -26,7 +26,8 @@ export default function RevenueHeatmap({ points }: RevenueHeatmapProps) {
 
     // Dynamically load Leaflet to avoid SSR issues
     const loadLeaflet = async () => {
-      const L = (await import("leaflet")).default;
+      const leafletModule = await import("leaflet");
+      const L = ((leafletModule as any).default ?? leafletModule) as any;
 
       // Inject Leaflet CSS if not already present
       if (!document.getElementById("leaflet-css")) {
