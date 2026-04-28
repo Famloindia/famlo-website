@@ -1,4 +1,5 @@
 import { createAdminSupabaseClient } from "@/lib/supabase";
+import { getCachedHomeRouteResolution } from "@/lib/home-route-resolution";
 
 export type FamilyStory = {
   id: string;
@@ -199,25 +200,16 @@ async function mapLegacyFamilyIdsToHostIds(
 async function resolveRouteIdToHostId(routeId: string): Promise<{ hostId: string | null; familyId: string | null; hostUserId: string | null }> {
   if (!routeId) return { hostId: null, familyId: null, hostUserId: null };
 
-  const supabase = createAdminSupabaseClient();
-  const { data: hostById, error: hostError } = await supabase
-    .from("hosts")
-    .select("id,legacy_family_id,user_id")
-    .eq("id", routeId)
-    .maybeSingle();
-
-  if (hostError && !isMissingSchemaError(hostError.message)) {
-    console.error("Failed to resolve host from route id:", hostError);
-  }
-
-  if (hostById) {
+  const resolved = await getCachedHomeRouteResolution(routeId);
+  if (resolved.hostId || resolved.familyId || resolved.hostUserId) {
     return {
-      hostId: asString(hostById.id),
-      familyId: asString(hostById.legacy_family_id),
-      hostUserId: asString(hostById.user_id),
+      hostId: resolved.hostId,
+      familyId: resolved.familyId,
+      hostUserId: resolved.hostUserId,
     };
   }
 
+  const supabase = createAdminSupabaseClient();
   const { data: hostByFamily, error: familyLookupError } = await supabase
     .from("hosts")
     .select("id,legacy_family_id,user_id")
