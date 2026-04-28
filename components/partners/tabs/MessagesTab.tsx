@@ -94,7 +94,10 @@ export default function MessagesTab({
   }, [supabase]);
 
   const fetchConversations = useCallback(async (preserveSelection = true): Promise<any[]> => {
-    if (!familyId || !hostUserId) return [];
+    if (!familyId || !hostUserId) {
+      setLoading(false);
+      return [];
+    }
     try {
       const response = await fetch(`/api/host/conversations?familyId=${familyId}&hostUserId=${hostUserId}`, {
         headers: await getAuthHeaders(),
@@ -167,6 +170,10 @@ export default function MessagesTab({
   }, [activeConversation?.last_message_at, activeConvId]);
 
   useEffect(() => {
+    if (!familyId || !hostUserId) {
+      setLoading(false);
+      return;
+    }
     void fetchConversations(false);
   }, [fetchConversations]);
 

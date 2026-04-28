@@ -553,6 +553,7 @@ export function HostDashboardEditor({
           ].map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => navigateTab(tab.id)}
               className={`${styles.navItem} ${activeTab === tab.id ? styles.active : ""}`}
             >

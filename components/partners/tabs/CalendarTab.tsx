@@ -287,83 +287,85 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '32px' }}>
-        {/* Main Calendar Card */}
-        <div className={styles.glassCard} style={{ padding: 0, overflow: 'hidden', border: '1px solid rgba(14,43,87,0.08)' }}>
-          <div style={{ background: 'white', borderBottom: '1px solid #f1f5f9', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#0e2b57' }}>
-            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900 }}>{monthName} {viewDate.getFullYear()}</h3>
-            <div style={{ display: 'flex', gap: '4px' }}>
-              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#0e2b57', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}><ChevronLeft size={18} /></button>
-              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#0e2b57', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}><ChevronRight size={18} /></button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Main Calendar Card */}
+          <div className={styles.glassCard} style={{ padding: 0, overflow: 'hidden', border: '1px solid rgba(14,43,87,0.08)' }}>
+            <div style={{ background: 'white', borderBottom: '1px solid #f1f5f9', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#0e2b57' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900 }}>{monthName} {viewDate.getFullYear()}</h3>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#0e2b57', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}><ChevronLeft size={18} /></button>
+                <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#0e2b57', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}><ChevronRight size={18} /></button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: '#f8fafc', padding: '12px 0', borderBottom: '1px solid #f1f5f9' }}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                <div key={d} style={{ textAlign: 'center', fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.4)', textTransform: 'uppercase' }}>{d}</div>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'white' }}>
+               {Array.from({length: emptyDays}).map((_, i) => <div key={`e-${i}`} style={{ height: '100px', borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }} />)}
+               {Array.from({length: daysInMonth}, (_, i) => i + 1).map(day => {
+                  const blocked = isDayBlocked(day);
+                  const dayStr = `${yearMonth}-${day.toString().padStart(2, '0')}`;
+                  const isPastDay = isPastDateInIndia(dayStr);
+                  const dayBookings = getDisplayBookingsForDate(visibleBookingRows, dayStr).filter(
+                    (b: any) =>
+                      b.status === "confirmed" ||
+                      b.status === "accepted" ||
+                      b.status === "pending" ||
+                      b.status === "awaiting_payment" ||
+                      b.status === "checked_in" ||
+                      b.status === "completed"
+                  );
+                  const booked = dayBookings.length > 0;
+                  
+                  return (
+                    <button key={day} onClick={() => {
+                      if (isPastDay) return;
+                      setInsightDay(day);
+                    }} 
+                      className={styles.calendarDayBtn}
+                      style={{ 
+                        height: '100px', background: isPastDay ? '#f8fafc' : blocked ? '#fef2f2' : 'white', 
+                        border: 'none', padding: '12px', cursor: isPastDay ? 'not-allowed' : 'pointer', position: 'relative',
+                        display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                        borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9',
+                        transition: 'background 0.2s',
+                        opacity: isPastDay ? 0.5 : 1
+                      }}>
+                      <span style={{ fontSize: '15px', fontWeight: 900, color: isPastDay ? '#94a3b8' : blocked ? '#ef4444' : '#0e2b57' }}>{day}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px', width: '100%' }}>
+                        {booked && !blocked && !isPastDay && (
+                          <div style={{ background: '#eef2ff', color: '#4f46e5', fontSize: '9px', fontWeight: 900, padding: '4px 8px', borderRadius: '6px', textAlign: 'left', textTransform: 'uppercase' }}>
+                            {dayBookings.length} Bookings
+                          </div>
+                        )}
+                        {isPastDay && (
+                          <div style={{ fontSize: '9px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase' }}>
+                            Past date
+                          </div>
+                        )}
+                        {blocked && (
+                          <div style={{ color: '#ef4444', opacity: 0.4, position: 'absolute', right: '8px', top: '8px' }}>
+                            <Ban size={16} />
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  )
+               })}
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: '#f8fafc', padding: '12px 0', borderBottom: '1px solid #f1f5f9' }}>
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-              <div key={d} style={{ textAlign: 'center', fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.4)', textTransform: 'uppercase' }}>{d}</div>
-            ))}
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'white' }}>
-             {Array.from({length: emptyDays}).map((_, i) => <div key={`e-${i}`} style={{ height: '100px', borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }} />)}
-             {Array.from({length: daysInMonth}, (_, i) => i + 1).map(day => {
-                const blocked = isDayBlocked(day);
-                const dayStr = `${yearMonth}-${day.toString().padStart(2, '0')}`;
-                const isPastDay = isPastDateInIndia(dayStr);
-                const dayBookings = getDisplayBookingsForDate(visibleBookingRows, dayStr).filter(
-                  (b: any) =>
-                    b.status === "confirmed" ||
-                    b.status === "accepted" ||
-                    b.status === "pending" ||
-                    b.status === "awaiting_payment" ||
-                    b.status === "checked_in" ||
-                    b.status === "completed"
-                );
-                const booked = dayBookings.length > 0;
-                
-                return (
-                  <button key={day} onClick={() => {
-                    if (isPastDay) return;
-                    setInsightDay(day);
-                  }} 
-                    className={styles.calendarDayBtn}
-                    style={{ 
-                      height: '100px', background: isPastDay ? '#f8fafc' : blocked ? '#fef2f2' : 'white', 
-                      border: 'none', padding: '12px', cursor: isPastDay ? 'not-allowed' : 'pointer', position: 'relative',
-                      display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-                      borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9',
-                      transition: 'background 0.2s',
-                      opacity: isPastDay ? 0.5 : 1
-                    }}>
-                    <span style={{ fontSize: '15px', fontWeight: 900, color: isPastDay ? '#94a3b8' : blocked ? '#ef4444' : '#0e2b57' }}>{day}</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px', width: '100%' }}>
-                      {booked && !blocked && !isPastDay && (
-                        <div style={{ background: '#eef2ff', color: '#4f46e5', fontSize: '9px', fontWeight: 900, padding: '4px 8px', borderRadius: '6px', textAlign: 'left', textTransform: 'uppercase' }}>
-                          {dayBookings.length} Bookings
-                        </div>
-                      )}
-                      {isPastDay && (
-                        <div style={{ fontSize: '9px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase' }}>
-                          Past date
-                        </div>
-                      )}
-                      {blocked && (
-                        <div style={{ color: '#ef4444', opacity: 0.4, position: 'absolute', right: '8px', top: '8px' }}>
-                          <Ban size={16} />
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                )
-             })}
-          </div>
+          <button className={`${styles.primaryBtn} ${styles.successBtn}`} onClick={() => onSave()} disabled={saving} style={{ padding: '16px' }}>
+             {saving ? "Syncing..." : "sync."}
+          </button>
         </div>
 
         {/* Sidebar Controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-
-           <button className={`${styles.primaryBtn} ${styles.successBtn}`} onClick={() => onSave()} disabled={saving} style={{ padding: '16px' }}>
-              {saving ? "Syncing..." : "All Rooms Option"}
-           </button>
         </div>
       </div>
 
