@@ -4,7 +4,7 @@ import styles from "../dashboard.module.css";
 import { 
   Users, Calendar, IndianRupee,
   Clock, CheckCircle2, User, Eye,
-  Plus, Trash2, RefreshCw, ShieldCheck, Upload, Check
+  Plus, Trash2, RefreshCw, ShieldCheck, Upload, Check, Loader2, MapPin
 } from "lucide-react";
 import type { StayUnitRecord } from "@/lib/stay-units";
 import { normalizeAmenityList, ROOM_AMENITY_OPTIONS } from "@/lib/room-amenities";
@@ -187,6 +187,7 @@ export default function DashboardTab({
   const [roomsSaving, setRoomsSaving] = useState(false);
   const [roomsMessage, setRoomsMessage] = useState<string | null>(null);
   const [customAmenityDrafts, setCustomAmenityDrafts] = useState<Record<string, string>>({});
+  const [detectingRoomLocationId, setDetectingRoomLocationId] = useState<string>("");
 
   const roomStats = useMemo(() => {
     const activeRooms = roomDrafts.filter((room) => room.isActive).length;
@@ -377,14 +378,17 @@ export default function DashboardTab({
       return;
     }
 
+    setDetectingRoomLocationId(roomId);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         updateRoomField(roomId, "lat", String(position.coords.latitude));
         updateRoomField(roomId, "lng", String(position.coords.longitude));
         setRoomsMessage("Room location detected from your device.");
+        setDetectingRoomLocationId("");
       },
       () => {
         setRoomsMessage("Could not detect location. Please allow location access.");
+        setDetectingRoomLocationId("");
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
@@ -713,10 +717,10 @@ export default function DashboardTab({
         <section className={styles.glassCard} style={{ padding: "36px", borderRadius: "28px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", flexWrap: "wrap" }}>
             <div style={{ display: "grid", gap: "8px" }}>
-              <div className={styles.cardTitle} style={{ margin: 0, color: "#0e2b57" }}>ROOM TOGGLES</div>
-              <h2 style={{ margin: 0, fontSize: "30px", fontWeight: 900, color: "#0f172a" }}>Turn rooms on or off</h2>
+              <div className={styles.cardTitle} style={{ margin: 0, color: "#0e2b57" }}>ROOM EDITOR</div>
+              <h2 style={{ margin: 0, fontSize: "30px", fontWeight: 900, color: "#0f172a" }}>Edit room details and availability</h2>
               <p style={{ margin: 0, maxWidth: "720px", fontSize: "14px", lineHeight: 1.7, color: "rgba(14,43,87,0.7)", fontWeight: 600 }}>
-                Room details are edited from the room page. This dashboard view only controls room availability.
+                Update room details here, then use the public room page link to preview how guests will see it.
               </p>
             </div>
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
@@ -748,6 +752,16 @@ export default function DashboardTab({
                 <RefreshCw size={16} />
                 Refresh
               </button>
+              <button
+                type="button"
+                className={styles.primaryBtn}
+                style={{ width: "auto", minWidth: "auto", padding: "10px 16px", borderRadius: "14px" }}
+                onClick={addRoom}
+                disabled={roomsSaving}
+              >
+                <Plus size={16} />
+                Add room
+              </button>
             </div>
           </div>
 
@@ -763,48 +777,49 @@ export default function DashboardTab({
             <div style={{ fontSize: "14px", color: "rgba(14,43,87,0.68)", fontWeight: 700 }}>Loading rooms...</div>
           ) : null}
 
-        <div style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
+        <div style={{ display: 'grid', gap: '20px', minWidth: 0 }}>
           {roomDrafts.map((room, index) => {
             const roomPhotos = parseCsvList(room.photos);
             const localityPhotos = parseCsvList(room.localityPhotos);
             const amenityValues = parseCsvList(room.amenities);
+            const customAmenityValues = amenityValues.filter(
+              (amenity) => !ROOM_AMENITY_OPTIONS.includes(amenity as (typeof ROOM_AMENITY_OPTIONS)[number])
+            );
+            const customAmenityValue = customAmenityDrafts[room.id] ?? "";
             const hasRoomLocation = room.lat.trim().length > 0 && room.lng.trim().length > 0;
+            const smartPriceMidpoint = getSmartPricingMidpoint(room.priceMorning, room.priceEvening);
 
             return (
-              <article key={room.id} style={{ border: '1px solid #e2e8f0', borderRadius: '20px', background: '#fff', overflow: 'hidden', boxShadow: '0 4px 18px rgba(15,23,42,0.06)', minWidth: 0 }}>
+              <article key={room.id} style={{ border: '1px solid #e2e8f0', borderRadius: '24px', background: '#fff', overflow: 'hidden', boxShadow: '0 4px 24px rgba(15,23,42,0.07)', minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '16px 20px', minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', minWidth: 0 }}>
                     <span style={{ fontSize: '12px', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#64748b' }}>Room {index + 1}</span>
                     <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#0f172a', minWidth: 0, wordBreak: 'break-word' }}>{room.name || 'Untitled room'}</h4>
                     {room.isPrimary ? <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: '#ecfdf5', color: '#166534', padding: '3px 10px', borderRadius: '999px' }}>Primary</span> : null}
                     {room.isActive ? <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: '#eff6ff', color: '#1d4ed8', padding: '3px 10px', borderRadius: '999px' }}>Open</span> : <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: '#fef2f2', color: '#b91c1c', padding: '3px 10px', borderRadius: '999px' }}>Closed</span>}
+                    <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: room.quarterEnabled ? '#ecfeff' : '#f8fafc', color: room.quarterEnabled ? '#0f766e' : '#475569', padding: '3px 10px', borderRadius: '999px' }}>
+                      {room.quarterEnabled ? 'Smart pricing on' : 'Smart pricing off'}
+                    </span>
                     <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: hasRoomLocation ? '#ecfdf5' : '#fff7ed', color: hasRoomLocation ? '#166534' : '#9a3412', padding: '3px 10px', borderRadius: '999px' }}>
                       {hasRoomLocation ? 'Location set' : 'No room location'}
                     </span>
                     <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: roomPhotos.length > 0 ? '#ecfdf5' : '#fff7ed', color: roomPhotos.length > 0 ? '#166534' : '#9a3412', padding: '3px 10px', borderRadius: '999px' }}>
                       {roomPhotos.length > 0 ? `${roomPhotos.length} photos` : 'No photos yet'}
                     </span>
-                    {amenityValues.length > 0 ? <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: '#f5f3ff', color: '#6d28d9', padding: '3px 10px', borderRadius: '999px' }}>{amenityValues.length} amenities</span> : null}
+                    {localityPhotos.length > 0 ? <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: '#f5f3ff', color: '#6d28d9', padding: '3px 10px', borderRadius: '999px' }}>{localityPhotos.length} locality</span> : null}
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
+                    <button type="button" className={styles.secondaryBtn} onClick={() => setPrimaryRoom(room.id)} disabled={roomsSaving} style={{ background: '#ecfdf5', color: '#166534', borderColor: 'rgba(22,163,74,0.16)', width: 'auto', minWidth: 'auto', padding: '9px 14px', borderRadius: '999px' }}>
+                      <ShieldCheck size={14} />
+                      Make primary
+                    </button>
                     <button type="button" className={styles.secondaryBtn} onClick={() => void toggleRoomActive(room.id, !room.isActive)} disabled={roomsSaving} style={{ background: room.isActive ? '#ecfdf5' : '#fff7ed', color: room.isActive ? '#166534' : '#9a3412', borderColor: room.isActive ? 'rgba(22,163,74,0.16)' : 'rgba(249,115,22,0.18)', width: 'auto', minWidth: 'auto', padding: '9px 14px', borderRadius: '999px' }}>
                       {room.isActive ? 'Turn off' : 'Turn on'}
                     </button>
                   </div>
                 </div>
 
-                <div style={{ padding: '18px 20px', display: 'flex', flexWrap: 'wrap', gap: '12px', justifyContent: 'space-between', alignItems: 'center', minWidth: 0 }}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', minWidth: 0 }}>
-                    <span style={{ fontSize: '12px', fontWeight: 800, color: '#0f172a' }}>{room.unitType.replace(/_/g, ' ')}</span>
-                    <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-                      {roomPhotos.length} photos · {amenityValues.length} amenities
-                    </span>
-                    {room.isActive ? null : (
-                      <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', background: '#fef2f2', color: '#b91c1c', padding: '3px 10px', borderRadius: '999px' }}>
-                        Hidden on listing
-                      </span>
-                    )}
-                  </div>
+                <div style={{ padding: '22px', display: 'grid', gap: '24px', minWidth: 0, overflow: 'hidden' }}>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                     <Link
                       href={`/host/${familyId}/room/${room.id}`}
@@ -815,9 +830,337 @@ export default function DashboardTab({
                     >
                       View room page
                     </Link>
-                    <button type="button" className={styles.secondaryBtn} onClick={() => void toggleRoomActive(room.id, !room.isActive)} disabled={roomsSaving} style={{ background: room.isActive ? '#ecfdf5' : '#fff7ed', color: room.isActive ? '#166534' : '#9a3412', borderColor: room.isActive ? 'rgba(22,163,74,0.16)' : 'rgba(249,115,22,0.18)', width: 'auto', minWidth: 'auto', padding: '9px 14px', borderRadius: '999px' }}>
-                      {room.isActive ? 'Turn off' : 'Turn on'}
-                    </button>
+                    <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
+                      {formatUnitType(room.unitType)} · {roomPhotos.length} photos · {amenityValues.length} amenities
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
+                    <div style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#1d4ed8' }}>Room identity</div>
+                    <div className={styles.gridCols2} style={{ gap: '14px', minWidth: 0 }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Room name</span>
+                        <input className={styles.inputField} value={room.name} onChange={(event) => updateRoomField(room.id, 'name', event.target.value)} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Room type</span>
+                        <select className={styles.inputField} value={room.unitType} onChange={(event) => updateRoomField(room.id, 'unitType', event.target.value)}>
+                          <option value="private_room">Private room</option>
+                          <option value="deluxe_room">Deluxe room</option>
+                          <option value="standard_room">Standard room</option>
+                          <option value="family_room">Family room</option>
+                          <option value="entire_home">Entire home</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
+                    <div style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#1d4ed8' }}>Room details</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '14px', minWidth: 0 }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Max guests</span>
+                        <input className={styles.inputField} type="number" min="1" value={room.maxGuests} onChange={(event) => updateRoomField(room.id, 'maxGuests', event.target.value)} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Bed info</span>
+                        <input className={styles.inputField} value={room.bedInfo} onChange={(event) => updateRoomField(room.id, 'bedInfo', event.target.value)} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Bathroom type</span>
+                        <input className={styles.inputField} value={room.bathroomType} onChange={(event) => updateRoomField(room.id, 'bathroomType', event.target.value)} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Room size (sqm)</span>
+                        <input className={styles.inputField} type="number" min="0" value={room.roomSizeSqm} onChange={(event) => updateRoomField(room.id, 'roomSizeSqm', event.target.value)} />
+                      </label>
+                    </div>
+
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                      <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Description</span>
+                      <textarea className={styles.inputField} rows={3} value={room.description} onChange={(event) => updateRoomField(room.id, 'description', event.target.value)} style={{ wordBreak: 'break-word' }} />
+                    </label>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '10px', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', minWidth: 0 }}>
+                      <MapPin size={14} color="#1d4ed8" />
+                      <span style={{ fontSize: '11px', fontWeight: 900, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Room location</span>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#64748b' }}>Approximate only. Used for the room map.</span>
+                    </div>
+                    <div className={styles.gridCols2} style={{ gap: '14px', minWidth: 0 }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Latitude</span>
+                        <input className={styles.inputField} inputMode="decimal" placeholder="28.613939" value={room.lat} onChange={(event) => updateRoomField(room.id, 'lat', event.target.value)} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Longitude</span>
+                        <input className={styles.inputField} inputMode="decimal" placeholder="77.209021" value={room.lng} onChange={(event) => updateRoomField(room.id, 'lng', event.target.value)} />
+                      </label>
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', minWidth: 0 }}>
+                      <button
+                        type="button"
+                        className={styles.secondaryBtn}
+                        onClick={() => setRoomLocationFromHome(room.id)}
+                        disabled={roomsSaving || !Number.isFinite(homeLat) || !Number.isFinite(homeLng)}
+                        style={{ width: 'auto', minWidth: 'auto', padding: '12px 16px', borderRadius: '14px' }}
+                      >
+                        Use home location
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryBtn}
+                        onClick={() => void detectRoomLocation(room.id)}
+                        disabled={roomsSaving || detectingRoomLocationId === room.id}
+                        style={{ width: 'auto', minWidth: 'auto', padding: '12px 16px', borderRadius: '14px' }}
+                      >
+                        {detectingRoomLocationId === room.id ? <Loader2 size={14} className="animate-spin" /> : <MapPin size={14} />}
+                        {detectingRoomLocationId === room.id ? 'Detecting...' : 'Auto detect location'}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryBtn}
+                        onClick={() => {
+                          updateRoomField(room.id, 'lat', '');
+                          updateRoomField(room.id, 'lng', '');
+                        }}
+                        disabled={roomsSaving}
+                        style={{ width: 'auto', minWidth: 'auto', padding: '12px 16px', borderRadius: '14px', background: '#fff', color: '#475569' }}
+                      >
+                        Clear location
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '10px', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', minWidth: 0 }}>
+                      <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Amenities</span>
+                      <span style={{ fontSize: '12px', fontWeight: 800, color: '#0f172a' }}>{amenityValues.length} selected</span>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minWidth: 0 }}>
+                      {ROOM_AMENITY_OPTIONS.map((amenity) => {
+                        const active = amenityValues.includes(amenity);
+                        return (
+                          <button
+                            key={amenity}
+                            type="button"
+                            onClick={() => toggleAmenity(room.id, amenity)}
+                            disabled={roomsSaving}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '8px 12px',
+                              borderRadius: '999px',
+                              border: `1px solid ${active ? 'rgba(22,93,204,0.26)' : 'rgba(14,43,87,0.08)'}`,
+                              background: active ? '#eff6ff' : '#f8fafc',
+                              color: active ? '#165dcc' : '#334155',
+                              fontSize: '12px',
+                              fontWeight: 800,
+                              cursor: roomsSaving ? 'not-allowed' : 'pointer',
+                              minWidth: 0,
+                            }}
+                          >
+                            {active ? <Check size={12} /> : null}
+                            {amenity}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {customAmenityValues.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minWidth: 0 }}>
+                        {customAmenityValues.map((amenity) => (
+                          <button
+                            key={`${room.id}-${amenity}`}
+                            type="button"
+                            onClick={() => toggleAmenity(room.id, amenity)}
+                            disabled={roomsSaving}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '8px 12px',
+                              borderRadius: '999px',
+                              border: '1px solid rgba(124,58,237,0.18)',
+                              background: '#faf5ff',
+                              color: '#7c3aed',
+                              fontSize: '12px',
+                              fontWeight: 800,
+                              cursor: roomsSaving ? 'not-allowed' : 'pointer',
+                              minWidth: 0,
+                            }}
+                          >
+                            <Check size={12} />
+                            {amenity}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', minWidth: 0 }}>
+                      <input
+                        className={styles.inputField}
+                        value={customAmenityValue}
+                        onChange={(event) => setCustomAmenityDrafts((current) => ({ ...current, [room.id]: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            addCustomAmenity(room.id);
+                          }
+                        }}
+                        placeholder="Add custom amenity"
+                        style={{ flex: '1 1 240px', minWidth: 0 }}
+                      />
+                      <button type="button" className={styles.secondaryBtn} onClick={() => addCustomAmenity(room.id)} disabled={roomsSaving} style={{ width: 'auto', minWidth: 'auto', padding: '14px 16px', borderRadius: '14px' }}>
+                        Add custom
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
+                    <div style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#1d4ed8' }}>Room photos</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', minWidth: 0 }}>
+                      <label
+                        htmlFor={`room-photo-upload-${room.id}`}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '12px 16px',
+                          borderRadius: '14px',
+                          background: '#165dcc',
+                          color: '#fff',
+                          fontSize: '13px',
+                          fontWeight: 800,
+                          cursor: roomsSaving ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        <Upload size={14} />
+                        Upload room photos
+                      </label>
+                      <input id={`room-photo-upload-${room.id}`} accept="image/*" multiple onChange={(event) => void uploadRoomPhotos(room.id, event.target.files)} type="file" style={{ display: 'none' }} />
+                      <label
+                        htmlFor={`room-locality-upload-${room.id}`}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '12px 16px',
+                          borderRadius: '14px',
+                          background: '#f8fafc',
+                          color: '#0f172a',
+                          border: '1px solid #e2e8f0',
+                          fontSize: '13px',
+                          fontWeight: 800,
+                          cursor: roomsSaving ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        <Upload size={14} />
+                        Upload locality photos
+                      </label>
+                      <input id={`room-locality-upload-${room.id}`} accept="image/*" multiple onChange={(event) => void uploadLocalityPhotos(room.id, event.target.files)} type="file" style={{ display: 'none' }} />
+                    </div>
+
+                    {roomPhotos.length > 0 ? (
+                      <div style={{ display: 'grid', gap: '12px', minWidth: 0 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, 150px)', gap: '12px', minWidth: 0, justifyContent: 'flex-start' }}>
+                          {roomPhotos.slice(0, 8).map((photo, photoIndex) => (
+                            <div key={photo} style={{ borderRadius: '16px', overflow: 'hidden', border: photoIndex === 0 ? '2px solid #0f172a' : '1px solid #e2e8f0', background: '#f8fafc', aspectRatio: '4 / 3', position: 'relative', minWidth: 0 }}>
+                              <img src={photo} alt={room.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                              <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8, display: 'flex', gap: '6px', flexWrap: 'wrap', minWidth: 0 }}>
+                                <button type="button" onClick={() => void promoteRoomPhoto(room.id, photo)} disabled={roomsSaving} style={{ padding: '4px 8px', borderRadius: 999, background: photoIndex === 0 ? '#0f172a' : 'rgba(15,23,42,0.82)', color: '#fff', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', border: 'none', cursor: roomsSaving ? 'not-allowed' : 'pointer' }}>
+                                  {photoIndex === 0 ? 'Thumbnail' : 'Set thumbnail'}
+                                </button>
+                                <button type="button" onClick={() => void removeRoomPhoto(room.id, photo)} disabled={roomsSaving} style={{ padding: '4px 8px', borderRadius: 999, background: 'rgba(255,255,255,0.92)', color: '#991b1b', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', border: 'none', cursor: roomsSaving ? 'not-allowed' : 'pointer' }}>
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p style={{ margin: 0, fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>First photo is the thumbnail shown to guests.</p>
+                      </div>
+                    ) : null}
+
+                    {localityPhotos.length > 0 ? (
+                      <div style={{ display: 'grid', gap: '10px', minWidth: 0 }}>
+                        <div style={{ fontSize: '11px', fontWeight: 900, color: '#7c3aed', textTransform: 'uppercase', paddingTop: '12px', borderTop: '1px dashed #e2e8f0' }}>Locality photos</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, 150px)', gap: '12px', minWidth: 0, justifyContent: 'flex-start' }}>
+                          {localityPhotos.slice(0, 8).map((photo) => (
+                            <div key={photo} style={{ borderRadius: '16px', overflow: 'hidden', border: '1px solid #e2e8f0', background: '#faf5ff', aspectRatio: '4 / 3', position: 'relative', minWidth: 0 }}>
+                              <img src={photo} alt={`${room.name} locality`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                              <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8 }}>
+                                <button type="button" onClick={() => void removeRoomPhoto(room.id, photo, 'locality')} disabled={roomsSaving} style={{ padding: '4px 8px', borderRadius: 999, background: 'rgba(255,255,255,0.92)', color: '#7c3aed', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', border: 'none', cursor: roomsSaving ? 'not-allowed' : 'pointer' }}>
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
+                    <div style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#1d4ed8' }}>Smart pricing</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '14px', minWidth: 0 }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Public room price</span>
+                        <input className={styles.inputField} type="number" min="0" value={room.priceFullday} onChange={(event) => updateRoomField(room.id, 'priceFullday', event.target.value)} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Lower-demand backup</span>
+                        <input className={styles.inputField} type="number" min="0" value={room.priceMorning} onChange={(event) => updateRoomField(room.id, 'priceMorning', event.target.value)} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Higher-demand backup</span>
+                        <input className={styles.inputField} type="number" min="0" value={room.priceEvening} onChange={(event) => updateRoomField(room.id, 'priceEvening', event.target.value)} />
+                      </label>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', padding: '14px 16px', borderRadius: '16px', background: '#eff6ff', border: '1px solid rgba(37,99,235,0.12)', minWidth: 0 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#1d4ed8' }}>Enable Smart Pricing</div>
+                        <div style={{ marginTop: '4px', fontSize: '12px', fontWeight: 700, color: 'rgba(29,78,216,0.78)' }}>
+                          We keep a suggested midpoint for reference, but public booking uses the room price first.
+                        </div>
+                      </div>
+                      <label className={styles.iosToggleLabel}>
+                        <input type="checkbox" className={styles.iosToggleInput} checked={room.quarterEnabled} onChange={(event) => updateRoomField(room.id, 'quarterEnabled', event.target.checked)} />
+                        <div className={styles.iosToggleTrack}>
+                          <div className={styles.iosToggleThumb} />
+                        </div>
+                      </label>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', padding: '14px 16px', borderRadius: '16px', background: '#f8fafc', border: '1px solid #e2e8f0', minWidth: 0 }}>
+                      <div>
+                        <div style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#475569' }}>Suggested midpoint</div>
+                        <div style={{ marginTop: '4px', fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>For pricing guidance only</div>
+                      </div>
+                      <div style={{ fontSize: '18px', fontWeight: 900, color: '#165dcc' }}>₹{smartPriceMidpoint}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', paddingTop: '4px', borderTop: '1px solid #f1f5f9', minWidth: 0 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'rgba(14,43,87,0.62)' }}>
+                      Save updates the room, while delete removes it from the host dashboard.
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {index === roomDrafts.length - 1 ? (
+                        <button type="button" className={styles.primaryBtn} style={{ width: 'auto', minWidth: 'auto', padding: '10px 16px', borderRadius: '12px', background: '#f8fafc', color: '#0f172a', fontSize: '13px' }} onClick={addRoom} disabled={roomsSaving}>
+                          <Plus size={14} />
+                          Add room
+                        </button>
+                      ) : null}
+                      <button type="button" className={styles.primaryBtn} style={{ width: 'auto', minWidth: 'auto', padding: '10px 16px', borderRadius: '12px', fontSize: '13px' }} onClick={() => void saveRoom(room)} disabled={roomsSaving}>
+                        {roomsSaving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button type="button" className={styles.primaryBtn} style={{ width: 'auto', minWidth: 'auto', padding: '10px 16px', borderRadius: '12px', background: '#dc2626', color: '#fff', fontSize: '13px' }} onClick={() => void removeRoom(room.id)} disabled={roomsSaving}>
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
               </article>

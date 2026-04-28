@@ -2,9 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { createCalendarConflict, loadCanonicalCalendar, logCalendarSync, parseIcs, upsertCalendarEvent, toCalendarEventUid, type CanonicalCalendarEvent } from "@/lib/calendar";
-import { renderBookingReceipt, renderCompliancePack, renderEmailTemplate, renderPayoutStatement } from "@/lib/document-templates";
+import { renderBookingReceipt, renderCompliancePack, renderPayoutStatement } from "@/lib/document-templates";
+import { enqueueNotificationRecord } from "@/lib/notifications/enqueue";
+import { processNotificationQueueBatch } from "@/lib/notifications/notification-worker";
+import type { NotificationRecipientRole } from "@/lib/notifications/types";
 import { escapeHtml, enumerateDateRange, asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
-import { sendEmail } from "@/lib/resend";
 
 const HOLD_TTL_MINUTES = Number(process.env.FAMLO_HOLD_TTL_MINUTES ?? "20");
 
@@ -442,20 +444,13 @@ export async function enqueueNotification(
     subject?: string | null;
     payload?: JsonRecord;
     scheduledFor?: string | null;
+    recipientRole?: NotificationRecipientRole | null;
+    recipientPhone?: string | null;
+    templateName?: string | null;
   }
 ): Promise<void> {
-  const { error } = await supabase.from("notification_queue").insert({
-    event_type: input.eventType,
-    channel: input.channel,
-    user_id: input.userId ?? null,
-    booking_id: input.bookingId ?? null,
-    payout_id: input.payoutId ?? null,
-    dedupe_key: input.dedupeKey ?? null,
-    subject: input.subject ?? null,
-    payload: input.payload ?? {},
-    scheduled_for: input.scheduledFor ?? new Date().toISOString(),
-  });
-  if (!error) {
+  const result = await enqueueNotificationRecord(supabase, input);
+  if (result === "inserted") {
     console.info("[notifications] enqueue:success", {
       eventType: input.eventType,
       channel: input.channel,
@@ -464,9 +459,7 @@ export async function enqueueNotification(
       payoutId: input.payoutId ?? null,
       dedupeKey: input.dedupeKey ?? null,
     });
-  }
-  if (error && !String(error.message).includes("notification_queue_dedupe_idx")) throw error;
-  if (error && String(error.message).includes("notification_queue_dedupe_idx")) {
+  } else {
     console.info("[notifications] enqueue:deduped", {
       eventType: input.eventType,
       dedupeKey: input.dedupeKey ?? null,
@@ -474,59 +467,10 @@ export async function enqueueNotification(
   }
 }
 
-export async function processNotificationQueue(supabase: SupabaseClient): Promise<{ processed: number; failed: number }> {
-  const now = new Date().toISOString();
-  const { data: rows, error } = await supabase
-    .from("notification_queue")
-    .select("id,event_type,channel,user_id,booking_id,payout_id,subject,payload")
-    .eq("status", "pending")
-    .lte("scheduled_for", now)
-    .order("scheduled_for", { ascending: true })
-    .limit(50);
-  if (error) throw error;
-
-  let processed = 0;
-  let failed = 0;
-
-  for (const row of (rows ?? []) as JsonRecord[]) {
-    const id = asString(row.id);
-    if (!id) continue;
-    try {
-      const payload = (row.payload as JsonRecord | null) ?? {};
-      let emailTo = asString(payload.to);
-      if (!emailTo && asString(row.user_id)) {
-        const { data: user } = await supabase.from("users").select("email").eq("id", asString(row.user_id) ?? "").maybeSingle();
-        emailTo = asString((user as JsonRecord | null)?.email);
-      }
-      if (asString(row.channel) === "email" && emailTo) {
-        await sendEmail({
-          to: emailTo,
-          subject: asString(row.subject) ?? `Famlo update: ${asString(row.event_type) ?? "notification"}`,
-          html: renderEmailTemplate({
-            eyebrow: "Famlo Update",
-            title: asString(row.subject) ?? "Famlo Notification",
-            message: asString(payload.message) ?? "A Famlo event requires your attention.",
-            ctaLabel: asString(payload.cta_label) ?? undefined,
-            ctaUrl: asString(payload.cta_url) ?? undefined,
-          }),
-        });
-      }
-      await supabase.from("notification_queue").update({ status: "processed", processed_at: now } as never).eq("id", id);
-      processed += 1;
-    } catch (notificationError) {
-      await supabase
-        .from("notification_queue")
-        .update({
-          status: "failed",
-          processed_at: now,
-          error_message: notificationError instanceof Error ? notificationError.message : "Unknown notification error",
-        } as never)
-        .eq("id", id);
-      failed += 1;
-    }
-  }
-
-  return { processed, failed };
+export async function processNotificationQueue(
+  supabase: SupabaseClient
+): Promise<{ processed: number; failed: number; skipped: number }> {
+  return processNotificationQueueBatch(supabase);
 }
 
 export async function buildBookingReceiptDocument(

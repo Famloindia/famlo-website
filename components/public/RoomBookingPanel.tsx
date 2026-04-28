@@ -37,6 +37,7 @@ type RoomBookingPanelProps = {
     isAccepting: boolean;
     checkInTime?: string | null;
     checkOutTime?: string | null;
+    blockedDates?: string[];
   };
   room: StayUnitRecord;
   areaLabel: string;
@@ -189,8 +190,13 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
 
   const price = resolveRoomPrice(room);
   const blockedDateTokens = useMemo(
-    () => new Set([...(room.blockedDates ?? []), ...optimisticBlockedDates].filter((value) => value.length > 0)),
-    [optimisticBlockedDates, room.blockedDates]
+    () =>
+      new Set(
+        [...(home.blockedDates ?? []), ...(room.blockedDates ?? []), ...optimisticBlockedDates].filter(
+          (value) => value.length > 0
+        )
+      ),
+    [home.blockedDates, optimisticBlockedDates, room.blockedDates]
   );
   const blockedDateSet = useMemo(
     () => new Set(Array.from(blockedDateTokens).flatMap((token) => [token, normalizeBlockedDateToken(token)])),
@@ -375,7 +381,6 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
               >
                 <span style={{ display: "grid", gap: 3, justifyItems: "center", lineHeight: 1 }}>
                   <span>{cell.getDate()}</span>
-                  {blocked ? <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>Booked</span> : null}
                 </span>
               </button>
             );

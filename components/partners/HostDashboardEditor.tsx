@@ -67,6 +67,48 @@ function joinList(values: unknown): string {
   return "";
 }
 
+function pickObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  return "";
+}
+
+function firstListString(...values: unknown[]): string {
+  for (const value of values) {
+    if (Array.isArray(value) && value.length > 0) {
+      return value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+        .join(", ");
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function getPrimaryRoomDraft(payload: Record<string, unknown>): Record<string, unknown> {
+  const rooms = Array.isArray(payload.rooms)
+    ? payload.rooms.filter((room): room is Record<string, unknown> => Boolean(room && typeof room === "object" && !Array.isArray(room)))
+    : [];
+
+  return (
+    rooms.find((room) => room.isPrimary === true) ??
+    rooms[0] ??
+    {}
+  );
+}
+
 function parsePrice(value: unknown): string {
   if (value === null || value === undefined || value === "") return "";
   const numeric = typeof value === "number" ? value : Number(value);
@@ -86,17 +128,22 @@ function buildProfileFromFamily(
   family: Record<string, unknown>,
   meta: ReturnType<typeof parseHostListingMeta>
 ) {
+  const onboardingPayload = pickObject(family.latest_onboarding_payload);
+
   return {
-    hostDisplayName: String(
-      meta.hostDisplayName ?? family.primary_host_name ?? family.host_name ?? ""
+    hostDisplayName: firstString(
+      meta.hostDisplayName,
+      onboardingPayload.hostName,
+      family.primary_host_name,
+      family.host_name
     ),
-    hostHobbies: String(meta.hostHobbies ?? ""),
+    hostHobbies: firstListString(meta.hostHobbies, onboardingPayload.hostHobbies, onboardingPayload.hobbies),
     familyComposition: String(meta.familyComposition ?? ""),
-    city: String(family.city ?? ""),
-    state: String(family.state ?? ""),
-    cityNeighbourhood: String(family.village ?? ""),
-    hostCatchphrase: String(meta.hostCatchphrase ?? ""),
-    hostSelfieUrl: String(family.host_photo_url ?? meta.hostSelfieUrl ?? ""),
+    city: firstString(onboardingPayload.city, family.city),
+    state: firstString(onboardingPayload.state, family.state),
+    cityNeighbourhood: firstString(onboardingPayload.cityNeighbourhood, family.village),
+    hostCatchphrase: firstString(meta.hostCatchphrase, onboardingPayload.hostCatchphrase),
+    hostSelfieUrl: firstString(family.host_photo_url, meta.hostSelfieUrl),
     mobileNumber: String(family.host_phone ?? ""),
     languages: joinList(family.languages_spoken ?? family.languages ?? []),
   };
@@ -106,30 +153,48 @@ function buildListingFromFamily(
   family: Record<string, unknown>,
   meta: ReturnType<typeof parseHostListingMeta>
 ) {
+  const onboardingPayload = pickObject(family.latest_onboarding_payload);
+  const primaryRoomDraft = getPrimaryRoomDraft(onboardingPayload);
+
   return {
-    propertyName: String(family.name ?? ""),
-    hostBio: String(family.about ?? family.description ?? ""),
-    listingTitle: String(meta.listingTitle ?? ""),
-    culturalOffering: String(family.famlo_experience ?? meta.culturalOffering ?? ""),
-    journeyStory: String(meta.journeyStory ?? ""),
-    specialExperience: String(meta.specialExperience ?? ""),
-    localExperience: String(meta.localExperience ?? ""),
-    interactionType: String(meta.interactionType ?? ""),
-    houseType: String(meta.houseType ?? meta.familyComposition ?? ""),
-    checkInTime: String(meta.checkInTime ?? ""),
-    checkOutTime: String(meta.checkOutTime ?? ""),
-    bathroomType: String(family.bathroom_type ?? meta.bathroomType ?? ""),
-    propertyAddress: String(family.street_address ?? meta.propertyAddress ?? ""),
-    commonAreas: joinList(family.common_areas ?? meta.commonAreas ?? []),
-    amenities: joinList(family.amenities ?? meta.amenities ?? []),
-    includedItems: joinList(meta.includedItems),
-    houseRules: joinList(family.house_rules ?? meta.houseRules ?? []),
-    googleMapsLink: String(meta.googleMapsLink ?? family.google_maps_link ?? meta.propertyAddress ?? ""),
+    propertyName: firstString(onboardingPayload.propertyName, family.name),
+    hostBio: firstString(onboardingPayload.hostBio, family.about, family.description),
+    listingTitle: firstString(meta.listingTitle, onboardingPayload.listingTitle),
+    culturalOffering: firstString(onboardingPayload.culturalActivity, family.famlo_experience, meta.culturalOffering),
+    journeyStory: firstString(meta.journeyStory, onboardingPayload.journeyStory),
+    specialExperience: firstString(meta.specialExperience, onboardingPayload.specialExperience),
+    localExperience: firstString(meta.localExperience, onboardingPayload.localExperience),
+    interactionType: firstString(meta.interactionType, onboardingPayload.interactionType),
+    houseType: firstString(meta.houseType, onboardingPayload.houseType, meta.familyComposition),
+    checkInTime: firstString(meta.checkInTime, onboardingPayload.checkInTime),
+    checkOutTime: firstString(meta.checkOutTime, onboardingPayload.checkOutTime),
+    bathroomType: firstString(
+      family.bathroom_type,
+      meta.bathroomType,
+      onboardingPayload.bathroomType,
+      primaryRoomDraft.bathroomType
+    ),
+    propertyAddress: firstString(onboardingPayload.propertyAddress, family.street_address, meta.propertyAddress),
+    commonAreas: firstListString(onboardingPayload.commonAreas, family.common_areas, meta.commonAreas),
+    amenities: firstListString(
+      onboardingPayload.amenities,
+      family.amenities,
+      meta.amenities,
+      primaryRoomDraft.amenities,
+      primaryRoomDraft.roomAmenities
+    ),
+    includedItems: firstListString(
+      onboardingPayload.includedItems,
+      onboardingPayload.includedHighlights,
+      meta.includedItems
+    ),
+    houseRules: firstListString(onboardingPayload.houseRules, onboardingPayload.houseRulesText, family.house_rules, meta.houseRules),
+    googleMapsLink: firstString(meta.googleMapsLink, onboardingPayload.googleMapsLink, family.google_maps_link, meta.propertyAddress),
     priceMorning: parsePrice(family.price_morning),
     priceAfternoon: parsePrice(family.price_afternoon),
     priceEvening: parsePrice(family.price_evening),
     priceFullday: parsePrice(family.price_fullday),
-    foodType: String(family.food_type ?? meta.foodType ?? ""),
+    foodType: firstListString(onboardingPayload.foodType, family.food_type, meta.foodType),
   };
 }
 

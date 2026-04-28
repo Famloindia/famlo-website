@@ -119,6 +119,26 @@ export default async function HostDashboardPage({
 
   const familyRowsBase = (allFamilies ?? []) as Array<Record<string, unknown>>;
   const familyIds = familyRowsBase.map(f => String(f.id));
+  const { data: latestDraftRows } =
+    familyIds.length > 0
+      ? await supabase
+          .from("host_onboarding_drafts")
+          .select("family_id,payload,updated_at")
+          .in("family_id", familyIds)
+          .order("updated_at", { ascending: false })
+      : { data: [] };
+  const latestDraftByFamilyId = new Map<string, Record<string, unknown>>();
+  for (const row of (latestDraftRows ?? []) as Array<Record<string, unknown>>) {
+    const nextFamilyId = typeof row.family_id === "string" ? row.family_id : null;
+    const payload =
+      row.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+        ? (row.payload as Record<string, unknown>)
+        : null;
+    if (!nextFamilyId || !payload || latestDraftByFamilyId.has(nextFamilyId)) {
+      continue;
+    }
+    latestDraftByFamilyId.set(nextFamilyId, payload);
+  }
   const { data: v2Hosts } =
     familyIds.length > 0
       ? await supabase
@@ -137,6 +157,7 @@ export default async function HostDashboardPage({
   );
   const familyRows: Array<Record<string, unknown> & { v2_host_id: string | null }> = familyRowsBase.map((family) => ({
     ...family,
+    latest_onboarding_payload: latestDraftByFamilyId.get(String(family.id)) ?? null,
     v2_host_id: hostIdByFamilyId.get(String(family.id)) ?? null,
   }));
   const familyMetaById = new Map(

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 
 import { HomeBookingFlow } from "@/components/public/HomeBookingFlow";
@@ -18,6 +19,28 @@ interface BookingPageProps {
   params: Promise<{
     id: string;
   }>;
+}
+
+function BookingPageFallback(): React.JSX.Element {
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 680,
+        margin: "48px auto",
+        padding: "24px",
+        borderRadius: 24,
+        border: "1px solid rgba(26, 86, 219, 0.12)",
+        background: "linear-gradient(180deg, #ffffff, #f8fbff)",
+        boxShadow: "0 18px 40px rgba(15, 23, 42, 0.06)",
+      }}
+    >
+      <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: "#0f172a" }}>Loading booking page</h2>
+      <p style={{ margin: "10px 0 0", color: "#475569", fontSize: 15 }}>
+        Preparing your dates, room access, and guest session.
+      </p>
+    </div>
+  );
 }
 
 function enumerateDateStrings(startDate: string, endDate: string): string[] {
@@ -58,16 +81,26 @@ async function hydrateStayUnitsWithBlockedDates(supabase: ReturnType<typeof crea
   return Promise.all(
     stayUnits.map(async (unit) => {
       try {
-        const events = await loadCanonicalCalendar(supabase, {
-          ownerType: "stay_unit",
-          ownerId: unit.id,
-          from,
-          to,
-        });
+        const [hostEvents, stayUnitEvents] = await Promise.all([
+          unit.hostId
+            ? loadCanonicalCalendar(supabase, {
+                ownerType: "host",
+                ownerId: unit.hostId,
+                from,
+                to,
+              })
+            : Promise.resolve([]),
+          loadCanonicalCalendar(supabase, {
+            ownerType: "stay_unit",
+            ownerId: unit.id,
+            from,
+            to,
+          }),
+        ]);
 
         return {
           ...unit,
-          blockedDates: Array.from(new Set(events.flatMap(tokeniseRoomCalendarBlock))),
+          blockedDates: Array.from(new Set([...hostEvents, ...stayUnitEvents].flatMap(tokeniseRoomCalendarBlock))),
         };
       } catch (error) {
         console.warn("[homes.book] failed to hydrate room calendar", unit.id, error);
@@ -232,7 +265,9 @@ export default async function BookingPage({
 
   return (
     <main className="shell">
-      <HomeBookingFlow home={bookingHome} existingBookings={existingBookings} stayUnits={stayUnits} />
+      <Suspense fallback={<BookingPageFallback />}>
+        <HomeBookingFlow home={bookingHome} existingBookings={existingBookings} stayUnits={stayUnits} />
+      </Suspense>
     </main>
   );
 }

@@ -78,6 +78,81 @@ function extractMissingColumnFromSchemaError(error: unknown): string | null {
   return match?.[1] ?? null;
 }
 
+function pickObject(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
+}
+
+function mergeRoomIntoDraftRooms(
+  currentRooms: unknown,
+  roomPatch: JsonRecord,
+  identity: { roomId: string | null; unitKey: string | null; name: string }
+): JsonRecord[] {
+  const rooms = Array.isArray(currentRooms)
+    ? currentRooms
+        .filter((room): room is JsonRecord => Boolean(room && typeof room === "object" && !Array.isArray(room)))
+        .map((room) => ({ ...room }))
+    : [];
+
+  const roomIndex = rooms.findIndex((room) => {
+    const roomId = asNullableString(room.id);
+    const roomName = asNullableString(room.roomName ?? room.name);
+    return (
+      (identity.roomId != null && roomId === identity.roomId) ||
+      (identity.unitKey != null && roomId === identity.unitKey) ||
+      roomName === identity.name
+    );
+  });
+
+  if (roomIndex >= 0) {
+    rooms[roomIndex] = {
+      ...rooms[roomIndex],
+      ...roomPatch,
+    };
+    return rooms;
+  }
+
+  return [...rooms, roomPatch];
+}
+
+async function syncRoomDraftPayload(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  familyId: string,
+  roomIdentity: { roomId: string | null; unitKey: string | null; name: string },
+  roomPatch: JsonRecord
+): Promise<void> {
+  const { data: drafts } = await supabase
+    .from("host_onboarding_drafts")
+    .select("id,payload")
+    .eq("family_id", familyId)
+    .in("listing_status", ["approved", "live", "published"])
+    .order("updated_at", { ascending: false })
+    .limit(5);
+
+  if (!Array.isArray(drafts) || drafts.length === 0) {
+    return;
+  }
+
+  for (const draft of drafts) {
+    const draftRecord = pickObject(draft);
+    const payload = pickObject(draftRecord.payload);
+    const nextRooms = mergeRoomIntoDraftRooms(payload.rooms, roomPatch, roomIdentity);
+    const nextPayload: JsonRecord = {
+      ...payload,
+      rooms: nextRooms,
+    };
+
+    await supabase
+      .from("host_onboarding_drafts")
+      .update({
+        payload: nextPayload,
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("id", asString(draftRecord.id));
+  }
+}
+
 async function mutateStayUnitWithSchemaFallback(
   supabase: ReturnType<typeof createAdminSupabaseClient>,
   mode: "insert" | "update",
@@ -185,6 +260,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const unitKey = asNullableString(unit.unitKey) || (unitId ? null : makeUnitKey(name));
+    const normalizedLat = asNullableNumber(unit.lat);
+    const normalizedLng = asNullableNumber(unit.lng);
     const payload: JsonRecord = {
       host_id: hostId,
       legacy_family_id: legacyFamilyId,
@@ -196,8 +273,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       bed_info: asNullableString(unit.bedInfo),
       bathroom_type: asNullableString(unit.bathroomType),
       room_size_sqm: typeof unit.roomSizeSqm === "number" || typeof unit.roomSizeSqm === "string" ? asNumber(unit.roomSizeSqm, 0) : null,
-      lat: asNullableNumber(unit.lat),
-      lng: asNullableNumber(unit.lng),
+      lat: normalizedLat,
+      lng: normalizedLng,
       price_morning: Math.max(0, Math.trunc(asNumber(unit.priceMorning, 0))),
       price_afternoon: Math.max(0, Math.trunc(asNumber(unit.priceAfternoon, 0))),
       price_evening: Math.max(0, Math.trunc(asNumber(unit.priceEvening, 0))),
@@ -210,6 +287,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       locality_photos: asStringArray(unit.localityPhotos),
       sort_order: Math.trunc(asNumber(unit.sortOrder, 0)),
       updated_at: new Date().toISOString(),
+    };
+
+    const roomDraftPatch: JsonRecord = {
+      id: unitId ?? clientId ?? unitKey ?? name,
+      roomName: name,
+      roomType: asString(unit.unitType) || "private_room",
+      description: asNullableString(unit.description),
+      roomDescription: asNullableString(unit.description),
+      maxGuests: Math.max(1, Math.trunc(asNumber(unit.maxGuests, 1))),
+      bedConfiguration: asNullableString(unit.bedInfo),
+      bathroomType: asNullableString(unit.bathroomType),
+      roomSizeSqm: typeof unit.roomSizeSqm === "number" || typeof unit.roomSizeSqm === "string" ? asNumber(unit.roomSizeSqm, 0) : null,
+      lat: normalizedLat,
+      lng: normalizedLng,
+      latitude: normalizedLat,
+      longitude: normalizedLng,
+      standardPrice: Math.max(0, Math.trunc(asNumber(unit.priceFullday, 0))),
+      lowDemandPrice: Math.max(0, Math.trunc(asNumber(unit.priceMorning, 0))),
+      highDemandPrice: Math.max(0, Math.trunc(asNumber(unit.priceEvening, 0))),
+      smartPricingEnabled: asBoolean(unit.quarterEnabled, true),
+      isActive: asBoolean(unit.isActive, true),
+      isPrimary: asBoolean(unit.isPrimary, false),
+      roomAmenities: normalizeAmenityList(asStringArray(unit.amenities)),
+      amenities: normalizeAmenityList(asStringArray(unit.amenities)),
+      roomPhotos: asStringArray(unit.photos),
+      photos: asStringArray(unit.photos),
+      localityPhotos: asStringArray(unit.localityPhotos),
+      locality_photos: asStringArray(unit.localityPhotos),
+      sortOrder: Math.trunc(asNumber(unit.sortOrder, 0)),
     };
 
     if (payload.is_primary) {
@@ -238,6 +344,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         console.warn("[stay-units] stripped unsupported columns during update", strippedColumns);
       }
       if (error) throw error;
+      await syncRoomDraftPayload(
+        supabase,
+        familyId,
+        {
+          roomId: unitId ?? clientId,
+          unitKey: unitKey,
+          name,
+        },
+        roomDraftPatch
+      );
       return NextResponse.json({ stayUnit: mapStayUnitRow(data as JsonRecord), clientId });
     }
 
@@ -250,6 +366,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       console.warn("[stay-units] stripped unsupported columns during insert", strippedColumns);
     }
     if (error) throw error;
+    await syncRoomDraftPayload(
+      supabase,
+      familyId,
+      {
+        roomId: asNullableString((data as JsonRecord | null)?.id) ?? clientId,
+        unitKey: asNullableString((data as JsonRecord | null)?.unit_key) ?? unitKey,
+        name,
+      },
+      {
+        ...roomDraftPatch,
+        id: asNullableString((data as JsonRecord | null)?.id) ?? roomDraftPatch.id,
+      }
+    );
     return NextResponse.json({ stayUnit: mapStayUnitRow(data as JsonRecord), clientId });
   } catch (error) {
     return NextResponse.json(

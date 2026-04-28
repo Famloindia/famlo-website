@@ -43,6 +43,47 @@ function normalizedDate(value: string | null | undefined): string | null {
   return date.toISOString().split("T")[0] ?? null;
 }
 
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function buildManualBlockEvents(input: {
+  ownerType: string;
+  ownerId: string;
+  from: string;
+  to: string;
+  blockedDates: string[];
+}): CanonicalCalendarEvent[] {
+  const events: CanonicalCalendarEvent[] = [];
+
+  for (const token of input.blockedDates) {
+    const [dateToken, slotToken] = token.split("::");
+    const startDate = normalizedDate(dateToken);
+    if (!startDate) continue;
+    if (slotToken && slotToken !== "fullday") continue;
+    if (startDate < input.from || startDate > input.to) continue;
+
+    events.push({
+      eventUid: toCalendarEventUid("manual_block", `${input.ownerType}:${input.ownerId}`, startDate, null),
+      ownerType: input.ownerType,
+      ownerId: input.ownerId,
+      title: "Famlo manual block",
+      startDate,
+      endDate: startDate,
+      slotKey: null,
+      status: "confirmed",
+      sourceType: "manual_block",
+      sourceReference: token,
+      isBlocking: true,
+      payload: {},
+      connectionId: null,
+    });
+  }
+
+  return events;
+}
+
 function isMissingColumnError(error: unknown, columnName: string): boolean {
   if (!error || typeof error !== "object") return false;
   const record = error as { code?: unknown; message?: unknown };
@@ -81,6 +122,18 @@ export async function loadCanonicalCalendar(
   let storedResult;
   let bookingsResult;
   let roomSnapshotBookingsResult;
+  let hostBlockedDatesResult:
+    | {
+        data: JsonRecord | null;
+        error: unknown;
+      }
+    | null = null;
+  let familyBlockedDatesResult:
+    | {
+        data: JsonRecord | null;
+        error: unknown;
+      }
+    | null = null;
 
   try {
     storedResult = await supabase
@@ -139,6 +192,27 @@ export async function loadCanonicalCalendar(
         .eq("pricing_snapshot->>stay_unit_id", input.ownerId)
         .lte("start_date", input.to)
         .gte("end_date", input.from);
+    } else {
+      hostBlockedDatesResult = await supabase
+        .from("hosts")
+        .select("id,legacy_family_id,blocked_dates")
+        .eq("id", input.ownerId)
+        .maybeSingle();
+
+      const familyId = asString(hostBlockedDatesResult.data?.legacy_family_id);
+      if (familyId) {
+        familyBlockedDatesResult = await supabase
+          .from("families")
+          .select("id,blocked_dates")
+          .eq("id", familyId)
+          .maybeSingle();
+      } else {
+        familyBlockedDatesResult = await supabase
+          .from("families")
+          .select("id,blocked_dates")
+          .eq("id", input.ownerId)
+          .maybeSingle();
+      }
     }
   } else {
     bookingsResult = { data: [], error: null };
@@ -165,6 +239,8 @@ export async function loadCanonicalCalendar(
   if (storedResult.error) throw storedResult.error;
   if (bookingsResult?.error) throw bookingsResult.error;
   if (roomSnapshotBookingsResult?.error) throw roomSnapshotBookingsResult.error;
+  if (hostBlockedDatesResult?.error) throw hostBlockedDatesResult.error;
+  if (familyBlockedDatesResult?.error) throw familyBlockedDatesResult.error;
 
   const bookingRows = new Map<string, JsonRecord>();
   for (const row of ((bookingsResult?.data ?? []) as JsonRecord[])) {
@@ -226,8 +302,22 @@ export async function loadCanonicalCalendar(
         })
       : [];
 
+  const hostBlockedDates =
+    input.ownerType === "host"
+      ? asStringArray(familyBlockedDatesResult?.data?.blocked_dates).length > 0
+        ? asStringArray(familyBlockedDatesResult?.data?.blocked_dates)
+        : asStringArray(hostBlockedDatesResult?.data?.blocked_dates)
+      : [];
+  const manualBlocks = buildManualBlockEvents({
+    ownerType: input.ownerType,
+    ownerId: input.ownerId,
+    from: input.from,
+    to: input.to,
+    blockedDates: hostBlockedDates,
+  });
+
   const merged = new Map<string, CanonicalCalendarEvent>();
-  for (const event of [...bookingDerived, ...stored]) {
+  for (const event of [...bookingDerived, ...manualBlocks, ...stored]) {
     merged.set(event.eventUid, event);
   }
   return [...merged.values()];
@@ -310,7 +400,12 @@ export async function createCalendarConflict(
   if (error) throw error;
 }
 
-export function generateIcs(events: CanonicalCalendarEvent[]): string {
+export function generateIcs(
+  events: CanonicalCalendarEvent[],
+  options?: {
+    summary?: string;
+  }
+): string {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -329,7 +424,7 @@ export function generateIcs(events: CanonicalCalendarEvent[]): string {
     lines.push(`DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}`);
     lines.push(`DTSTART;VALUE=DATE:${start}`);
     lines.push(`DTEND;VALUE=DATE:${end}`);
-    lines.push(`SUMMARY:${event.title.replace(/\n/g, " ")}`);
+    lines.push(`SUMMARY:${(options?.summary ?? event.title).replace(/\n/g, " ")}`);
     lines.push(`STATUS:${event.status === "cancelled" ? "CANCELLED" : "CONFIRMED"}`);
     lines.push("END:VEVENT");
   }
@@ -352,13 +447,13 @@ export function parseIcs(input: string): Array<{
       const dtEndRaw = /DTEND(?:;VALUE=DATE)?:(.+)/.exec(block)?.[1]?.trim() ?? "";
       const summary = /SUMMARY:(.+)/.exec(block)?.[1]?.trim() ?? "Imported booking";
       const startDate = `${dtStartRaw.slice(0, 4)}-${dtStartRaw.slice(4, 6)}-${dtStartRaw.slice(6, 8)}`;
-      const endExclusive = `${dtEndRaw.slice(0, 4)}-${dtEndRaw.slice(4, 6)}-${dtEndRaw.slice(6, 8)}`;
-      const endDateValue = new Date(`${endExclusive}T00:00:00`);
-      endDateValue.setDate(endDateValue.getDate() - 1);
+      const endDate = dtEndRaw
+        ? `${dtEndRaw.slice(0, 4)}-${dtEndRaw.slice(4, 6)}-${dtEndRaw.slice(6, 8)}`
+        : startDate;
       return {
         uid,
         startDate,
-        endDate: endDateValue.toISOString().split("T")[0] ?? startDate,
+        endDate,
         summary,
       };
     })

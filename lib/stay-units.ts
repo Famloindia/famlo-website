@@ -99,6 +99,121 @@ function dedupeStrings(values: Array<string | null | undefined>): string[] {
   );
 }
 
+function extractMissingColumnFromSchemaError(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  const match = message.match(/Could not find the '([^']+)' column/i);
+  return match?.[1] ?? null;
+}
+
+async function insertStayUnitRowsWithSchemaFallback(
+  supabase: SupabaseClient,
+  rows: JsonRecord[]
+): Promise<Array<JsonRecord>> {
+  const workingRows = rows.map((row) => ({ ...row }));
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const { data, error } = await supabase
+      .from("stay_units_v2")
+      .insert(workingRows as never)
+      .select("id,is_primary");
+
+    if (!error) {
+      return Array.isArray(data) ? (data as JsonRecord[]) : [];
+    }
+
+    const missingColumn = extractMissingColumnFromSchemaError(error);
+    if (!missingColumn) {
+      throw error;
+    }
+
+    let removed = false;
+    for (const row of workingRows) {
+      if (missingColumn in row) {
+        delete row[missingColumn];
+        removed = true;
+      }
+    }
+
+    if (!removed) {
+      throw error;
+    }
+  }
+
+  throw new Error("Schema fallback exhausted for stay_units_v2 room sync.");
+}
+
+async function upsertStayUnitRowWithSchemaFallback(
+  supabase: SupabaseClient,
+  row: JsonRecord
+): Promise<JsonRecord | null> {
+  const workingRow: JsonRecord = { ...row };
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const { data, error } = await supabase
+      .from("stay_units_v2")
+      .upsert(workingRow as never, { onConflict: "host_id,unit_key" })
+      .select("id")
+      .single();
+
+    if (!error) {
+      return (data as JsonRecord | null) ?? null;
+    }
+
+    const missingColumn = extractMissingColumnFromSchemaError(error);
+    if (!missingColumn || !(missingColumn in workingRow)) {
+      throw error;
+    }
+
+    delete workingRow[missingColumn];
+  }
+
+  throw new Error("Schema fallback exhausted for stay_units_v2 primary-room upsert.");
+}
+
+async function upsertStayUnitRowsWithSchemaFallback(
+  supabase: SupabaseClient,
+  rows: JsonRecord[]
+): Promise<Array<JsonRecord | null>> {
+  const results: Array<JsonRecord | null> = [];
+
+  for (const row of rows) {
+    results.push(await upsertStayUnitRowWithSchemaFallback(supabase, row));
+  }
+
+  return results;
+}
+
+async function updateStayUnitRowWithSchemaFallback(
+  supabase: SupabaseClient,
+  unitId: string,
+  row: JsonRecord
+): Promise<JsonRecord | null> {
+  const workingRow: JsonRecord = { ...row };
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const { data, error } = await supabase
+      .from("stay_units_v2")
+      .update(workingRow as never)
+      .eq("id", unitId)
+      .select("id,is_primary,unit_key")
+      .single();
+
+    if (!error) {
+      return (data as JsonRecord | null) ?? null;
+    }
+
+    const missingColumn = extractMissingColumnFromSchemaError(error);
+    if (!missingColumn || !(missingColumn in workingRow)) {
+      throw error;
+    }
+
+    delete workingRow[missingColumn];
+  }
+
+  throw new Error("Schema fallback exhausted for stay_units_v2 room update.");
+}
+
 function pickObject(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -211,6 +326,51 @@ function getRoomDraftsFromSource(source: JsonRecord): JsonRecord[] {
 
   const legacyRoom = buildLegacyRoomDraft(source);
   return legacyRoom ? [legacyRoom] : [];
+}
+
+function roomDraftIdentityMatches(room: JsonRecord, row: StayUnitRecord): boolean {
+  const roomId = asNullableString(room.id);
+  const roomName = asNullableString(room.roomName ?? room.name);
+
+  return (
+    (roomId != null && (roomId === row.id || roomId === row.unitKey)) ||
+    (roomName != null && roomName === row.name) ||
+    (Boolean(room.isPrimary) && row.isPrimary)
+  );
+}
+
+function mergeStayUnitRowFromSource(row: StayUnitRecord, sourceRoom: JsonRecord): StayUnitRecord {
+  const sourceLat = asNullableNumber(sourceRoom.lat ?? sourceRoom.latitude);
+  const sourceLng = asNullableNumber(sourceRoom.lng ?? sourceRoom.longitude);
+  const sourceLocalityPhotos = dedupeStrings([
+    ...asStringArray(sourceRoom.localityPhotos),
+    ...asStringArray(sourceRoom.locality_photos),
+    ...asStringArray(sourceRoom.localityImages),
+    ...asStringArray(sourceRoom.locality_images),
+  ]);
+
+  return {
+    ...row,
+    lat: sourceLat ?? row.lat,
+    lng: sourceLng ?? row.lng,
+    localityPhotos: sourceLocalityPhotos.length > 0 ? sourceLocalityPhotos : row.localityPhotos,
+  };
+}
+
+function mergeStayUnitRowsFromSource(rows: StayUnitRecord[], source: JsonRecord | null): StayUnitRecord[] {
+  if (!source || rows.length === 0) {
+    return rows;
+  }
+
+  const sourceRooms = getRoomDraftsFromSource(source);
+  if (sourceRooms.length === 0) {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const matchedRoom = sourceRooms.find((room) => roomDraftIdentityMatches(pickObject(room), row));
+    return matchedRoom ? mergeStayUnitRowFromSource(row, pickObject(matchedRoom)) : row;
+  });
 }
 
 function countRoomsFromSource(source: JsonRecord): number {
@@ -577,6 +737,22 @@ async function loadApprovedRoomSourceForFamily(
     }
   }
 
+  const { data: latestDrafts, error: latestDraftError } = await supabase
+    .from("host_onboarding_drafts")
+    .select("*")
+    .eq("family_id", normalizedFamilyId)
+    .order("updated_at", { ascending: false })
+    .limit(10);
+
+  if (latestDraftError) {
+    console.warn("[stay-units] latest draft lookup failed", latestDraftError);
+  } else if (Array.isArray(latestDrafts)) {
+    const latestRoomDraft = latestDrafts.find((row) => countRoomsFromSource(row as JsonRecord) > 0);
+    if (latestRoomDraft && typeof latestRoomDraft === "object") {
+      return latestRoomDraft as JsonRecord;
+    }
+  }
+
   const { data: applications, error: applicationError } = await supabase
     .from("family_applications")
     .select("*")
@@ -642,7 +818,7 @@ async function repairStayUnitsFromApprovedSource(
       application: normalizeApplicationSource(roomSource),
     });
   } catch (error) {
-    console.error("[stay-units] approved room repair failed", error);
+    console.warn("[stay-units] approved room repair skipped", error);
     return existingRows;
   }
 
@@ -654,7 +830,14 @@ export async function loadStayUnitsForSelector(
   selector: { hostId?: string | null; legacyFamilyId?: string | null }
 ): Promise<StayUnitRecord[]> {
   const rows = await fetchStayUnitRowsRaw(supabase, selector);
-  return repairStayUnitsFromApprovedSource(supabase, selector, rows);
+  const repairedRows = await repairStayUnitsFromApprovedSource(supabase, selector, rows);
+  const legacyFamilyId = asNullableString(selector.legacyFamilyId) ?? repairedRows[0]?.legacyFamilyId ?? null;
+  if (!legacyFamilyId) {
+    return repairedRows;
+  }
+
+  const approvedRoomSource = await loadApprovedRoomSourceForFamily(supabase, legacyFamilyId);
+  return mergeStayUnitRowsFromSource(repairedRows, approvedRoomSource);
 }
 
 export async function loadStayUnitsForHome(
@@ -734,23 +917,44 @@ export async function syncPrimaryStayUnitForFamily(
     : [];
 
   if (roomsFromApplication.length > 0) {
-    if (hostId) {
-      const { error: deleteHostRoomsError } = await supabase.from("stay_units_v2").delete().eq("host_id", hostId);
-      if (deleteHostRoomsError) throw deleteHostRoomsError;
+    const currentRows = await fetchStayUnitRowsRaw(supabase, { hostId, legacyFamilyId: familyId });
+    const existingRowByUnitKey = new Map(
+      currentRows
+        .map((row) => (row.unitKey ? [row.unitKey, row] : null))
+        .filter((entry): entry is [string, StayUnitRecord] => Boolean(entry))
+    );
+    const syncedRooms: Array<JsonRecord | null> = [];
+
+    for (const desiredRow of roomsFromApplication) {
+      const unitKey = asNullableString(desiredRow.unit_key);
+      const existingRow = unitKey ? existingRowByUnitKey.get(unitKey) : null;
+      if (existingRow?.id) {
+        syncedRooms.push(await updateStayUnitRowWithSchemaFallback(supabase, existingRow.id, desiredRow));
+        continue;
+      }
+
+      const insertedRows = await insertStayUnitRowsWithSchemaFallback(supabase, [desiredRow]);
+      syncedRooms.push(insertedRows[0] ?? null);
     }
 
-    const { error: deleteFamilyRoomsError } = await supabase.from("stay_units_v2").delete().eq("legacy_family_id", familyId);
-    if (deleteFamilyRoomsError) throw deleteFamilyRoomsError;
+    const desiredUnitKeys = new Set(
+      roomsFromApplication
+        .map((row) => asNullableString(row.unit_key))
+        .filter((value): value is string => Boolean(value))
+    );
+    const refreshedRows = await fetchStayUnitRowsRaw(supabase, { hostId, legacyFamilyId: familyId });
+    const staleRowIds = refreshedRows
+      .filter((row) => !desiredUnitKeys.has(row.unitKey))
+      .map((row) => row.id)
+      .filter((value) => value.length > 0);
 
-    const { data: insertedRooms, error: insertRoomsError } = await supabase
-      .from("stay_units_v2")
-      .insert(roomsFromApplication as never)
-      .select("id,is_primary");
+    if (staleRowIds.length > 0) {
+      const { error: deleteStaleRoomsError } = await supabase.from("stay_units_v2").delete().in("id", staleRowIds);
+      if (deleteStaleRoomsError) throw deleteStaleRoomsError;
+    }
 
-    if (insertRoomsError) throw insertRoomsError;
-
-    const primaryRow = Array.isArray(insertedRooms)
-      ? insertedRooms.find((row) => Boolean((row as JsonRecord).is_primary)) ?? insertedRooms[0] ?? null
+    const primaryRow = Array.isArray(syncedRooms)
+      ? syncedRooms.find((row, index) => Boolean(roomsFromApplication[index]?.is_primary)) ?? syncedRooms[0] ?? null
       : null;
 
     return {
@@ -842,15 +1046,7 @@ export async function syncPrimaryStayUnitForFamily(
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from("stay_units_v2")
-    .upsert(stayUnitPayload as never, { onConflict: "host_id,unit_key" })
-    .select("id")
-    .single();
-
-  if (error) {
-    throw error;
-  }
+  const data = await upsertStayUnitRowWithSchemaFallback(supabase, stayUnitPayload);
 
   return {
     stayUnitId: typeof data?.id === "string" ? data.id : null,

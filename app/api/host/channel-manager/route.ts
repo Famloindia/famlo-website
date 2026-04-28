@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { syncImportedCalendar } from "@/lib/booking-platform";
+import { buildCalendarExportUrl, ensureCalendarExportToken, regenerateCalendarExportToken } from "@/lib/calendar-export";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -25,12 +26,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (connections.error) throw connections.error;
     if (syncLogs.error) throw syncLogs.error;
     if (conflicts.error) throw conflicts.error;
+    const exportToken = await ensureCalendarExportToken(supabase, { ownerType, ownerId });
 
     return NextResponse.json({
       connections: connections.data ?? [],
       syncLogs: syncLogs.data ?? [],
       conflicts: conflicts.data ?? [],
       exportUrl: `/api/host/calendar/export?ownerType=${encodeURIComponent(ownerType)}&ownerId=${encodeURIComponent(ownerId)}`,
+      publicExportUrl: buildCalendarExportUrl({ hostId: ownerId, token: exportToken }),
     });
   } catch (error) {
     return NextResponse.json(
@@ -49,6 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       sourceLabel?: string;
       externalUrl?: string | null;
       icsContent?: string | null;
+      action?: string | null;
     };
     const ownerType = String(body.ownerType ?? "host").trim() || "host";
     const ownerId = String(body.ownerId ?? "").trim();
@@ -73,6 +77,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!hostAccess) {
       return NextResponse.json({ error: "You do not have access to this channel manager." }, { status: 403 });
     }
+    if (body.action === "regenerate_export_url") {
+      const exportToken = await regenerateCalendarExportToken(supabase, { ownerType, ownerId });
+      return NextResponse.json({
+        success: true,
+        publicExportUrl: buildCalendarExportUrl({ hostId: ownerId, token: exportToken }),
+      });
+    }
+
     const result = await syncImportedCalendar(supabase, {
       ownerType,
       ownerId,

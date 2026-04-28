@@ -1,8 +1,46 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { createBrowserSupabaseClient } from "@/lib/supabase";
 import styles from "../dashboard.module.css";
 import { X, Calendar as CalendarIcon, Ban, Clock, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
 import { isPastDateInIndia } from "@/lib/booking-time";
 import ChannelManagerTab from "./ChannelManagerTab";
+
+function enumerateDateStrings(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+
+  while (cursor <= end) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return dates;
+}
+
+function tokeniseCalendarBlock(event: {
+  start_date: string;
+  end_date: string;
+  slot_key?: string | null;
+  is_blocking: boolean;
+  status: string;
+}): string[] {
+  if (!event.is_blocking || event.status === "released" || event.status === "cancelled") {
+    return [];
+  }
+
+  const tokens: string[] = [];
+  for (const date of enumerateDateStrings(event.start_date, event.end_date)) {
+    if (event.slot_key && event.slot_key !== "fullday") {
+      tokens.push(`${date}::${event.slot_key}`);
+      continue;
+    }
+
+    tokens.push(date, `${date}::fullday`);
+  }
+
+  return tokens;
+}
 
 function getStatusPriority(status: string | null | undefined): number {
   const normalized = String(status ?? "").trim().toLowerCase();
@@ -45,6 +83,80 @@ function getDisplayBookingsForDate(bookingRows: any[], dayStr: string) {
 export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave, saving, hostId }: any) {
   const [insightDay, setInsightDay] = useState<number | null>(null);
   const [selectedStayUnitId, setSelectedStayUnitId] = useState<string>("all");
+  const [allRooms, setAllRooms] = useState<any[]>([]);
+  const [importedBlockedDates, setImportedBlockedDates] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!hostId) return;
+    const fetchRooms = async () => {
+      const supabase = createBrowserSupabaseClient();
+      const { data } = await supabase
+        .from("stay_units_v2")
+        .select("id, name")
+        .eq("host_id", hostId)
+        .eq("is_active", true);
+      if (data) setAllRooms(data);
+    };
+    fetchRooms();
+  }, [hostId]);
+
+  useEffect(() => {
+    if (!hostId) {
+      setImportedBlockedDates([]);
+      return;
+    }
+
+    const supabase = createBrowserSupabaseClient();
+    let cancelled = false;
+
+    async function fetchImportedBlocks() {
+      const hostQuery = supabase
+        .from("calendar_events")
+        .select("start_date,end_date,slot_key,is_blocking,status")
+        .eq("owner_type", "host")
+        .eq("owner_id", hostId)
+        .eq("source_type", "external_import");
+
+      const roomQuery =
+        selectedStayUnitId !== "all"
+          ? supabase
+              .from("calendar_events")
+              .select("start_date,end_date,slot_key,is_blocking,status")
+              .eq("owner_type", "stay_unit")
+              .eq("owner_id", selectedStayUnitId)
+              .eq("source_type", "external_import")
+          : Promise.resolve({ data: [], error: null });
+
+      const [hostResult, roomResult] = await Promise.all([hostQuery, roomQuery]);
+      if (hostResult.error) {
+        throw hostResult.error;
+      }
+      if (roomResult.error) {
+        throw roomResult.error;
+      }
+
+      if (cancelled) return;
+
+      setImportedBlockedDates(
+        Array.from(
+          new Set([
+            ...((hostResult.data ?? []) as any[]).flatMap(tokeniseCalendarBlock),
+            ...((roomResult.data ?? []) as any[]).flatMap(tokeniseCalendarBlock),
+          ])
+        )
+      );
+    }
+
+    void fetchImportedBlocks().catch(() => {
+      if (!cancelled) {
+        setImportedBlockedDates([]);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hostId, selectedStayUnitId]);
   
   const now = new Date();
   const [viewDate, setViewDate] = useState(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -57,6 +169,10 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
   // Native JS getDay() is 0 for Sunday, which matches our new Sunday-first grid
   const emptyDays = firstDayOfMonth;
   const roomOptions = useMemo(() => {
+    if (allRooms.length > 0) {
+      return allRooms.map(room => ({ id: room.id, label: room.name }));
+    }
+
     const seen = new Set<string>();
     return bookingRows
       .map((booking: any, index: number) => {
@@ -73,7 +189,7 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
       })
       .filter((option: { id: string; label: string } | null): option is { id: string; label: string } => Boolean(option))
       .sort((left: { id: string; label: string }, right: { id: string; label: string }) => left.label.localeCompare(right.label));
-  }, [bookingRows]);
+  }, [bookingRows, allRooms]);
   const visibleBookingRows = useMemo(() => {
     if (selectedStayUnitId === "all") {
       return bookingRows;
@@ -82,10 +198,14 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
     return bookingRows.filter((booking: any) => booking.stay_unit_id === selectedStayUnitId);
   }, [bookingRows, selectedStayUnitId]);
 
+  const blockedTokens = useMemo(() => {
+    const manual = schedule.blockedDates.split(",").map((i: string) => i.trim()).filter(Boolean);
+    return new Set([...manual, ...importedBlockedDates]);
+  }, [importedBlockedDates, schedule.blockedDates]);
+
   const isDayBlocked = (day: number) => {
     const formatted = `${yearMonth}-${day.toString().padStart(2, '0')}`;
-    const blockedList = schedule.blockedDates.split(",").map((i: string) => i.trim()).filter(Boolean);
-    return blockedList.includes(formatted);
+    return blockedTokens.has(formatted) || blockedTokens.has(`${formatted}::fullday`);
   };
   
   const toggleBlockDay = (day: number) => {
@@ -126,7 +246,7 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
     onSave({ updatedSchedule }); // Atomic Sync
   };
 
-  const blockedCount = schedule.blockedDates.length > 0 ? schedule.blockedDates.split(",").filter((i: string) => i.includes('-')).length : 0;
+  const blockedCount = Array.from(blockedTokens).filter((i: string) => i.includes("-")).length;
 
   return (
     <div className={`${styles.flexCol} ${styles.animateIn}`} style={{ gap: '32px' }}>
@@ -143,12 +263,13 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
               onChange={(event) => setSelectedStayUnitId(event.target.value)}
               style={{
                 border: '1px solid #dbe4f0',
-                borderRadius: '10px',
-                padding: '8px 12px',
-                fontSize: '12px',
+                borderRadius: '12px',
+                padding: '12px 20px',
+                fontSize: '16px',
                 fontWeight: 800,
                 color: '#0e2b57',
                 background: 'white',
+                minWidth: '200px'
               }}
             >
               <option value="all">All rooms</option>
@@ -168,11 +289,11 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '32px' }}>
         {/* Main Calendar Card */}
         <div className={styles.glassCard} style={{ padding: 0, overflow: 'hidden', border: '1px solid rgba(14,43,87,0.08)' }}>
-          <div style={{ background: '#0e2b57', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'white' }}>
+          <div style={{ background: 'white', borderBottom: '1px solid #f1f5f9', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#0e2b57' }}>
             <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900 }}>{monthName} {viewDate.getFullYear()}</h3>
             <div style={{ display: 'flex', gap: '4px' }}>
-              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}><ChevronLeft size={18} /></button>
-              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}><ChevronRight size={18} /></button>
+              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#0e2b57', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}><ChevronLeft size={18} /></button>
+              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#0e2b57', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}><ChevronRight size={18} /></button>
             </div>
           </div>
 
@@ -241,7 +362,7 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
            <button className={`${styles.primaryBtn} ${styles.successBtn}`} onClick={() => onSave()} disabled={saving} style={{ padding: '16px' }}>
-              {saving ? "Syncing..." : "Manual Database Sync"}
+              {saving ? "Syncing..." : "All Rooms Option"}
            </button>
         </div>
       </div>
@@ -319,41 +440,6 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
                           <div className={styles.iosToggleThumb} style={{ transform: isDayBlocked(insightDay) ? 'translateX(22px)' : 'translateX(0)' }}></div>
                         </div>
                       </label>
-                   </div>
-
-                   {/* Quarter Sections */}
-                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                     {['morning', 'afternoon', 'evening', 'fullday'].map(q => {
-                        const dateStr = `${yearMonth}-${insightDay.toString().padStart(2, '0')}`;
-                        const isGloballyOff = !schedule.activeQuarters.split(",").map((i: string) => i.trim()).includes(q);
-                        const token = `${dateStr}::${q}`;
-                        const blockedList = schedule.blockedDates.split(",").map((i: string) => i.trim()).filter(Boolean);
-                        
-                        const isQBlocked = isDayBlocked(insightDay) || blockedList.includes(token);
-                        const qBooked = visibleBookingRows.find((b: any) => 
-                           String(b.date_from).startsWith(dateStr) && 
-                           (b.quarter_type === q || b.quarter_type === 'fullday') &&
-                           (b.status !== "cancelled")
-                        );
-                        const isDisabled = !!qBooked || isDayBlocked(insightDay) || isGloballyOff;
-
-                        return (
-                          <div key={q} style={{ display: 'flex', flexDirection: 'column', padding: '16px', border: '1px solid #f1f5f9', borderRadius: '16px', background: isQBlocked ? '#fef2f2' : isGloballyOff ? '#f8fafc' : 'white', opacity: isGloballyOff ? 0.7 : 1 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                               <span style={{ fontSize: '13px', fontWeight: 900, textTransform: 'capitalize', color: isQBlocked ? '#ef4444' : '#0e2b57' }}>{q} session</span>
-                               <label className={styles.iosToggleLabel}>
-                                 <input type="checkbox" disabled={isDisabled} className={styles.iosToggleInput} checked={isQBlocked} onChange={() => toggleSlotBlock(insightDay, q)} />
-                                 <div style={{ opacity: isDisabled ? 0.5 : 1 }}>
-                                   <div className={styles.iosToggleTrack} style={{ scale: '0.8', background: isQBlocked ? '#ef4444' : '#cbd5e1' }}><div className={styles.iosToggleThumb} style={{ transform: isQBlocked ? 'translateX(22px)' : 'translateX(0)' }}></div></div>
-                                 </div>
-                               </label>
-                            </div>
-                            <p style={{ margin: 0, fontSize: '11px', color: 'rgba(14,43,87,0.5)', fontWeight: 800 }}>
-                              {!!qBooked ? `Reserved by ${qBooked.users?.name}` : isGloballyOff ? "Inactive in settings" : isQBlocked ? "Blocked by you" : "Available"}
-                            </p>
-                          </div>
-                        )
-                     })}
                    </div>
                 </div>
              </div>

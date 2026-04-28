@@ -37,6 +37,7 @@
 .loginCard {
   width: 100%;
   max-width: 440px;
+  box-sizing: border-box;
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(20px);
   padding: 56px;
@@ -84,6 +85,7 @@
 
 .inputField {
   width: 100%;
+  box-sizing: border-box;
   padding: 18px 24px;
   border-radius: 20px;
   border: 2px solid rgba(14, 43, 87, 0.04);
@@ -102,6 +104,8 @@
 }
 
 .errorBox {
+  width: 100%;
+  box-sizing: border-box;
   padding: 14px 18px;
   background: #fef2f2;
   border: 1px solid #fee2e2;
@@ -117,6 +121,7 @@
 
 .loginBtn {
   width: 100%;
+  box-sizing: border-box;
   padding: 20px;
   border-radius: 20px;
   border: none;

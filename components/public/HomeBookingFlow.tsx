@@ -182,6 +182,8 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
   const [guestName, setGuestName] = useState<string | null>(null);
   const [guestCity, setGuestCity] = useState<string | null>(null);
   const [kycStatus, setKycStatus] = useState<string | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [step, setStep] = useState<BookingStep>("login");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -216,6 +218,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
     () => Array.from(new Set([...(home.blockedDates ?? []), ...(selectedStayUnit?.blockedDates ?? [])])),
     [home.blockedDates, selectedStayUnit?.blockedDates]
   );
+  const isAuthStateLoading = loadingAuth || !sessionChecked || !authReady;
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     const {
       data: { session },
@@ -429,14 +432,14 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
   function renderWidget(showInline = false): React.JSX.Element {
     return (
       <div className={`famlo-booking-widget ${showInline ? "famlo-booking-widget-inline" : ""}`} ref={showInline ? inlineWidgetRef : undefined}>
-        {loadingAuth ? (
+        {isAuthStateLoading ? (
           <div className="famlo-state-card">
             <h3>Loading booking state</h3>
             <p>Checking your Famlo account and booking access.</p>
           </div>
         ) : null}
 
-        {!loadingAuth && step === "login" ? (
+        {!isAuthStateLoading && step === "login" ? (
           <div className="famlo-state-card">
             <h3>Sign in to continue</h3>
             <p>Use the same Famlo login flow. Your booking, payment, and messages will stay connected.</p>
@@ -454,7 +457,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
           </div>
         ) : null}
 
-        {!loadingAuth && step === "kyc" ? (
+        {!isAuthStateLoading && step === "kyc" ? (
           <div className="famlo-state-card">
             <h3>Verification needed</h3>
             <p>
@@ -479,7 +482,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
           </div>
         ) : null}
 
-        {!loadingAuth && BOOKABLE_KYC_STATUSES.has(kycStatus ?? "") ? (
+        {!isAuthStateLoading && BOOKABLE_KYC_STATUSES.has(kycStatus ?? "") ? (
           <div className="booking-widget-shell famlo-booking-shell">
             <div className="famlo-widget-head">
               <span className="famlo-section-label">Choose your visit</span>
@@ -747,45 +750,59 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
 
   const syncAuthState = useCallback(async (): Promise<{ userId: string | null; kycStatus: string | null }> => {
     setLoadingAuth(true);
+    setAuthReady(false);
 
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
+    try {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
 
-    if (!user) {
+      if (!user) {
+        setCurrentUserId(null);
+        setCurrentUserEmail(null);
+        setGuestName(null);
+        setGuestCity(null);
+        setKycStatus(null);
+        setStep("login");
+        return { userId: null, kycStatus: null };
+      }
+
+      const { data: userRow } = await supabase
+        .from("users")
+        .select("name, city, kyc_status, kyc_submitted_at, id_document_url")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const nextKycStatus =
+        typeof userRow?.kyc_status === "string" && BOOKABLE_KYC_STATUSES.has(userRow.kyc_status)
+          ? userRow.kyc_status
+          : (typeof userRow?.id_document_url === "string" && userRow.id_document_url.trim().length > 0) ||
+              typeof userRow?.kyc_submitted_at === "string"
+            ? "pending"
+            : typeof userRow?.kyc_status === "string"
+              ? userRow.kyc_status
+              : null;
+      setCurrentUserId(user.id);
+      setCurrentUserEmail(user.email ?? null);
+      setGuestName(typeof userRow?.name === "string" ? userRow.name : null);
+      setGuestCity(typeof userRow?.city === "string" ? userRow.city : null);
+      setKycStatus(nextKycStatus);
+      setStep(resolveNextStep(user.id, nextKycStatus));
+      return { userId: user.id, kycStatus: nextKycStatus };
+    } catch (error) {
+      console.error("[booking.flow] failed to sync auth state", error);
       setCurrentUserId(null);
       setCurrentUserEmail(null);
       setGuestName(null);
       setGuestCity(null);
       setKycStatus(null);
       setStep("login");
-      setLoadingAuth(false);
       return { userId: null, kycStatus: null };
+    } finally {
+      setSessionChecked(true);
+      setAuthReady(true);
+      setLoadingAuth(false);
     }
-
-    const { data: userRow } = await supabase
-      .from("users")
-      .select("name, city, kyc_status, kyc_submitted_at, id_document_url")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    const nextKycStatus =
-      typeof userRow?.kyc_status === "string" && BOOKABLE_KYC_STATUSES.has(userRow.kyc_status)
-        ? userRow.kyc_status
-        : (typeof userRow?.id_document_url === "string" && userRow.id_document_url.trim().length > 0) ||
-            typeof userRow?.kyc_submitted_at === "string"
-          ? "pending"
-          : typeof userRow?.kyc_status === "string"
-            ? userRow.kyc_status
-            : null;
-    setCurrentUserId(user.id);
-    setCurrentUserEmail(user.email ?? null);
-    setGuestName(typeof userRow?.name === "string" ? userRow.name : null);
-    setGuestCity(typeof userRow?.city === "string" ? userRow.city : null);
-    setKycStatus(nextKycStatus);
-    setStep(resolveNextStep(user.id, nextKycStatus));
-    setLoadingAuth(false);
-    return { userId: user.id, kycStatus: nextKycStatus };
   }, [supabase]);
 
   useEffect(() => {
@@ -798,7 +815,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
     });
 
     return () => {
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, [supabase, syncAuthState]);
 
@@ -842,7 +859,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
   }, [guestLimit, quarterOptions, searchParams]);
 
   useEffect(() => {
-    if (loadingAuth || requestedStep !== "confirm" || requestedEntry !== "listing") {
+    if (!sessionChecked || !authReady || loadingAuth || requestedStep !== "confirm" || requestedEntry !== "listing") {
       return;
     }
 
@@ -859,7 +876,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
     if (selectedQuarter && dateFrom) {
       setStep("confirm");
     }
-  }, [currentUserId, dateFrom, kycStatus, loadingAuth, requestedEntry, requestedStep, selectedQuarter]);
+  }, [authReady, currentUserId, dateFrom, kycStatus, loadingAuth, requestedEntry, requestedStep, selectedQuarter, sessionChecked]);
 
   useEffect(() => {
     if (step !== "login" && step !== "kyc") {
@@ -868,7 +885,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
   }, [step]);
 
   useEffect(() => {
-    if (hasClosedRooms || !currentUserId || !selectedQuarter || !dateFrom) {
+    if (!sessionChecked || !authReady || hasClosedRooms || !currentUserId || !selectedQuarter || !dateFrom) {
       setQuote(null);
       return;
     }
@@ -936,6 +953,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
       cancelled = true;
     };
   }, [
+    authReady,
     couponCode,
     currentUserId,
     dateFrom,
@@ -948,6 +966,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
     home.legacyFamilyId,
     home.platformCommissionPct,
     isFullDayBooking,
+    sessionChecked,
     selectedStayUnit?.id,
     selectedQuarter,
   ]);

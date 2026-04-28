@@ -68,16 +68,26 @@ async function hydrateStayUnitsWithBlockedDates(supabase: ReturnType<typeof crea
   return Promise.all(
     stayUnits.map(async (unit) => {
       try {
-        const events = await loadCanonicalCalendar(supabase, {
-          ownerType: "stay_unit",
-          ownerId: unit.id,
-          from,
-          to,
-        });
+        const [hostEvents, stayUnitEvents] = await Promise.all([
+          unit.hostId
+            ? loadCanonicalCalendar(supabase, {
+                ownerType: "host",
+                ownerId: unit.hostId,
+                from,
+                to,
+              })
+            : Promise.resolve([]),
+          loadCanonicalCalendar(supabase, {
+            ownerType: "stay_unit",
+            ownerId: unit.id,
+            from,
+            to,
+          }),
+        ]);
 
         return {
           ...unit,
-          blockedDates: Array.from(new Set(events.flatMap(tokeniseRoomCalendarBlock))),
+          blockedDates: Array.from(new Set([...hostEvents, ...stayUnitEvents].flatMap(tokeniseRoomCalendarBlock))),
         };
       } catch (error) {
         console.warn("[homes.page] failed to hydrate room calendar", unit.id, error);

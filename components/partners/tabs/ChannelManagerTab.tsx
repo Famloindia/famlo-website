@@ -18,10 +18,13 @@ export default function ChannelManagerTab({
 }: Readonly<ChannelManagerTabProps>) {
   const [data, setData] = useState<any>(null);
   const [externalUrl, setExternalUrl] = useState("");
+  const [icsContent, setIcsContent] = useState("");
   const [provider, setProvider] = useState("airbnb");
   const [label, setLabel] = useState("Airbnb");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const panelTitle = title ?? (ownerType === "stay_unit" ? "Room Calendar & ICS" : "Multi-channel Reservations");
   const panelDescription =
     description ??
@@ -44,13 +47,16 @@ export default function ChannelManagerTab({
   }, [ownerId, ownerType]);
 
   async function syncByUrl() {
+    if (syncing) return;
+
     try {
+      setSyncing(true);
       setMessage(null);
       setError(null);
       const response = await fetch("/api/host/channel-manager", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerType, ownerId, provider, sourceLabel: label, externalUrl }),
+        body: JSON.stringify({ ownerType, ownerId, provider, sourceLabel: label, externalUrl, icsContent }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Failed to sync channel.");
@@ -58,6 +64,42 @@ export default function ChannelManagerTab({
       await load();
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "Failed to sync channel.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function copyExportUrl() {
+    const value = String(data?.publicExportUrl ?? "").trim();
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage("ICS link copied.");
+      setError(null);
+    } catch {
+      setError("Failed to copy ICS link.");
+    }
+  }
+
+  async function regenerateExportUrl() {
+    try {
+      setRegenerating(true);
+      setMessage(null);
+      setError(null);
+      const response = await fetch("/api/host/channel-manager", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerType, ownerId, action: "regenerate_export_url" }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Failed to regenerate ICS link.");
+      setData((current: any) => ({ ...(current ?? {}), publicExportUrl: payload.publicExportUrl }));
+      setMessage("ICS link regenerated.");
+    } catch (regenerateError) {
+      setError(regenerateError instanceof Error ? regenerateError.message : "Failed to regenerate ICS link.");
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -69,11 +111,71 @@ export default function ChannelManagerTab({
           {panelDescription}
         </p>
         <div style={{ display: "grid", gap: 10 }}>
+          {data?.publicExportUrl ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#0e2b57" }}>
+                Famlo iCal URL for Airbnb / Booking / MMT
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <input readOnly value={data.publicExportUrl} style={{ ...inputStyle, flex: "1 1 420px" }} />
+                <button
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void copyExportUrl();
+                  }}
+                  style={{ ...buttonStyle, background: "#165dcc" }}
+                  type="button"
+                >
+                  Copy
+                </button>
+              </div>
+              <div>
+                <button
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void regenerateExportUrl();
+                  }}
+                  style={buttonStyle}
+                  type="button"
+                  disabled={regenerating}
+                >
+                  {regenerating ? "Regenerating..." : "Regenerate Link"}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <input value={provider} onChange={(event) => setProvider(event.target.value)} placeholder="Provider" style={inputStyle} />
           <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Source label" style={inputStyle} />
           <input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder="External ICS URL" style={inputStyle} />
+          <div style={{ display: "grid", gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 800, color: "#0e2b57" }}>Paste ICS content for testing</label>
+            <textarea
+              value={icsContent}
+              onChange={(event) => setIcsContent(event.target.value)}
+              placeholder="BEGIN:VCALENDAR..."
+              style={{ ...inputStyle, minHeight: 160, resize: "vertical" }}
+            />
+          </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button onClick={() => void syncByUrl()} style={buttonStyle}>Connect and Sync</button>
+            <button
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void syncByUrl();
+              }}
+              style={{
+                ...buttonStyle,
+                opacity: syncing ? 0.7 : 1,
+                transform: syncing ? "scale(0.98)" : "scale(1)",
+                cursor: syncing ? "wait" : "pointer",
+              }}
+              type="button"
+              disabled={syncing}
+            >
+              {syncing ? "Syncing..." : "Connect and Sync"}
+            </button>
             {data?.exportUrl ? (
               <a href={data.exportUrl} target="_blank" rel="noreferrer" className={""} style={{ ...buttonStyle, background: "#165dcc", textDecoration: "none" }}>
                 {ownerType === "stay_unit" ? "Export Room Calendar" : "Export Famlo Calendar"}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { appendPaymentEventAudit } from "@/lib/finance/payment-audit";
+import { createHostBookingActionLinks } from "@/lib/booking-action-tokens";
 import { buildBookingReceiptDocument, enqueueNotification } from "@/lib/booking-platform";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
@@ -459,6 +460,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       await enqueueNotification(supabase, {
         eventType: approvalRequired ? "booking_request" : "booking_confirmed",
         channel: "email",
+        userId: typeof booking?.user_id === "string" ? booking.user_id : null,
         bookingId: payment.booking_id,
         dedupeKey: `${approvalRequired ? "booking_request" : "booking_confirmed"}:${payment.booking_id}`,
         subject: approvalRequired ? "Your Famlo booking is awaiting host approval" : "Your Famlo booking is confirmed",
@@ -468,6 +470,80 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             : "Your Famlo booking has been confirmed from the payment webhook.",
         },
       });
+      await enqueueNotification(supabase, {
+        eventType: approvalRequired ? "booking_request" : "booking_confirmed",
+        channel: "whatsapp",
+        userId: typeof booking?.user_id === "string" ? booking.user_id : null,
+        bookingId: payment.booking_id,
+        dedupeKey: `${approvalRequired ? "booking_request" : "booking_confirmed"}:${payment.booking_id}:whatsapp`,
+        subject: approvalRequired ? "Your Famlo booking is awaiting host approval" : "Your Famlo booking is confirmed",
+        templateName: approvalRequired ? "guest_booking_request_received" : "guest_booking_confirmed",
+        recipientRole: "guest",
+        payload: {
+          message: approvalRequired
+            ? "Your payment was received and your Famlo booking is pending host approval."
+            : "Your Famlo booking has been confirmed from the payment webhook.",
+        },
+      });
+      const hostRelation = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
+      const hostUserId = typeof hostRelation?.user_id === "string" ? hostRelation.user_id : null;
+      const hostLegacyFamilyId =
+        typeof hostRelation?.legacy_family_id === "string" && hostRelation.legacy_family_id.trim().length > 0
+          ? hostRelation.legacy_family_id
+          : null;
+      const fallbackHostDashboardUrl = hostLegacyFamilyId
+        ? `/partnerslogin/home/dashboard?family=${encodeURIComponent(hostLegacyFamilyId)}&tab=bookings`
+        : "/partnerslogin/home/dashboard?tab=bookings";
+
+      if (approvalRequired && hostUserId) {
+        const actionLinks = await createHostBookingActionLinks(supabase, {
+          bookingId: payment.booking_id,
+          familyId: hostLegacyFamilyId,
+          hostId: typeof booking?.host_id === "string" ? booking.host_id : null,
+          hostUserId,
+          metadata: {
+            source: "payments_webhook",
+          },
+        });
+
+        await enqueueNotification(supabase, {
+          eventType: "booking_host_action_required",
+          channel: "email",
+          userId: hostUserId,
+          bookingId: payment.booking_id,
+          dedupeKey: `booking_host_action_required:${payment.booking_id}:email`,
+          subject: "New Famlo booking request needs your approval",
+          templateName: "host_new_booking_request",
+          recipientRole: "host",
+          payload: {
+            title: "New Booking Request",
+            message: "A new Famlo booking request is waiting for your approval. Review it and accept or reject it soon.",
+            cta_label: "Review booking request",
+            cta_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
+            view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
+            accept_url: actionLinks?.acceptUrl,
+            reject_url: actionLinks?.rejectUrl,
+          },
+        });
+
+        await enqueueNotification(supabase, {
+          eventType: "booking_host_action_required",
+          channel: "whatsapp",
+          userId: hostUserId,
+          bookingId: payment.booking_id,
+          dedupeKey: `booking_host_action_required:${payment.booking_id}:whatsapp`,
+          subject: "New Famlo booking request needs your approval",
+          templateName: "host_new_booking_request",
+          recipientRole: "host",
+          payload: {
+            title: "New Booking Request",
+            message: "A new Famlo booking request is waiting for your approval. Review it and accept or reject it soon.",
+            view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
+            accept_url: actionLinks?.acceptUrl,
+            reject_url: actionLinks?.rejectUrl,
+          },
+        });
+      }
 
       await appendLedgerEntryIfMissing(supabase, {
         bookingId: payment.booking_id,
@@ -498,7 +574,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         },
       });
 
-      const hostRelation = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
       const hommieRelation = Array.isArray(booking?.hommie_profiles_v2)
         ? booking.hommie_profiles_v2[0]
         : booking?.hommie_profiles_v2;

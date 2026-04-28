@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { createHostBookingActionLinks } from "@/lib/booking-action-tokens";
 import { getErrorDiagnostics, getErrorMessage } from "@/lib/error-utils";
 import { appendPaymentEventAudit } from "@/lib/finance/payment-audit";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
@@ -331,13 +332,80 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           : "Your payment was received and your Famlo booking is now confirmed.",
       },
     });
-    if (conversationId) {
-      const hostProfile = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
-      const hostLegacyFamilyId =
-        typeof hostProfile?.legacy_family_id === "string" && hostProfile.legacy_family_id.trim().length > 0
-          ? hostProfile.legacy_family_id
-          : null;
+    await enqueueNotification(supabase, {
+      eventType: approvalRequired ? "booking_request" : "booking_confirmed",
+      channel: "whatsapp",
+      userId: guestUserId,
+      bookingId: payment.booking_id,
+      dedupeKey: `${approvalRequired ? "booking_request" : "booking_confirmed"}:${payment.booking_id}:whatsapp`,
+      subject: approvalRequired ? "Your Famlo booking is awaiting host approval" : "Your Famlo booking is confirmed",
+      templateName: approvalRequired ? "guest_booking_request_received" : "guest_booking_confirmed",
+      recipientRole: "guest",
+      payload: {
+        message: approvalRequired
+          ? "Your payment was received and your Famlo booking is pending host approval."
+          : "Your payment was received and your Famlo booking is now confirmed.",
+      },
+    });
+    const hostUserId = typeof hostProfile?.user_id === "string" ? hostProfile.user_id : null;
+    const hostLegacyFamilyId =
+      typeof hostProfile?.legacy_family_id === "string" && hostProfile.legacy_family_id.trim().length > 0
+        ? hostProfile.legacy_family_id
+        : null;
+    const fallbackHostDashboardUrl = hostLegacyFamilyId
+      ? `/partnerslogin/home/dashboard?family=${encodeURIComponent(hostLegacyFamilyId)}&tab=bookings`
+      : "/partnerslogin/home/dashboard?tab=bookings";
 
+    if (approvalRequired && hostUserId) {
+      const actionLinks = await createHostBookingActionLinks(supabase, {
+        bookingId: payment.booking_id,
+        familyId: hostLegacyFamilyId,
+        hostId: typeof booking?.host_id === "string" ? booking.host_id : null,
+        hostUserId,
+        metadata: {
+          source: "payments_verify",
+        },
+      });
+
+      await enqueueNotification(supabase, {
+        eventType: "booking_host_action_required",
+        channel: "email",
+        userId: hostUserId,
+        bookingId: payment.booking_id,
+        dedupeKey: `booking_host_action_required:${payment.booking_id}:email`,
+        subject: "New Famlo booking request needs your approval",
+        templateName: "host_new_booking_request",
+        recipientRole: "host",
+        payload: {
+          title: "New Booking Request",
+          message: "A new Famlo booking request is waiting for your approval. Review it and accept or reject it soon.",
+          cta_label: "Review booking request",
+          cta_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
+          view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
+          accept_url: actionLinks?.acceptUrl,
+          reject_url: actionLinks?.rejectUrl,
+        },
+      });
+
+      await enqueueNotification(supabase, {
+        eventType: "booking_host_action_required",
+        channel: "whatsapp",
+        userId: hostUserId,
+        bookingId: payment.booking_id,
+        dedupeKey: `booking_host_action_required:${payment.booking_id}:whatsapp`,
+        subject: "New Famlo booking request needs your approval",
+        templateName: "host_new_booking_request",
+        recipientRole: "host",
+        payload: {
+          title: "New Booking Request",
+          message: "A new Famlo booking request is waiting for your approval. Review it and accept or reject it soon.",
+          view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
+          accept_url: actionLinks?.acceptUrl,
+          reject_url: actionLinks?.rejectUrl,
+        },
+      });
+    }
+    if (conversationId) {
       const familyLookup = hostLegacyFamilyId
         ? await (async () => {
             const fullResult = await supabase

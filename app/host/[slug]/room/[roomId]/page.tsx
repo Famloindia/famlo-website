@@ -83,16 +83,26 @@ async function hydrateRoomWithBlockedDates(
   const to = addIndiaDays(from, 365);
 
   try {
-    const events = await loadCanonicalCalendar(supabase, {
-      ownerType: "stay_unit",
-      ownerId: unit.id,
-      from,
-      to,
-    });
+    const [hostEvents, stayUnitEvents] = await Promise.all([
+      unit.hostId
+        ? loadCanonicalCalendar(supabase, {
+            ownerType: "host",
+            ownerId: unit.hostId,
+            from,
+            to,
+          })
+        : Promise.resolve([]),
+      loadCanonicalCalendar(supabase, {
+        ownerType: "stay_unit",
+        ownerId: unit.id,
+        from,
+        to,
+      }),
+    ]);
 
     return {
       ...unit,
-      blockedDates: Array.from(new Set(events.flatMap(tokeniseBookedDates))),
+      blockedDates: Array.from(new Set([...hostEvents, ...stayUnitEvents].flatMap(tokeniseBookedDates))),
     };
   } catch (error) {
     console.warn("[room.page] failed to hydrate room calendar", unit.id, error);
@@ -153,6 +163,18 @@ function buildFallbackHomeInput(resolved: Awaited<ReturnType<typeof resolveHomeR
   };
 }
 
+function getHomeBlockedDates(resolved: Awaited<ReturnType<typeof resolveHomeRoute>>): string[] {
+  if (Array.isArray(resolved.familyRow?.blocked_dates)) {
+    return (resolved.familyRow.blocked_dates as string[]).filter((value) => typeof value === "string" && value.trim().length > 0);
+  }
+
+  if (Array.isArray(resolved.hostRow?.blocked_dates)) {
+    return (resolved.hostRow.blocked_dates as string[]).filter((value) => typeof value === "string" && value.trim().length > 0);
+  }
+
+  return [];
+}
+
 export default async function HostRoomPage({
   params,
 }: Readonly<HostRoomPageProps>): Promise<React.JSX.Element> {
@@ -178,10 +200,13 @@ export default async function HostRoomPage({
   const meta = parseHostListingMeta(asString(resolved.familyRow?.admin_notes) || null);
   const fallbackRoom = await loadStayUnitsForHome(supabase, buildFallbackHomeInput(resolved, meta));
   const directRoom = await loadStayUnitById(supabase, roomId);
+  const hydratedDirectRoom = directRoom
+    ? fallbackRoom.find((unit) => unit.id === directRoom.id) ?? directRoom
+    : null;
   const directRoomMatchesHost = !directRoom || !resolved.hostId || !directRoom.hostId || directRoom.hostId === resolved.hostId;
   const directRoomMatchesFamily = !directRoom || !resolved.familyId || !directRoom.legacyFamilyId || directRoom.legacyFamilyId === resolved.familyId;
   const resolvedRoom =
-    (directRoomMatchesHost && directRoomMatchesFamily ? directRoom : null) ??
+    (directRoomMatchesHost && directRoomMatchesFamily ? hydratedDirectRoom : null) ??
     fallbackRoom.find((unit) => unit.id === roomId) ??
     fallbackRoom.find((unit) => unit.isPrimary) ??
     fallbackRoom[0] ??
@@ -236,11 +261,22 @@ export default async function HostRoomPage({
     lngExact: asNumber(resolved.familyRow?.lng_exact ?? resolved.hostRow?.lng_exact, NaN),
     seed: routeId,
   });
-  const roomLat = Number.isFinite(room.lat ?? NaN) ? room.lat : publicCoords?.lat ?? null;
-  const roomLng = Number.isFinite(room.lng ?? NaN) ? room.lng : publicCoords?.lng ?? null;
+  const maskedRoomCoords =
+    Number.isFinite(room.lat ?? NaN) && Number.isFinite(room.lng ?? NaN)
+      ? getPublicCoordinates({
+          lat: room.lat,
+          lng: room.lng,
+          latExact: room.lat,
+          lngExact: room.lng,
+          seed: room.id || routeId,
+        })
+      : null;
+  const roomLat = maskedRoomCoords?.lat ?? publicCoords?.lat ?? null;
+  const roomLng = maskedRoomCoords?.lng ?? publicCoords?.lng ?? null;
 
   const galleryImages = dedupeStrings(room.photos);
   const localityImages = dedupeStrings(room.localityPhotos);
+  const homeBlockedDates = getHomeBlockedDates(resolved);
 
   const roomFacts = [
     { label: "Room type", value: roomTypeLabel(room.unitType) },
@@ -401,6 +437,7 @@ export default async function HostRoomPage({
                   isAccepting: Boolean(resolved.familyRow?.is_accepting ?? resolved.hostRow?.is_accepting ?? room.isActive),
                   checkInTime,
                   checkOutTime,
+                  blockedDates: homeBlockedDates,
                 }}
                 room={room}
                 areaLabel={areaLabel}
