@@ -66,9 +66,10 @@ export default function AuthCallbackPage(): React.JSX.Element {
       }}
     >
       <div style={{ display: "grid", gap: "12px", justifyItems: "center", textAlign: "center" }}>
-        <img src="/logo-blue.png" alt="Famlo" style={{ width: "120px", height: "auto" }} />
+        <Image src="/logo-blue.png" alt="Famlo" width={1024} height={344} sizes="120px" style={{ width: "120px", height: "auto" }} />
         <div style={{ fontSize: "15px", fontWeight: 700, color: "#33527d" }}>{message}</div>
       </div>
     </main>
   );
 }
+import Image from "next/image";

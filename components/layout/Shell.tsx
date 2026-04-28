@@ -20,7 +20,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const hideLoader = () => {
-      window.setTimeout(() => setShowBootLoader(false), 750);
+      window.requestAnimationFrame(() => setShowBootLoader(false));
     };
 
     if (document.readyState === "complete") {

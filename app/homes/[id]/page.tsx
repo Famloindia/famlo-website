@@ -21,14 +21,14 @@ import { DEFAULT_EXPERIENCE_CARDS, parseMultiValueList } from "@/lib/home-listin
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { getPublicCoordinates } from "@/lib/location-utils";
 import { getCachedHomeRouteResolution } from "@/lib/home-route-resolution";
-import { getHomesDiscoveryDataUncached } from "@/lib/discovery";
+import { getHomesDiscoveryData } from "@/lib/discovery";
 import { loadStayUnitRatingSummaries } from "@/lib/stay-unit-ratings";
 import { loadStayUnitsForHome, type StayUnitRecord } from "@/lib/stay-units";
 import { buildHomestayPath } from "@/lib/slug";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import styles from "./home-details.module.css";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 function enumerateDateStrings(startDate: string, endDate: string): string[] {
   const dates: string[] = [];
@@ -270,7 +270,7 @@ export default async function HomeDetailPage({
   const familyId = resolved.familyId;
   const hostId = resolved.hostId;
   const metricsId = familyId ?? hostId ?? id;
-  const moreHomesPromise = getHomesDiscoveryDataUncached();
+  const moreHomesPromise = getHomesDiscoveryData();
 
   // 3. Fetch the independent data in parallel.
   const familyPhotosPromise = familyId

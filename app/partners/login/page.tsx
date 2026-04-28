@@ -84,7 +84,7 @@ export default function PartnerLoginPage(): React.JSX.Element {
   return (
     <div className={styles.loginContainer}>
       <div className={styles.brandHeader}>
-        <img src="/logo-blue.png" alt="Famlo" style={{ height: "32px", width: "auto" }} />
+        <Image src="/logo-blue.png" alt="Famlo" width={1024} height={344} sizes="132px" style={{ height: "32px", width: "auto" }} />
         <div className={styles.tagline}>Partner Portal</div>
       </div>
 
@@ -154,3 +154,4 @@ export default function PartnerLoginPage(): React.JSX.Element {
     </div>
   );
 }
+import Image from "next/image";

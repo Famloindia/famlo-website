@@ -1,8 +1,9 @@
 import Link from "next/link";
+import Image from "next/image";
 
 import HomestaysSearchBar from "@/components/public/HomestaysSearchBar";
 import { HomePageCard } from "@/components/public/HomePageCard";
-import { getHomesDiscoveryDataUncached, type HomeCardRecord } from "@/lib/discovery";
+import { getHomesDiscoveryData, type HomeCardRecord } from "@/lib/discovery";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { calculateDistance } from "@/lib/location-utils";
 import { enumerateDateRange } from "@/lib/platform-utils";
@@ -158,7 +159,7 @@ function buildRoomStatsMap(
   return stats;
 }
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 const MOST_INTERACTED_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOST_INTERACTED_HOSTS === "true";
 const NEAR_RADIUS_KM = 25;
 
@@ -175,7 +176,7 @@ export default async function HomestaysPage({ searchParams }: HomestaysPageProps
   const nearOnly = asSearchString(params.near) === "1";
   const openOnly = asSearchString(params.open) === "1";
 
-  const homes = await getHomesDiscoveryDataUncached();
+  const homes = await getHomesDiscoveryData();
   const hostIds = [...new Set(homes.map((home) => home.hostId).filter((hostId): hostId is string => Boolean(hostId)))];
   const legacyFamilyIds = [...new Set(homes.map((home) => home.legacyFamilyId).filter((familyId): familyId is string => Boolean(familyId)))];
 
@@ -322,7 +323,14 @@ export default async function HomestaysPage({ searchParams }: HomestaysPageProps
           }}
         >
           <Link href="/" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}>
-            <img src="/logo-blue.png" alt="Famlo" style={{ height: "28px", width: "auto", display: "block" }} />
+            <Image
+              src="/logo-blue.png"
+              alt="Famlo"
+              width={1024}
+              height={344}
+              sizes="120px"
+              style={{ height: "28px", width: "auto", display: "block" }}
+            />
           </Link>
           <Link
             href="/"

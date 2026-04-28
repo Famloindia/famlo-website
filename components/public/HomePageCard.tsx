@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -159,24 +160,51 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
         backgroundColor: "#0b1020",
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: activeRoomImage
-            ? `url(${activeRoomImage}) center 34% / cover no-repeat`
-            : `linear-gradient(145deg, ${c1}, ${c2})`,
-          pointerEvents: "none",
-          transition: "opacity 240ms ease",
-          opacity: isCrossfading ? 0 : 1,
-        }}
-      />
-      {pendingImageIndex != null && incomingRoomImage ? (
+      {activeRoomImage ? (
+        <Image
+          src={activeRoomImage}
+          alt=""
+          fill
+          sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 430px"
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center 34%",
+            pointerEvents: "none",
+            transition: "opacity 240ms ease",
+            opacity: isCrossfading ? 0 : 1,
+          }}
+        />
+      ) : (
         <div
           style={{
             position: "absolute",
             inset: 0,
-            background: `url(${incomingRoomImage}) center 34% / cover no-repeat`,
+            background: `linear-gradient(145deg, ${c1}, ${c2})`,
+            pointerEvents: "none",
+            transition: "opacity 240ms ease",
+            opacity: isCrossfading ? 0 : 1,
+          }}
+        />
+      )}
+      {pendingImageIndex != null && incomingRoomImage ? (
+        <Image
+          src={incomingRoomImage}
+          alt=""
+          fill
+          sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 430px"
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center 34%",
             pointerEvents: "none",
             transition: "opacity 240ms ease",
             opacity: isCrossfading ? 1 : 0,
@@ -225,9 +253,12 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
             }}
           >
             {hostPortrait ? (
-              <img
+              <Image
                 src={hostPortrait}
                 alt={`${home.name} host`}
+                width={128}
+                height={128}
+                sizes="64px"
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
               />
             ) : (

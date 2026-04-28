@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -55,7 +56,7 @@ export function AppHome(): React.JSX.Element {
       }}
     >
       <div style={{ display: "grid", gap: 12, justifyItems: "center", textAlign: "center", padding: 24 }}>
-        <img src="/logo-blue.png" alt="Famlo" style={{ width: 120, height: "auto" }} />
+        <Image src="/logo-blue.png" alt="Famlo" width={1024} height={344} sizes="120px" style={{ width: 120, height: "auto" }} />
         <div style={{ fontSize: 15, fontWeight: 700, color: "#33527d" }}>{message}</div>
       </div>
     </main>

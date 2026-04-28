@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useRef, useState } from "react";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
 
@@ -114,7 +115,16 @@ export function HomeDetailGallery({
       />
 
       <div className="famlo-hero-main">
-        {images[activeIndex] ? <img onClick={() => openLightbox(activeIndex)} src={images[activeIndex]} alt={title} /> : null}
+        {images[activeIndex] ? (
+          <Image
+            onClick={() => openLightbox(activeIndex)}
+            src={images[activeIndex]}
+            alt={title}
+            width={1600}
+            height={1000}
+            sizes="100vw"
+          />
+        ) : null}
         <div className="famlo-hero-overlay famlo-hero-overlay-clean">
           <button onClick={() => openLightbox(activeIndex)} type="button">View all photos</button>
         </div>
@@ -131,9 +141,12 @@ export function HomeDetailGallery({
       {lightboxIndex != null && images[lightboxIndex] ? (
         <div className="home-detail-lightbox" onClick={() => setLightboxIndex(null)} role="presentation">
           <button className="home-detail-lightbox-close" onClick={() => setLightboxIndex(null)} type="button">×</button>
-          <img
+          <Image
             src={images[lightboxIndex]}
             alt={`${title} full view`}
+            width={1800}
+            height={1200}
+            sizes="100vw"
             onClick={(event) => event.stopPropagation()}
           />
           <div className="home-detail-lightbox-controls" onClick={(event) => event.stopPropagation()} role="presentation">

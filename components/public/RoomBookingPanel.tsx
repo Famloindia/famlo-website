@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import Script from "next/script";
@@ -594,7 +595,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         <div className="famlo-booking-loader" role="status" aria-live="polite" aria-label="Opening booking checkout">
           <div className="famlo-booking-loader-card">
             <div className="famlo-booking-loader-logo-wrap">
-              <img className="famlo-booking-loader-logo" src="/logo-blue.png" alt="Famlo" />
+              <Image className="famlo-booking-loader-logo" src="/logo-blue.png" alt="Famlo" width={1024} height={344} sizes="120px" />
               <div className="famlo-booking-loader-wave" />
             </div>
             <div className="famlo-booking-loader-title">Opening your booking</div>

@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { useUser } from "@/components/auth/UserContext";
@@ -161,10 +162,10 @@ function isAdLive(ad: AdRecord): boolean {
 
 /* ─── default banners ─────────────────────────────────────────── */
 const DEFAULT_BANNERS = [
-  { imageUrl: "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=1600&q=85", alt: "India streets" },
-  { imageUrl: "https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=1600&q=85", alt: "Local home" },
-  { imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&q=85", alt: "Cultural travel" },
-  { imageUrl: "https://images.unsplash.com/photo-1587474260584-136574528ed5?w=1600&q=85", alt: "Delhi streets" },
+  { imageUrl: "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?auto=format&fit=crop&w=1600&q=75", alt: "India streets" },
+  { imageUrl: "https://images.unsplash.com/photo-1598091383021-15ddea10925d?auto=format&fit=crop&w=1600&q=75", alt: "Local home" },
+  { imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=1600&q=75", alt: "Cultural travel" },
+  { imageUrl: "https://images.unsplash.com/photo-1587474260584-136574528ed5?auto=format&fit=crop&w=1600&q=75", alt: "Delhi streets" },
 ];
 
 /* ═══════════════════════════════════════════════════════════════
@@ -203,10 +204,13 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
       justifyContent: "space-between",
     }}>
       <Link href="/">
-        <img 
-          src="/logo-blue.png" 
-          alt="Famlo" 
-          style={{ height: "32px", width: "auto", display: "block" }} 
+        <Image
+          src="/logo-blue.png"
+          alt="Famlo"
+          width={1024}
+          height={344}
+          sizes="128px"
+          style={{ height: "32px", width: "auto", display: "block" }}
         />
       </Link>
 
@@ -226,9 +230,12 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
               onMouseLeave={e => (e.currentTarget.style.transform = "scale(1)")}
             >
               {profile?.avatar_url ? (
-                <img
+                <Image
                   src={profile.avatar_url}
                   alt={profile?.name || "Profile"}
+                  width={80}
+                  height={80}
+                  sizes="40px"
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : initial}
@@ -524,9 +531,12 @@ function StoryCard({ story, index }: { story: StoryRecord; index: number }) {
       <div>
         {coverImage ? (
           <div style={{ marginBottom: "14px", borderRadius: "16px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
-            <img
+            <Image
               src={coverImage}
               alt={storyAuthor}
+              width={472}
+              height={240}
+              sizes="(max-width: 768px) 184px, 236px"
               style={{ width: "100%", height: "120px", objectFit: "cover", display: "block" }}
             />
           </div>
@@ -588,22 +598,22 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
   const [bannerIdx, setBannerIdx] = useState(0);
   const banners = heroBanners?.length ? heroBanners : DEFAULT_BANNERS;
   const safeBannerIdx = banners.length > 0 ? bannerIdx % banners.length : 0;
-  const hasRequestedInitialLocation = useRef(false);
   const isClient = useSyncExternalStore(
     () => () => undefined,
     () => true,
     () => false
   );
+  const userId = user?.id;
   const recentViews = useMemo(() => {
     if (!isClient) return [];
     try {
-      return readRecentViews(user?.id)
+      return readRecentViews(userId)
         .filter((rv: RecentViewItem) => rv.id && rv.title && rv.title !== "Famlo stay")
         .slice(0, 10);
     } catch {
       return [];
     }
-  }, [isClient, user?.id]);
+  }, [isClient, userId]);
 
   const requestCurrentLocation = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -639,15 +649,6 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
       }
     );
   }, []);
-
-  useEffect(() => {
-    if (hasRequestedInitialLocation.current) return;
-    hasRequestedInitialLocation.current = true;
-    const timeout = window.setTimeout(() => {
-      requestCurrentLocation();
-    }, 0);
-    return () => window.clearTimeout(timeout);
-  }, [requestCurrentLocation]);
 
   useEffect(() => {
     if (banners.length <= 1) return;
@@ -814,11 +815,26 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
         overflow: "hidden", 
         background: "#0a1628" }}>
         {banners.map((b, i) => (
-          <div key={i} style={{
-            position: "absolute", inset: 0,
-            backgroundImage: `url(${b.imageUrl})`, backgroundSize: "cover", backgroundPosition: "center",
-            opacity: i === safeBannerIdx ? 1 : 0, transition: "opacity 1.2s ease",
-          }} />
+          <Image
+            key={i}
+            src={b.imageUrl}
+            alt={b.alt ?? ""}
+            fill
+            priority={i === 0}
+            loading={i === 0 ? "eager" : "lazy"}
+            sizes="100vw"
+            aria-hidden={i === safeBannerIdx ? undefined : true}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              opacity: i === safeBannerIdx ? 1 : 0,
+              transition: "opacity 1.2s ease",
+            }}
+          />
         ))}
         {/* dark overlay */}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(10,22,40,0.44) 0%, rgba(10,22,40,0.65) 50%, rgba(10,22,40,0.92) 100%)" }} />
@@ -1019,9 +1035,12 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
                       }}
                     >
                       {rv.hostPhotoUrl ? (
-                        <img
+                        <Image
                           src={rv.hostPhotoUrl}
                           alt={`${rv.hostName || rv.title} host`}
+                          width={68}
+                          height={68}
+                          sizes="34px"
                           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                         />
                       ) : (
@@ -1185,7 +1204,16 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
                 <article key={ad.id} className="discover-more-card">
                   <div className="discover-more-media">
                     {ad.image_url
-                      ? <img src={ad.image_url} alt={ad.title} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                      ? (
+                        <Image
+                          src={ad.image_url}
+                          alt={ad.title}
+                          width={1200}
+                          height={720}
+                          sizes="(max-width: 768px) 100vw, 50vw"
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                        />
+                      )
                       : <div style={{ width: "100%", height: "100%", minHeight: "100%", background: "linear-gradient(135deg,#1A56DB,#3B82F6)" }} />}
                   </div>
                   <div className="discover-more-copy">
@@ -1242,9 +1270,12 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
         }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <Link href="/">
-              <img 
-                src="/logo-blue.png" 
-                alt="Famlo" 
+              <Image
+                src="/logo-blue.png"
+                alt="Famlo"
+                width={1024}
+                height={344}
+                sizes="144px"
                 style={{ 
                   height: "36px", 
                   width: "auto", 

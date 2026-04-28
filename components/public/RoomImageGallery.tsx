@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Images, Maximize2, X } from "lucide-react";
 
@@ -57,7 +58,7 @@ export function RoomImageGallery({ roomName, images }: Readonly<RoomImageGallery
         <div className={styles.roomGalleryGridLarge}>
           <button type="button" className={styles.roomGalleryMainButton} onClick={() => openModal(selectedIndex)}>
             {primaryImage ? (
-              <img className={styles.roomGalleryMainImage} src={primaryImage} alt={`${roomName} photo 1`} />
+              <Image className={styles.roomGalleryMainImage} src={primaryImage} alt={`${roomName} photo 1`} width={1200} height={900} sizes="(max-width: 768px) 100vw, 70vw" />
             ) : (
               <div className={styles.roomGalleryPlaceholder}>Room Image</div>
             )}
@@ -81,7 +82,7 @@ export function RoomImageGallery({ roomName, images }: Readonly<RoomImageGallery
                       openModal(imageIndex);
                     }}
                   >
-                    <img className={styles.roomGalleryThumbImage} src={imageUrl} alt={`${roomName} photo ${imageIndex + 1}`} />
+                    <Image className={styles.roomGalleryThumbImage} src={imageUrl} alt={`${roomName} photo ${imageIndex + 1}`} width={600} height={450} sizes="(max-width: 768px) 33vw, 240px" />
                   </button>
                 );
               })
@@ -111,10 +112,13 @@ export function RoomImageGallery({ roomName, images }: Readonly<RoomImageGallery
               <button type="button" className={styles.roomGalleryNavButton} onClick={() => stepImage(-1)} aria-label="Previous image">
                 <ChevronLeft size={18} />
               </button>
-              <img
+              <Image
                 className={styles.roomGalleryModalImage}
                 src={galleryImages[modalIndex] || primaryImage}
                 alt={`${roomName} enlarged view`}
+                width={1400}
+                height={1050}
+                sizes="100vw"
               />
               <button type="button" className={styles.roomGalleryNavButton} onClick={() => stepImage(1)} aria-label="Next image">
                 <ChevronRight size={18} />
@@ -131,7 +135,7 @@ export function RoomImageGallery({ roomName, images }: Readonly<RoomImageGallery
                     setSelectedIndex(index);
                   }}
                 >
-                  <img className={styles.roomGalleryModalThumbImage} src={imageUrl} alt={`${roomName} gallery thumbnail ${index + 1}`} />
+                  <Image className={styles.roomGalleryModalThumbImage} src={imageUrl} alt={`${roomName} gallery thumbnail ${index + 1}`} width={240} height={180} sizes="120px" />
                 </button>
               ))}
             </div>

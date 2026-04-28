@@ -2,6 +2,7 @@
 
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1296,7 +1297,15 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
 
       <div className="famlo-booking-hero">
         <div className="famlo-hero-main">
-          {displayImages[0] ? <img src={displayImages[0]} alt={home.listingTitle ?? home.name} /> : <div className="booking-hero-fallback" />}
+          {displayImages[0] ? (
+            <Image
+              src={displayImages[0]}
+              alt={home.listingTitle ?? home.name}
+              width={1600}
+              height={1000}
+              sizes="(max-width: 768px) 100vw, 70vw"
+            />
+          ) : <div className="booking-hero-fallback" />}
           <div className="famlo-hero-overlay">
             <span>Living room</span>
             <button type="button">View all photos</button>
@@ -1305,7 +1314,15 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         <div className="famlo-hero-side">
           {displayImages.slice(1, 3).map((image, index) => (
             <div className="famlo-hero-side-card" key={`${image}-${index}`}>
-              {image ? <img src={image} alt={`${home.listingTitle ?? home.name} ${index + 2}`} /> : <div className="booking-hero-fallback" />}
+              {image ? (
+                <Image
+                  src={image}
+                  alt={`${home.listingTitle ?? home.name} ${index + 2}`}
+                  width={900}
+                  height={600}
+                  sizes="(max-width: 768px) 100vw, 30vw"
+                />
+              ) : <div className="booking-hero-fallback" />}
               <span>{index === 0 ? "Bedroom" : "Kitchen"}</span>
             </div>
           ))}

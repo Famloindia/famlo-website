@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState, useRef } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useUser } from "@/components/auth/UserContext";
 import { AuthModal } from "@/components/auth/AuthModal";
@@ -34,7 +35,7 @@ function HeaderContent() {
   // Scroll effect
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 60);
-    window.addEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
@@ -53,10 +54,13 @@ function HeaderContent() {
     <header className={`header ${isScrolled ? "scrolled" : ""} ${isJoinPage ? "join-header" : ""}`}>
       <div className="shell header-inner">
         <Link href="/" className="logo-group">
-          <img 
-            src="/logo-blue.png" 
-            alt="Famlo" 
-            className={`logo-image ${isJoinPage ? "join-logo" : ""}`} 
+          <Image
+            src="/logo-blue.png"
+            alt="Famlo"
+            width={1024}
+            height={344}
+            sizes="120px"
+            className={`logo-image ${isJoinPage ? "join-logo" : ""}`}
             style={{
               height: isJoinPage ? "30px" : "26px",
               width: "auto",
@@ -84,9 +88,12 @@ function HeaderContent() {
                     onClick={() => setDropdownOpen(!dropdownOpen)}
                   >
                     {profile?.avatar_url ? (
-                      <img
+                      <Image
                         src={profile.avatar_url}
                         alt={profile?.name || "Profile"}
+                        width={80}
+                        height={80}
+                        sizes="40px"
                         className="avatar-image"
                       />
                     ) : (

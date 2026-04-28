@@ -5,7 +5,7 @@ import { getHomepageData } from "@/lib/discovery";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { getMostInteractedHostScores } from "@/lib/host-interactions";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 const MOST_INTERACTED_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOST_INTERACTED_HOSTS === "true";
 
 export default async function HomePage(): Promise<React.JSX.Element> {
