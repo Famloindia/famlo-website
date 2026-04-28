@@ -12,90 +12,17 @@ import { HomeDetailTopBar } from "@/components/public/HomeDetailTopBar";
 import { HomeCoverCard } from "@/components/public/HomeCoverCard";
 import { HostGalleryViewer } from "@/components/public/HostGalleryViewer";
 import { RecentHomeViewTracker } from "@/components/public/RecentHomeViewTracker";
-import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
-import { loadHostStayBookingRecordsCompatibility } from "@/lib/booking-compat";
-import { loadCanonicalCalendar } from "@/lib/calendar";
-import { loadHostGuestNetworkSummary } from "@/lib/host-guest-network";
-import { loadFamilyStories, loadLikedGuestCounts } from "@/lib/home-social-proof";
+import { getCachedPublicHomeSideData, getCachedPublicHomeStayData } from "@/lib/home-detail-public-data";
 import { DEFAULT_EXPERIENCE_CARDS, parseMultiValueList } from "@/lib/home-listing-options";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { getPublicCoordinates } from "@/lib/location-utils";
 import { getCachedHomeRouteResolution } from "@/lib/home-route-resolution";
 import { getHomesDiscoveryData } from "@/lib/discovery";
-import { loadStayUnitRatingSummaries } from "@/lib/stay-unit-ratings";
-import { loadStayUnitsForHome, type StayUnitRecord } from "@/lib/stay-units";
 import { buildHomestayPath } from "@/lib/slug";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import styles from "./home-details.module.css";
 
 export const revalidate = 60;
-
-function enumerateDateStrings(startDate: string, endDate: string): string[] {
-  const dates: string[] = [];
-  const cursor = new Date(`${startDate}T00:00:00.000Z`);
-  const end = new Date(`${endDate}T00:00:00.000Z`);
-
-  while (cursor <= end) {
-    dates.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-
-  return dates;
-}
-
-function tokeniseRoomCalendarBlock(event: { startDate: string; endDate: string; slotKey?: string | null; isBlocking: boolean; status: string }): string[] {
-  if (!event.isBlocking || event.status === "released" || event.status === "cancelled") {
-    return [];
-  }
-
-  const tokens: string[] = [];
-  for (const date of enumerateDateStrings(event.startDate, event.endDate)) {
-    if (event.slotKey && event.slotKey !== "fullday") {
-      tokens.push(`${date}::${event.slotKey}`);
-      continue;
-    }
-
-    tokens.push(date, `${date}::fullday`);
-  }
-
-  return tokens;
-}
-
-async function hydrateStayUnitsWithBlockedDates(supabase: ReturnType<typeof createAdminSupabaseClient>, stayUnits: StayUnitRecord[]): Promise<StayUnitRecord[]> {
-  const from = getTodayInIndia();
-  const to = addIndiaDays(from, 365);
-
-  return Promise.all(
-    stayUnits.map(async (unit) => {
-      try {
-        const [hostEvents, stayUnitEvents] = await Promise.all([
-          unit.hostId
-            ? loadCanonicalCalendar(supabase, {
-                ownerType: "host",
-                ownerId: unit.hostId,
-                from,
-                to,
-              })
-            : Promise.resolve([]),
-          loadCanonicalCalendar(supabase, {
-            ownerType: "stay_unit",
-            ownerId: unit.id,
-            from,
-            to,
-          }),
-        ]);
-
-        return {
-          ...unit,
-          blockedDates: Array.from(new Set([...hostEvents, ...stayUnitEvents].flatMap(tokeniseRoomCalendarBlock))),
-        };
-      } catch (error) {
-        console.warn("[homes.page] failed to hydrate room calendar", unit.id, error);
-        return unit;
-      }
-    })
-  );
-}
 
 export async function generateMetadata({
   params,
@@ -302,32 +229,18 @@ export default async function HomeDetailPage({
         .maybeSingle()
     : Promise.resolve({ data: null as { payload?: unknown; updated_at?: string | null } | null });
 
-  const [familyPhotosResult, hostMediaResult, approvedDraftResult, stories, likedCountMap, stayBookingRows, verifiedGuestNetwork, moreHomes] = await Promise.all([
+  const [familyPhotosResult, hostMediaResult, approvedDraftResult, publicSideData, moreHomes] = await Promise.all([
     familyPhotosPromise,
     hostMediaPromise,
     approvedDraftPromise,
-    loadFamilyStories(metricsId, 4),
-    loadLikedGuestCounts([metricsId]),
-    loadHostStayBookingRecordsCompatibility(supabase, {
+    getCachedPublicHomeSideData({
+      routeId: metricsId,
       hostId,
-      legacyFamilyId: familyId,
+      familyId,
     }),
-    familyId
-      ? loadHostGuestNetworkSummary(supabase, {
-          familyId,
-          viewerUserId: null,
-          limit: 6,
-        })
-      : Promise.resolve({
-          familyId: "",
-          hostUserId: null,
-          guestCount: 0,
-          viewerCanAccessPeerChat: false,
-          guests: [],
-        }),
     moreHomesPromise,
   ]);
-  const existingBookings = stayBookingRows;
+  const existingBookings = publicSideData.stayBookingRows;
 
   const meta = parseHostListingMeta(asString(family?.admin_notes) || null);
   const approvedDraft = approvedDraftResult.data;
@@ -361,7 +274,9 @@ export default async function HomeDetailPage({
     asString(host?.display_name) ||
     "Famlo host";
   const hostPhotoUrl = hostPhotoSeed;
-  const likedCount = likedCountMap.get(metricsId) ?? (typeof family?.total_reviews === "number" ? family.total_reviews : stories.length);
+  const likedCount =
+    publicSideData.likedCount ||
+    (typeof family?.total_reviews === "number" ? family.total_reviews : publicSideData.stories.length);
   const languageList = asArray(family?.languages ?? host?.languages);
   const blockedDateSource =
     asArray(family?.blocked_dates).length > 0 ? asArray(family?.blocked_dates) : asArray(host?.blocked_dates);
@@ -406,7 +321,7 @@ export default async function HomeDetailPage({
     hostName,
     googleMapsLink: asString(family?.google_maps_link) || asString(host?.google_maps_link) || null,
     likedCount,
-    stories,
+    stories: publicSideData.stories,
     platformCommissionPct:
       typeof family?.platform_commission_pct === "number"
         ? family.platform_commission_pct
@@ -432,14 +347,9 @@ export default async function HomeDetailPage({
     interactionType: firstStringValue(meta.interactionType, asString(onboardingPayload.interactionType)),
     houseType: firstStringValue(meta.houseType, meta.familyComposition, asString(onboardingPayload.houseType)),
   };
-  const stayUnitsPromise = loadStayUnitsForHome(supabase, home);
-  const [stayUnitsRaw] = await Promise.all([stayUnitsPromise]);
-  const stayUnits = await hydrateStayUnitsWithBlockedDates(supabase, stayUnitsRaw);
+  const { stayUnits, roomRatingSummaryEntries } = await getCachedPublicHomeStayData(home);
   const visibleStayUnits = stayUnits.filter((unit) => unit.isActive);
-  const roomRatingSummaryMap = await loadStayUnitRatingSummaries(
-    supabase,
-    visibleStayUnits.map((unit) => unit.id)
-  );
+  const roomRatingSummaryMap = new Map(roomRatingSummaryEntries);
   const primaryStayUnit =
     visibleStayUnits.find((unit) => unit.isPrimary) ??
     visibleStayUnits[0] ??
@@ -479,7 +389,7 @@ export default async function HomeDetailPage({
       price: homeQuarterPrices[quarter.id]
     }))
     .filter((quarter) => Number.isFinite(quarter.price) && quarter.price > 0);
-  const totalStaysCount = stayBookingRows.length;
+  const totalStaysCount = publicSideData.stayBookingRows.length;
   const hostStatusLabel = home.isActive && home.isAccepting ? "Professional Active" : "Professional Inactive";
   const hostInitial = home.hostName.charAt(0).toUpperCase() || "F";
   const activeStayUnitCount = visibleStayUnits.length;
@@ -798,7 +708,7 @@ export default async function HomeDetailPage({
                 marginBottom: "18px"
               }}>
                 {[
-                  { label: "Guests Hosted", value: verifiedGuestNetwork.guestCount },
+                  { label: "Guests Hosted", value: publicSideData.guestNetwork.guestCount },
                   { label: "Rooms", value: activeStayUnitCount },
                   { label: "Stories", value: home.stories.length },
                   { label: "Liked by", value: likedCount }
