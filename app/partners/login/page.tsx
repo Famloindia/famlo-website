@@ -1,12 +1,15 @@
+//app/partners/login/page.tsx
+
 "use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
+import styles from "./login.module.css";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
+import { ShieldCheck, AlertCircle, Loader2 } from "lucide-react";
 
-export default function PartnerLoginPage(): JSX.Element {
+export default function PartnerLoginPage(): React.JSX.Element {
   const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -19,7 +22,7 @@ export default function PartnerLoginPage(): JSX.Element {
     const cleanPassword = password.trim();
 
     if (!cleanIdentifier || !cleanPassword) {
-      setErrorMessage("Enter your user ID or approved email and password.");
+      setErrorMessage("Enter your Partner ID and password.");
       return;
     }
 
@@ -35,19 +38,22 @@ export default function PartnerLoginPage(): JSX.Element {
         });
 
         if (error || !data.user) {
-          setErrorMessage("User ID or password is incorrect.");
+          setErrorMessage("ID or password is incorrect.");
           return;
         }
 
         const resolveResponse = await fetch("/api/partners/resolve-stay", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: cleanIdentifier.toLowerCase(), userId: data.user.id })
+          body: JSON.stringify({
+            email: cleanIdentifier.toLowerCase(),
+            userId: data.user.id
+          })
         });
         const resolvePayload = (await resolveResponse.json()) as { redirect?: string; error?: string };
 
         if (!resolveResponse.ok || !resolvePayload.redirect) {
-          setErrorMessage(resolvePayload.error ?? "No approved partner dashboard was found for this email.");
+          setErrorMessage(resolvePayload.error ?? "No partner dashboard matched this account.");
           return;
         }
 
@@ -63,102 +69,88 @@ export default function PartnerLoginPage(): JSX.Element {
       const payload = (await response.json()) as { redirect?: string; error?: string };
 
       if (!response.ok || !payload.redirect) {
-        setErrorMessage(payload.error ?? "User ID or password is incorrect.");
+        setErrorMessage(payload.error ?? "Partner ID or password is incorrect.");
         return;
       }
 
       router.push(payload.redirect);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not log in right now.");
+      setErrorMessage(error instanceof Error ? error.message : "Service error. Try again.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,#f6efe5_0%,#fbf9f4_45%,#f4f7fb_100%)] px-6 py-12">
-      <div className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="space-y-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.32em] text-[#8a6a3d]">Partner Login</p>
-          <h1 className="text-4xl font-semibold tracking-[-0.05em] text-[#1f2937] sm:text-5xl">
-            One login for Famlo home hosts and hommie partners.
-          </h1>
-          <p className="max-w-2xl text-base leading-7 text-[#52606d]">
-            Use your Famlo Homes host ID and password, or your approved hommie partner email and password.
-          </p>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            {[
-              "Famlo Homes host ID login",
-              "Approved hommie email login",
-              "Quarter pricing and calendar sync",
-              "Live dashboard linked with the mobile app"
-            ].map((item) => (
-              <div key={item} className="rounded-[24px] border border-white/70 bg-white/80 px-5 py-4 text-sm font-semibold text-[#1f2937] shadow-[0_18px_60px_rgba(15,23,42,0.05)]">
-                {item}
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-[36px] border border-white/70 bg-white/90 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-          <p className="text-sm font-semibold text-[#1f2937]">Login</p>
-          <p className="mt-2 text-sm leading-7 text-[#52606d]">
-            Enter your user ID or approved email, then your password.
-          </p>
-
-          <form className="mt-8 space-y-5" onSubmit={(event) => void handleLogin(event)}>
-            <label className="grid gap-2 text-sm text-[#52606d]">
-              User ID or approved email
-              <input
-                value={identifier}
-                onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="FAM-XXXXXX or approved@email.com"
-                className="rounded-2xl border border-[#e5e7eb] px-4 py-4 text-[#1f2937] outline-none"
-              />
-            </label>
-
-            <label className="grid gap-2 text-sm text-[#52606d]">
-              Password
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Your password"
-                className="rounded-2xl border border-[#e5e7eb] px-4 py-4 text-[#1f2937] outline-none"
-              />
-            </label>
-
-            {errorMessage ? (
-              <div className="rounded-2xl border border-[#f3c3cb] bg-[#fff5f7] px-4 py-3 text-sm text-[#9f1239]">
-                {errorMessage}
-              </div>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-full bg-[#1f2937] px-5 py-4 text-sm font-semibold text-white disabled:opacity-70"
-            >
-              {loading ? "Checking login..." : "Log in"}
-            </button>
-          </form>
-
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm">
-            <Link href="/partners/forgot-password" className="font-semibold text-[#8a6a3d]">
-              Forgot password?
-            </Link>
-            <div className="flex flex-wrap items-center gap-3">
-              <Link href="/partners" className="inline-flex items-center rounded-full border border-[#1f2937] px-4 py-2 font-semibold text-[#1f2937]">
-                Join Famlo
-              </Link>
-              <Link href="/partners/home" className="text-[#52606d]">
-                Need onboarding instead?
-              </Link>
-            </div>
-          </div>
-        </section>
+    <div className={styles.loginContainer}>
+      <div className={styles.brandHeader}>
+        <img src="/logo-blue.png" alt="Famlo" style={{ height: "32px", width: "auto" }} />
+        <div className={styles.tagline}>Partner Portal</div>
       </div>
-    </main>
+
+      <div className={styles.loginCard}>
+        <div className={styles.loginHeader}>
+          <h2>Welcome Back</h2>
+          <p>Login to your secure Host Dashboard.</p>
+        </div>
+
+        <form onSubmit={(event) => void handleLogin(event)}>
+          <div className={styles.formGroup}>
+            <label htmlFor="identifier">Partner ID / Email</label>
+            <input
+              id="identifier"
+              className={styles.inputField}
+              onChange={(event) => setIdentifier(event.target.value)}
+              placeholder="e.g. FAM-123456"
+              value={identifier}
+              disabled={loading}
+              autoFocus
+            />
+          </div>
+
+          <div className={styles.formGroup}>
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              className={styles.inputField}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="••••••••"
+              value={password}
+              disabled={loading}
+            />
+          </div>
+
+          {errorMessage && (
+            <div className={styles.errorBox}>
+              <AlertCircle size={16} />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          <button className={styles.loginBtn} disabled={loading} type="submit">
+            {loading ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                <Loader2 className="animate-spin" size={20} />
+                <span>Verifying...</span>
+              </div>
+            ) : "Log in to Dashboard"}
+          </button>
+        </form>
+
+        <div className={styles.footerLinks}>
+          <Link href="/partners/forgetpassword" className={styles.forgotLink}>
+            Forgot password?
+          </Link>
+          <Link href="/" className={styles.backLink}>
+            Back to Homepage
+          </Link>
+        </div>
+      </div>
+      
+      <div style={{ marginTop: '40px', display: 'flex', gap: '12px', opacity: 0.15 }}>
+         <ShieldCheck size={24} />
+      </div>
+    </div>
   );
 }

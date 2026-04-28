@@ -1,89 +1,129 @@
 import Link from "next/link";
 
-import { HommiePartnerDashboard } from "@/app/_components/HommiePartnerDashboard";
+import { HommieDashboardEditor } from "@/components/partners/HommieDashboardEditor";
 import { createAdminSupabaseClient } from "@/lib/supabase";
-import type { Hommie, HommieBookingRequest } from "@/lib/types";
 
 interface HommieDashboardPageProps {
-  searchParams?: {
+  searchParams?: Promise<{
     slug?: string;
+  }>;
+}
+
+export const dynamic = "force-dynamic";
+
+function mapV2HommieToEditorRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: String(row.id),
+    host_name: typeof row.display_name === "string" ? row.display_name : "",
+    email: typeof row.email === "string" ? row.email : "",
+    phone: typeof row.phone === "string" ? row.phone : "",
+    city: typeof row.city === "string" ? row.city : "",
+    state: typeof row.state === "string" ? row.state : "",
+    locality: typeof row.locality === "string" ? row.locality : "",
+    is_active: typeof row.status === "string" ? row.status === "published" : true,
+    property_name: typeof row.display_name === "string" ? row.display_name : "",
+    description: typeof row.bio === "string" ? row.bio : "",
+    amenities: Array.isArray(row.service_tags) ? row.service_tags : [],
+    images: Array.isArray(row.hommie_media_v2)
+      ? (row.hommie_media_v2 as Array<Record<string, unknown>>)
+          .map((item) => (typeof item.media_url === "string" ? item.media_url : ""))
+          .filter(Boolean)
+      : [],
+    nightly_price:
+      typeof row.nightly_price === "number"
+        ? row.nightly_price
+        : typeof row.hourly_price === "number"
+          ? row.hourly_price
+          : 0,
+    max_guests: typeof row.max_guests === "number" ? row.max_guests : 1,
+    admin_notes: "",
+  };
+}
+
+function mapV2BookingRow(row: Record<string, unknown>): Record<string, unknown> {
+  const pricing = (row.pricing_snapshot as Record<string, unknown> | null) ?? {};
+  return {
+    id: row.id,
+    status: row.status,
+    date_from: row.start_date,
+    date_to: row.end_date,
+    guests_count: row.guests_count,
+    total_price: row.total_price,
+    base_price: pricing.base_price ?? pricing.unit_price ?? null,
+    platform_fee: pricing.platform_fee ?? null,
+    gst_amount: pricing.tax_amount ?? pricing.gst_amount ?? null,
+    created_at: row.created_at,
+    user_id: row.user_id,
+    vibe: row.notes,
+    quarter_type: row.quarter_type,
+    quarter_time: row.quarter_time,
   };
 }
 
 export default async function HommieDashboardPage({
   searchParams
-}: Readonly<HommieDashboardPageProps>): Promise<JSX.Element> {
+}: Readonly<HommieDashboardPageProps>): Promise<React.JSX.Element> {
+  const params = await searchParams;
   const supabase = createAdminSupabaseClient();
-  const slug = searchParams?.slug;
+  const slug = params?.slug ?? "";
 
-  let hommie: Hommie | null = null;
-
-  if (slug) {
-    const { data } = await supabase
-      .from("hommies")
-      .select("*")
-      .eq("slug", slug)
-      .maybeSingle();
-    hommie = (data as Hommie | null) ?? null;
-  }
-
-  if (!hommie) {
-    const { data } = await supabase
-      .from("hommies")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    hommie = (data as Hommie | null) ?? null;
-  }
-
-  const hommieId = hommie?.id ?? null;
-  const { data: bookingsData } = hommieId
+  const { data: v2Hommie } = slug
     ? await supabase
-        .from("hommie_booking_requests")
-        .select("*")
-        .eq("hommie_id", hommieId)
-        .order("created_at", { ascending: false })
-    : { data: [] as HommieBookingRequest[] };
+        .from("hommie_profiles_v2")
+        .select("*, hommie_media_v2(media_url, is_primary)")
+        .or(`slug.eq.${slug},legacy_hommie_id.eq.${slug},id.eq.${slug}`)
+        .eq("status", "published")
+        .maybeSingle()
+    : { data: null };
 
-  const bookings = (bookingsData ?? []) as HommieBookingRequest[];
+  const hommieRow = v2Hommie ? mapV2HommieToEditorRow(v2Hommie as Record<string, unknown>) : null;
+  const v2HommieId =
+    v2Hommie && typeof (v2Hommie as Record<string, unknown>).id === "string"
+      ? String((v2Hommie as Record<string, unknown>).id)
+      : null;
+
+  const { data: bookingRowsV2 } =
+    v2HommieId
+      ? await supabase
+          .from("bookings_v2")
+          .select("id,status,start_date,end_date,guests_count,total_price,pricing_snapshot,created_at,user_id,notes,quarter_type,quarter_time")
+          .eq("hommie_id", v2HommieId)
+          .order("created_at", { ascending: false })
+      : { data: [] };
+
+  const bookingRows = ((bookingRowsV2 ?? []) as Array<Record<string, unknown>>).map(mapV2BookingRow);
 
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,#f6efe5_0%,#fbf9f4_45%,#f4f7fb_100%)] px-6 py-10">
-      <div className="mx-auto w-full max-w-7xl space-y-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.32em] text-[#8a6a3d]">
-              /app/partnerslogin/hommie/dashboard
-            </p>
-            <h1 className="text-4xl font-semibold tracking-[-0.05em] text-[#1f2937]">
-              Hommie dashboard
-            </h1>
-            <p className="max-w-3xl text-base leading-7 text-[#52606d]">
-              Manage your hommie listing, booking requests, availability details, and earnings from one partner workspace.
+    <main className="shell">
+      <section className="panel dashboard-shell">
+        <div className="dashboard-header">
+          <div>
+            <span className="eyebrow">Hommie dashboard</span>
+            <h1>Famlo hommie dashboard</h1>
+            <p>
+              This dashboard keeps the current partner URL alive, but loads the real v2 hommie
+              profile first so the web partner experience stays aligned with the cleaner booking
+              system.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3 text-sm">
-            <Link
-              href="/partners/login"
-              className="rounded-full border border-[#1f2937] px-5 py-3 font-semibold text-[#1f2937]"
-            >
-              Back to partner login
-            </Link>
+          <div className="dashboard-links">
+            <Link href="/">Public homepage</Link>
+            <Link href="/partners/login">Back to login</Link>
           </div>
         </div>
 
-        {!hommie ? (
-          <section className="rounded-[32px] border border-white/70 bg-white/90 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
-            <p className="text-lg font-semibold text-[#1f2937]">No hommie listing found yet.</p>
-            <p className="mt-3 text-sm leading-7 text-[#52606d]">
-              Create or approve a hommie listing first, then this dashboard can load the live partner profile.
-            </p>
-          </section>
+        {!hommieRow ? (
+          <div className="panel detail-box">
+            <h2>No hommie listing found</h2>
+            <p>Log in with an approved hommie partner email to load the connected dashboard.</p>
+          </div>
         ) : (
-          <HommiePartnerDashboard hommie={hommie} bookings={bookings} />
+          <HommieDashboardEditor
+            bookingRows={bookingRows}
+            hommie={hommieRow}
+          />
         )}
-      </div>
+      </section>
     </main>
   );
 }

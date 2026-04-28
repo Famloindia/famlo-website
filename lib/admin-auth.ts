@@ -1,7 +1,7 @@
+import { cookies } from "next/headers";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const ADMIN_COOKIE_NAME = "famlo-admin-session";
-const SESSION_DURATION_SECONDS = 60 * 60 * 8;
+import { getAdminCookieName, getTeamsCookieName, getAdminSessionMaxAge } from "./auth-constants";
 
 function getRequiredEnv(name: "ADMIN_PASSWORD" | "ADMIN_SESSION_SECRET"): string {
   const value = process.env[name];
@@ -17,13 +17,11 @@ function createSignature(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("hex");
 }
 
-export function getAdminCookieName(): string {
-  return ADMIN_COOKIE_NAME;
-}
+export { getAdminCookieName, getTeamsCookieName, getAdminSessionMaxAge };
 
 export function createAdminSessionToken(): string {
   const secret = getRequiredEnv("ADMIN_SESSION_SECRET");
-  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_DURATION_SECONDS;
+  const expiresAt = Math.floor(Date.now() / 1000) + getAdminSessionMaxAge();
   const payload = `${expiresAt}`;
   const signature = createSignature(payload, secret);
 
@@ -45,11 +43,7 @@ export function verifyAdminSessionToken(token: string | undefined): boolean {
     return false;
   }
 
-  const expectedSignature = createSignature(
-    expiresAt,
-    getRequiredEnv("ADMIN_SESSION_SECRET")
-  );
-
+  const expectedSignature = createSignature(expiresAt, getRequiredEnv("ADMIN_SESSION_SECRET"));
   const providedBuffer = Buffer.from(providedSignature);
   const expectedBuffer = Buffer.from(expectedSignature);
 
@@ -72,6 +66,14 @@ export function verifyAdminPassword(input: string): boolean {
   return timingSafeEqual(inputBuffer, expectedBuffer);
 }
 
-export function getAdminSessionMaxAge(): number {
-  return SESSION_DURATION_SECONDS;
+export async function hasValidAdminSession(): Promise<boolean> {
+  const cookieStore = await cookies();
+  return verifyAdminSessionToken(cookieStore.get(getAdminCookieName())?.value);
+}
+
+export async function hasValidBackofficeSession(): Promise<boolean> {
+  const cookieStore = await cookies();
+  const adminToken = cookieStore.get(getAdminCookieName())?.value;
+  const teamsToken = cookieStore.get(getTeamsCookieName())?.value;
+  return verifyAdminSessionToken(adminToken) || verifyAdminSessionToken(teamsToken);
 }

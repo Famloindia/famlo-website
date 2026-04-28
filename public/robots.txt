@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+User-agent: Googlebot-Image
+Allow: /icon-*.png
+Allow: /favicon.ico

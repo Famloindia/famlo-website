@@ -1,3 +1,5 @@
+//app/api/partners/login/route.ts
+
 import { NextResponse } from "next/server";
 
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -16,29 +18,28 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const supabase = createAdminSupabaseClient();
-
-  const { data: family, error } = await supabase
+  const { data, error } = await supabase
     .from("families")
     .select("id, host_password, host_phone")
     .eq("host_id", identifier)
     .maybeSingle();
-  const familyRow = family as { id: string; host_password: string | null; host_phone: string | null } | null;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  if (!familyRow) {
+  const family = data as { id: string; host_password: string | null; host_phone: string | null } | null;
+  if (!family) {
     return NextResponse.json({ error: "Partner ID or password is incorrect." }, { status: 401 });
   }
 
   const fallbackPassword =
-    typeof familyRow.host_phone === "string" && familyRow.host_phone.length >= 4
-      ? `famlo${familyRow.host_phone.slice(-4)}`
+    typeof family.host_phone === "string" && family.host_phone.length >= 4
+      ? `famlo${family.host_phone.slice(-4)}`
       : "";
 
   const isMatch =
-    password === String(familyRow.host_password ?? "") ||
+    password === String(family.host_password ?? "") ||
     (fallbackPassword.length > 0 && password === fallbackPassword);
 
   if (!isMatch) {
@@ -47,10 +48,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const response = NextResponse.json({
     ok: true,
-    redirect: `/app/partnerslogin/home/dashboard?family=${familyRow.id}`
+    redirect: `/partnerslogin/home/dashboard?family=${family.id}`
   });
 
-  response.cookies.set("famlo_host_family_id", familyRow.id, {
+  response.cookies.set("famlo_host_family_id", family.id, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
