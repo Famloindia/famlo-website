@@ -241,25 +241,25 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
                   width={80}
                   height={80}
                   sizes="40px"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", borderRadius: "50%" }}
                 />
               ) : initial}
             </button>
             {dropOpen && (
               <div className="profile-dropdown" style={{
                 position: "absolute", top: "calc(100% + 10px)", right: 0,
-                width: "248px",
-                background: "linear-gradient(180deg,#ffffff,#f8fbff)",
-                borderRadius: "18px",
-                boxShadow: "0 18px 38px rgba(30,64,175,0.16)",
+                width: "170px",
+                background: "#ffffff",
+                borderRadius: "8px",
+                boxShadow: "0 8px 24px rgba(30,64,175,0.1)",
                 border: "1px solid #dbeafe",
                 overflow: "hidden", animation: "dropIn 0.2s ease",
               }}>
-                <div style={{ padding: "16px 18px", borderBottom: "1px solid #e0ecff", background: "linear-gradient(180deg,#f8fbff,#eef5ff)" }}>
-                  <div style={{ fontWeight: 800, fontSize: "15px", color: "#0f172a" }}>{profile?.name || "Welcome"}</div>
-                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>{user.email || user.phone}</div>
+                <div style={{ padding: "6px 10px", borderBottom: "1px solid #e0ecff", background: "#f8fbff" }}>
+                  <div style={{ fontWeight: 800, fontSize: "11px", color: "#0f172a" }}>{profile?.name || "User"}</div>
+                  <div style={{ fontSize: "9px", color: "#64748b", marginTop: "1px" }}>{user.email || user.phone}</div>
                 </div>
-                <div style={{ display: "grid", gap: 8, padding: "12px" }}>
+                <div style={{ display: "grid", gap: 4, padding: "6px 8px 8px" }}>
                   {[{ label: "Profile", href: "/profile" }, { label: "My Bookings", href: "/bookings" }, { label: "Messages", href: "/messages" }].map((item) => (
                     <Link
                       key={item.href}
@@ -269,50 +269,63 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        justifyContent: "space-between",
+                        justifyContent: "flex-start",
                         width: "100%",
-                        padding: "12px 14px",
-                        fontSize: "14px",
-                        fontWeight: 700,
+                        padding: "4px 8px",
+                        fontSize: "11px",
+                        fontWeight: 800,
                         color: "#1e3a8a",
                         textDecoration: "none",
-                        borderRadius: "14px",
-                        transition: "background 0.15s, transform 0.15s",
+                        borderRadius: "16px",
+                        transition: "all 0.2s ease",
                         background: "#f8fbff",
-                        border: "1px solid #e0ecff",
+                        border: "1px solid #dbeafe",
                         boxSizing: "border-box",
                         whiteSpace: "nowrap",
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "#eaf3ff";
+                        e.currentTarget.style.background = "#eff6ff";
                         e.currentTarget.style.transform = "translateY(-1px)";
+                        e.currentTarget.style.boxShadow = "0 4px 12px rgba(59, 130, 246, 0.08)";
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.background = "#f8fbff";
                         e.currentTarget.style.transform = "translateY(0)";
+                        e.currentTarget.style.boxShadow = "none";
                       }}
                     >
                       {item.label}
                     </Link>
                   ))}
+                  <button
+                    className="profile-dropdown-item logout-btn"
+                    onClick={() => { signOut(); setDropOpen(false); }}
+                    style={{
+                      width: "100%",
+                      padding: "4px 8px",
+                      background: "#fff5f5",
+                      border: "1px solid #fecaca",
+                      borderRadius: "6px",
+                      textAlign: "left",
+                      fontSize: "11px",
+                      color: "#dc2626",
+                      cursor: "pointer",
+                      fontWeight: 800,
+                      transition: "all 0.2s ease",
+                      marginTop: "2px"
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "#fee2e2";
+                      e.currentTarget.style.transform = "translateY(-1px)";
+                      e.currentTarget.style.boxShadow = "0 4px 12px rgba(220, 38, 38, 0.08)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "#fff5f5";
+                      e.currentTarget.style.transform = "translateY(0)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  >Log out</button>
                 </div>
-                <button 
-                  className="profile-dropdown-item logout-btn" 
-                  onClick={() => { signOut(); setDropOpen(false); }} 
-                  style={{
-                    width: "calc(100% - 24px)",
-                    margin: "0 12px 12px",
-                    padding: "12px 14px",
-                    background: "#fff5f5",
-                    border: "1px solid #fecaca",
-                    borderRadius: "14px",
-                    textAlign: "left",
-                    fontSize: "14px",
-                    color: "#dc2626",
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >Log out</button>
               </div>
             )}
           </>
@@ -344,7 +357,12 @@ function Section({ title, seeAllHref, dark = false, children }: {
   title: string; seeAllHref?: string; dark?: boolean; children: React.ReactNode;
 }) {
   return (
-    <section style={{ background: dark ? "#0d1b2a" : "#f7f9fc", padding: "36px clamp(16px, 4vw, 48px) 20px" }}>
+    <section style={{
+      background: dark ? "#0d1b2a" : "#f7f9fc",
+      padding: "36px clamp(16px, 4vw, 48px) 20px",
+      contentVisibility: "auto",
+      containIntrinsicSize: "1px 720px",
+    }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <h2 style={{
           fontSize: "clamp(16px, 2.5vw, 22px)", fontWeight: 700,
@@ -407,7 +425,8 @@ function HomeCard({ home, distance }: { home: HomeCardRecord; distance?: string 
         borderRadius: "20px", pointerEvents: "none",
       }} />
       <div style={{
-        position: "relative", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+        position: "relative", display: "flex", gap: "6px", flexWrap: "wrap"
+      }}>
         {!home.rating && <Badge bg="rgba(255,255,255,0.2)" color="#fff">NEW</Badge>}
         {home.isAccepting && <Badge bg="rgba(52,211,153,0.28)" color="#6ee7b7">OPEN</Badge>}
         {home.superhost && <Badge bg="rgba(251,191,36,0.28)" color="#fcd34d">★ Super</Badge>}
@@ -688,7 +707,7 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sortedHomes;
-    
+
     // Exact text matches (Village, City, State, Name)
     const exactMatches = sortedHomes.filter(h =>
       h.city?.toLowerCase().includes(q) || h.state?.toLowerCase().includes(q) ||
@@ -821,14 +840,15 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
   return (
     <div style={{ background: "#f7f9fc", minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "'DM Sans','Segoe UI',sans-serif" }}>
       {/* ══ HERO ══ */}
-      <section className="discovery-hero" style={{ 
-        position: "relative", 
-        height: "60svh", 
-        minHeight: "450px", 
-        maxHeight: "550px", 
-        marginTop: "0px", 
-        overflow: "hidden", 
-        background: "#0a1628" }}>
+      <section className="discovery-hero" style={{
+        position: "relative",
+        height: "60svh",
+        minHeight: "450px",
+        maxHeight: "550px",
+        marginTop: "0px",
+        overflow: "hidden",
+        background: "#0a1628"
+      }}>
         {banners[safeBannerIdx] ? (
           <Image
             key={`${safeBannerIdx}-${banners[safeBannerIdx]?.imageUrl ?? "banner"}`}
@@ -1070,7 +1090,7 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
                         >
                           {(rv.hostName || rv.title).slice(0, 1).toUpperCase()}
                         </div>
-                          )}
+                      )}
                     </div>
                   </div>
 
@@ -1255,23 +1275,23 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
       {showDeferredSections ? (
         <Section title="Moments that stayed" dark>
           {stories.length > 0 ? (
-          <div style={{ display: "flex", gap: "16px", overflowX: "auto", paddingBottom: "10px" }} className="hide-scroll">
-            {stories.slice(0, 10).map((s, i) => (
-              <StoryCard key={s.id} story={s} index={i} />
-            ))}
-          </div>
-        ) : (
-          <div style={{
-            borderRadius: "22px",
-            border: "1px solid rgba(255,255,255,0.12)",
-            background: "rgba(255,255,255,0.04)",
-            padding: "22px",
-            color: "rgba(255,255,255,0.82)",
-            lineHeight: 1.6,
-            maxWidth: "560px"
-          }}>
-            Real guest stories will appear here after completed stays and published experiences start flowing through the new story pipeline.
-          </div>
+            <div style={{ display: "flex", gap: "16px", overflowX: "auto", paddingBottom: "10px" }} className="hide-scroll">
+              {stories.slice(0, 10).map((s, i) => (
+                <StoryCard key={s.id} story={s} index={i} />
+              ))}
+            </div>
+          ) : (
+            <div style={{
+              borderRadius: "22px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(255,255,255,0.04)",
+              padding: "22px",
+              color: "rgba(255,255,255,0.82)",
+              lineHeight: 1.6,
+              maxWidth: "560px"
+            }}>
+              Real guest stories will appear here after completed stays and published experiences start flowing through the new story pipeline.
+            </div>
           )}
         </Section>
       ) : null}
@@ -1291,11 +1311,11 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
                 width={1024}
                 height={344}
                 sizes="144px"
-                style={{ 
-                  height: "36px", 
-                  width: "auto", 
-                  filter: "brightness(0) invert(1)" 
-                }} 
+                style={{
+                  height: "36px",
+                  width: "auto",
+                  filter: "brightness(0) invert(1)"
+                }}
               />
             </Link>
             <div style={{

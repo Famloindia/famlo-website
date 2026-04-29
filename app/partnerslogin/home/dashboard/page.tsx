@@ -208,7 +208,7 @@ export default async function HostDashboardPage({
       "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
       "legacy_booking_id", "stay_unit_id",
       "conversation_id", "guest_arrival_requested_at", "checked_in_at", "checked_in_by_host_user_id", "checked_out_at", "checked_out_by_host_user_id",
-      "users!user_id(id,name,city,state,gender,about,kyc_status)",
+      "users!user_id(id,name,city,state,gender,about,date_of_birth,kyc_status)",
     ].join(",");
     const selectWithoutRoom = [
       "id", "status", "start_date", "end_date", "guests_count",
@@ -216,7 +216,7 @@ export default async function HostDashboardPage({
       "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
       "legacy_booking_id",
       "conversation_id", "guest_arrival_requested_at", "checked_in_at", "checked_in_by_host_user_id", "checked_out_at", "checked_out_by_host_user_id",
-      "users!user_id(id,name,city,state,gender,about,kyc_status)",
+      "users!user_id(id,name,city,state,gender,about,date_of_birth,kyc_status)",
     ].join(",");
 
     const primaryResult = await supabase

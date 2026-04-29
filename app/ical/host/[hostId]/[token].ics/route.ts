@@ -26,7 +26,7 @@ export async function GET(request: NextRequest, context: RouteContext): Promise<
 
     const supabase = createAdminSupabaseClient();
     const resolved = await resolveCalendarExportByToken(supabase, cleanToken);
-    if (!resolved || resolved.ownerType !== "host" || resolved.ownerId !== cleanHostId) {
+    if (!resolved || resolved.ownerId !== cleanHostId) {
       return NextResponse.json({ error: "Calendar not found." }, { status: 404 });
     }
 

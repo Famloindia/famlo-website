@@ -318,7 +318,12 @@ export default function MessagesTab({
 
   useEffect(() => {
     if (!scrollRef.current) return;
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const timer = setTimeout(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    }, 100);
+    return () => clearTimeout(timer);
   }, [messages]);
 
   useEffect(() => {
@@ -487,15 +492,15 @@ export default function MessagesTab({
         current.map((message) =>
           message.id === messageId
             ? {
-                ...message,
-                deleted_at: new Date().toISOString(),
-                deleted_by: hostUserId,
-                message_type: "deleted",
-                text: "Message deleted",
-                content: "Message deleted",
-                image_url: null,
-                image_name: null,
-              }
+              ...message,
+              deleted_at: new Date().toISOString(),
+              deleted_by: hostUserId,
+              message_type: "deleted",
+              text: "Message deleted",
+              content: "Message deleted",
+              image_url: null,
+              image_name: null,
+            }
             : message
         )
       );
@@ -545,6 +550,25 @@ export default function MessagesTab({
 
   return (
     <div className={styles.chatLayout}>
+      {/* Mobile Stories List - Always on top for phone UI */}
+      <div className={styles.storyList}>
+        {conversations.map((conv) => (
+          <div
+            key={conv.id}
+            className={styles.storyItem}
+            onClick={() => setActiveConvId(conv.id)}
+          >
+            <div className={`${styles.storyAvatarWrapper} ${activeConvId !== conv.id ? styles.inactive : ""}`}>
+              {conv.guest?.avatar_url ? (
+                <img src={conv.guest.avatar_url} className={styles.storyAvatar} alt="" />
+              ) : (
+                <div className={styles.chatAvatarFallback} style={{ width: '100%', height: '100%' }}><User size={24} /></div>
+              )}
+            </div>
+            <span className={styles.storyName}>{conv.guest?.name || "Guest"}</span>
+          </div>
+        ))}
+      </div>
       <div className={`${styles.chatSidebar} ${activeConvId ? styles.sidebarHiddenOnMobile : ""}`}>
         <div style={{ padding: "20px", borderBottom: "1px solid #f1f5f9" }}>
           <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 900, color: "#0e2b57" }}>Messages</h3>
@@ -599,28 +623,29 @@ export default function MessagesTab({
       <div className={`${styles.chatWindow} ${!activeConvId ? styles.windowHiddenOnMobile : ""}`}>
         {activeConversation ? (
           <>
-            <div className={styles.chatHeader}>
-              <button className={styles.backBtn} onClick={() => setActiveConvId(null)}><ChevronLeft size={20} /></button>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#f4f8ff", color: "#165dcc", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {activeConversation.guest?.avatar_url ? (
-                    <img src={activeConversation.guest.avatar_url} alt={activeConversation.guest?.name || "Guest"} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
-                  ) : (
-                    <User size={20} />
-                  )}
-                </div>
-                <div>
-                  <div style={{ fontWeight: 900, color: "#0e2b57", fontSize: "15px" }}>
-                    {activeConversation.guest?.name || "Guest"}
+            <div className={styles.chatHeader} style={{ display: 'none' }}>
+            </div>
+
+            {/* Active Contact Banner - Slim Horizontal Style */}
+            <div className={styles.chatBanner}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%' }}>
+                <button className={styles.bannerBackBtn} onClick={() => setActiveConvId(null)}>
+                  <ChevronLeft size={24} />
+                </button>
+
+                {activeConversation.guest?.avatar_url ? (
+                  <img src={activeConversation.guest.avatar_url} className={styles.bannerAvatar} alt="" />
+                ) : (
+                  <div className={styles.bannerAvatar} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)' }}>
+                    <User size={24} color="white" />
                   </div>
-                  <div style={{ fontSize: "11px", color: "#10b981", fontWeight: 800 }}>
-                    {activeFamily?.property_name || activeFamily?.name || "Famlo stay"}
+                )}
+
+                <div style={{ textAlign: 'left' }}>
+                  <h3 className={styles.bannerName}>{activeConversation.guest?.name || "Guest"}</h3>
+                  <div className={styles.bannerSub}>
+                    {activeConversation.guest?.city || "Traveler"} · {activeFamily?.property_name || "Stay"}
                   </div>
-                  {activeConversation.guest?.city || activeConversation.guest?.state ? (
-                    <div style={{ fontSize: "11px", color: "rgba(14,43,87,0.5)", fontWeight: 700, marginTop: "2px" }}>
-                      {[activeConversation.guest?.city, activeConversation.guest?.state].filter(Boolean).join(", ")}
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </div>

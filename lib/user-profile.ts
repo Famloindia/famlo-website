@@ -64,8 +64,16 @@ function mapLegacyUserRow(userId: string, row: JsonRecord | null): UserProfileRe
 
 export function isGuestProfileComplete(profile: UserProfileRecord | null | undefined): boolean {
   if (!profile) return false;
-  if (profile.onboarding_completed) return true;
-  return Boolean(profile.name && profile.city && profile.state);
+  const hasContact = Boolean(profile.phone || profile.email);
+  return Boolean(
+    profile.name &&
+    profile.city &&
+    profile.state &&
+    profile.gender &&
+    profile.date_of_birth &&
+    profile.about &&
+    hasContact
+  );
 }
 
 export function hasGuestVerificationSubmission(profile: UserProfileRecord | null | undefined): boolean {

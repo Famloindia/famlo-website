@@ -3,18 +3,17 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { GuestVerificationForm } from "@/components/account/GuestVerificationForm";
+import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { AuthModal } from "@/components/auth/AuthModal";
 import type { CompanionRecord } from "@/lib/discovery";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
+import { isGuestProfileComplete } from "@/lib/user-profile";
 
-type BookingStep = "login" | "kyc" | "need" | "date" | "guests" | "confirm";
+type BookingStep = "login" | "profile" | "need" | "date" | "guests" | "confirm";
 
 interface HommieBookingFlowProps {
   companion: CompanionRecord;
 }
-
-const BOOKABLE_KYC_STATUSES = new Set(["auto_verified", "verified", "pending", "pending_review"]);
 
 function getToday(): string {
   return new Date().toISOString().split("T")[0] ?? "";
@@ -42,7 +41,7 @@ export function HommieBookingFlow({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [guestName, setGuestName] = useState<string | null>(null);
   const [guestCity, setGuestCity] = useState<string | null>(null);
-  const [kycStatus, setKycStatus] = useState<string | null>(null);
+  const [profileComplete, setProfileComplete] = useState(false);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [step, setStep] = useState<BookingStep>("login");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -81,19 +80,19 @@ export function HommieBookingFlow({
   const previewPrice = companion.hourlyPrice ?? companion.nightlyPrice ?? 0;
   const estimatedTotalPrice = previewPrice > 0 ? previewPrice * guestCount : 0;
 
-  function resolveNextStep(userId: string | null, nextKycStatus: string | null): BookingStep {
+  function resolveNextStep(userId: string | null, nextProfileComplete: boolean): BookingStep {
     if (!userId) {
       return "login";
     }
 
-    if (!BOOKABLE_KYC_STATUSES.has(nextKycStatus ?? "")) {
-      return "kyc";
+    if (!nextProfileComplete) {
+      return "profile";
     }
 
     return "need";
   }
 
-  const syncAuthState = useCallback(async (): Promise<{ userId: string | null; kycStatus: string | null }> => {
+  const syncAuthState = useCallback(async (): Promise<{ userId: string | null; profileComplete: boolean }> => {
     setLoadingAuth(true);
 
     const {
@@ -104,33 +103,41 @@ export function HommieBookingFlow({
       setCurrentUserId(null);
       setGuestName(null);
       setGuestCity(null);
-      setKycStatus(null);
+      setProfileComplete(false);
       setStep("login");
       setLoadingAuth(false);
-      return { userId: null, kycStatus: null };
+      return { userId: null, profileComplete: false };
     }
 
     const { data: userRow } = await supabase
       .from("users")
-      .select("name, city, kyc_status, id_document_url")
+      .select("name, phone, email, city, state, about, date_of_birth, gender")
       .eq("id", user.id)
       .maybeSingle();
 
-    const nextKycStatus =
-      typeof userRow?.kyc_status === "string" && BOOKABLE_KYC_STATUSES.has(userRow.kyc_status)
-        ? userRow.kyc_status
-        : typeof userRow?.id_document_url === "string" && userRow.id_document_url.trim().length > 0
-          ? "pending"
-          : typeof userRow?.kyc_status === "string"
-            ? userRow.kyc_status
-            : null;
+    const nextProfileComplete = isGuestProfileComplete({
+      id: user.id,
+      name: typeof userRow?.name === "string" ? userRow.name : null,
+      phone: typeof userRow?.phone === "string" ? userRow.phone : user.phone ?? null,
+      email: typeof userRow?.email === "string" ? userRow.email : user.email ?? null,
+      city: typeof userRow?.city === "string" ? userRow.city : null,
+      state: typeof userRow?.state === "string" ? userRow.state : null,
+      onboarding_completed: false,
+      avatar_url: null,
+      about: typeof userRow?.about === "string" ? userRow.about : null,
+      date_of_birth: typeof userRow?.date_of_birth === "string" ? userRow.date_of_birth : null,
+      gender: typeof userRow?.gender === "string" ? userRow.gender : null,
+      kyc_status: null,
+      id_document_url: null,
+      id_document_type: null,
+    });
     setCurrentUserId(user.id);
     setGuestName(typeof userRow?.name === "string" ? userRow.name : null);
     setGuestCity(typeof userRow?.city === "string" ? userRow.city : null);
-    setKycStatus(nextKycStatus);
-    setStep(resolveNextStep(user.id, nextKycStatus));
+    setProfileComplete(nextProfileComplete);
+    setStep(resolveNextStep(user.id, nextProfileComplete));
     setLoadingAuth(false);
-    return { userId: user.id, kycStatus: nextKycStatus };
+    return { userId: user.id, profileComplete: nextProfileComplete };
   }, [supabase]);
 
   useEffect(() => {
@@ -154,7 +161,7 @@ export function HommieBookingFlow({
   }, [options, selectedNeed]);
 
   useEffect(() => {
-    if (step !== "login" && step !== "kyc") {
+    if (step !== "login" && step !== "profile") {
       resumeStepRef.current = step;
     }
   }, [step]);
@@ -281,8 +288,8 @@ export function HommieBookingFlow({
       return;
     }
 
-    if (BOOKABLE_KYC_STATUSES.has(kycStatus ?? "") === false) {
-      setBookingError("Submit your KYC once, then you can continue to booking and payment.");
+    if (!profileComplete) {
+      setBookingError("Complete your guest profile once, then you can continue to booking and payment.");
       return;
     }
 
@@ -349,7 +356,7 @@ export function HommieBookingFlow({
           <h1>Connect with {companion.title}</h1>
           <p className="detail-subtitle">{publicLocation || "Location shared in connected flow"}</p>
           <p className="detail-description">
-            This flow now follows the shared Famlo app-connected structure: login, KYC check, help type,
+            This flow now follows the shared Famlo app-connected structure: login, profile check, help type,
             date, guests, and shared writes into `bookings_v2`, `conversations`, and `messages`.
           </p>
 
@@ -369,14 +376,14 @@ export function HommieBookingFlow({
           {loadingAuth ? (
             <div className="panel detail-box">
               <h2>Loading booking state</h2>
-              <p>Checking your Famlo account and KYC status.</p>
+              <p>Checking your Famlo account and profile status.</p>
             </div>
           ) : null}
 
           {!loadingAuth && step === "login" ? (
             <div className="panel detail-box">
               <h2>Sign in to continue</h2>
-              <p>Use the Famlo sign-in flow here. The same session then unlocks KYC, booking creation, and payment without switching flows.</p>
+              <p>Use the Famlo sign-in flow here. The same session then unlocks profile completion, booking creation, and payment without switching flows.</p>
               {authError ? <div className="auth-error">{authError}</div> : null}
               <button
                 className="button-like"
@@ -391,26 +398,22 @@ export function HommieBookingFlow({
             </div>
           ) : null}
 
-          {!loadingAuth && step === "kyc" ? (
+          {!loadingAuth && step === "profile" ? (
             <div className="panel detail-box">
-              <h2>KYC required before continuing</h2>
+              <h2>Profile required before continuing</h2>
               <p>
-                Submit your KYC once here, then Famlo can let you continue while review stays in progress.
-                Your current status is <strong>{kycStatus ?? "not_started"}</strong>.
-              </p>
-              <p>
-                As soon as this becomes `pending`, `auto_verified`, or `verified`, this same flow can continue
-                into the shared booking and chat tables.
+                Save your name, contact details, location, gender, date of birth, and about section here.
+                Once saved, this same flow can continue into booking and chat.
               </p>
               <div style={{ marginTop: 20 }}>
-                <GuestVerificationForm
+                <ProfileCompletionForm
                   compact
-                  title="Submit guest verification"
-                  description="Upload your booking profile and Aadhaar-with-face image. Team approval will unlock this hommie booking flow too."
-                  buttonLabel="Submit KYC and continue"
+                  title="Complete guest profile"
+                  description="Save your guest details here so the host can review who is booking."
+                  buttonLabel="Save profile and continue"
                   onSuccess={async () => {
                     const nextState = await syncAuthState();
-                    if (nextState.userId && BOOKABLE_KYC_STATUSES.has(nextState.kycStatus ?? "")) {
+                    if (nextState.userId && nextState.profileComplete) {
                       setBookingError(null);
                       setStep(resumeStepRef.current);
                     }
@@ -420,7 +423,7 @@ export function HommieBookingFlow({
             </div>
           ) : null}
 
-          {!loadingAuth && BOOKABLE_KYC_STATUSES.has(kycStatus ?? "") ? (
+          {!loadingAuth && profileComplete ? (
             <div className="panel detail-box">
               <h2>Booking steps</h2>
               <div className="auth-pills">
@@ -582,7 +585,6 @@ export function HommieBookingFlow({
       {showAuthModal ? (
         <AuthModal
           isOpen={showAuthModal}
-          skipProfileStep
           onClose={() => {
             setShowAuthModal(false);
             void syncAuthState();

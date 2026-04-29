@@ -251,42 +251,44 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
   return (
     <div className={`${styles.flexCol} ${styles.animateIn}`} style={{ gap: '32px' }}>
       
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '2px solid #f1f5f9', paddingBottom: '16px' }}>
-        <div>
-          <h2 style={{ fontSize: '24px', fontWeight: 900, margin: '0 0 4px', color: '#0e2b57' }}>Calendar Control</h2>
-          <p style={{ fontSize: '13px', margin: 0, color: 'rgba(14,43,87,0.6)', fontWeight: 600 }}>Block specific days or quarters instantly.</p>
+      <div className={styles.flexCol} style={{ gap: '12px', borderBottom: '2px solid #f1f5f9', paddingBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h2 style={{ fontSize: '24px', fontWeight: 900, margin: '0 0 4px', color: '#0e2b57' }}>Calendar Control</h2>
+            <p style={{ fontSize: '13px', margin: 0, color: 'rgba(14,43,87,0.6)', fontWeight: 600 }}>Block specific days or quarters instantly.</p>
+          </div>
+          <div style={{ background: '#fef2f2', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 900, color: '#ef4444', height: 'fit-content' }}>
+            {blockedCount} BLOCKS ACTIVE
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {roomOptions.length > 0 ? (
-            <select
-              value={selectedStayUnitId}
-              onChange={(event) => setSelectedStayUnitId(event.target.value)}
-              style={{
-                border: '1px solid #dbe4f0',
-                borderRadius: '12px',
-                padding: '12px 20px',
-                fontSize: '16px',
-                fontWeight: 800,
-                color: '#0e2b57',
-                background: 'white',
-                minWidth: '200px'
-              }}
-            >
-              <option value="all">All rooms</option>
-              {roomOptions.map((room: { id: string; label: string }) => (
-                <option key={room.id} value={room.id}>
-                  {room.label}
-                </option>
-              ))}
-            </select>
-          ) : null}
-           <div style={{ background: '#fef2f2', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 900, color: '#ef4444' }}>
-             {blockedCount} BLOCKS ACTIVE
-           </div>
-        </div>
+        
+        {roomOptions.length > 0 && (
+          <select
+            value={selectedStayUnitId}
+            onChange={(event) => setSelectedStayUnitId(event.target.value)}
+            style={{
+              border: '1px solid #dbe4f0',
+              borderRadius: '12px',
+              padding: '12px 20px',
+              fontSize: '14px',
+              fontWeight: 800,
+              color: '#0e2b57',
+              background: 'white',
+              width: '100%',
+              maxWidth: '300px'
+            }}
+          >
+            <option value="all">All rooms</option>
+            {roomOptions.map((room: { id: string; label: string }) => (
+              <option key={room.id} value={room.id}>
+                {room.label}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '32px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* Main Calendar Card */}
           <div className={styles.glassCard} style={{ padding: 0, overflow: 'hidden', border: '1px solid rgba(14,43,87,0.08)' }}>
@@ -326,10 +328,9 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
                       if (isPastDay) return;
                       setInsightDay(day);
                     }} 
-                      className={styles.calendarDayBtn}
                       style={{ 
-                        height: '100px', background: isPastDay ? '#f8fafc' : blocked ? '#fef2f2' : 'white', 
-                        border: 'none', padding: '12px', cursor: isPastDay ? 'not-allowed' : 'pointer', position: 'relative',
+                        height: 'auto', minHeight: '80px', background: isPastDay ? '#f8fafc' : blocked ? '#fef2f2' : 'white', 
+                        border: 'none', padding: '8px', cursor: isPastDay ? 'not-allowed' : 'pointer', position: 'relative',
                         display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
                         borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9',
                         transition: 'background 0.2s',
@@ -364,9 +365,6 @@ export default function CalendarTab({ schedule, setSchedule, bookingRows, onSave
           </button>
         </div>
 
-        {/* Sidebar Controls */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-        </div>
       </div>
 
       {hostId ? (

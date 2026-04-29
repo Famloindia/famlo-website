@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import { useUser } from "./UserContext";
-import { ProfileForm } from "./ProfileForm";
+import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { isGuestProfileComplete } from "@/lib/user-profile";
 import { buildOAuthCallbackUrl } from "@/lib/site-url";
 
@@ -25,10 +25,15 @@ export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModa
   const [sessionId, setSessionId] = useState("");
 
   useEffect(() => {
-    if (isOpen && user && (skipProfileStep || isGuestProfileComplete(profile))) {
-      onClose();
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
     }
-  }, [isOpen, onClose, profile, skipProfileStep, user]);
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -202,7 +207,13 @@ export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModa
         )}
 
         {currentStep === "profile" && (
-          <ProfileForm onSuccess={onClose} />
+          <ProfileCompletionForm
+            compact
+            title="Complete your profile"
+            description="Save your guest profile before you continue to booking."
+            buttonLabel="Save and continue"
+            onSuccess={onClose}
+          />
         )}
       </div>
 
@@ -213,105 +224,157 @@ export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModa
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0, 0, 0, 0.4);
-          backdrop-filter: blur(5px);
-          z-index: 2000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 1rem;
+          background: rgba(15, 23, 42, 0.6);
+          backdrop-filter: blur(8px);
+          z-index: 9999;
+          overflow: hidden;
+          overscroll-behavior: contain;
+          display: block;
         }
 
         .modal-content {
           background: #fff;
-          width: 100%;
-          max-width: 450px;
+          width: calc(100% - 32px);
+          max-width: 500px;
+          max-height: calc(100vh - 40px);
           border-radius: 24px;
-          padding: 2.5rem;
-          position: relative;
-          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+          padding: 1.75rem;
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+          overflow-y: auto;
+          scrollbar-width: thin;
+          scrollbar-color: #e2e8f0 transparent;
+          animation: modal-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        @keyframes modal-pop {
+          from { opacity: 0; transform: translate(-50%, -48%) scale(0.98); }
+          to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        .modal-content::-webkit-scrollbar {
+          width: 4px;
+        }
+
+        .modal-content::-webkit-scrollbar-thumb {
+          background-color: #e2e8f0;
+          border-radius: 10px;
         }
 
         .close-btn {
           position: absolute;
-          top: 1.5rem;
-          right: 1.5rem;
-          background: none;
+          top: 1.25rem;
+          right: 1.25rem;
+          z-index: 10;
+          background: #f1f5f9;
           border: none;
-          font-size: 2rem;
-          line-height: 1;
+          font-size: 1.25rem;
+          width: 28px;
+          height: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
           cursor: pointer;
-          color: #999;
-          transition: color 0.2s;
+          color: #64748b;
+          transition: all 0.2s;
         }
 
         .close-btn:hover {
-          color: #333;
+          color: #0f172a;
+          background: #e2e8f0;
+          transform: rotate(90deg);
         }
 
         .auth-form h2 {
-          font-size: 1.75rem;
-          font-weight: 700;
+          font-size: 1.5rem;
+          font-weight: 800;
           margin-bottom: 0.5rem;
-          letter-spacing: -0.5px;
+          letter-spacing: -0.02em;
+          color: #0f172a;
+          padding-right: 32px;
         }
 
         .auth-subtitle {
-          color: #666;
-          margin-bottom: 2rem;
+          color: #64748b;
+          margin-bottom: 1.5rem;
+          font-size: 0.9rem;
+          font-weight: 500;
+          max-width: 80%;
         }
 
         .auth-note {
-          color: #64748b;
-          margin: -1rem 0 1rem;
-          font-size: 0.92rem;
+          color: #1e40af;
+          background: #eff6ff;
+          padding: 8px 12px;
+          border-radius: 10px;
+          margin: -0.5rem 0 1.25rem;
+          font-size: 0.82rem;
           line-height: 1.4;
+          font-weight: 600;
         }
 
         .type-toggle {
           display: flex;
-          background: #f0f0f0;
+          background: #f1f5f9;
           border-radius: 12px;
-          padding: 0.25rem;
-          margin-bottom: 1.5rem;
+          padding: 4px;
+          margin-bottom: 1.25rem;
         }
 
         .type-toggle button {
           flex: 1;
           border: none;
           background: none;
-          padding: 0.6rem;
+          padding: 8px;
           border-radius: 8px;
-          font-weight: 600;
+          font-weight: 700;
           font-size: 0.9rem;
           cursor: pointer;
           transition: all 0.2s;
+          color: #64748b;
         }
 
         .type-toggle button.active {
           background: #fff;
-          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+          color: #0f172a;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
 
         .google-btn {
           width: 100%;
-          border: 1px solid #dbe5ff;
-          background: #f8fbff;
+          border: 1px solid #e2e8f0;
+          background: #fff;
           color: #0f172a;
           border-radius: 12px;
-          padding: 0.95rem 1rem;
-          font-size: 0.98rem;
+          padding: 12px;
+          font-size: 0.95rem;
           font-weight: 700;
           cursor: pointer;
           margin-bottom: 1rem;
+          transition: all 0.2s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+        }
+
+        .google-btn:hover {
+          background: #f8fafc;
         }
 
         .auth-divider {
           display: flex;
           align-items: center;
-          gap: 12px;
-          color: #94a3b8;
-          font-size: 0.85rem;
+          gap: 10px;
+          color: #cbd5e1;
+          font-size: 0.8rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
           margin-bottom: 1rem;
         }
 
@@ -320,67 +383,76 @@ export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModa
           content: "";
           flex: 1;
           height: 1px;
-          background: #e2e8f0;
+          background: #f1f5f9;
         }
 
         .auth-input {
           width: 100%;
-          padding: 1rem 1.25rem;
+          padding: 12px 16px;
           border-radius: 12px;
-          border: 1px solid #ddd;
+          border: 2px solid #f1f5f9;
           font-size: 1rem;
-          margin-bottom: 1.5rem;
+          margin-bottom: 1.25rem;
           outline: none;
-          transition: border-color 0.2s;
+          transition: all 0.2s;
+          background: #f8fafc;
+          box-sizing: border-box;
         }
 
         .auth-input:focus {
-          border-color: #000;
+          border-color: #3b82f6;
+          background: #fff;
+          box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.06);
         }
 
         .otp-input {
           text-align: center;
-          letter-spacing: 0.5rem;
-          font-weight: 700;
-          font-size: 1.5rem;
+          letter-spacing: 0.4rem;
+          font-weight: 800;
+          font-size: 1.75rem;
         }
 
         .submit-btn {
           width: 100%;
-          padding: 1.1rem;
+          padding: 14px;
           border-radius: 12px;
-          background: #000;
+          background: #0f172a;
           color: #fff;
           border: none;
-          font-weight: 600;
+          font-weight: 700;
           font-size: 1rem;
           cursor: pointer;
-          transition: transform 0.2s, background 0.2s;
+          transition: all 0.2s;
         }
 
         .submit-btn:hover {
-          background: #333;
-          transform: translateY(-2px);
+          background: #1e293b;
+          transform: translateY(-1px);
         }
 
         .submit-btn:disabled {
-          background: #999;
-          transform: none;
+          background: #cbd5e1;
+          cursor: not-allowed;
         }
 
         .error-msg {
-          color: #e53e3e;
-          margin-bottom: 1.5rem;
-          font-size: 0.9rem;
+          color: #b91c1c;
+          margin-bottom: 1rem;
+          font-size: 0.85rem;
+          font-weight: 600;
+          background: #fef2f2;
+          padding: 10px;
+          border-radius: 8px;
         }
 
         .back-btn {
           width: 100%;
           background: none;
           border: none;
-          color: #666;
+          color: #64748b;
           margin-top: 1rem;
-          font-size: 0.9rem;
+          font-size: 0.85rem;
+          font-weight: 600;
           text-decoration: underline;
           cursor: pointer;
         }

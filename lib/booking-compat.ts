@@ -6,7 +6,7 @@ import { resolveFinanceRules } from "@/lib/finance/rules";
 import { calculateIndiaHostStayGst } from "@/lib/finance/stay-tax";
 import { getTodayInIndia } from "@/lib/booking-time";
 import { computeHoldExpiry, enforceInventoryRules } from "@/lib/booking-platform";
-import { loadCanonicalCalendar } from "@/lib/calendar";
+import { getCalendarEventStayUnitId, loadCanonicalCalendar } from "@/lib/calendar";
 import { ensureHostProfileForFamily } from "@/lib/family-approval";
 import { toPctFromBps } from "@/lib/finance/money";
 import { buildHostStayOccupancy } from "@/lib/host-stay-availability";
@@ -450,6 +450,12 @@ export async function assertHostStayAvailability(
     for (const event of canonicalEvents) {
       if (excludedBookingId && event.bookingId === excludedBookingId) continue;
       if (!event.isBlocking || event.status === "released" || event.status === "cancelled") continue;
+      if (requestedStayUnitId) {
+        const eventStayUnitId = getCalendarEventStayUnitId(event);
+        if (eventStayUnitId && eventStayUnitId !== requestedStayUnitId) {
+          continue;
+        }
+      }
       for (const date of enumerateDates(input.startDate, endDate)) {
         const overlapsDate = date >= event.startDate && date <= event.endDate;
         const overlapsSlot = !event.slotKey || !quarterType || event.slotKey === quarterType;

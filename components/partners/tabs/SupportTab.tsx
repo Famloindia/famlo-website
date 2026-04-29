@@ -91,7 +91,7 @@ export default function SupportTab({ hostCode, hostName }: SupportTabProps) {
       <div className={styles.glassCard} style={{ background: 'linear-gradient(135deg, #0e2b57 0%, #165dcc 100%)', color: 'white', border: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h2 style={{ fontSize: '24px', fontWeight: 900, marginBottom: '8px' }}>Support & Resolution</h2>
+            <h2 style={{ fontSize: '24px', fontWeight: 900, marginBottom: '8px', color: 'white' }}>Support & Resolution</h2>
             <p style={{ fontSize: '14px', opacity: 0.8, fontWeight: 500 }}>
               Need help with a booking or payout? Message the Team Famlo directly.
             </p>

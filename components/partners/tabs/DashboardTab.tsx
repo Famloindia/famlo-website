@@ -9,6 +9,7 @@ import {
 import type { StayUnitRecord } from "@/lib/stay-units";
 import { normalizeAmenityList, ROOM_AMENITY_OPTIONS } from "@/lib/room-amenities";
 import { buildHomestayPath } from "@/lib/slug";
+import ChannelManagerTab from "./ChannelManagerTab";
 
 interface DashboardTabProps {
   profile: any;
@@ -788,6 +789,7 @@ export default function DashboardTab({
             const customAmenityValue = customAmenityDrafts[room.id] ?? "";
             const hasRoomLocation = room.lat.trim().length > 0 && room.lng.trim().length > 0;
             const smartPriceMidpoint = getSmartPricingMidpoint(room.priceMorning, room.priceEvening);
+            const canManageRoomCalendar = !room.id.startsWith("temp-");
 
             return (
               <article key={room.id} style={{ border: '1px solid #e2e8f0', borderRadius: '24px', background: '#fff', overflow: 'hidden', boxShadow: '0 4px 24px rgba(15,23,42,0.07)', minWidth: 0 }}>
@@ -931,6 +933,24 @@ export default function DashboardTab({
                         Clear location
                       </button>
                     </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
+                    <div style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#1d4ed8' }}>Room calendar & OTA sync</div>
+                    {canManageRoomCalendar ? (
+                      <div style={{ border: '1px solid #e2e8f0', borderRadius: '18px', padding: '18px', background: '#f8fafc', minWidth: 0 }}>
+                        <ChannelManagerTab
+                          ownerType="stay_unit"
+                          ownerId={room.id}
+                          title={`${room.name || `Room ${index + 1}`} Calendar`}
+                          description="Connect Airbnb, Booking.com, Google Calendar, or any ICS feed for this room only. Imports and exports stay attached to this room calendar."
+                        />
+                      </div>
+                    ) : (
+                      <div style={{ padding: '14px 16px', borderRadius: '14px', background: '#fff7ed', color: '#9a3412', fontSize: '13px', fontWeight: 700 }}>
+                        Save this room once to unlock its separate iCal and OTA sync links.
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: 'grid', gap: '10px', minWidth: 0 }}>

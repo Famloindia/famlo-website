@@ -16,6 +16,7 @@ export default function AuthCallbackPage(): React.JSX.Element {
       const currentUrl = new URL(window.location.href);
       const hashParams = new URLSearchParams(currentUrl.hash.replace(/^#/, ""));
       const nextPath = getSafeReturnPath(currentUrl.searchParams.get("next"));
+      const profileUrl = new URL("/profile", window.location.origin);
       const code = currentUrl.searchParams.get("code");
       const oauthError =
         currentUrl.searchParams.get("error_description") ??
@@ -42,8 +43,10 @@ export default function AuthCallbackPage(): React.JSX.Element {
           return;
         }
 
-        setMessage("Redirecting to Famlo...");
-        window.location.replace(nextPath);
+        setMessage("Opening your profile...");
+        profileUrl.searchParams.set("next", nextPath);
+        profileUrl.searchParams.set("auth_return", "google");
+        window.location.replace(`${profileUrl.pathname}${profileUrl.search}${profileUrl.hash}`);
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Login failed";
         window.location.replace(`${nextPath}${nextPath.includes("?") ? "&" : "?"}auth_error=${encodeURIComponent(detail)}`);

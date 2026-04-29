@@ -1,8 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
 import { useUser } from "@/components/auth/UserContext";
-import { GuestVerificationForm } from "@/components/account/GuestVerificationForm";
+import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { SavedHomesSection } from "@/components/account/SavedHomesSection";
+import { getSafeReturnPath } from "@/lib/site-url";
+import { isGuestProfileComplete } from "@/lib/user-profile";
 
 function ProfileSummaryCard(): React.JSX.Element | null {
   const { user, profile } = useUser();
@@ -89,11 +94,68 @@ function ProfileSummaryCard(): React.JSX.Element | null {
 }
 
 export default function ProfilePage(): React.JSX.Element {
+  const { profile, loading } = useUser();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = getSafeReturnPath(searchParams.get("next"));
+  const authReturn = searchParams.get("auth_return");
+  const isGoogleOnboarding = authReturn === "google";
+  const profileComplete = isGuestProfileComplete(profile);
+
+  useEffect(() => {
+    if (!isGoogleOnboarding || loading) {
+      return;
+    }
+
+    if (!profileComplete) {
+      return;
+    }
+
+    router.replace(nextPath);
+  }, [isGoogleOnboarding, loading, nextPath, profileComplete, router]);
+
+  if (isGoogleOnboarding && loading) {
+    return (
+      <main
+        className="shell account-page-shell"
+        style={{ minHeight: "100vh", display: "grid", placeItems: "center", paddingTop: "40px", paddingBottom: "60px" }}
+      >
+        <section
+          className="panel account-page-panel"
+          style={{
+            width: "100%",
+            maxWidth: "720px",
+            padding: "32px",
+            display: "grid",
+            gap: "12px",
+            textAlign: "center",
+          }}
+        >
+          <h1 style={{ margin: 0 }}>Opening your profile</h1>
+          <p style={{ margin: 0, color: "#5A6A85", fontSize: "16px" }}>
+            Just a moment while we load your account details.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="shell account-page-shell" style={{ paddingTop: "40px", paddingBottom: "60px" }}>
+    <main
+      className="shell account-page-shell"
+      style={{
+        minHeight: isGoogleOnboarding ? "100vh" : undefined,
+        paddingTop: "40px",
+        paddingBottom: "60px",
+        display: isGoogleOnboarding ? "grid" : undefined,
+        placeItems: isGoogleOnboarding ? "center" : undefined,
+      }}
+    >
       <section
         className="panel account-page-panel"
         style={{
+          width: "100%",
+          maxWidth: isGoogleOnboarding ? "760px" : undefined,
           padding: "clamp(24px, 4vw, 48px)",
           display: "grid",
           gap: "24px",
@@ -113,19 +175,28 @@ export default function ProfilePage(): React.JSX.Element {
           </span>
           <h1 style={{ margin: 0 }}>Your Profile</h1>
           <p style={{ margin: 0, color: "#5A6A85", fontSize: "16px", maxWidth: "72ch" }}>
-            Save your profile once here. If you add ID verification, Famlo can approve you for bookings across homes and hommies.
+            Save your guest profile once here. Hosts will see these details when you book a stay.
           </p>
         </div>
 
-        <ProfileSummaryCard />
+        {isGoogleOnboarding ? null : <ProfileSummaryCard />}
 
-        <GuestVerificationForm
-          title="Profile and verification"
-          description="Save your basic profile first. Add Aadhaar-with-face verification if you want Famlo to review your booking identity."
-          buttonLabel="Save profile"
+        <ProfileCompletionForm
+          title={isGoogleOnboarding ? "Complete your profile" : "Guest profile"}
+          description={
+            isGoogleOnboarding
+              ? "Add your name, contact details, location, gender, date of birth, and about section before continuing."
+              : "Fill in your name, contact details, location, gender, date of birth, and about section to unlock booking."
+          }
+          buttonLabel={isGoogleOnboarding ? "Save and continue" : "Save profile"}
+          onSuccess={async () => {
+            if (isGoogleOnboarding) {
+              router.replace(nextPath);
+            }
+          }}
         />
 
-        <SavedHomesSection />
+        {isGoogleOnboarding ? null : <SavedHomesSection />}
       </section>
     </main>
   );

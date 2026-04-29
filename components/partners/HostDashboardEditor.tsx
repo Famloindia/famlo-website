@@ -609,7 +609,7 @@ export function HostDashboardEditor({
         <header className={styles.topHeader}>
           <div className={styles.brandSideLeft}>
             <h1 className={styles.pageTitle}>
-              {activeTab === "support" ? "Contact Support" : activeTab === "rooms" ? "Rooms" : activeTab}
+              {activeTab === "support" ? "Support & Resolution" : activeTab === "rooms" ? "Rooms" : activeTab}
             </h1>
           </div>
       <div className={styles.brandSideRight}>

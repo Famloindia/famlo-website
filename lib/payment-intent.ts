@@ -157,39 +157,42 @@ export async function createPaymentIntentForBooking(
     nextStep = "Open Razorpay Checkout with this order payload, then call /api/payments/verify on success.";
   }
 
-  await ensureBookingFinancialSnapshot(supabase, {
-    bookingId,
-    paymentId: payment.id,
-    currency: "INR",
-    bookingType: typeof booking.booking_type === "string" ? booking.booking_type : null,
-    pricingSnapshot,
-    totalPrice: amountTotal,
-    partnerPayoutAmount:
-      typeof booking.partner_payout_amount === "number"
-        ? booking.partner_payout_amount
-        : Number(booking.partner_payout_amount ?? 0),
-  });
-
-  await upsertPaymentIntentAudit(supabase, {
-    bookingId,
-    paymentId: payment.id,
-    provider: gateway,
-    amountTotal,
-    currency: "INR",
-    providerOrderId:
-      typeof orderPayload?.orderId === "string" ? orderPayload.orderId : payment.gateway_order_id ?? null,
-    idempotencyKey: `payment_intent:${bookingId}:${gateway}`,
-    status: "created",
-    metadata: {
-      integrationStatus,
-      nextStep,
-    },
-  });
-
-  await supabase
-    .from("bookings_v2")
-    .update({ payment_id: payment.id, payment_status: "pending" } as never)
-    .eq("id", bookingId);
+  await Promise.all([
+    ensureBookingFinancialSnapshot(supabase, {
+      bookingId,
+      paymentId: payment.id,
+      currency: "INR",
+      bookingType: typeof booking.booking_type === "string" ? booking.booking_type : null,
+      pricingSnapshot,
+      totalPrice: amountTotal,
+      partnerPayoutAmount:
+        typeof booking.partner_payout_amount === "number"
+          ? booking.partner_payout_amount
+          : Number(booking.partner_payout_amount ?? 0),
+    }),
+    upsertPaymentIntentAudit(supabase, {
+      bookingId,
+      paymentId: payment.id,
+      provider: gateway,
+      amountTotal,
+      currency: "INR",
+      providerOrderId:
+        typeof orderPayload?.orderId === "string" ? orderPayload.orderId : payment.gateway_order_id ?? null,
+      idempotencyKey: `payment_intent:${bookingId}:${gateway}`,
+      status: "created",
+      metadata: {
+        integrationStatus,
+        nextStep,
+      },
+    }),
+    supabase
+      .from("bookings_v2")
+      .update({ payment_id: payment.id, payment_status: "pending" } as never)
+      .eq("id", bookingId)
+      .then(({ error }) => {
+        if (error) throw error;
+      }),
+  ]);
 
   return {
     payment,

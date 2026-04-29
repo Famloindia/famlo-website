@@ -2,11 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Script from "next/script";
 import { CalendarDays, ChevronRight, IndianRupee, MapPin, ShieldCheck, Users } from "lucide-react";
 
 import { AuthModal } from "@/components/auth/AuthModal";
+import { isGuestProfileComplete } from "@/lib/user-profile";
 import { useUser } from "@/components/auth/UserContext";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
@@ -172,6 +173,23 @@ function ensureRazorpayCheckout(): Promise<void> {
   });
 }
 
+function warmRazorpayCheckout(): void {
+  if (typeof window === "undefined") return;
+
+  const scheduleWarmup = () => {
+    void ensureRazorpayCheckout().catch(() => {
+      // Ignore warmup failures and retry on the real checkout tap.
+    });
+  };
+
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(scheduleWarmup, { timeout: 1500 });
+    return;
+  }
+
+  window.setTimeout(scheduleWarmup, 250);
+}
+
 export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBookingPanelProps>): React.JSX.Element {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const { user, profile, loading, refreshProfile } = useUser();
@@ -188,6 +206,39 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
   const [scriptReady, setScriptReady] = useState(false);
   const [bookHovered, setBookHovered] = useState(false);
   const [optimisticBlockedDates, setOptimisticBlockedDates] = useState<string[]>([]);
+
+  useEffect(() => {
+    warmRazorpayCheckout();
+  }, []);
+
+  const releasePendingBooking = async (bookingId: string): Promise<void> => {
+    const normalizedBookingId = bookingId.trim();
+    if (!normalizedBookingId) return;
+
+    const {
+      data: { session: authSession },
+    } = await supabase.auth.getSession();
+    const authHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (authSession?.access_token) authHeaders.Authorization = `Bearer ${authSession.access_token}`;
+    if (user?.id) authHeaders["x-famlo-user-id"] = user.id;
+    if (user?.email) authHeaders["x-famlo-user-email"] = user.email;
+
+    const response = await fetch("/api/bookings/cancel", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        bookingId: normalizedBookingId,
+        action: "cancel",
+      }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(payload?.error ?? "Could not release the unpaid booking hold.");
+    }
+  };
 
   const price = resolveRoomPrice(room);
   const blockedDateTokens = useMemo(
@@ -233,7 +284,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
   const isSelectedDateBookable = compareDateStrings(selectedStartDate, getTodayInIndia()) >= 0;
   const hasBlockedSelection = selectedBookingDates.some((date) => blockedDateSet.has(date) || blockedDateSet.has(`${date}::fullday`));
   const hasUser = Boolean(user);
-  const verified = Boolean(profile?.kyc_status && ["pending", "verified", "auto_verified", "pending_review"].includes(profile.kyc_status));
+  const profileComplete = isGuestProfileComplete(profile);
   const profileName = asString(profile?.name) || user?.email || "Guest";
   const profileCity = asString(profile?.city) || asString(profile?.last_location_label) || home.city || "";
   const rangeLabel = formatRangeLabel(selectedStartDate, selectedEndDate);
@@ -397,8 +448,8 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
       return;
     }
 
-    if (!verified) {
-      setBookingError("Complete guest verification in your profile first so admin can approve the booking.");
+    if (!profileComplete) {
+      setBookingError("Complete your guest profile first so the host can review your booking.");
       return;
     }
 
@@ -475,15 +526,10 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
       }
 
       if (payload.bookingId) {
-        setOptimisticBlockedDates((current) => Array.from(new Set([...current, ...selectedBookingDates])));
         const paymentIntentPayload = payload.paymentIntent;
         if (!paymentIntentPayload) {
-          setReceipt({
-            bookingId: payload.bookingId,
-            paymentId: payload.paymentId ?? null,
-            totalLabel: `₹${getRupeeLabel(Number(payload.totalPrice ?? price))}`,
-          });
-          setSuccessMessage("Your booking is created, but payment setup needs one more retry from the same page.");
+          setReceipt(null);
+          setSuccessMessage("Payment setup needs one more retry, so this room has not been booked yet.");
         } else if (paymentIntentPayload.integrationStatus === "razorpay_ready" && paymentIntentPayload.order) {
           await ensureRazorpayCheckout();
           if (!window.Razorpay) {
@@ -533,6 +579,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
                   throw new Error(verifyPayload.error ?? "Payment verification failed.");
                 }
 
+                setOptimisticBlockedDates((current) => Array.from(new Set([...current, ...selectedBookingDates])));
                 setReceipt({
                   bookingId: order.bookingId,
                   paymentId: order.paymentRowId,
@@ -550,7 +597,11 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             },
             modal: {
               ondismiss: () => {
-                setSuccessMessage("Your booking is created. Payment remains pending until you complete the checkout.");
+                void releasePendingBooking(order.bookingId).catch((cancelError) => {
+                  console.error("[room-booking-panel] release_pending_booking_failed", cancelError);
+                });
+                setReceipt(null);
+                setSuccessMessage("Payment was not completed, so this room was not booked.");
               },
             },
             theme: {
@@ -559,27 +610,23 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           });
 
           checkout.on("payment.failed", (failureResponse) => {
+            void releasePendingBooking(order.bookingId).catch((cancelError) => {
+              console.error("[room-booking-panel] release_pending_booking_failed", cancelError);
+            });
+            setReceipt(null);
             setBookingError(
               failureResponse.error?.description ??
                 failureResponse.error?.reason ??
-                "Payment failed. The booking remains created but unpaid."
+                "Payment failed, so the booking was not saved."
             );
           });
 
           checkout.open();
-          setReceipt({
-            bookingId: payload.bookingId,
-            paymentId: paymentIntentPayload.order.paymentRowId,
-            totalLabel: `₹${getRupeeLabel(Number(payload.totalPrice ?? price))}`,
-          });
-          setSuccessMessage("Booking created. Complete payment in the Razorpay window that opened on this page.");
+          setReceipt(null);
+          setSuccessMessage("Complete payment in the Razorpay window to confirm this booking.");
         } else {
-          setReceipt({
-            bookingId: payload.bookingId,
-            paymentId: payload.paymentId ?? null,
-            totalLabel: `₹${getRupeeLabel(Number(payload.totalPrice ?? price))}`,
-          });
-          setSuccessMessage("Booking created. Payment setup is pending on the server.");
+          setReceipt(null);
+          setSuccessMessage("Payment setup is pending on the server, so this room is not booked yet.");
         }
       }
     } catch (error) {
@@ -831,7 +878,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         </button>
       )}
 
-        <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} skipProfileStep />
+        <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
       </section>
 
       <style jsx>{`

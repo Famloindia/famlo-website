@@ -22,6 +22,30 @@ type VerifyBody = {
   razorpay_signature?: string;
 };
 
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function resolveStayUnitId(record: Record<string, unknown> | null | undefined): string | null {
+  const direct = asString(record?.stay_unit_id);
+  if (direct) {
+    return direct;
+  }
+
+  const snapshot =
+    record && typeof record === "object"
+      ? ((record.pricing_snapshot as Record<string, unknown> | null) ?? null)
+      : null;
+
+  return asString(snapshot?.stay_unit_id);
+}
+
+function formatBookingDateRange(startDate: string | null, endDate: string | null): string {
+  if (!startDate) return "the selected dates";
+  if (!endDate || endDate === startDate) return startDate;
+  return `${startDate} to ${endDate}`;
+}
+
 function isSchemaCompatibilityError(message: string): boolean {
   const lower = message.toLowerCase();
   return (
@@ -108,6 +132,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const booking = await loadBookingForPaymentFinalization(supabase, payment.booking_id);
+    const stayUnitId = resolveStayUnitId(booking as Record<string, unknown> | null | undefined);
+    const stayUnitName =
+      stayUnitId
+        ? await (async () => {
+            const stayUnitLookup = await supabase
+              .from("stay_units_v2")
+              .select("name")
+              .eq("id", stayUnitId)
+              .maybeSingle();
+            if (stayUnitLookup.error) {
+              console.error("[payments.verify] stay unit lookup failed:", stayUnitLookup.error);
+              return null;
+            }
+            return asString(stayUnitLookup.data?.name);
+          })()
+        : null;
+    const bookingDateLabel = formatBookingDateRange(
+      asString(booking?.start_date),
+      asString(booking?.end_date) ?? asString(booking?.start_date)
+    );
 
     const bookingStatus = String(booking?.status ?? "").trim().toLowerCase();
     const bookingPaymentStatus = String(booking?.payment_status ?? "").trim().toLowerCase();
@@ -348,6 +392,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
     });
     const hostUserId = typeof hostProfile?.user_id === "string" ? hostProfile.user_id : null;
+    const hostListingLabel =
+      stayUnitName ??
+      (typeof hostProfile?.display_name === "string" && hostProfile.display_name.trim().length > 0
+        ? hostProfile.display_name.trim()
+        : "your Famlo stay");
     const hostLegacyFamilyId =
       typeof hostProfile?.legacy_family_id === "string" && hostProfile.legacy_family_id.trim().length > 0
         ? hostProfile.legacy_family_id
@@ -378,7 +427,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         recipientRole: "host",
         payload: {
           title: "New Booking Request",
-          message: "A new Famlo booking request is waiting for your approval. Review it and accept or reject it soon.",
+          message: `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
           cta_label: "Review booking request",
           cta_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
           view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
@@ -398,10 +447,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         recipientRole: "host",
         payload: {
           title: "New Booking Request",
-          message: "A new Famlo booking request is waiting for your approval. Review it and accept or reject it soon.",
+          message: `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
           view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
           accept_url: actionLinks?.acceptUrl,
           reject_url: actionLinks?.rejectUrl,
+        },
+      });
+    } else if (hostUserId) {
+      await enqueueNotification(supabase, {
+        eventType: "booking_confirmed",
+        channel: "email",
+        userId: hostUserId,
+        bookingId: payment.booking_id,
+        dedupeKey: `booking_confirmed:host:${payment.booking_id}:email`,
+        subject: "Your room is booked on Famlo",
+        payload: {
+          title: "Room booked",
+          message: `Congratulations. ${hostListingLabel} is booked for ${bookingDateLabel}.`,
+          cta_label: "View booking",
+          cta_url: fallbackHostDashboardUrl,
+          view_url: fallbackHostDashboardUrl,
+        },
+      });
+
+      await enqueueNotification(supabase, {
+        eventType: "booking_confirmed",
+        channel: "whatsapp",
+        userId: hostUserId,
+        bookingId: payment.booking_id,
+        dedupeKey: `booking_confirmed:host:${payment.booking_id}:whatsapp`,
+        subject: "Your room is booked on Famlo",
+        recipientRole: "host",
+        payload: {
+          title: "Room booked",
+          message: `Congratulations. ${hostListingLabel} is booked for ${bookingDateLabel}.`,
+          view_url: fallbackHostDashboardUrl,
         },
       });
     }
@@ -439,6 +519,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             : typeof hostProfile?.display_name === "string" && hostProfile.display_name.trim().length > 0
               ? hostProfile.display_name
               : "your Famlo stay");
+      const roomLabel = stayUnitName ?? propertyName;
 
       const hostLocationLabel = [family?.village, family?.city, family?.state].filter(Boolean).join(", ");
       const hostMapsLink =
@@ -454,13 +535,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         : hostMapsLink
           ? `Host location for ${propertyName}: ${hostLocationLabel || "Shared in maps"}.\nMap: ${hostMapsLink}\nEmergency: if you need urgent help during the stay, open Emergency Assistance from your booking card and Famlo will share your live location with the support team.`
           : `Your booking for ${propertyName} is confirmed. The host location will be shared here once it is available. If you need urgent help during the stay, use Emergency Assistance from your booking card.`;
+      const hostBookingMessage = approvalRequired
+        ? `${roomLabel} has a paid booking request for ${bookingDateLabel}. Review it in your Famlo dashboard and accept or reject it soon.`
+        : `Congratulations. ${roomLabel} is booked for ${bookingDateLabel}.`;
 
       const { data: existingSystemMessages, error: existingMessagesError } = await supabase
         .from("messages")
         .select("id,text")
         .eq("conversation_id", conversationId)
         .eq("sender_type", "system")
-        .in("text", [confirmationMessage, hostLocationMessage]);
+        .in("text", [confirmationMessage, hostLocationMessage, hostBookingMessage]);
 
       if (existingMessagesError) {
         console.error("[payments.verify] existing system message lookup failed:", existingMessagesError);
@@ -489,6 +573,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           receiver_id: guestUserId,
           sender_type: "system",
           text: hostLocationMessage,
+          created_at: now,
+        },
+        {
+          conversation_id: conversationId,
+          booking_id: legacyBookingId ?? payment.booking_id,
+          sender_id: null,
+          receiver_id: hostUserId,
+          sender_type: "system",
+          text: hostBookingMessage,
           created_at: now,
         },
       ].filter((message) => !existingContents.has(message.text));

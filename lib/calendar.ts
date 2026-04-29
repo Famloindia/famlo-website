@@ -110,6 +110,16 @@ export function toCalendarEventUid(prefix: string, id: string, startDate: string
   return [prefix, id, startDate, slotKey ?? "full"].filter(Boolean).join(":");
 }
 
+export function getCalendarEventStayUnitId(event: Pick<CanonicalCalendarEvent, "payload"> | null | undefined): string | null {
+  const payload = event?.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const stayUnitId = payload.stay_unit_id;
+  return typeof stayUnitId === "string" && stayUnitId.trim().length > 0 ? stayUnitId.trim() : null;
+}
+
 export async function loadCanonicalCalendar(
   supabase: SupabaseClient,
   input: {
@@ -296,6 +306,7 @@ export async function loadCanonicalCalendar(
               payload: {
                 payment_status: paymentStatus,
                 hold_expires_at: holdExpiresAt,
+                stay_unit_id: stayUnitId,
               },
             },
           ];

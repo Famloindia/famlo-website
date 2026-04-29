@@ -16,6 +16,21 @@ function formatKycStatus(value: unknown): string {
   return value.replaceAll("_", " ");
 }
 
+function formatAge(dateOfBirth: unknown): string {
+  if (typeof dateOfBirth !== "string" || dateOfBirth.length === 0) return "Not added";
+  const birthDate = new Date(`${dateOfBirth}T00:00:00`);
+  if (Number.isNaN(birthDate.getTime())) return "Not added";
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDelta = today.getMonth() - birthDate.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+
+  return age > 0 ? `${age} years` : "Not added";
+}
+
 function isCheckInWindowOpen(booking: any): boolean {
   if (typeof booking?.date_from !== "string" || booking.date_from.length === 0) return false;
   const start = new Date(`${booking.date_from}T00:00:00+05:30`);
@@ -319,7 +334,7 @@ export default function BookingsTab({
             </h3>
             <p style={{ fontSize: "14px", color: "rgba(14,43,87,0.6)", margin: 0, maxWidth: "400px", alignSelf: "center", lineHeight: 1.5 }}>
               When guests choose your home in the Famlo app, their reservations will appear here
-              automatically with full identity verification.
+              automatically with the guest profile they saved in Famlo.
             </p>
           </div>
         ) : (
@@ -330,8 +345,9 @@ export default function BookingsTab({
             const propertyLocation = typeof booking.property_location === "string" ? booking.property_location : "";
             const guestCity = typeof userData.city === "string" ? userData.city : null;
             const guestState = typeof userData.state === "string" ? userData.state : null;
+            const guestGender = typeof userData.gender === "string" ? userData.gender : null;
+            const guestAge = formatAge(userData.date_of_birth);
             const guestAbout = typeof userData.about === "string" ? userData.about : "";
-            const kycStatus = typeof userData.kyc_status === "string" ? userData.kyc_status : "";
             const stayVibe = typeof booking.vibe === "string" ? booking.vibe : "";
             const quarterLabel = String(booking.quarter_type ?? booking.quarter_time ?? "Reservation");
             const normalizedStatus = normalizeStatus(booking);
@@ -429,24 +445,25 @@ export default function BookingsTab({
                   </div>
 
                   <div style={{ textAlign: "right" }}>
-                    <div
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        padding: "6px 12px",
-                        background: isCancelled ? "#fef2f2" : isPending ? "#fff7ed" : isConfirmed ? "#f0fdf4" : "#f8fafc",
-                        color: isCancelled ? "#b91c1c" : isPending ? "#c2410c" : isConfirmed ? "#15803d" : "#64748b",
-                        fontSize: "11px",
-                        fontWeight: 900,
-                        textTransform: "uppercase",
-                        borderRadius: "8px",
-                        border: `1px solid ${isCancelled ? "#fecaca" : isPending ? "#fed7aa" : isConfirmed ? "#bbf7d0" : "#e2e8f0"}`,
-                      }}
-                    >
-                      {isPending && <Clock size={12} />}
-                      {getStatusLabel(normalizedStatus)}
-                    </div>
+                    {!isPending && (
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          padding: "6px 12px",
+                          background: isCancelled ? "#fef2f2" : isConfirmed ? "#f0fdf4" : "#f8fafc",
+                          color: isCancelled ? "#b91c1c" : isConfirmed ? "#15803d" : "#64748b",
+                          fontSize: "11px",
+                          fontWeight: 900,
+                          textTransform: "uppercase",
+                          borderRadius: "8px",
+                          border: `1px solid ${isCancelled ? "#fecaca" : isConfirmed ? "#bbf7d0" : "#e2e8f0"}`,
+                        }}
+                      >
+                        {getStatusLabel(normalizedStatus)}
+                      </div>
+                    )}
                     <h3 style={{ margin: "12px 0 0", fontSize: "24px", fontWeight: 900, color: "#0e2b57" }}>
                       ₹{displayAmount.toLocaleString("en-IN")}
                     </h3>
@@ -483,23 +500,7 @@ export default function BookingsTab({
                     </div>
 
                   <div style={{ display: "grid", gap: "12px", justifyItems: "end" }}>
-                    <div
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "10px 14px",
-                        borderRadius: "12px",
-                        background: kycStatus === "verified" ? "#ecfdf5" : "#fff7ed",
-                        color: kycStatus === "verified" ? "#047857" : "#b45309",
-                        fontSize: "12px",
-                        fontWeight: 900,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      <ShieldCheck size={14} />
-                      {formatKycStatus(kycStatus)}
-                    </div>
+                    {/* Removed Pending/KYC status badge as per request */}
                     {isConfirmed && !isCancelled ? (
                       <button
                         onClick={() => onOpenChat && onOpenChat(String(booking.conversation_id || booking.id))}
@@ -797,42 +798,35 @@ export default function BookingsTab({
                       Host receipt
                     </a>
                   ) : null}
-                </div>
-
-                <div
+                            <div
                   style={{
                     marginTop: "16px",
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                    gap: "12px",
                   }}
                 >
-                  <div style={{ padding: "16px", borderRadius: "16px", background: "#ffffff", border: "1px solid #e2e8f0" }}>
-                    <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(14,43,87,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>
+                    <div style={{ padding: "20px", borderRadius: "18px", background: "#ffffff", border: "1px solid #f1f5f9", boxShadow: "0 2px 8px rgba(0,0,0,0.02)" }}>
+                    <div style={{ fontSize: "10px", fontWeight: 900, color: "#165dcc", textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: "10px" }}>
                       Guest snapshot
                     </div>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center", color: "#0e2b57", fontWeight: 800, marginBottom: "8px" }}>
-                      <MapPin size={14} />
-                      <span>{[guestCity, guestState].filter(Boolean).join(", ") || "Location on profile"}</span>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center", color: "#0e2b57", fontWeight: 900, marginBottom: "10px" }}>
+                      <MapPin size={16} />
+                      <span style={{ fontSize: "14px" }}>{[guestCity, guestState].filter(Boolean).join(", ") || "Location on profile"}</span>
                     </div>
-                    <p style={{ margin: 0, color: "rgba(14,43,87,0.65)", fontSize: "13px", lineHeight: 1.5 }}>
-                      {guestAbout || "This guest has completed Famlo verification and can continue through the hosted stay journey."}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "10px" }}>
+                      <span style={{ padding: "6px 10px", borderRadius: "999px", background: "#f8fafc", border: "1px solid #e2e8f0", color: "#0e2b57", fontSize: "12px", fontWeight: 800 }}>
+                        Age: {guestAge}
+                      </span>
+                      <span style={{ padding: "6px 10px", borderRadius: "999px", background: "#f8fafc", border: "1px solid #e2e8f0", color: "#0e2b57", fontSize: "12px", fontWeight: 800 }}>
+                        Gender: {guestGender || "Not added"}
+                      </span>
+                      <span style={{ padding: "6px 10px", borderRadius: "999px", background: "#f8fafc", border: "1px solid #e2e8f0", color: "#0e2b57", fontSize: "12px", fontWeight: 800 }}>
+                        State: {guestState || "Not added"}
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, color: "rgba(14,43,87,0.7)", fontSize: "14px", lineHeight: 1.6, fontWeight: 600 }}>
+                      {guestAbout || "This guest has not added an about section yet."}
                     </p>
                   </div>
-
-                  <div style={{ padding: "16px", borderRadius: "16px", background: "#ffffff", border: "1px solid #e2e8f0" }}>
-                    <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(14,43,87,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>
-                      Stay notes
-                    </div>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center", color: "#0e2b57", fontWeight: 800, marginBottom: "8px" }}>
-                      <Sparkles size={14} />
-                      <span>{stayVibe || "No special vibe selected yet"}</span>
-                    </div>
-                    <p style={{ margin: 0, color: "rgba(14,43,87,0.65)", fontSize: "13px", lineHeight: 1.5 }}>
-                      Quarter: {quarterLabel}. Conversation ID: {booking.conversation_id ? String(booking.conversation_id).slice(0, 8) : "Pending"}
-                    </p>
-                  </div>
-                </div>
+                </div>      </div>
               </div>
             );
           })

@@ -18,15 +18,7 @@ export function isHostBookingVisibleToPartner(status: unknown, paymentStatus: un
     return true;
   }
 
-  return (
-    normalizedStatus === "awaiting_payment" ||
-    normalizedStatus === "pending" ||
-    normalizedStatus === "confirmed" ||
-    normalizedStatus === "accepted" ||
-    normalizedStatus === "cancelled_by_user" ||
-    normalizedStatus === "checked_in" ||
-    normalizedStatus === "completed"
-  );
+  return normalizedStatus === "confirmed" || normalizedStatus === "accepted" || normalizedStatus === "checked_in" || normalizedStatus === "completed";
 }
 
 export function isHostBookingInventoryBlocking(status: unknown, paymentStatus: unknown): boolean {

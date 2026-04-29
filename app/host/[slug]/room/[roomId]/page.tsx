@@ -6,7 +6,7 @@ import { RoomBookingPanel } from "@/components/public/RoomBookingPanel";
 import { RoomImageGallery } from "@/components/public/RoomImageGallery";
 import { RoomLocationMap } from "@/components/public/RoomLocationMap";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
-import { loadCanonicalCalendar } from "@/lib/calendar";
+import { getCalendarEventStayUnitId, loadCanonicalCalendar } from "@/lib/calendar";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { resolveHomeRoute } from "@/lib/home-route-resolution";
 import { getPublicCoordinates } from "@/lib/location-utils";
@@ -21,7 +21,7 @@ interface HostRoomPageProps {
   }>;
 }
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -99,10 +99,14 @@ async function hydrateRoomWithBlockedDates(
         to,
       }),
     ]);
+    const applicableHostEvents = hostEvents.filter((event) => {
+      const eventStayUnitId = getCalendarEventStayUnitId(event);
+      return !eventStayUnitId || eventStayUnitId === unit.id;
+    });
 
     return {
       ...unit,
-      blockedDates: Array.from(new Set([...hostEvents, ...stayUnitEvents].flatMap(tokeniseBookedDates))),
+      blockedDates: Array.from(new Set([...applicableHostEvents, ...stayUnitEvents].flatMap(tokeniseBookedDates))),
     };
   } catch (error) {
     console.warn("[room.page] failed to hydrate room calendar", unit.id, error);

@@ -5,10 +5,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronDown, Minus, Plus } from "lucide-react";
 import { addIndiaDays, getTodayInIndia, isBookingSlotExpired } from "@/lib/booking-time";
-import { GuestVerificationForm } from "@/components/account/GuestVerificationForm";
+import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { buildHostStayOccupancy, type HostStayBookingRecord } from "@/lib/host-stay-availability";
 import { enumerateDateRange } from "@/lib/platform-utils";
-import { hasGuestVerificationSubmission } from "@/lib/user-profile";
+import { isGuestProfileComplete } from "@/lib/user-profile";
 
 type QuarterOption = {
   id: string;
@@ -73,8 +73,6 @@ declare global {
   }
 }
 
-const BOOKABLE_KYC_STATUSES = new Set(["auto_verified", "verified", "pending", "pending_review"]);
-
 async function ensureRazorpayCheckout(): Promise<void> {
   if (typeof window === "undefined") return;
   if (window.Razorpay) return;
@@ -95,6 +93,23 @@ async function ensureRazorpayCheckout(): Promise<void> {
     script.onerror = () => reject(new Error("Failed to load Razorpay Checkout."));
     document.body.appendChild(script);
   });
+}
+
+function warmRazorpayCheckout(): void {
+  if (typeof window === "undefined") return;
+
+  const scheduleWarmup = () => {
+    void ensureRazorpayCheckout().catch(() => {
+      // Ignore warmup failures and retry on the real checkout tap.
+    });
+  };
+
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(scheduleWarmup, { timeout: 1500 });
+    return;
+  }
+
+  window.setTimeout(scheduleWarmup, 250);
 }
 
 export function HomeBookingPreview({
@@ -126,9 +141,45 @@ export function HomeBookingPreview({
   const endDateInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
-  const [showVerification, setShowVerification] = useState(false);
-  const [verificationUnlocked, setVerificationUnlocked] = useState(false);
-  const [resumeAfterVerification, setResumeAfterVerification] = useState(false);
+  const [showProfileGate, setShowProfileGate] = useState(false);
+  const [profileUnlocked, setProfileUnlocked] = useState(false);
+  const [resumeAfterProfileSave, setResumeAfterProfileSave] = useState(false);
+
+  useEffect(() => {
+    warmRazorpayCheckout();
+  }, []);
+
+  const releasePendingBooking = useCallback(
+    async (bookingId: string): Promise<void> => {
+      const normalizedBookingId = bookingId.trim();
+      if (!normalizedBookingId) return;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const authHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (session?.access_token) authHeaders.Authorization = `Bearer ${session.access_token}`;
+      if (user?.id) authHeaders["x-famlo-user-id"] = user.id;
+      if (user?.email) authHeaders["x-famlo-user-email"] = user.email;
+
+      const response = await fetch("/api/bookings/cancel", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          bookingId: normalizedBookingId,
+          action: "cancel",
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Could not release the unpaid booking hold.");
+      }
+    },
+    [supabase, user?.email, user?.id]
+  );
 
   const selectedQuarter = availableQuarters.find((quarter) => quarter.id === selectedQuarterId) ?? null;
   const isFullDay = selectedQuarter?.id === "fullday";
@@ -147,9 +198,7 @@ export function HomeBookingPreview({
   const total = selectedQuarter ? selectedQuarter.price * guestCount * bookingDayCount : 0;
   const guestLimit = Math.max(1, maxGuests ?? 1);
   const canBook = availableQuarters.length > 0;
-  const hasSavedVerification =
-    hasGuestVerificationSubmission(profile) || BOOKABLE_KYC_STATUSES.has(profile?.kyc_status ?? "");
-  const verificationReady = verificationUnlocked || hasSavedVerification;
+  const profileReady = profileUnlocked || isGuestProfileComplete(profile);
   const selectedDateHasExpired =
     Boolean(selectedDate) &&
     Boolean(selectedQuarter) &&
@@ -241,10 +290,10 @@ export function HomeBookingPreview({
       return;
     }
 
-    if (!verificationReady) {
-      setShowVerification(true);
+    if (!profileReady) {
+      setShowProfileGate(true);
       if (!fromAuth) {
-        setFeedback({ type: "error", text: "Upload and submit your ID once, then you can pay and confirm the booking here." });
+        setFeedback({ type: "error", text: "Complete your guest profile once, then you can pay and confirm the booking here." });
       }
       return;
     }
@@ -303,6 +352,8 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
           hostArea: publicLocation || "Shared after booking",
           hostUserId: hostUserId ?? null,
           welcomeMessage,
+          requestPaymentIntent: true,
+          gateway: "razorpay",
         }),
       });
 
@@ -325,17 +376,8 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
       });
 
       const bookingSavedMessage = "Booking created and saved in Famlo. Opening secure payment now.";
-      const paymentIntentResponse = await fetch("/api/payments/create-intent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookingId: bookingPayload.bookingId,
-          gateway: "razorpay",
-        }),
-      });
-
-      const paymentIntentPayload = await paymentIntentResponse.json();
-      if (!paymentIntentResponse.ok || paymentIntentPayload.error) {
+      const paymentIntentPayload = bookingPayload.paymentIntent;
+      if (!paymentIntentPayload) {
         setFeedback({
           type: "success",
           text: `${bookingSavedMessage} Payment setup needs one more retry, so please complete it from your bookings dashboard.`,
@@ -418,10 +460,13 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
           },
           modal: {
             ondismiss: () => {
+              void releasePendingBooking(order.bookingId).catch((cancelError) => {
+                console.error("[home-booking-preview] release_pending_booking_failed", cancelError);
+              });
               setSubmitting(false);
               setFeedback({
-                type: "success",
-                text: "Your booking was created. Complete the Razorpay payment from your bookings dashboard to confirm it.",
+                type: "error",
+                text: "Payment was not completed, so this stay was not booked.",
               });
             },
           },
@@ -431,13 +476,16 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         });
 
         checkout.on("payment.failed", (failureResponse) => {
+          void releasePendingBooking(order.bookingId).catch((cancelError) => {
+            console.error("[home-booking-preview] release_pending_booking_failed", cancelError);
+          });
           setSubmitting(false);
           setFeedback({
             type: "error",
             text:
               failureResponse.error?.description ??
               failureResponse.error?.reason ??
-              "Payment failed. The booking was created but payment is still pending.",
+              "Payment failed, so the booking was not saved.",
           });
         });
 
@@ -479,7 +527,7 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
     getDateConflictMessage,
     supabase,
     user,
-    verificationReady,
+    profileReady,
   ]);
 
   useEffect(() => {
@@ -492,13 +540,13 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
   }, [handleContinue, loading, user]);
 
   useEffect(() => {
-    if (!resumeAfterVerification || !verificationUnlocked) {
+    if (!resumeAfterProfileSave || !profileUnlocked) {
       return;
     }
 
-    setResumeAfterVerification(false);
+    setResumeAfterProfileSave(false);
     void handleContinue(true);
-  }, [handleContinue, resumeAfterVerification, verificationUnlocked]);
+  }, [handleContinue, profileUnlocked, resumeAfterProfileSave]);
 
   return (
     <div
@@ -649,28 +697,27 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
       {showAuth ? (
         <AuthModal
           isOpen={showAuth}
-          skipProfileStep
           onClose={() => {
             setShowAuth(false);
           }}
         />
       ) : null}
 
-      {showVerification ? (
+      {showProfileGate ? (
         <div style={{ padding: "18px" }}>
-          <GuestVerificationForm
+          <ProfileCompletionForm
             compact
             title="Complete guest profile first"
-            description="Add your booking profile and Aadhaar-with-face capture here. Once done, you can pay directly from this page."
-            buttonLabel="Submit verification"
+            description="Save your guest profile here. Once done, you can pay directly from this page."
+            buttonLabel="Save profile"
             onSuccess={async () => {
               await refreshProfile();
-              setVerificationUnlocked(true);
-              setShowVerification(false);
-              setResumeAfterVerification(true);
+              setProfileUnlocked(true);
+              setShowProfileGate(false);
+              setResumeAfterProfileSave(true);
               setFeedback({
                 type: "success",
-                text: "Profile submitted to admin/team review. Your document is saved, and payment can continue now.",
+                text: "Profile saved. Payment can continue now.",
               });
             }}
           />

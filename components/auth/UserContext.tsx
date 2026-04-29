@@ -111,15 +111,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
 
-    void (async () => {
-      try {
-        await loadAuthState();
-      } finally {
-        if (active) {
-          setLoading(false);
+    const bootstrapHandle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await loadAuthState();
+        } finally {
+          if (active) {
+            setLoading(false);
+          }
         }
-      }
-    })();
+      })();
+    }, 0);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
       void (async () => {
@@ -134,6 +136,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       active = false;
+      window.clearTimeout(bootstrapHandle);
       subscription.unsubscribe();
     };
   }, [supabase, loadAuthState]);

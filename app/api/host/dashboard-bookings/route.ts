@@ -80,7 +80,7 @@ export async function GET(request: Request): Promise<NextResponse> {
         "id", "status", "start_date", "end_date", "guests_count",
         "total_price", "partner_payout_amount", "pricing_snapshot",
         "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
-        "conversation_id", "stay_unit_id", "users!user_id(id,name,city,state,gender,about,kyc_status)",
+        "conversation_id", "stay_unit_id", "users!user_id(id,name,city,state,gender,about,date_of_birth,kyc_status)",
       ].join(","))
       .in("host_id", hostIds)
       .order("start_date", { ascending: false })

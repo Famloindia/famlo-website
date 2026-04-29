@@ -35,8 +35,9 @@ import {
   Zap,
 } from "lucide-react";
 
-import { GuestVerificationForm } from "@/components/account/GuestVerificationForm";
+import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { isGuestProfileComplete } from "@/lib/user-profile";
 import type { HomeCardRecord } from "@/lib/discovery";
 import { getTodayInIndia } from "@/lib/booking-time";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
@@ -44,7 +45,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase";
 import { buildHostStayOccupancy, type HostStayBookingRecord } from "@/lib/host-stay-availability";
 import type { StayUnitRecord } from "@/lib/stay-units";
 
-type BookingStep = "login" | "kyc" | "quarter" | "date" | "guests" | "confirm";
+type BookingStep = "login" | "profile" | "quarter" | "date" | "guests" | "confirm";
 
 interface HomeBookingFlowProps {
   home: HomeCardRecord;
@@ -117,8 +118,6 @@ type QuoteState = {
 };
 
 const DEFAULT_ACTIVE_QUARTERS = ["morning", "afternoon", "evening", "fullday"];
-const BOOKABLE_KYC_STATUSES = new Set(["auto_verified", "verified", "pending", "pending_review"]);
-
 const QUARTERS: QuarterOption[] = [
   { id: "morning", label: "Morning", time: "7AM - 12PM", meal: "Breakfast included", price: 0, icon: <Sunrise size={18} strokeWidth={2.2} /> },
   { id: "afternoon", label: "Afternoon", time: "12PM - 5PM", meal: "Lunch included", price: 0, icon: <Sun size={18} strokeWidth={2.2} /> },
@@ -173,6 +172,23 @@ async function ensureRazorpayCheckout(): Promise<void> {
   });
 }
 
+function warmRazorpayCheckout(): void {
+  if (typeof window === "undefined") return;
+
+  const scheduleWarmup = () => {
+    void ensureRazorpayCheckout().catch(() => {
+      // Ignore warmup failures and retry on the real checkout tap.
+    });
+  };
+
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(scheduleWarmup, { timeout: 1500 });
+    return;
+  }
+
+  window.setTimeout(scheduleWarmup, 250);
+}
+
 export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }: Readonly<HomeBookingFlowProps>): React.JSX.Element {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const searchParams = useSearchParams();
@@ -182,7 +198,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [guestName, setGuestName] = useState<string | null>(null);
   const [guestCity, setGuestCity] = useState<string | null>(null);
-  const [kycStatus, setKycStatus] = useState<string | null>(null);
+  const [profileComplete, setProfileComplete] = useState(false);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -230,6 +246,32 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
     if (currentUserEmail) headers["x-famlo-user-email"] = currentUserEmail;
     return headers;
   }, [currentUserEmail, currentUserId, supabase]);
+
+  const releasePendingBooking = useCallback(
+    async (bookingId: string): Promise<void> => {
+      const normalizedBookingId = bookingId.trim();
+      if (!normalizedBookingId) return;
+
+      const response = await fetch("/api/bookings/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await getAuthHeaders()) },
+        body: JSON.stringify({
+          bookingId: normalizedBookingId,
+          action: "cancel",
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Could not release the unpaid booking hold.");
+      }
+    },
+    [getAuthHeaders]
+  );
+
+  useEffect(() => {
+    warmRazorpayCheckout();
+  }, []);
 
   useEffect(() => {
     if (requestedStayUnitId && stayUnits.some((unit) => unit.id === requestedStayUnitId && unit.isActive)) {
@@ -458,23 +500,20 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
           </div>
         ) : null}
 
-        {!isAuthStateLoading && step === "kyc" ? (
+        {!isAuthStateLoading && step === "profile" ? (
           <div className="famlo-state-card">
-            <h3>Verification needed</h3>
+            <h3>Complete your profile</h3>
             <p>
-              Your current status is <strong>{kycStatus ?? "not_started"}</strong>.
-              {kycStatus === "pending" || kycStatus === "pending_review"
-                ? " Your ID was already submitted, and Famlo is reviewing it."
-                : " Submit once and continue."}
+              Add your name, contact details, location, gender, date of birth, and about section once. Then you can continue with booking.
             </p>
-            <GuestVerificationForm
+            <ProfileCompletionForm
               compact
-              title="Submit guest verification"
-              description="Add your booking profile and Aadhaar-with-face capture here."
-              buttonLabel="Submit verification"
+              title="Complete guest profile"
+              description="Save your guest details here. The host will receive them with your booking request."
+              buttonLabel="Save profile"
               onSuccess={async () => {
                 const nextState = await syncAuthState();
-                if (nextState.userId && BOOKABLE_KYC_STATUSES.has(nextState.kycStatus ?? "")) {
+                if (nextState.userId && nextState.profileComplete) {
                   setBookingError(null);
                   setStep(resumeStepRef.current);
                 }
@@ -483,7 +522,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
           </div>
         ) : null}
 
-        {!isAuthStateLoading && BOOKABLE_KYC_STATUSES.has(kycStatus ?? "") ? (
+        {!isAuthStateLoading && profileComplete ? (
           <div className="booking-widget-shell famlo-booking-shell">
             <div className="famlo-widget-head">
               <span className="famlo-section-label">Choose your visit</span>
@@ -708,13 +747,13 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
     );
   }
 
-  function resolveNextStep(userId: string | null, nextKycStatus: string | null): BookingStep {
+  function resolveNextStep(userId: string | null, nextProfileComplete: boolean): BookingStep {
     if (!userId) {
       return "login";
     }
 
-    if (!BOOKABLE_KYC_STATUSES.has(nextKycStatus ?? "")) {
-      return "kyc";
+    if (!nextProfileComplete) {
+      return "profile";
     }
 
     return "quarter";
@@ -749,7 +788,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
     return dayOccupancy.anyBooking;
   }
 
-  const syncAuthState = useCallback(async (): Promise<{ userId: string | null; kycStatus: string | null }> => {
+  const syncAuthState = useCallback(async (): Promise<{ userId: string | null; profileComplete: boolean }> => {
     setLoadingAuth(true);
     setAuthReady(false);
 
@@ -763,42 +802,48 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
         setCurrentUserEmail(null);
         setGuestName(null);
         setGuestCity(null);
-        setKycStatus(null);
+        setProfileComplete(false);
         setStep("login");
-        return { userId: null, kycStatus: null };
+        return { userId: null, profileComplete: false };
       }
 
       const { data: userRow } = await supabase
         .from("users")
-        .select("name, city, kyc_status, kyc_submitted_at, id_document_url")
+        .select("name, phone, email, city, state, about, date_of_birth, gender")
         .eq("id", user.id)
         .maybeSingle();
-
-      const nextKycStatus =
-        typeof userRow?.kyc_status === "string" && BOOKABLE_KYC_STATUSES.has(userRow.kyc_status)
-          ? userRow.kyc_status
-          : (typeof userRow?.id_document_url === "string" && userRow.id_document_url.trim().length > 0) ||
-              typeof userRow?.kyc_submitted_at === "string"
-            ? "pending"
-            : typeof userRow?.kyc_status === "string"
-              ? userRow.kyc_status
-              : null;
+      const nextProfileComplete = isGuestProfileComplete({
+        id: user.id,
+        name: typeof userRow?.name === "string" ? userRow.name : null,
+        phone: typeof userRow?.phone === "string" ? userRow.phone : user.phone ?? null,
+        email: typeof userRow?.email === "string" ? userRow.email : user.email ?? null,
+        city: typeof userRow?.city === "string" ? userRow.city : null,
+        state: typeof userRow?.state === "string" ? userRow.state : null,
+        onboarding_completed: false,
+        avatar_url: null,
+        about: typeof userRow?.about === "string" ? userRow.about : null,
+        date_of_birth: typeof userRow?.date_of_birth === "string" ? userRow.date_of_birth : null,
+        gender: typeof userRow?.gender === "string" ? userRow.gender : null,
+        kyc_status: null,
+        id_document_url: null,
+        id_document_type: null,
+      });
       setCurrentUserId(user.id);
       setCurrentUserEmail(user.email ?? null);
       setGuestName(typeof userRow?.name === "string" ? userRow.name : null);
       setGuestCity(typeof userRow?.city === "string" ? userRow.city : null);
-      setKycStatus(nextKycStatus);
-      setStep(resolveNextStep(user.id, nextKycStatus));
-      return { userId: user.id, kycStatus: nextKycStatus };
+      setProfileComplete(nextProfileComplete);
+      setStep(resolveNextStep(user.id, nextProfileComplete));
+      return { userId: user.id, profileComplete: nextProfileComplete };
     } catch (error) {
       console.error("[booking.flow] failed to sync auth state", error);
       setCurrentUserId(null);
       setCurrentUserEmail(null);
       setGuestName(null);
       setGuestCity(null);
-      setKycStatus(null);
+      setProfileComplete(false);
       setStep("login");
-      return { userId: null, kycStatus: null };
+      return { userId: null, profileComplete: false };
     } finally {
       setSessionChecked(true);
       setAuthReady(true);
@@ -869,18 +914,18 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
       return;
     }
 
-    if (!BOOKABLE_KYC_STATUSES.has(kycStatus ?? "")) {
-      setStep("kyc");
+    if (!profileComplete) {
+      setStep("profile");
       return;
     }
 
     if (selectedQuarter && dateFrom) {
       setStep("confirm");
     }
-  }, [authReady, currentUserId, dateFrom, kycStatus, loadingAuth, requestedEntry, requestedStep, selectedQuarter, sessionChecked]);
+  }, [authReady, currentUserId, dateFrom, loadingAuth, profileComplete, requestedEntry, requestedStep, selectedQuarter, sessionChecked]);
 
   useEffect(() => {
-    if (step !== "login" && step !== "kyc") {
+    if (step !== "login" && step !== "profile") {
       resumeStepRef.current = step;
     }
   }, [step]);
@@ -1042,8 +1087,8 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
       return;
     }
 
-    if (BOOKABLE_KYC_STATUSES.has(kycStatus ?? "") === false) {
-      setBookingError("Submit your document once, then you can continue to payment and booking.");
+    if (!profileComplete) {
+      setBookingError("Complete your guest profile once, then you can continue to payment and booking.");
       return;
     }
 
@@ -1105,6 +1150,8 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
           hostArea: publicLocation || "Shared after booking",
           hostUserId: home.hostUserId,
           welcomeMessage,
+          requestPaymentIntent: true,
+          gateway: "razorpay",
         }),
       });
 
@@ -1132,17 +1179,8 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         `Your ${selectedQuarter.label.toLowerCase()} stay with ${home.name} is now created in the new Famlo booking system.`;
 
       if (payload.bookingId) {
-        const paymentIntentResponse = await fetch("/api/payments/create-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            bookingId: payload.bookingId,
-            gateway: "razorpay",
-          }),
-        });
-
-        const paymentIntentPayload = await paymentIntentResponse.json();
-        if (!paymentIntentResponse.ok || paymentIntentPayload.error) {
+        const paymentIntentPayload = payload.paymentIntent;
+        if (!paymentIntentPayload) {
           paymentMessage =
             `Your ${selectedQuarter.label.toLowerCase()} stay with ${home.name} is saved in Famlo, but payment setup needs one more retry. You can complete it from your bookings dashboard.`;
         } else if (paymentIntentPayload.integrationStatus === "razorpay_ready" && paymentIntentPayload.order) {
@@ -1210,6 +1248,18 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
                   }
 
                   const hostLabel = home.hostName ?? home.listingTitle ?? home.name;
+                  setBookingReceipt({
+                    bookingId: order.bookingId,
+                    conversationId: payload.conversationId ?? null,
+                    paymentId: order.paymentRowId,
+                    hostArea: publicLocation || "Shared after booking",
+                    listingName: home.listingTitle ?? home.name,
+                    quarterLabel: selectedQuarter.label,
+                    quarterTime: selectedQuarter.time,
+                    visitDateLabel: isFullDayBooking ? `${dateFrom} to ${dateToValue}` : dateFrom,
+                    guestsLabel: `${guestCount} guest${guestCount > 1 ? "s" : ""}`,
+                    totalLabel: `Rs. ${Number(payload.totalPrice ?? quote?.totalPrice ?? estimatedTotalPrice).toLocaleString("en-IN")}`
+                  });
                   setSuccessMessage(
                     requiresHostApproval
                       ? `We have notified ${hostLabel} about you. They will approve soon as possible, and you can see the update in My Bookings.`
@@ -1224,8 +1274,12 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
             },
             modal: {
               ondismiss: () => {
+                void releasePendingBooking(order.bookingId).catch((cancelError) => {
+                  console.error("[home-booking-flow] release_pending_booking_failed", cancelError);
+                });
+                setBookingReceipt(null);
                 setSuccessMessage(
-                  `Your ${selectedQuarter.label.toLowerCase()} stay with ${home.name} is created, but payment is still pending. You can retry from your bookings dashboard.`
+                  `Payment was not completed, so this stay was not booked. You can try again whenever you're ready.`
                 );
               },
             },
@@ -1235,33 +1289,24 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
           });
 
           checkout.on("payment.failed", (failureResponse) => {
+            void releasePendingBooking(order.bookingId).catch((cancelError) => {
+              console.error("[home-booking-flow] release_pending_booking_failed", cancelError);
+            });
+            setBookingReceipt(null);
             setBookingError(
               failureResponse.error?.description ??
                 failureResponse.error?.reason ??
-                "Payment failed. The booking remains created but unpaid."
+                "Payment failed, so the booking was not saved."
             );
           });
 
           checkout.open();
-          paymentMessage = `Your ${selectedQuarter.label.toLowerCase()} stay with ${home.name} is created. Complete payment in the Razorpay window to confirm it in Famlo.`;
+          paymentMessage = `Complete payment in the Razorpay window to confirm your ${selectedQuarter.label.toLowerCase()} stay with ${home.name}.`;
         } else {
           paymentMessage =
             "Your booking is created and the payment record is ready, but live Razorpay keys are not configured yet.";
         }
       }
-
-      setBookingReceipt({
-        bookingId: payload.bookingId,
-        conversationId: payload.conversationId ?? null,
-        paymentId: payload.paymentId ?? null,
-        hostArea: publicLocation || "Shared after booking",
-        listingName: home.listingTitle ?? home.name,
-        quarterLabel: selectedQuarter.label,
-        quarterTime: selectedQuarter.time,
-        visitDateLabel: isFullDayBooking ? `${dateFrom} to ${dateToValue}` : dateFrom,
-        guestsLabel: `${guestCount} guest${guestCount > 1 ? "s" : ""}`,
-        totalLabel: `Rs. ${Number(payload.totalPrice ?? quote?.totalPrice ?? estimatedTotalPrice).toLocaleString("en-IN")}`
-      });
       setSuccessMessage(paymentMessage);
       setStep("confirm");
     } catch (error) {
@@ -1642,7 +1687,6 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
       {showAuthModal ? (
         <AuthModal
           isOpen={showAuthModal}
-          skipProfileStep
           onClose={() => {
             setShowAuthModal(false);
             void syncAuthState();

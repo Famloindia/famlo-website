@@ -110,13 +110,28 @@ export default function DocumentsTab({ compliance, setCompliance, onSave, saving
   };
 
   return (
-    <div className={styles.tabContent}>
-      <div className={styles.sectionHeader}>
-        <h2 className={styles.sectionTitle}>Documents & Verification</h2>
-        <p className={styles.sectionSubtitle}>Manage your listing access and benefits by submitting the required documentation.</p>
+    <div className={`${styles.flexCol} ${styles.animateIn}`} style={{ gap: '32px' }}>
+      <div
+        style={{
+          marginBottom: "8px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          borderBottom: "2px solid #f1f5f9",
+          paddingBottom: "16px",
+        }}
+      >
+        <div>
+          <h2 style={{ fontSize: "24px", fontWeight: 900, margin: "0 0 4px", color: "#0e2b57" }}>
+            Documents & Verification
+          </h2>
+          <p style={{ fontSize: "13px", margin: 0, color: "rgba(14,43,87,0.6)", fontWeight: 600 }}>
+            Manage your listing access and benefits by submitting the required documentation.
+          </p>
+        </div>
       </div>
 
-      <div className={styles.formGrid}>
+      <div className={styles.flexCol} style={{ gap: '16px' }}>
         {categories.map((cat, idx) => (
           <div key={idx} style={{ gridColumn: '1 / -1', marginBottom: '40px' }}>
             <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '20px' }}>
@@ -150,7 +165,7 @@ export default function DocumentsTab({ compliance, setCompliance, onSave, saving
                         ) : null}
                       </div>
                     </div>
-                    <div>
+                    <div style={{ flexShrink: 0 }}>
                       {isUploaded ? (
                         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                           <div style={{ textAlign: 'right' }}>
@@ -159,13 +174,13 @@ export default function DocumentsTab({ compliance, setCompliance, onSave, saving
                             </div>
                             <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '10px', fontWeight: 600, color: '#165dcc', textDecoration: 'none' }}>View Document</a>
                           </div>
-                          <label className={styles.secondaryBtn} style={{ padding: '10px 20px', borderRadius: '12px', minWidth: 'auto', cursor: 'pointer' }}>
+                          <label className={styles.secondaryBtn} style={{ padding: '10px 20px', borderRadius: '12px', width: 'auto', minWidth: 'auto', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                             {isUploading ? <Loader2 className="animate-spin" size={16} /> : "Update"}
                             <input type="file" style={{ display: 'none' }} onChange={(e) => handleFileChange(e, doc.id)} />
                           </label>
                         </div>
                       ) : (
-                        <label className={styles.primaryBtn} style={{ padding: '12px 24px', borderRadius: '12px', minWidth: 'auto', cursor: 'pointer' }}>
+                        <label className={styles.primaryBtn} style={{ padding: '12px 24px', borderRadius: '12px', width: 'auto', minWidth: 'auto', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                            {isUploading ? <Loader2 className="animate-spin" size={16} /> : <><Upload size={16} /> <span style={{ marginLeft: '8px' }}>Upload</span></>}
                            <input type="file" style={{ display: 'none' }} onChange={(e) => handleFileChange(e, doc.id)} />
                         </label>

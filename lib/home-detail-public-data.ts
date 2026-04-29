@@ -2,7 +2,7 @@ import { unstable_cache } from "next/cache";
 
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { loadHostStayBookingRecordsCompatibility } from "@/lib/booking-compat";
-import { loadCanonicalCalendar } from "@/lib/calendar";
+import { getCalendarEventStayUnitId, loadCanonicalCalendar } from "@/lib/calendar";
 import { loadHostGuestNetworkSummary, type HostGuestNetworkSummary } from "@/lib/host-guest-network";
 import { loadFamilyStories, loadLikedGuestCounts, type FamilyStory } from "@/lib/home-social-proof";
 import { loadStayUnitRatingSummaries, type StayUnitRatingSummary } from "@/lib/stay-unit-ratings";
@@ -105,11 +105,15 @@ async function hydrateStayUnitsWithBlockedDates(stayUnits: StayUnitRecord[]): Pr
           }),
         ]);
         const hostEvents = unit.hostId ? (hostEventsByHostId.get(unit.hostId) ?? []) : [];
+        const applicableHostEvents = hostEvents.filter((event) => {
+          const eventStayUnitId = getCalendarEventStayUnitId(event);
+          return !eventStayUnitId || eventStayUnitId === unit.id;
+        });
 
         return {
           ...unit,
           blockedDates: Array.from(
-            new Set([...hostEvents, ...stayUnitEvents].flatMap(tokeniseRoomCalendarBlock))
+            new Set([...applicableHostEvents, ...stayUnitEvents].flatMap(tokeniseRoomCalendarBlock))
           ),
         };
       } catch (error) {

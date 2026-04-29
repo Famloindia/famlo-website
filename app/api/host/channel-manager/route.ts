@@ -60,6 +60,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "ownerId is required." }, { status: 400 });
     }
 
+    const supabase = createAdminSupabaseClient();
+    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { ownerType, ownerId });
+    if (!hostAccess) {
+      return NextResponse.json({ error: "You do not have access to this channel manager." }, { status: 403 });
+    }
+
+    if (body.action === "regenerate_export_url") {
+      const exportToken = await regenerateCalendarExportToken(supabase, { ownerType, ownerId });
+      return NextResponse.json({
+        success: true,
+        publicExportUrl: buildCalendarExportUrl({ hostId: ownerId, token: exportToken }),
+      });
+    }
+
     let icsContent = String(body.icsContent ?? "").trim();
     if (!icsContent && body.externalUrl) {
       const response = await fetch(String(body.externalUrl));
@@ -70,19 +84,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (!icsContent) {
       return NextResponse.json({ error: "ICS content or externalUrl is required." }, { status: 400 });
-    }
-
-    const supabase = createAdminSupabaseClient();
-    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { ownerType, ownerId });
-    if (!hostAccess) {
-      return NextResponse.json({ error: "You do not have access to this channel manager." }, { status: 403 });
-    }
-    if (body.action === "regenerate_export_url") {
-      const exportToken = await regenerateCalendarExportToken(supabase, { ownerType, ownerId });
-      return NextResponse.json({
-        success: true,
-        publicExportUrl: buildCalendarExportUrl({ hostId: ownerId, token: exportToken }),
-      });
     }
 
     const result = await syncImportedCalendar(supabase, {

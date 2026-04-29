@@ -86,9 +86,9 @@ function HeaderContent() {
                     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
                   </svg>
                 </button>
-                
+
                 <div className="user-dropdown-container" ref={dropdownRef}>
-                  <button 
+                  <button
                     className="avatar-btn"
                     onClick={() => setDropdownOpen(!dropdownOpen)}
                   >
@@ -109,25 +109,62 @@ function HeaderContent() {
                   {dropdownOpen && (
                     <div className="dropdown-menu">
                       <div className="dropdown-header">
-                        <strong>Welcome</strong>
-                        <span style={{ fontSize: "16px", fontWeight: "700", color: "#1e3a8a" }}>
+                        <span style={{ fontSize: "14px", fontWeight: "800", color: "#1e3a8a" }}>
                           {profile?.name || user.user_metadata?.full_name || "User"}
                         </span>
-                        <span>{profile?.phone || user.phone || profile?.email || user.email}</span>
+                        <span style={{ fontSize: "11px" }}>{profile?.phone || user.phone || profile?.email || user.email}</span>
                       </div>
                       <div className="dropdown-tabs">
-                        <Link href="/profile" passHref legacyBehavior>
-                          <a className="tab-item" onClick={() => setDropdownOpen(false)}>Profile</a>
-                        </Link>
-                        <Link href="/bookings" passHref legacyBehavior>
-                          <a className="tab-item" onClick={() => setDropdownOpen(false)}>My Bookings</a>
-                        </Link>
-                        <Link href="/messages" passHref legacyBehavior>
-                          <a className="tab-item" onClick={() => setDropdownOpen(false)}>Messages</a>
-                        </Link>
-                        <button className="logout-btn" onClick={() => { signOut(); setDropdownOpen(false); }}>
-                          Log out
-                        </button>
+                        {[
+                          { label: "Profile", href: "/profile" },
+                          { label: "My Bookings", href: "/bookings" },
+                          { label: "Messages", href: "/messages" },
+                        ].map((item) => (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            className="tab-item-link"
+                            onClick={() => setDropdownOpen(false)}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "flex-start",
+                              width: "100%",
+                              padding: "4px 8px",
+                              textDecoration: "none",
+                              color: "#1e3a8a",
+                              fontSize: "11px",
+                              fontWeight: "800",
+                              borderRadius: "6px",
+                              background: "#f8fbff",
+                              border: "1px solid #dbeafe",
+                              boxSizing: "border-box",
+                              transition: "all 200ms ease",
+                            }}
+                          >
+                            {item.label}
+                          </Link>
+                        ))}
+                         <button
+                           className="logout-btn"
+                           onClick={() => { signOut(); setDropdownOpen(false); }}
+                           style={{
+                             width: "100%",
+                             textAlign: "left",
+                             padding: "4px 8px",
+                             background: "#fff5f5",
+                             border: "1px solid #fecaca",
+                             borderRadius: "6px",
+                             color: "#dc2626",
+                             fontSize: "11px",
+                             fontWeight: "800",
+                             cursor: "pointer",
+                             transition: "all 200ms ease",
+                             marginTop: "2px"
+                           }}
+                         >
+                           Log out
+                         </button>
                       </div>
                     </div>
                   )}
@@ -240,9 +277,9 @@ function HeaderContent() {
         .avatar-btn {
           width: 40px;
           height: 40px;
-          padding: 0;
+          padding: 2px;
           border-radius: 50%;
-          background: #f0f7ff;
+          background: #ffffff;
           color: #3b82f6;
           border: 2px solid #e0e7ff;
           font-weight: 800;
@@ -267,7 +304,8 @@ function HeaderContent() {
           min-width: 100% !important;
           min-height: 100% !important;
           aspect-ratio: 1/1 !important;
-          object-fit: cover !important;
+          border-radius: 50% !important;
+          object-fit: contain !important;
           object-position: center !important;
           display: block !important;
           image-rendering: -webkit-optimize-contrast;
@@ -277,11 +315,11 @@ function HeaderContent() {
           position: absolute;
           top: calc(100% + 12px);
           right: 0;
-          width: 300px;
-          background: #fdfdfd;
+          width: 170px;
+          background: #ffffff;
           border: 1px solid #e2e8f0;
-          border-radius: 20px;
-          box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+          border-radius: 8px;
+          box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
           padding: 0;
           overflow: hidden;
           animation: fade-drop 250ms ease-out;
@@ -293,53 +331,35 @@ function HeaderContent() {
         }
 
         .dropdown-header {
-          padding: 24px 28px;
-          background: #f4f7fb;
+          padding: 6px 10px;
+          background: #f8fbff;
           border-bottom: 1px solid #e2e8f0;
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 0;
         }
 
-        .dropdown-header strong {
-          font-size: 20px;
+        .dropdown-header span:first-of-type {
+          font-size: 11px !important;
           font-weight: 800;
           color: #0f172a;
         }
 
-        .dropdown-header span {
-          font-size: 15px;
+        .dropdown-header span:last-of-type {
+          font-size: 9px !important;
           font-weight: 500;
           color: #64748b;
         }
 
         .dropdown-tabs {
-          padding: 20px 24px 24px;
+          padding: 6px 8px 8px;
           display: grid;
-          gap: 14px;
+          gap: 4px;
         }
 
-        .tab-item {
-          display: flex;
-          align-items: center;
-          justify-content: flex-start;
-          width: 100%;
-          box-sizing: border-box;
-          padding: 16px 20px;
-          text-decoration: none;
-          color: #1e3a8a;
-          font-size: 16px;
-          font-weight: 800;
-          border-radius: 18px;
-          transition: all 200ms ease;
-          background: #fbfdff;
-          border: 1px solid #dbeafe;
-          white-space: nowrap;
-        }
-
-        .tab-item:hover {
-          background: #eff6ff;
-          border-color: #bfdbfe;
+        .tab-item-link:hover {
+          background: #eff6ff !important;
+          border-color: #bfdbfe !important;
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
         }
@@ -361,7 +381,7 @@ function HeaderContent() {
         }
 
         .logout-btn:hover {
-          background: #fee2e2;
+          background: #fee2e2 !important;
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(220, 38, 38, 0.08);
         }
