@@ -9,6 +9,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase";
 import styles from "../dashboard.module.css";
 
 const INITIAL_MESSAGE_BATCH = 25;
+const LOCAL_MESSAGE_COOLDOWN_MS = 15000;
 
 function extractMapsUrl(text: string | null | undefined): string | null {
   if (!text) return null;
@@ -35,6 +36,13 @@ function mergeMessages(current: any[], incoming: any): any[] {
 
   return [...withoutTemp, { ...incoming, text: incoming.content || incoming.text || "", pending: false }].sort(
     (left, right) => new Date(left.created_at ?? 0).getTime() - new Date(right.created_at ?? 0).getTime()
+  );
+}
+
+function sortConversationsByRecent(current: any[]): any[] {
+  return [...current].sort(
+    (left, right) =>
+      new Date(right?.last_message_at ?? 0).getTime() - new Date(left?.last_message_at ?? 0).getTime()
   );
 }
 
@@ -70,6 +78,7 @@ export default function MessagesTab({
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingTimerRef = useRef<number | null>(null);
   const activeConversationLastMessageAtRef = useRef<string | null>(null);
+  const lastLocalMessageSentAtRef = useRef(0);
   const authRefreshAttemptedRef = useRef(false);
   const conversationCacheKey = familyId && hostUserId ? `famlo:host-conversations:${familyId}:${hostUserId}` : null;
   const messageCacheKey = activeConvId ? `famlo:host-messages:${activeConvId}` : null;
@@ -189,6 +198,37 @@ export default function MessagesTab({
     }
   }, [familyId, getAuthHeaders, hostUserId]);
 
+  const patchConversationFromRealtime = useCallback((incoming: any): boolean => {
+    if (!incoming?.id) return false;
+
+    let updated = false;
+    setConversations((current) => {
+      const index = current.findIndex((conversation) => conversation.id === incoming.id);
+      if (index === -1) {
+        return current;
+      }
+
+      updated = true;
+      const next = [...current];
+      next[index] = {
+        ...next[index],
+        ...incoming,
+      };
+      return sortConversationsByRecent(next);
+    });
+
+    if (
+      updated &&
+      typeof incoming.id === "string" &&
+      incoming.id === activeConvId &&
+      typeof incoming.last_message_at === "string"
+    ) {
+      activeConversationLastMessageAtRef.current = incoming.last_message_at;
+    }
+
+    return updated;
+  }, [activeConvId]);
+
   useEffect(() => {
     setActiveConvId(initialConversationId || null);
   }, [initialConversationId]);
@@ -249,7 +289,11 @@ export default function MessagesTab({
           table: "conversations",
           filter: `host_user_id=eq.${hostUserId}`,
         },
-        () => {
+        (payload) => {
+          const incoming = payload.new as any;
+          if (patchConversationFromRealtime(incoming)) {
+            return;
+          }
           void fetchConversations(true);
         }
       )
@@ -258,7 +302,7 @@ export default function MessagesTab({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [familyId, fetchConversations, hostUserId, supabase]);
+  }, [familyId, fetchConversations, hostUserId, patchConversationFromRealtime, supabase]);
 
   useEffect(() => {
     if (!activeConvId) return;
@@ -285,6 +329,7 @@ export default function MessagesTab({
     const interval = window.setInterval(() => {
       void (async () => {
         if (document.visibilityState !== "visible") return;
+        if (Date.now() - lastLocalMessageSentAtRef.current < LOCAL_MESSAGE_COOLDOWN_MS) return;
         const latestLastMessageAt = await fetchActiveConversationStatus(activeConvId);
         if (latestLastMessageAt && latestLastMessageAt !== activeConversationLastMessageAtRef.current) {
           activeConversationLastMessageAtRef.current = latestLastMessageAt;
@@ -295,6 +340,7 @@ export default function MessagesTab({
 
     const onFocus = () => {
       if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastLocalMessageSentAtRef.current < LOCAL_MESSAGE_COOLDOWN_MS) return;
       void fetchConversations(true);
       void (async () => {
         const latestLastMessageAt = await fetchActiveConversationStatus(activeConvId);
@@ -395,6 +441,8 @@ export default function MessagesTab({
           : conversation
       )
     );
+    activeConversationLastMessageAtRef.current = new Date().toISOString();
+    lastLocalMessageSentAtRef.current = Date.now();
 
     try {
       const response = await fetch("/api/host/messages", {
@@ -512,9 +560,14 @@ export default function MessagesTab({
   }, [activeConvId, activeConversation?.booking_id, getAuthHeaders, hostUserId]);
 
   const handleDraftChange = useCallback((value: string) => {
+    const shouldNotifyTypingStart = !isTyping;
     setNewMessage(value);
-    if (!isTyping) setIsTyping(true);
-    void updateTypingState(true);
+    if (!isTyping) {
+      setIsTyping(true);
+    }
+    if (shouldNotifyTypingStart) {
+      void updateTypingState(true);
+    }
     if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
     typingTimerRef.current = window.setTimeout(() => {
       void updateTypingState(false);

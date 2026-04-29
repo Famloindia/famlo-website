@@ -63,6 +63,23 @@ type BookingSummary = {
   totalEarnings: number;
 };
 
+const ALLOWED_DASHBOARD_TABS = new Set([
+  "dashboard",
+  "rooms",
+  "bookings",
+  "messages",
+  "calendar",
+  "earnings",
+  "profile",
+  "compliance",
+  "support",
+]);
+
+function normalizeDashboardTab(value: unknown): string {
+  const normalized = String(value || "dashboard").trim().toLowerCase();
+  return ALLOWED_DASHBOARD_TABS.has(normalized) ? normalized : "dashboard";
+}
+
 function getActiveRealtimeHostId(family: Record<string, unknown>): string | null {
   return typeof family.v2_host_id === "string" ? family.v2_host_id : null;
 }
@@ -319,13 +336,16 @@ export function HostDashboardEditor({
     setPhotos(buildPhotosFromAllPhotos(allPhotos, activeFamilyId));
   }, [activeFamilyId, activeFamily, meta, allPhotos, hostTaxDetails]); 
 
-  const [activeTab, setActiveTab] = useState(initialTab);
+  const [activeTab, setActiveTab] = useState(() => normalizeDashboardTab(initialTab));
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [localBookingRows, setLocalBookingRows] = useState<Array<Record<string, unknown>>>(bookingRows);
   const [bookingRowsLoading, setBookingRowsLoading] = useState(false);
+  const [bookingRowsRequestedForFamilyId, setBookingRowsRequestedForFamilyId] = useState<string | null>(
+    bookingRows.length > 0 ? String(initialFamily.id) : null
+  );
   const [bookingSummary, setBookingSummary] = useState<BookingSummary | null>(null);
   const [bookingSummaryLoading, setBookingSummaryLoading] = useState(false);
   const [bookingLoadError, setBookingLoadError] = useState<string | null>(null);
@@ -333,10 +353,19 @@ export function HostDashboardEditor({
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    const normalized = String(initialTab || "dashboard").trim().toLowerCase();
-    const allowedTabs = new Set(["dashboard", "rooms", "bookings", "messages", "calendar", "earnings", "profile", "compliance", "support"]);
-    setActiveTab(allowedTabs.has(normalized) ? normalized : "dashboard");
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const tabFromUrl = searchParams.get("tab");
+    setActiveTab(normalizeDashboardTab(tabFromUrl || initialTab));
   }, [initialTab]);
+
+  const syncDashboardUrl = useCallback((nextTab: string, nextFamilyId?: string) => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", normalizeDashboardTab(nextTab));
+    url.searchParams.set("family", nextFamilyId ?? activeFamilyId);
+    window.history.replaceState({}, "", url.toString());
+  }, [activeFamilyId]);
 
   const needsDetailedBookingRows = useMemo(
     () => new Set(["bookings", "calendar", "earnings"]).has(activeTab),
@@ -353,6 +382,7 @@ export function HostDashboardEditor({
         if (!silent) {
           setBookingRowsLoading(true);
         }
+        setBookingRowsRequestedForFamilyId(familyIdToLoad);
         setBookingLoadError(null);
         const response = await fetch(`/api/host/dashboard-bookings?familyId=${encodeURIComponent(familyIdToLoad)}`);
         const payload = (await response.json()) as Array<Record<string, unknown>> | { error?: string };
@@ -373,9 +403,23 @@ export function HostDashboardEditor({
   );
 
   useEffect(() => {
-    if (!needsDetailedBookingRows || bookingRowsLoading || localBookingRows.length > 0) return;
+    if (
+      !needsDetailedBookingRows ||
+      bookingRowsLoading ||
+      localBookingRows.length > 0 ||
+      bookingRowsRequestedForFamilyId === activeFamilyId
+    ) {
+      return;
+    }
     void loadBookingRows(activeFamilyId);
-  }, [activeFamilyId, bookingRowsLoading, loadBookingRows, localBookingRows.length, needsDetailedBookingRows]);
+  }, [
+    activeFamilyId,
+    bookingRowsLoading,
+    bookingRowsRequestedForFamilyId,
+    loadBookingRows,
+    localBookingRows.length,
+    needsDetailedBookingRows,
+  ]);
 
   const loadBookingSummary = useCallback(
     async (familyIdToLoad: string, options?: { silent?: boolean }): Promise<void> => {
@@ -581,7 +625,9 @@ export function HostDashboardEditor({
   }, [mounted, activeFamilyId, localBookingRows, diagnostics]);
 
   const navigateTab = (tab: string) => {
-    setActiveTab(tab);
+    const normalizedTab = normalizeDashboardTab(tab);
+    setActiveTab(normalizedTab);
+    syncDashboardUrl(normalizedTab);
     if (tab !== "messages") setActiveConversationId(null);
     window.scrollTo(0, 0);
   };
@@ -603,15 +649,18 @@ export function HostDashboardEditor({
     }
 
     setActiveTab("messages");
+    syncDashboardUrl("messages");
     window.scrollTo(0, 0);
   };
 
   const handleListingSwitch = (nextId: string) => {
     setActiveFamilyId(nextId);
     setLocalBookingRows([]);
+    setBookingRowsRequestedForFamilyId(null);
     setBookingSummary(null);
     setBookingLoadError(null);
     document.cookie = `famlo_host_family_id=${nextId}; path=/; max-age=${60 * 60 * 24 * 30}`;
+    syncDashboardUrl(activeTab, nextId);
   };
 
   return (

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { canHostAccessConversation, resolveAuthorizedHostSession, resolveConversationAccess } from "@/lib/chat-access";
+import { canHostAccessConversation, resolveAuthorizedHostSession, resolveConversationAccess, resolveDirectHostConversationAccess } from "@/lib/chat-access";
 import { detectChatSafetyIssue, ensurePendingChatFlag, fetchChatKeywordsCached } from "@/lib/chat-safety";
 import { enqueueNotification } from "@/lib/booking-platform";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -117,11 +117,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "Host session required." }, { status: 401 });
     }
 
-    const access = await resolveConversationAccess(supabase, conversationRef, { createIfMissing: true });
-    if (!access || !canHostAccessConversation(access, hostSession)) {
+    const directAccess = await resolveDirectHostConversationAccess(supabase, conversationRef, hostSession);
+    if (!directAccess) {
       return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
     }
-    if (!access.chatUnlocked) {
+    if (!directAccess.chatUnlocked) {
       return NextResponse.json({ error: "Chat unlocks after the booking is confirmed." }, { status: 409 });
     }
 
@@ -132,10 +132,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     const { data: message, error: insertError } = await supabase
       .from("messages")
       .insert({
-        conversation_id: access.conversationId,
-        booking_id: access.legacyBookingId,
+        conversation_id: directAccess.conversationId,
+        booking_id: directAccess.bookingId,
         sender_id: hostSession.hostUserId,
-        receiver_id: access.guestId,
+        receiver_id: directAccess.guestId,
         sender_type: "host",
         text: trimmedText,
         created_at: now,
@@ -157,22 +157,22 @@ export async function POST(request: Request): Promise<NextResponse> {
         typing_user_id: null,
         typing_updated_at: now,
       } as never)
-      .eq("id", access.conversationId);
+      .eq("id", directAccess.conversationId);
 
     if (updateError) throw updateError;
 
-    if (access.guestId && message?.id) {
+    if (directAccess.guestId && message?.id) {
       void enqueueNotification(supabase, {
         eventType: "host_message_sent",
         channel: "email",
-        userId: access.guestId,
-        bookingId: access.legacyBookingId ?? access.bookingId ?? null,
+        userId: directAccess.guestId,
+        bookingId: directAccess.bookingId,
         dedupeKey: `host_message_sent:${message.id}`,
         subject: "New Famlo message from your host",
         payload: {
           message: summaryText,
           cta_label: "Open conversation",
-          cta_url: `/messages?conversation=${access.conversationId}`,
+          cta_url: `/messages?conversation=${directAccess.conversationId}`,
         },
       }).catch((notificationError) => console.error("Host message notification failed:", notificationError));
     }
@@ -185,7 +185,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           const keywords = await fetchChatKeywordsCached(supabase);
           const safety = detectChatSafetyIssue(trimmedText, keywords);
           if (safety.matched) {
-            await ensurePendingChatFlag(supabase, access.conversationId);
+            await ensurePendingChatFlag(supabase, directAccess.conversationId);
           }
         } catch (safetyError) {
           console.error("Host message safety check failed:", safetyError);

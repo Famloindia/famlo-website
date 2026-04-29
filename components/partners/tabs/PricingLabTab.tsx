@@ -6,10 +6,13 @@ import { useEffect, useState } from "react";
 export default function PricingLabTab({ hostId }: { hostId: string }) {
   const [suggestions, setSuggestions] = useState<Array<{ slotKey: string; currentPrice: number; suggestedPrice: number; confidence: string; reason: string }>>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     if (!hostId) return;
+    setLoading(true);
+    setError(null);
     fetch(`/api/host/pricing/suggestions?hostId=${encodeURIComponent(hostId)}`)
       .then(async (response) => {
         const payload = await response.json();
@@ -18,6 +21,9 @@ export default function PricingLabTab({ hostId }: { hostId: string }) {
       })
       .catch((loadError) => {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Failed to load pricing suggestions.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -32,7 +38,16 @@ export default function PricingLabTab({ hostId }: { hostId: string }) {
           Famlo looks at recent bookings and slot demand to suggest cleaner price moves you can review before changing rates.
         </p>
       </section>
+      {loading ? <div style={{ color: "#475569" }}>Loading pricing suggestions...</div> : null}
       {error ? <div style={{ color: "#b91c1c" }}>{error}</div> : null}
+      {!loading && !error && suggestions.length === 0 ? (
+        <section style={panelStyle}>
+          <strong style={{ fontSize: 18, color: "#0e2b57" }}>No suggestions yet</strong>
+          <p style={{ margin: 0, color: "#475569", lineHeight: 1.7 }}>
+            This section only works when your host profile has slot prices set and there is enough confirmed stay history to compare demand.
+          </p>
+        </section>
+      ) : null}
       {(suggestions ?? []).map((suggestion) => (
         <section key={suggestion.slotKey} style={panelStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>

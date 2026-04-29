@@ -329,6 +329,19 @@ export type AuthorizedHostSession = {
   authUserId: string | null;
 };
 
+export type DirectHostConversationAccess = {
+  conversationId: string;
+  bookingId: string | null;
+  guestId: string | null;
+  familyId: string | null;
+  hostId: string | null;
+  hostUserId: string | null;
+  bookingStatus: string | null;
+  paymentStatus: string | null;
+  kind: "booking" | "network";
+  chatUnlocked: boolean;
+};
+
 export async function resolveAuthorizedHostSession(
   supabase: SupabaseClient,
   request?: Request
@@ -366,6 +379,58 @@ export async function resolveAuthorizedHostSession(
     familyId: normalizeString(familyRecord?.id) ?? cookieFamilyId,
     hostUserId: normalizeString(hostRecord?.user_id) ?? normalizeString(familyRecord?.user_id),
     authUserId: authUser?.id ?? null,
+  };
+}
+
+export async function resolveDirectHostConversationAccess(
+  supabase: SupabaseClient,
+  conversationId: string,
+  hostSession: AuthorizedHostSession | null
+): Promise<DirectHostConversationAccess | null> {
+  if (!hostSession) return null;
+
+  const conversation = await fetchConversationRecord(supabase, conversationId);
+  if (!conversation) return null;
+
+  const hostMatches =
+    (hostSession.hostUserId && conversation.host_user_id && hostSession.hostUserId === conversation.host_user_id) ||
+    (hostSession.familyId && conversation.family_id && hostSession.familyId === conversation.family_id);
+
+  if (!hostMatches) {
+    return null;
+  }
+
+  const bookingRef = normalizeString(conversation.booking_id);
+  if (!bookingRef) {
+    return {
+      conversationId: conversation.id,
+      bookingId: null,
+      guestId: normalizeString(conversation.guest_id),
+      familyId: normalizeString(conversation.family_id),
+      hostId: normalizeString(conversation.host_id),
+      hostUserId: normalizeString(conversation.host_user_id),
+      bookingStatus: null,
+      paymentStatus: null,
+      kind: "network",
+      chatUnlocked: true,
+    };
+  }
+
+  const { bookingV2, legacyBooking } = await fetchBookingContext(supabase, [bookingRef]);
+  const bookingStatus = normalizeString(bookingV2?.status) ?? normalizeString(legacyBooking?.status);
+  const paymentStatus = normalizeString(bookingV2?.payment_status);
+
+  return {
+    conversationId: conversation.id,
+    bookingId: bookingRef,
+    guestId: normalizeString(conversation.guest_id) ?? normalizeString(bookingV2?.user_id) ?? normalizeString(legacyBooking?.user_id),
+    familyId: normalizeString(conversation.family_id),
+    hostId: normalizeString(conversation.host_id) ?? normalizeString(bookingV2?.host_id),
+    hostUserId: normalizeString(conversation.host_user_id),
+    bookingStatus,
+    paymentStatus,
+    kind: "booking",
+    chatUnlocked: isBookingChatUnlocked(bookingStatus),
   };
 }
 

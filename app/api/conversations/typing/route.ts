@@ -1,37 +1,49 @@
 import { NextResponse } from "next/server";
 
-import { canGuestAccessConversation, canHostAccessConversation, resolveAuthorizedHostSession, resolveConversationAccess } from "@/lib/chat-access";
+import { canGuestAccessConversation, canHostAccessConversation, resolveAuthorizedHostSession, resolveConversationAccess, resolveDirectHostConversationAccess } from "@/lib/chat-access";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const { conversationId, isTyping } = (await request.json()) as Record<string, unknown>;
+    const { conversationId, isTyping, userId } = (await request.json()) as Record<string, unknown>;
 
     if (typeof conversationId !== "string") {
       return NextResponse.json({ error: "conversationId is required." }, { status: 400 });
     }
 
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
     const hostSession = await resolveAuthorizedHostSession(supabase, request);
-    const access = await resolveConversationAccess(supabase, conversationId, { createIfMissing: false });
+    const requestedUserId = typeof userId === "string" ? userId : null;
+    const directHostAccess =
+      hostSession?.hostUserId && requestedUserId === hostSession.hostUserId
+        ? await resolveDirectHostConversationAccess(supabase, conversationId, hostSession)
+        : null;
 
-    if (!access) {
-      return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
+    let actorUserId = directHostAccess?.hostUserId ?? null;
+    let chatUnlocked = directHostAccess?.chatUnlocked ?? false;
+
+    if (!directHostAccess) {
+      const authUser = await resolveAuthenticatedUser(supabase, request);
+      const access = await resolveConversationAccess(supabase, conversationId, { createIfMissing: false });
+
+      if (!access) {
+        return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
+      }
+
+      actorUserId =
+        authUser && canGuestAccessConversation(access, authUser.id)
+          ? authUser.id
+          : hostSession && canHostAccessConversation(access, hostSession) && hostSession.hostUserId
+            ? hostSession.hostUserId
+            : null;
+      chatUnlocked = access.chatUnlocked;
     }
-
-    const actorUserId =
-      authUser && canGuestAccessConversation(access, authUser.id)
-        ? authUser.id
-        : hostSession && canHostAccessConversation(access, hostSession) && hostSession.hostUserId
-          ? hostSession.hostUserId
-          : null;
 
     if (!actorUserId) {
       return NextResponse.json({ error: "Conversation access denied." }, { status: 403 });
     }
-    if (!access.chatUnlocked) {
+    if (!chatUnlocked) {
       return NextResponse.json({ error: "Chat unlocks after the booking is confirmed." }, { status: 409 });
     }
 

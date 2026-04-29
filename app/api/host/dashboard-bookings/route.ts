@@ -4,8 +4,24 @@ import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown };
+  const code = typeof record.code === "string" ? record.code : "";
+  const message = typeof record.message === "string" ? record.message : "";
+  return (
+    (code === "42703" && message.includes(columnName)) ||
+    (message.includes(columnName) && (message.includes("schema cache") || message.includes("does not exist"))) ||
+    (columnName === "stay_unit_id" && message === "")
+  );
+}
+
 function mapV2BookingRow(row: Record<string, unknown>): Record<string, unknown> {
   const pricing = (row.pricing_snapshot as Record<string, unknown> | null) ?? {};
+  const stayUnitId =
+    (typeof row.stay_unit_id === "string" && row.stay_unit_id.trim().length > 0 ? row.stay_unit_id : null) ??
+    (typeof pricing.stay_unit_id === "string" && pricing.stay_unit_id.trim().length > 0 ? pricing.stay_unit_id : null);
+
   return {
     id: row.id,
     status: row.status,
@@ -24,7 +40,7 @@ function mapV2BookingRow(row: Record<string, unknown>): Record<string, unknown> 
     vibe: row.notes,
     family_id: row.host_id,
     conversation_id: row.conversation_id,
-    stay_unit_id: row.stay_unit_id ?? null,
+    stay_unit_id: stayUnitId,
     users: row.users,
   };
 }
@@ -71,26 +87,51 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json(summaryOnly ? { totalStays: 0, totalEarnings: 0 } : []);
     }
 
-    const { data: bookingRowsV2, error: bookingError } = await (
-      summaryOnly
-        ? supabase
-            .from("bookings_v2")
-            .select("status,payment_status,total_price,partner_payout_amount")
-            .in("host_id", hostIds)
-            .order("start_date", { ascending: false })
-            .limit(200)
-        : supabase
-            .from("bookings_v2")
-            .select([
-              "id", "status", "start_date", "end_date", "guests_count",
-              "total_price", "partner_payout_amount", "pricing_snapshot",
-              "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
-              "conversation_id", "stay_unit_id", "users!user_id(id,name,city,state,gender,about,date_of_birth,kyc_status)",
-            ].join(","))
-            .in("host_id", hostIds)
-            .order("start_date", { ascending: false })
-            .limit(200)
-    );
+    let bookingRowsV2: Array<Record<string, unknown>> | null = null;
+    let bookingError: unknown = null;
+
+    if (summaryOnly) {
+      const result = await supabase
+        .from("bookings_v2")
+        .select("status,payment_status,total_price,partner_payout_amount")
+        .in("host_id", hostIds)
+        .order("start_date", { ascending: false })
+        .limit(200);
+      bookingRowsV2 = (result.data ?? []) as unknown as Array<Record<string, unknown>>;
+      bookingError = result.error;
+    } else {
+      const detailedSelectWithStayUnit = [
+        "id", "status", "start_date", "end_date", "guests_count",
+        "total_price", "partner_payout_amount", "pricing_snapshot",
+        "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
+        "conversation_id", "stay_unit_id", "users!user_id(id,name,city,state,gender,about,date_of_birth,kyc_status)",
+      ].join(",");
+      const detailedSelectFallback = [
+        "id", "status", "start_date", "end_date", "guests_count",
+        "total_price", "partner_payout_amount", "pricing_snapshot",
+        "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
+        "conversation_id", "users!user_id(id,name,city,state,gender,about,date_of_birth,kyc_status)",
+      ].join(",");
+
+      let result = await supabase
+        .from("bookings_v2")
+        .select(detailedSelectWithStayUnit)
+        .in("host_id", hostIds)
+        .order("start_date", { ascending: false })
+        .limit(200);
+
+      if (result.error && isMissingColumnError(result.error, "stay_unit_id")) {
+        result = await supabase
+          .from("bookings_v2")
+          .select(detailedSelectFallback)
+          .in("host_id", hostIds)
+          .order("start_date", { ascending: false })
+          .limit(200);
+      }
+
+      bookingRowsV2 = (result.data ?? []) as unknown as Array<Record<string, unknown>>;
+      bookingError = result.error;
+    }
 
     if (bookingError) throw bookingError;
 
