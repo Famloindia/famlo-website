@@ -1,34 +1,21 @@
 import type { Metadata } from "next";
 import type { Viewport } from "next";
-import { Fraunces, Nunito, Playfair_Display, DM_Sans } from "next/font/google";
+import { Playfair_Display, DM_Sans } from "next/font/google";
 import "./globals.css";
-import "leaflet/dist/leaflet.css";
 import { UserProvider } from "@/components/auth/UserContext";
 import Shell from "@/components/layout/Shell";
-
-const nunito = Nunito({
-  subsets: ["latin"],
-  variable: "--font-ui",
-  weight: ["400", "500", "600", "700", "800"],
-  display: "swap",
-});
-
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["500", "600", "700"],
-  display: "swap",
-});
 
 const playfair = Playfair_Display({
   subsets: ["latin"],
   variable: "--font-playfair",
+  weight: ["600", "700"],
   display: "swap",
 });
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
   variable: "--font-dm-sans",
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -78,7 +65,13 @@ export default function RootLayout({
 }>): React.JSX.Element {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${nunito.variable} ${fraunces.variable} ${playfair.variable} ${dmSans.variable}`}>
+      <head>
+        <link rel="preconnect" href="https://pub-8e2cb60fdd79431fa41db047fa09d02b.r2.dev" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://pub-8e2cb60fdd79431fa41db047fa09d02b.r2.dev" />
+        <link rel="preconnect" href="https://images.unsplash.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://images.unsplash.com" />
+      </head>
+      <body className={`${playfair.variable} ${dmSans.variable}`}>
         <UserProvider>
           <Shell>
             {children}

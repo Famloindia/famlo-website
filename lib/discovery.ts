@@ -153,6 +153,47 @@ type StayUnitSummaryRow = {
   is_active?: boolean | null;
 };
 
+type PublicHomeCardViewRow = {
+  id: string;
+  user_id?: string | null;
+  legacy_family_id?: string | null;
+  slug?: string | null;
+  status?: string | null;
+  display_name?: string | null;
+  city?: string | null;
+  state?: string | null;
+  locality?: string | null;
+  about?: string | null;
+  family_story?: string | null;
+  house_rules?: unknown;
+  amenities?: unknown;
+  bathroom_type?: string | null;
+  max_guests?: number | null;
+  price_morning?: number | string | null;
+  price_afternoon?: number | string | null;
+  price_evening?: number | string | null;
+  price_fullday?: number | string | null;
+  is_accepting?: boolean | null;
+  active_quarters?: unknown;
+  blocked_dates?: unknown;
+  platform_commission_pct?: number | null;
+  booking_requires_host_approval?: boolean | null;
+  lat?: number | null;
+  lng?: number | null;
+  lat_exact?: number | null;
+  lng_exact?: number | null;
+  landmarks?: unknown;
+  neighborhood_desc?: string | null;
+  accessibility_desc?: string | null;
+  admin_notes?: string | null;
+  is_featured?: boolean | null;
+  host_photo_url?: string | null;
+  image_urls?: unknown;
+  room_image_urls?: unknown;
+  room_count?: number | null;
+  starting_room_price?: number | null;
+};
+
 function parseStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
 }
@@ -503,6 +544,86 @@ function mapHostV2(
   };
 }
 
+function mapPublicHomeCardViewRow(row: PublicHomeCardViewRow): HomeCardRecord {
+  const meta = parseHostListingMeta(typeof row.admin_notes === "string" ? row.admin_notes : null);
+  const hostName =
+    typeof row.display_name === "string"
+      ? row.display_name
+      : null;
+  const imageUrls = dedupeUrls([
+    ...parseStringArray(row.image_urls),
+    ...((meta.photoUrls ?? []).filter((item): item is string => typeof item === "string")),
+    typeof row.host_photo_url === "string" ? row.host_photo_url : null,
+    typeof meta.hostSelfieUrl === "string" ? meta.hostSelfieUrl : null,
+  ]);
+  const exactLat = typeof row.lat_exact === "number" ? row.lat_exact : typeof row.lat === "number" ? row.lat : null;
+  const exactLng = typeof row.lng_exact === "number" ? row.lng_exact : typeof row.lng === "number" ? row.lng : null;
+  const publicCoords = getPublicCoordinates({
+    lat: typeof row.lat === "number" ? row.lat : null,
+    lng: typeof row.lng === "number" ? row.lng : null,
+    latExact: exactLat,
+    lngExact: exactLng,
+    seed: String(row.id),
+  });
+
+  return {
+    id: String(row.id),
+    href: buildHomestayPath(
+      String(row.display_name ?? row.id),
+      typeof row.locality === "string" ? row.locality : null,
+      typeof row.city === "string" ? row.city : null,
+      String(row.id)
+    ),
+    hostId: typeof row.id === "string" ? row.id : null,
+    hostUserId: typeof row.user_id === "string" ? row.user_id : null,
+    legacyFamilyId: typeof row.legacy_family_id === "string" ? row.legacy_family_id : null,
+    name: typeof row.display_name === "string" ? row.display_name : "Famlo host",
+    hostName,
+    city: typeof row.city === "string" ? row.city : null,
+    state: typeof row.state === "string" ? row.state : null,
+    village: typeof row.locality === "string" ? row.locality : null,
+    description: typeof row.about === "string" ? row.about : null,
+    culturalOffering: typeof row.family_story === "string" ? row.family_story : null,
+    includedItems: meta.includedItems ?? [],
+    houseRules: parseStringArray(row.house_rules),
+    amenities: parseStringArray(row.amenities),
+    bathroomType: typeof row.bathroom_type === "string" ? row.bathroom_type : null,
+    listingTitle: meta.listingTitle ?? (typeof row.display_name === "string" ? row.display_name : null),
+    maxGuests: typeof row.max_guests === "number" ? row.max_guests : null,
+    roomCount: typeof row.room_count === "number" ? row.room_count : null,
+    startingRoomPrice: typeof row.starting_room_price === "number" ? row.starting_room_price : null,
+    priceMorning: toNumber(row.price_morning),
+    priceAfternoon: toNumber(row.price_afternoon),
+    priceEvening: toNumber(row.price_evening),
+    priceFullday: toNumber(row.price_fullday),
+    rating: null,
+    totalReviews: null,
+    superhost: Boolean(row.is_featured),
+    isActive: typeof row.status === "string" ? row.status === "published" : false,
+    isAccepting: Boolean(row.is_accepting),
+    googleMapsLink: null,
+    activeQuarters: parseStringArray(row.active_quarters),
+    blockedDates: parseStringArray(row.blocked_dates),
+    platformCommissionPct: typeof row.platform_commission_pct === "number" ? row.platform_commission_pct : 18,
+    bookingRequiresHostApproval: Boolean(row.booking_requires_host_approval),
+    lat: publicCoords?.lat ?? null,
+    lng: publicCoords?.lng ?? null,
+    latExact: exactLat,
+    lngExact: exactLng,
+    landmarks: Array.isArray(row.landmarks) ? row.landmarks : [],
+    neighborhoodDesc: typeof row.neighborhood_desc === "string" ? row.neighborhood_desc : null,
+    accessibilityDesc: typeof row.accessibility_desc === "string" ? row.accessibility_desc : null,
+    imageUrls,
+    roomImageUrls: parseStringArray(row.room_image_urls),
+    hostPhotoUrl: pickHostProfilePhoto([
+      typeof row.host_photo_url === "string" ? row.host_photo_url : null,
+      typeof meta.hostSelfieUrl === "string" ? meta.hostSelfieUrl : null,
+      ...imageUrls,
+    ]),
+    featured: Boolean(row.is_featured),
+  };
+}
+
 function mapHommieV2(
   row: Record<string, unknown>,
   mediaRow?: Record<string, unknown> | null
@@ -542,13 +663,12 @@ function mapHommieV2(
 async function loadHomepageDataV2(
   supabase: ReturnType<typeof createAdminSupabaseClient>
 ): Promise<HomepageData | null> {
-  const [hostsResult, hommiesResult, storiesResult, adsResult] = await Promise.all([
+  const [publicHomesResult, hommiesResult, storiesResult, adsResult] = await Promise.all([
     supabase
-      .from("hosts")
+      .from("public_home_cards_v1")
       .select("*")
       .eq("status", "published")
       .eq("is_accepting", true)
-      .order("published_at", { ascending: false })
       .limit(36),
     supabase
       .from("hommie_profiles_v2")
@@ -570,7 +690,7 @@ async function loadHomepageDataV2(
       .order("priority", { ascending: true })
   ]);
 
-  if (hostsResult.error || hommiesResult.error || adsResult.error) {
+  if (publicHomesResult.error || hommiesResult.error || adsResult.error) {
     return null;
   }
 
@@ -580,17 +700,12 @@ async function loadHomepageDataV2(
     });
   }
 
-  const hostRows = (hostsResult.data ?? []) as Record<string, unknown>[];
+  const publicHomeRows = (publicHomesResult.data ?? []) as PublicHomeCardViewRow[];
   const hommieRows = (hommiesResult.data ?? []) as Record<string, unknown>[];
   const storyRows = storiesResult.error ? [] : ((storiesResult.data ?? []) as Record<string, unknown>[]);
-
-  const hostIds = hostRows.map((row) => String(row.id));
   const hommieIds = hommieRows.map((row) => String(row.id));
 
-  const [hostMediaResult, hommieMediaResult, bannersResult] = await Promise.all([
-    hostIds.length > 0
-      ? supabase.from("host_media").select("host_id, media_url, is_primary").in("host_id", hostIds)
-      : Promise.resolve({ data: [] as HostMediaRow[], error: null }),
+  const [hommieMediaResult, bannersResult] = await Promise.all([
     hommieIds.length > 0
       ? supabase
           .from("hommie_media_v2")
@@ -604,14 +719,6 @@ async function loadHomepageDataV2(
       .order("sort_order", { ascending: true }),
   ]);
 
-  const hostMediaMap = new Map<string, HostMediaRow[]>();
-  for (const media of ((hostMediaResult.data ?? []) as HostMediaRow[])) {
-    if (!media.host_id) continue;
-    const current = hostMediaMap.get(media.host_id) ?? [];
-    current.push(media);
-    hostMediaMap.set(media.host_id, current);
-  }
-
   const hommieMediaMap = new Map<string, Record<string, unknown>[]>();
   for (const media of ((hommieMediaResult.data ?? []) as Array<Record<string, unknown>>)) {
     const hommieId = typeof media.hommie_id === "string" ? media.hommie_id : null;
@@ -621,23 +728,7 @@ async function loadHomepageDataV2(
     hommieMediaMap.set(hommieId, current);
   }
 
-  const hostRoomStatsResult = hostIds.length > 0
-    ? await supabase
-        .from("stay_units_v2")
-        .select("host_id, unit_key, name, unit_type, description, price_fullday, price_morning, price_afternoon, price_evening, is_active, photos")
-        .in("host_id", hostIds)
-    : { data: [] as StayUnitSummaryRow[], error: null };
-  const hostRoomStatsMap = buildStayUnitStatsMap((hostRoomStatsResult.data ?? []) as StayUnitSummaryRow[], "host_id");
-  const hostRoomImageMap = buildStayUnitImageMap((hostRoomStatsResult.data ?? []) as StayUnitSummaryRow[], "host_id");
-
-  const homes = hostRows.map((row) =>
-    mapHostV2(
-      row,
-      hostMediaMap.get(String(row.id)) ?? [],
-      hostRoomStatsMap.get(String(row.id)) ?? undefined,
-      hostRoomImageMap.get(String(row.id)) ?? []
-    )
-  );
+  const homes = publicHomeRows.map((row) => mapPublicHomeCardViewRow(row));
   const companions = hommieRows.map((row) => mapHommieV2(row, (hommieMediaMap.get(String(row.id)) ?? [])[0] ?? null));
   const stories = storyRows
     .sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
@@ -709,51 +800,18 @@ async function loadHomepageDataV2(
 async function loadHomesDiscoveryDataV2(
   supabase: ReturnType<typeof createAdminSupabaseClient>
 ): Promise<HomeCardRecord[] | null> {
-  const hostsResult = await supabase
-    .from("hosts")
+  const publicHomesResult = await supabase
+    .from("public_home_cards_v1")
     .select("*")
     .in("status", ["published", "draft", "paused"])
-    .order("published_at", { ascending: false })
     .limit(36);
 
-  if (hostsResult.error) {
+  if (publicHomesResult.error) {
     return null;
   }
 
-  const hostRows = (hostsResult.data ?? []) as Record<string, unknown>[];
-  const hostIds = hostRows.map((row) => String(row.id));
-
-  const [hostMediaResult, hostRoomStatsResult] = await Promise.all([
-    hostIds.length > 0
-      ? supabase.from("host_media").select("host_id, media_url, is_primary").in("host_id", hostIds)
-      : Promise.resolve({ data: [] as HostMediaRow[], error: null }),
-    hostIds.length > 0
-      ? supabase
-          .from("stay_units_v2")
-          .select("host_id, unit_key, name, unit_type, description, price_fullday, price_morning, price_afternoon, price_evening, is_active, photos")
-          .in("host_id", hostIds)
-      : Promise.resolve({ data: [] as StayUnitSummaryRow[], error: null }),
-  ]);
-
-  const hostMediaMap = new Map<string, HostMediaRow[]>();
-  for (const media of ((hostMediaResult.data ?? []) as HostMediaRow[])) {
-    if (!media.host_id) continue;
-    const current = hostMediaMap.get(media.host_id) ?? [];
-    current.push(media);
-    hostMediaMap.set(media.host_id, current);
-  }
-
-  const hostRoomStatsMap = buildStayUnitStatsMap((hostRoomStatsResult.data ?? []) as StayUnitSummaryRow[], "host_id");
-  const hostRoomImageMap = buildStayUnitImageMap((hostRoomStatsResult.data ?? []) as StayUnitSummaryRow[], "host_id");
-
-  return hostRows.map((row) =>
-    mapHostV2(
-      row,
-      hostMediaMap.get(String(row.id)) ?? [],
-      hostRoomStatsMap.get(String(row.id)) ?? undefined,
-      hostRoomImageMap.get(String(row.id)) ?? []
-    )
-  );
+  const publicHomeRows = (publicHomesResult.data ?? []) as PublicHomeCardViewRow[];
+  return publicHomeRows.map((row) => mapPublicHomeCardViewRow(row));
 }
 
 async function loadHomepageDataLegacy(

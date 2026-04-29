@@ -2,7 +2,7 @@ import { type SupabaseClient } from "@supabase/supabase-js";
 
 import { serializeHostListingMeta } from "@/lib/host-listing-meta";
 import { maskCoordinates } from "@/lib/location-utils";
-import { syncPrimaryStayUnitForFamily } from "@/lib/stay-units";
+import { ensureApprovedStayUnitsForFamily } from "@/lib/stay-units";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -564,7 +564,10 @@ export async function ensureHostProfileForFamily(
     }
 
     try {
-      await syncPrimaryStayUnitForFamily(supabase, { familyId: normalizedFamilyId, application: application ?? family });
+      await ensureApprovedStayUnitsForFamily(supabase, {
+        familyId: normalizedFamilyId,
+        application: application ?? family,
+      });
     } catch (roomSyncError) {
       console.error("[FamilyApproval] Stay unit sync failed:", roomSyncError);
     }

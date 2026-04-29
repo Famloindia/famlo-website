@@ -1,15 +1,51 @@
 "use client";
 
 // FILE: components/HomepageExperience.tsx
+import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import type { Home, Hommie } from "../lib/types";
 import { FilterChips } from "./FilterChips";
 import { HomeCard, type ListingItem, type ListingQuarter } from "./HomeCard";
 import { MapSection } from "./MapSection";
 import { QuarterModal } from "./QuarterModal";
 import { SearchBar } from "./SearchBar";
+
+interface Home {
+  id: string;
+  slug: string;
+  property_name: string;
+  city: string;
+  state: string;
+  locality: string | null;
+  description: string;
+  images: string[] | null;
+  latitude: number;
+  longitude: number;
+  google_maps_link: string | null;
+  is_approved: boolean;
+  food_details: string | null;
+  nightly_price: number;
+  blocked_dates?: string[] | null;
+}
+
+interface Hommie {
+  id: string;
+  slug: string;
+  property_name: string;
+  city: string;
+  state: string;
+  locality: string | null;
+  description: string;
+  images: string[] | null;
+  latitude: number;
+  longitude: number;
+  google_maps_link: string | null;
+  is_approved: boolean;
+  nightly_price: number;
+  blocked_dates?: string[] | null;
+  amenities?: string[] | null;
+}
 
 interface HomepageExperienceProps {
   homes: Home[];

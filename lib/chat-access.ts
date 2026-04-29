@@ -304,7 +304,7 @@ export async function resolveConversationAccess(
   const legacyBookingId = normalizeString(bookingV2?.legacy_booking_id) ?? normalizeString(legacyBooking?.id) ?? normalizeString(thread.legacyBookingId);
   const hostId = normalizeString(bookingV2?.host_id) ?? normalizeString(conversation?.host_id) ?? normalizeString(hostRecord?.id);
 
-  const result = {
+  const result: ConversationAccess = {
     thread,
     conversationId: thread.conversationId,
     bookingId,

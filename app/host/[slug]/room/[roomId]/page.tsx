@@ -199,15 +199,21 @@ export default async function HostRoomPage({
 
   const meta = parseHostListingMeta(asString(resolved.familyRow?.admin_notes) || null);
   const fallbackRoom = await loadStayUnitsForHome(supabase, buildFallbackHomeInput(resolved, meta));
-  const directRoom = await loadStayUnitById(supabase, roomId);
+  const matchedFallbackRoom =
+    fallbackRoom.find((unit) => unit.id === roomId || unit.unitKey === roomId) ?? null;
+  const directRoom = await loadStayUnitById(supabase, roomId, {
+    hostId: resolved.hostId,
+    legacyFamilyId: resolved.familyId,
+  });
   const hydratedDirectRoom = directRoom
-    ? fallbackRoom.find((unit) => unit.id === directRoom.id) ?? directRoom
+    ? fallbackRoom.find((unit) => unit.id === directRoom.id || unit.unitKey === directRoom.unitKey) ?? directRoom
     : null;
   const directRoomMatchesHost = !directRoom || !resolved.hostId || !directRoom.hostId || directRoom.hostId === resolved.hostId;
   const directRoomMatchesFamily = !directRoom || !resolved.familyId || !directRoom.legacyFamilyId || directRoom.legacyFamilyId === resolved.familyId;
   const resolvedRoom =
+    matchedFallbackRoom ??
     (directRoomMatchesHost && directRoomMatchesFamily ? hydratedDirectRoom : null) ??
-    fallbackRoom.find((unit) => unit.id === roomId) ??
+    fallbackRoom.find((unit) => unit.id === roomId || unit.unitKey === roomId) ??
     fallbackRoom.find((unit) => unit.isPrimary) ??
     fallbackRoom[0] ??
     {

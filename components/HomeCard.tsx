@@ -1,5 +1,7 @@
 "use client";
 
+import type { JSX } from "react";
+
 // FILE: components/HomeCard.tsx
 export type QuarterKey = "morning" | "afternoon" | "evening" | "fullday";
 

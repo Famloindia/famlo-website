@@ -1,16 +1,21 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, useCallback, useSyncExternalStore } from "react";
+import dynamic from "next/dynamic";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { AuthModal } from "@/components/auth/AuthModal";
 import { useUser } from "@/components/auth/UserContext";
 import { HomeCardRecord, CompanionRecord, AdRecord, StoryRecord } from "@/lib/discovery";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
 import { buildHomestayPath } from "@/lib/slug";
 import { readRecentViews, type RecentViewItem } from "@/lib/recent-views";
 import { HomePageCard } from "@/components/public/HomePageCard";
+
+const AuthModal = dynamic(
+  () => import("@/components/auth/AuthModal").then((module) => module.AuthModal),
+  { ssr: false }
+);
 interface Props {
   homes: HomeCardRecord[];
   mostInteractedHomes?: HomeCardRecord[];
@@ -596,16 +601,13 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
   const [locatingUser, setLocatingUser] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [bannerIdx, setBannerIdx] = useState(0);
+  const [mounted, setMounted] = useState(false);
+  const [showDeferredSections, setShowDeferredSections] = useState(false);
   const banners = heroBanners?.length ? heroBanners : DEFAULT_BANNERS;
   const safeBannerIdx = banners.length > 0 ? bannerIdx % banners.length : 0;
-  const isClient = useSyncExternalStore(
-    () => () => undefined,
-    () => true,
-    () => false
-  );
   const userId = user?.id;
   const recentViews = useMemo(() => {
-    if (!isClient) return [];
+    if (!mounted) return [];
     try {
       return readRecentViews(userId)
         .filter((rv: RecentViewItem) => rv.id && rv.title && rv.title !== "Famlo stay")
@@ -613,7 +615,20 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
     } catch {
       return [];
     }
-  }, [isClient, userId]);
+  }, [mounted, userId]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const revealDeferredSections = () => setShowDeferredSections(true);
+    const timeoutHandle = window.setTimeout(revealDeferredSections, 500);
+
+    return () => {
+      window.clearTimeout(timeoutHandle);
+    };
+  }, []);
 
   const requestCurrentLocation = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -814,16 +829,16 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
         marginTop: "0px", 
         overflow: "hidden", 
         background: "#0a1628" }}>
-        {banners.map((b, i) => (
+        {banners[safeBannerIdx] ? (
           <Image
-            key={i}
-            src={b.imageUrl}
-            alt={b.alt ?? ""}
+            key={`${safeBannerIdx}-${banners[safeBannerIdx]?.imageUrl ?? "banner"}`}
+            src={banners[safeBannerIdx]!.imageUrl}
+            alt={banners[safeBannerIdx]!.alt ?? ""}
             fill
-            priority={i === 0}
-            loading={i === 0 ? "eager" : "lazy"}
+            priority={safeBannerIdx === 0}
+            loading={safeBannerIdx === 0 ? "eager" : "lazy"}
+            fetchPriority={safeBannerIdx === 0 ? "high" : "auto"}
             sizes="100vw"
-            aria-hidden={i === safeBannerIdx ? undefined : true}
             style={{
               position: "absolute",
               inset: 0,
@@ -831,11 +846,9 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
               height: "100%",
               objectFit: "cover",
               objectPosition: "center",
-              opacity: i === safeBannerIdx ? 1 : 0,
-              transition: "opacity 1.2s ease",
             }}
           />
-        ))}
+        ) : null}
         {/* dark overlay */}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(10,22,40,0.44) 0%, rgba(10,22,40,0.65) 50%, rgba(10,22,40,0.92) 100%)" }} />
 
@@ -953,7 +966,7 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
       </section>
 
       {/* ══ RECENT VIEW — only shown if user has actual recent views ══ */}
-      {enrichedRecentViews.length > 0 && (
+      {showDeferredSections && enrichedRecentViews.length > 0 && (
         <Section title="Recent View">
           <div style={{ display: "flex", gap: "14px", overflowX: "auto", paddingBottom: "12px" }} className="hide-scroll">
             {enrichedRecentViews.map((rv) => (
@@ -1150,7 +1163,7 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
       )}
 
       {/* ══ MOST INTERACTED ══ */}
-      {mostInteractedHomes.length > 0 && (
+      {showDeferredSections && mostInteractedHomes.length > 0 && (
         <Section title="Most Interacted Hosts" seeAllHref="/homestays">
           <div style={{ display: "flex", gap: "14px", overflowX: "auto", paddingBottom: "10px" }} className="hide-scroll">
             {mostInteractedHomes.map((home) => (
@@ -1183,7 +1196,7 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
       </Section>
 
       {/* ══ HOMMIES ══ */}
-      {sortedCompanions.length > 0 && (
+      {showDeferredSections && sortedCompanions.length > 0 && (
         <Section title="Hommies near you" seeAllHref="/joinfamlo">
           <div style={{ display: "flex", gap: "14px", overflowX: "auto", paddingBottom: "8px" }} className="hide-scroll">
             {sortedCompanions.slice(0, 14).map(c => (
@@ -1195,7 +1208,7 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
       )}
 
       {/* ══ AD / DISCOVER MORE ══ */}
-      {visibleAds.length > 0 && (
+      {showDeferredSections && visibleAds.length > 0 && (
         <Section title="Discover More">
           <div className="discover-more-rail">
             {visibleAds.map(ad => {
@@ -1239,8 +1252,9 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
       )}
 
       {/* ══ STORIES — no stars, dark bg ══ */}
-      <Section title="Moments that stayed" dark>
-        {stories.length > 0 ? (
+      {showDeferredSections ? (
+        <Section title="Moments that stayed" dark>
+          {stories.length > 0 ? (
           <div style={{ display: "flex", gap: "16px", overflowX: "auto", paddingBottom: "10px" }} className="hide-scroll">
             {stories.slice(0, 10).map((s, i) => (
               <StoryCard key={s.id} story={s} index={i} />
@@ -1258,8 +1272,9 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
           }}>
             Real guest stories will appear here after completed stays and published experiences start flowing through the new story pipeline.
           </div>
-        )}
-      </Section>
+          )}
+        </Section>
+      ) : null}
 
       {/* ══ FOOTER ══ */}
       <footer style={{ background: "#1A56DB", marginTop: "auto", flexShrink: 0 }}>

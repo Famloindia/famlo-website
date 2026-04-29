@@ -858,7 +858,8 @@ export async function loadStayUnitsForHome(
 
 export async function loadStayUnitById(
   supabase: SupabaseClient,
-  roomId: string
+  roomId: string,
+  selector?: { hostId?: string | null; legacyFamilyId?: string | null }
 ): Promise<StayUnitRecord | null> {
   const nextRoomId = asNullableString(roomId);
   if (!nextRoomId) {
@@ -879,7 +880,16 @@ export async function loadStayUnitById(
     throw error;
   }
 
-  return data ? mapStayUnitRow(data as JsonRecord) : null;
+  if (data) {
+    return mapStayUnitRow(data as JsonRecord);
+  }
+
+  if (selector?.hostId || selector?.legacyFamilyId) {
+    const scopedRows = await fetchStayUnitRowsRaw(supabase, selector);
+    return scopedRows.find((row) => row.id === nextRoomId || row.unitKey === nextRoomId) ?? null;
+  }
+
+  return null;
 }
 
 export async function resolvePrimaryStayUnitId(
@@ -942,9 +952,14 @@ export async function syncPrimaryStayUnitForFamily(
         .map((row) => asNullableString(row.unit_key))
         .filter((value): value is string => Boolean(value))
     );
+    const keptRowIds = new Set(
+      syncedRooms
+        .map((row) => asNullableString((row as JsonRecord | null)?.id))
+        .filter((value): value is string => Boolean(value))
+    );
     const refreshedRows = await fetchStayUnitRowsRaw(supabase, { hostId, legacyFamilyId: familyId });
     const staleRowIds = refreshedRows
-      .filter((row) => !desiredUnitKeys.has(row.unitKey))
+      .filter((row) => !desiredUnitKeys.has(row.unitKey) || !keptRowIds.has(row.id))
       .map((row) => row.id)
       .filter((value) => value.length > 0);
 
@@ -1050,5 +1065,44 @@ export async function syncPrimaryStayUnitForFamily(
 
   return {
     stayUnitId: typeof data?.id === "string" ? data.id : null,
+  };
+}
+
+export async function ensureApprovedStayUnitsForFamily(
+  supabase: SupabaseClient,
+  input: {
+    familyId: string;
+    application?: JsonRecord;
+  }
+): Promise<{ stayUnitId: string | null; repairedFromApprovedSource: boolean; roomCount: number }> {
+  const familyId = asNullableString(input.familyId);
+  if (!familyId) {
+    return { stayUnitId: null, repairedFromApprovedSource: false, roomCount: 0 };
+  }
+
+  const approvedRoomSource = input.application ?? (await loadApprovedRoomSourceForFamily(supabase, familyId));
+  const approvedRoomCount = approvedRoomSource ? countRoomsFromSource(approvedRoomSource) : 0;
+  const syncResult = await syncPrimaryStayUnitForFamily(supabase, {
+    familyId,
+    application: approvedRoomSource ? normalizeApplicationSource(approvedRoomSource) : input.application,
+  });
+
+  if (approvedRoomCount === 0) {
+    return {
+      stayUnitId: syncResult.stayUnitId,
+      repairedFromApprovedSource: false,
+      roomCount: 0,
+    };
+  }
+
+  const repairedRows = await fetchStayUnitRowsRaw(supabase, { legacyFamilyId: familyId });
+  if (repairedRows.length === 0) {
+    throw new Error(`Approved rooms exist for family ${familyId}, but stay_units_v2 is still empty after sync.`);
+  }
+
+  return {
+    stayUnitId: syncResult.stayUnitId ?? repairedRows.find((row) => row.isPrimary)?.id ?? repairedRows[0]?.id ?? null,
+    repairedFromApprovedSource: repairedRows.length !== approvedRoomCount,
+    roomCount: repairedRows.length,
   };
 }

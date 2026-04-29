@@ -1,11 +1,16 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Suspense, useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useUser } from "@/components/auth/UserContext";
-import { AuthModal } from "@/components/auth/AuthModal";
 import { useSearchParams, usePathname } from "next/navigation";
+
+const AuthModal = dynamic(
+  () => import("@/components/auth/AuthModal").then((module) => module.AuthModal),
+  { ssr: false }
+);
 
 // Triggering hard reload for profile dropdown CSS updates
 export default function Header() {
@@ -137,13 +142,15 @@ function HeaderContent() {
         </nav>
       </div>
 
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => {
-          setAuthModalOpen(false);
-          if (urlWantsAuth) setDismissedAuthToken(authToken);
-        }}
-      />
+      {isAuthOpen ? (
+        <AuthModal
+          isOpen={isAuthOpen}
+          onClose={() => {
+            setAuthModalOpen(false);
+            if (urlWantsAuth) setDismissedAuthToken(authToken);
+          }}
+        />
+      ) : null}
 
       <style jsx>{`
         .header {

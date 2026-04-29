@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "db:v2:verify": "node scripts/verify-v2.mjs",
     "db:v2:backfill": "node scripts/backfill-v2.mjs",
-    "images:backfill": "node scripts/backfill-image-variants.mjs"
+    "images:backfill": "node scripts/backfill-image-variants.mjs",
+    "stay-units:scan": "node scripts/scan-stay-unit-integrity.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1024.0",
@@ -20,7 +21,8 @@
     "next": "16.2.2",
     "pg": "^8.20.0",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "react-leaflet": "^5.0.0"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.21",

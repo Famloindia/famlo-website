@@ -1,6 +1,7 @@
 "use client";
 
 // FILE: components/QuarterModal.tsx
+import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { ListingItem, ListingQuarter } from "./HomeCard";

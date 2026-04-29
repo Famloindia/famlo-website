@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { getPanLastFour, isValidPanNumber, maskPanNumber, normalizePanNumber } from "@/lib/host-tax";
 import { parseHostListingMeta, serializeHostListingMeta } from "@/lib/host-listing-meta";
 import { maskCoordinates } from "@/lib/location-utils";
-import { syncPrimaryStayUnitForFamily } from "@/lib/stay-units";
+import { ensureApprovedStayUnitsForFamily } from "@/lib/stay-units";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type JsonRecord = Record<string, unknown>;
@@ -448,7 +448,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     } else {
       console.info("[dashboard-save] host:update:success", { familyId: body.familyId });
       try {
-        await syncPrimaryStayUnitForFamily(supabase, { familyId: body.familyId });
+        await ensureApprovedStayUnitsForFamily(supabase, { familyId: body.familyId });
       } catch (roomSyncError) {
         console.warn("[dashboard-save] stay-unit sync warning:", roomSyncError);
         warnings.push(`Room sync skipped: ${roomSyncError instanceof Error ? roomSyncError.message : "unknown error"}`);

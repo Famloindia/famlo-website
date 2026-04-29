@@ -88,7 +88,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     if (bookingError) throw bookingError;
 
-    const bookingRows = ((bookingRowsV2 ?? []) as Array<Record<string, unknown>>)
+    const bookingRows = ((bookingRowsV2 ?? []) as unknown as Array<Record<string, unknown>>)
       .filter((row) => isHostBookingVisibleToPartner(row.status, row.payment_status))
       .map((row) => {
         const mapped = mapV2BookingRow(row);

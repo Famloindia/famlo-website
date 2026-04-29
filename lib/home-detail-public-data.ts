@@ -66,19 +66,37 @@ async function hydrateStayUnitsWithBlockedDates(stayUnits: StayUnitRecord[]): Pr
   const supabase = createAdminSupabaseClient();
   const from = getTodayInIndia();
   const to = addIndiaDays(from, 365);
+  const uniqueHostIds = Array.from(
+    new Set(
+      stayUnits
+        .map((unit) => unit.hostId)
+        .filter((hostId): hostId is string => typeof hostId === "string" && hostId.length > 0)
+    )
+  );
+
+  const hostEventsByHostId = new Map<string, Awaited<ReturnType<typeof loadCanonicalCalendar>>>();
+
+  await Promise.all(
+    uniqueHostIds.map(async (hostId) => {
+      try {
+        const hostEvents = await loadCanonicalCalendar(supabase, {
+          ownerType: "host",
+          ownerId: hostId,
+          from,
+          to,
+        });
+        hostEventsByHostId.set(hostId, hostEvents);
+      } catch (error) {
+        console.warn("[home-detail-public-data] failed to hydrate host calendar", hostId, error);
+        hostEventsByHostId.set(hostId, []);
+      }
+    })
+  );
 
   return Promise.all(
     stayUnits.map(async (unit) => {
       try {
-        const [hostEvents, stayUnitEvents] = await Promise.all([
-          unit.hostId
-            ? loadCanonicalCalendar(supabase, {
-                ownerType: "host",
-                ownerId: unit.hostId,
-                from,
-                to,
-              })
-            : Promise.resolve([]),
+        const [stayUnitEvents] = await Promise.all([
           loadCanonicalCalendar(supabase, {
             ownerType: "stay_unit",
             ownerId: unit.id,
@@ -86,6 +104,7 @@ async function hydrateStayUnitsWithBlockedDates(stayUnits: StayUnitRecord[]): Pr
             to,
           }),
         ]);
+        const hostEvents = unit.hostId ? (hostEventsByHostId.get(unit.hostId) ?? []) : [];
 
         return {
           ...unit,

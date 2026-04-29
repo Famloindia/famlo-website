@@ -5,6 +5,11 @@ import { HostDashboardEditor } from "@/components/partners/HostDashboardEditor";
 import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
+type JsonRecord = Record<string, unknown>;
+type FamilyDashboardRow = JsonRecord & {
+  latest_onboarding_payload: JsonRecord | null;
+};
+
 interface HostDashboardPageProps {
   searchParams?: Promise<{
     family?: string;
@@ -73,7 +78,7 @@ export default async function HostDashboardPage({
     ? await supabase.from("families").select("*").ilike("host_id", hostCode)
     : { data: [] };
 
-  const familyRowsBase = (allFamilies ?? []) as Array<Record<string, unknown>>;
+  const familyRowsBase = (allFamilies ?? []) as Array<JsonRecord>;
   const familyIds = familyRowsBase.map(f => String(f.id));
   const { data: latestDraftRows } =
     familyIds.length > 0
@@ -83,12 +88,12 @@ export default async function HostDashboardPage({
           .in("family_id", familyIds)
           .order("updated_at", { ascending: false })
       : { data: [] };
-  const latestDraftByFamilyId = new Map<string, Record<string, unknown>>();
-  for (const row of (latestDraftRows ?? []) as Array<Record<string, unknown>>) {
+  const latestDraftByFamilyId = new Map<string, JsonRecord>();
+  for (const row of (latestDraftRows ?? []) as Array<JsonRecord>) {
     const nextFamilyId = typeof row.family_id === "string" ? row.family_id : null;
     const payload =
       row.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
-        ? (row.payload as Record<string, unknown>)
+        ? (row.payload as JsonRecord)
         : null;
     if (!nextFamilyId || !payload || latestDraftByFamilyId.has(nextFamilyId)) {
       continue;
@@ -102,15 +107,15 @@ export default async function HostDashboardPage({
           .select("id,legacy_family_id")
           .in("legacy_family_id", familyIds)
       : { data: [] };
-  const familyRows = familyRowsBase.map((family) => ({
+  const familyRows: FamilyDashboardRow[] = familyRowsBase.map((family) => ({
     ...family,
     latest_onboarding_payload: latestDraftByFamilyId.get(String(family.id)) ?? null,
   }));
-  const hostIds = ((v2Hosts ?? []) as Array<Record<string, unknown>>)
+  const hostIds = ((v2Hosts ?? []) as Array<JsonRecord>)
     .map((row) => (typeof row.id === "string" ? row.id : null))
     .filter((value): value is string => Boolean(value));
   const familyIdByHostId = new Map(
-    ((v2Hosts ?? []) as unknown as Array<Record<string, unknown>>)
+    ((v2Hosts ?? []) as unknown as Array<JsonRecord>)
       .map((row) => {
         const hostId = typeof row.id === "string" ? row.id : null;
         const legacyFamilyId = typeof row.legacy_family_id === "string" ? row.legacy_family_id : null;
@@ -143,7 +148,7 @@ export default async function HostDashboardPage({
               .in("host_id", hostIds)
               .order("start_date", { ascending: false })
               .limit(200)
-          : { data: [] }).data ?? []) as unknown as Array<Record<string, unknown>>
+          : { data: [] }).data ?? []) as unknown as Array<JsonRecord>
       )
         .filter((row) => isHostBookingVisibleToPartner(row.status, row.payment_status))
         .map((row) => {
@@ -156,7 +161,7 @@ export default async function HostDashboardPage({
         })
     : [];
 
-  const currentFamily: Record<string, unknown> | undefined =
+  const currentFamily: FamilyDashboardRow | undefined =
     familyRows.find((f) => String(f.id) === familyId) || familyRows[0];
 
   return (

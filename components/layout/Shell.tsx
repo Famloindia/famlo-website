@@ -1,13 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Header from "./Header";
-import FamloLoadingScreen from "./FamloLoadingScreen";
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [showBootLoader, setShowBootLoader] = useState(true);
   
   // Hide global site header on internal portals and onboarding steps
   const shouldHideHeader = 
@@ -18,23 +15,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   const isJoinPage = pathname === "/joinfamlo";
 
-  useEffect(() => {
-    const hideLoader = () => {
-      window.requestAnimationFrame(() => setShowBootLoader(false));
-    };
-
-    if (document.readyState === "complete") {
-      hideLoader();
-      return;
-    }
-
-    window.addEventListener("load", hideLoader, { once: true });
-    return () => window.removeEventListener("load", hideLoader);
-  }, []);
-
   return (
     <>
-      {showBootLoader && <FamloLoadingScreen />}
       {!shouldHideHeader && <Header />}
       <main
         style={{

@@ -1,6 +1,8 @@
 "use client";
 
 // FILE: components/SearchBar.tsx
+import type { JSX } from "react";
+
 interface SearchBarProps {
   query: string;
   onQueryChange: (value: string) => void;

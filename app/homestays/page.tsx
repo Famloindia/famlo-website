@@ -76,96 +76,12 @@ function prettyDate(value: string): string {
   return parsed.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
-type StayUnitSummaryRow = {
-  host_id?: string | null;
-  legacy_family_id?: string | null;
-  unit_key?: string | null;
-  name?: string | null;
-  unit_type?: string | null;
-  price_fullday?: number | string | null;
-  price_morning?: number | string | null;
-  price_afternoon?: number | string | null;
-  price_evening?: number | string | null;
-  is_active?: boolean | null;
-  photos?: unknown;
-};
-
-function asStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    : [];
-}
-
-function toPrice(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-  }
-  return 0;
-}
-
-function dedupeStrings(values: Array<string | null | undefined>): string[] {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => (typeof value === "string" ? value.trim() : ""))
-        .filter((value) => value.length > 0)
-    )
-  );
-}
-
-function buildRoomStatsMap(
-  rows: StayUnitSummaryRow[],
-  key: "host_id" | "legacy_family_id"
-): Map<string, { roomCount: number; startingRoomPrice: number | null; roomImageUrls: string[] }> {
-  const stats = new Map<string, { roomCount: number; startingRoomPrice: number | null; roomImageUrls: string[] }>();
-  const seen = new Set<string>();
-
-  for (const row of rows) {
-    const lookup = typeof row[key] === "string" ? row[key] : null;
-    if (!lookup) continue;
-    if (row.is_active === false) continue;
-
-    const photos = asStringArray(row.photos);
-    const hasPrices =
-      toPrice(row.price_fullday) > 0 ||
-      toPrice(row.price_morning) > 0 ||
-      toPrice(row.price_afternoon) > 0 ||
-      toPrice(row.price_evening) > 0;
-    const hasCopy = typeof row.name === "string" && row.name.trim().length > 0;
-    const hasUnitType = typeof row.unit_type === "string" && row.unit_type.trim().length > 0;
-    if (!hasPrices && photos.length === 0 && !hasCopy && !hasUnitType) continue;
-
-    const rowKey = `${lookup}::${row.unit_key ?? row.name ?? JSON.stringify(row.photos ?? [])}`;
-    if (seen.has(rowKey)) continue;
-    seen.add(rowKey);
-
-    const current = stats.get(lookup) ?? { roomCount: 0, startingRoomPrice: null, roomImageUrls: [] };
-    current.roomCount += 1;
-
-    const candidate = [row.price_fullday, row.price_morning, row.price_afternoon, row.price_evening]
-      .map((price) => toPrice(price))
-      .filter((price) => price > 0)
-      .reduce((lowest, price) => Math.min(lowest, price), Number.POSITIVE_INFINITY);
-    if (Number.isFinite(candidate) && candidate > 0) {
-      current.startingRoomPrice = current.startingRoomPrice == null ? candidate : Math.min(current.startingRoomPrice, candidate);
-    }
-
-    current.roomImageUrls = dedupeStrings([...current.roomImageUrls, ...photos]);
-    stats.set(lookup, current);
-  }
-
-  return stats;
-}
-
 export const revalidate = 60;
 const MOST_INTERACTED_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOST_INTERACTED_HOSTS === "true";
 const NEAR_RADIUS_KM = 25;
 
 export default async function HomestaysPage({ searchParams }: HomestaysPageProps): Promise<React.JSX.Element> {
   const params = (await searchParams) ?? {};
-  const supabase = createAdminSupabaseClient();
   const rawQuery = asSearchString(params.q);
   const query = rawQuery.toLowerCase();
   const guests = asSearchGuests(params.guests);
@@ -177,60 +93,11 @@ export default async function HomestaysPage({ searchParams }: HomestaysPageProps
   const openOnly = asSearchString(params.open) === "1";
 
   const homes = await getHomesDiscoveryData();
-  const hostIds = [...new Set(homes.map((home) => home.hostId).filter((hostId): hostId is string => Boolean(hostId)))];
-  const legacyFamilyIds = [...new Set(homes.map((home) => home.legacyFamilyId).filter((familyId): familyId is string => Boolean(familyId)))];
-
-  const [hostStayUnitsResult, legacyStayUnitsResult] = await Promise.all([
-    hostIds.length > 0
-      ? supabase
-          .from("stay_units_v2")
-          .select("host_id, unit_key, name, unit_type, price_fullday, price_morning, price_afternoon, price_evening, is_active, photos")
-          .in("host_id", hostIds)
-      : Promise.resolve({ data: [] as StayUnitSummaryRow[], error: null }),
-    legacyFamilyIds.length > 0
-      ? supabase
-          .from("stay_units_v2")
-          .select("legacy_family_id, unit_key, name, unit_type, price_fullday, price_morning, price_afternoon, price_evening, is_active, photos")
-          .in("legacy_family_id", legacyFamilyIds)
-      : Promise.resolve({ data: [] as StayUnitSummaryRow[], error: null }),
-  ]);
-
-  const roomStatsMap = new Map<string, { roomCount: number; startingRoomPrice: number | null; roomImageUrls: string[] }>();
-  for (const [lookup, stats] of buildRoomStatsMap((hostStayUnitsResult.data ?? []) as StayUnitSummaryRow[], "host_id")) {
-    roomStatsMap.set(lookup, stats);
-  }
-  for (const [lookup, stats] of buildRoomStatsMap((legacyStayUnitsResult.data ?? []) as StayUnitSummaryRow[], "legacy_family_id")) {
-    const current = roomStatsMap.get(lookup);
-    if (!current) {
-      roomStatsMap.set(lookup, stats);
-      continue;
-    }
-
-    current.roomCount = Math.max(current.roomCount, stats.roomCount);
-    current.startingRoomPrice =
-      current.startingRoomPrice == null
-        ? stats.startingRoomPrice
-        : stats.startingRoomPrice == null
-          ? current.startingRoomPrice
-          : Math.min(current.startingRoomPrice, stats.startingRoomPrice);
-    current.roomImageUrls = dedupeStrings([...current.roomImageUrls, ...stats.roomImageUrls]);
-  }
-
-  const enrichedHomes = homes.map((home) => {
-    const roomStats = roomStatsMap.get(home.hostId ?? "") ?? roomStatsMap.get(home.legacyFamilyId ?? "");
-    if (!roomStats) return home;
-
-    return {
-      ...home,
-      roomCount: home.roomCount ?? roomStats.roomCount,
-      startingRoomPrice: home.startingRoomPrice ?? roomStats.startingRoomPrice,
-      roomImageUrls: home.roomImageUrls.length > 0 ? home.roomImageUrls : roomStats.roomImageUrls,
-    };
-  });
+  const enrichedHomes = homes;
 
   const interactionScores = MOST_INTERACTED_ENABLED
     ? await getMostInteractedHostScores(
-        supabase,
+        createAdminSupabaseClient(),
         [...new Set(enrichedHomes.map((home) => home.hostId ?? "").filter((hostId): hostId is string => Boolean(hostId)))]
       )
     : new Map();

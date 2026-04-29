@@ -592,7 +592,7 @@ export default async function HomeDetailPage({
                         return (
                           <Link
                             key={unit.id}
-                            href={`/host/${home.hostId}/room/${unit.id}`}
+                            href={`/host/${home.legacyFamilyId ?? home.hostId ?? home.id}/room/${unit.id}`}
                             style={{ textDecoration: "none", color: "inherit", display: "block" }}
                           >
                             <div className={styles.roomCard}>
@@ -962,7 +962,7 @@ export default async function HomeDetailPage({
               return (
                 <Link
                   key={unit.id}
-                  href={`/host/${home.hostId}/room/${unit.id}`}
+                  href={`/host/${home.legacyFamilyId ?? home.hostId ?? home.id}/room/${unit.id}`}
                   style={{ textDecoration: "none", color: "inherit", display: "block" }}
                 >
                   <div className={styles.roomCard}>
