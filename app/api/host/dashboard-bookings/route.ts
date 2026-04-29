@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
-import { resolveAuthorizedHostSession } from "@/lib/chat-access";
+import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 function mapV2BookingRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -32,21 +32,18 @@ function mapV2BookingRow(row: Record<string, unknown>): Record<string, unknown> 
 export async function GET(request: Request): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const requestedFamilyId = searchParams.get("familyId");
+  const summaryOnly = searchParams.get("summary") === "1";
 
   try {
     const supabase = createAdminSupabaseClient();
-    const hostSession = await resolveAuthorizedHostSession(supabase, request);
-    if (!hostSession?.familyId && !hostSession?.hostUserId) {
-      return NextResponse.json({ error: "Host session required." }, { status: 401 });
-    }
-
-    if (requestedFamilyId && hostSession.familyId && requestedFamilyId !== hostSession.familyId) {
-      return NextResponse.json({ error: "You can only load your own booking data." }, { status: 403 });
-    }
-
-    const familyId = requestedFamilyId ?? hostSession.familyId;
+    const familyId = requestedFamilyId?.trim() ?? "";
     if (!familyId) {
-      return NextResponse.json([]);
+      return NextResponse.json(summaryOnly ? { totalStays: 0, totalEarnings: 0 } : []);
+    }
+
+    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { familyId });
+    if (!hostAccess) {
+      return NextResponse.json({ error: "You do not have access to this host listing." }, { status: 403 });
     }
 
     const { data: v2Hosts, error: hostError } = await supabase
@@ -71,22 +68,55 @@ export async function GET(request: Request): Promise<NextResponse> {
     );
 
     if (hostIds.length === 0) {
-      return NextResponse.json([]);
+      return NextResponse.json(summaryOnly ? { totalStays: 0, totalEarnings: 0 } : []);
     }
 
-    const { data: bookingRowsV2, error: bookingError } = await supabase
-      .from("bookings_v2")
-      .select([
-        "id", "status", "start_date", "end_date", "guests_count",
-        "total_price", "partner_payout_amount", "pricing_snapshot",
-        "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
-        "conversation_id", "stay_unit_id", "users!user_id(id,name,city,state,gender,about,date_of_birth,kyc_status)",
-      ].join(","))
-      .in("host_id", hostIds)
-      .order("start_date", { ascending: false })
-      .limit(200);
+    const { data: bookingRowsV2, error: bookingError } = await (
+      summaryOnly
+        ? supabase
+            .from("bookings_v2")
+            .select("status,payment_status,total_price,partner_payout_amount")
+            .in("host_id", hostIds)
+            .order("start_date", { ascending: false })
+            .limit(200)
+        : supabase
+            .from("bookings_v2")
+            .select([
+              "id", "status", "start_date", "end_date", "guests_count",
+              "total_price", "partner_payout_amount", "pricing_snapshot",
+              "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
+              "conversation_id", "stay_unit_id", "users!user_id(id,name,city,state,gender,about,date_of_birth,kyc_status)",
+            ].join(","))
+            .in("host_id", hostIds)
+            .order("start_date", { ascending: false })
+            .limit(200)
+    );
 
     if (bookingError) throw bookingError;
+
+    if (summaryOnly) {
+      const revenueRows = ((bookingRowsV2 ?? []) as Array<Record<string, unknown>>).filter((row) => {
+        if (!isHostBookingVisibleToPartner(row.status, row.payment_status)) return false;
+        return (
+          row.payment_status === "paid" ||
+          row.status === "confirmed" ||
+          row.status === "completed" ||
+          row.status === "checked_in" ||
+          row.status === "accepted"
+        );
+      });
+
+      const totalEarnings = revenueRows.reduce((acc, row) => {
+        const payout = Number(row.partner_payout_amount);
+        if (payout > 0) return acc + payout;
+        return acc + (Number(row.total_price) || 0);
+      }, 0);
+
+      return NextResponse.json({
+        totalStays: revenueRows.length,
+        totalEarnings,
+      });
+    }
 
     const bookingRows = ((bookingRowsV2 ?? []) as unknown as Array<Record<string, unknown>>)
       .filter((row) => isHostBookingVisibleToPartner(row.status, row.payment_status))

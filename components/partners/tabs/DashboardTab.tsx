@@ -25,6 +25,7 @@ interface DashboardTabProps {
   saving: boolean;
   familyId: string;
   bookingRows: any[];
+  bookingDataLoading?: boolean;
   mounted?: boolean;
   viewMode?: "dashboard" | "rooms";
   homeLat?: number;
@@ -177,6 +178,7 @@ export default function DashboardTab({
   familyId,
   globalCommission,
   mounted,
+  bookingDataLoading = false,
   viewMode = "dashboard",
   homeLat,
   homeLng,
@@ -185,6 +187,7 @@ export default function DashboardTab({
   const liveStatus = schedule.isActive ? "Listing Active" : "Listing Inactive";
   const [roomDrafts, setRoomDrafts] = useState<RoomFormState[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
+  const [roomsLoadedOnce, setRoomsLoadedOnce] = useState(false);
   const [roomsSaving, setRoomsSaving] = useState(false);
   const [roomsMessage, setRoomsMessage] = useState<string | null>(null);
   const [customAmenityDrafts, setCustomAmenityDrafts] = useState<Record<string, string>>({});
@@ -287,6 +290,7 @@ export default function DashboardTab({
 
   useEffect(() => {
     let cancelled = false;
+    let deferredLoadHandle: number | null = null;
 
     async function loadRooms(): Promise<void> {
       setRoomsLoading(true);
@@ -301,11 +305,13 @@ export default function DashboardTab({
         if (!cancelled) {
           const nextRooms = Array.isArray(payload.stayUnits) ? payload.stayUnits.map(roomToForm) : [];
           setRoomDrafts(nextRooms.length > 0 ? nextRooms : [createBlankRoom(true)]);
+          setRoomsLoadedOnce(true);
         }
       } catch (error) {
         if (!cancelled) {
           setRoomDrafts((current) => (current.length > 0 ? current : [createBlankRoom(true)]));
           setRoomsMessage(error instanceof Error ? error.message : "Failed to load rooms.");
+          setRoomsLoadedOnce(true);
         }
       } finally {
         if (!cancelled) {
@@ -314,12 +320,21 @@ export default function DashboardTab({
       }
     }
 
-    void loadRooms();
+    if (isRoomsView) {
+      void loadRooms();
+    } else {
+      deferredLoadHandle = window.setTimeout(() => {
+        void loadRooms();
+      }, 250);
+    }
 
     return () => {
       cancelled = true;
+      if (deferredLoadHandle != null) {
+        window.clearTimeout(deferredLoadHandle);
+      }
     };
-  }, [familyId]);
+  }, [familyId, isRoomsView]);
 
   const persistVisibility = async (patch: Partial<typeof schedule>) => {
     const updatedSchedule = { ...schedule, ...patch };
@@ -1355,7 +1370,9 @@ export default function DashboardTab({
               </div>
               <div style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.8 }}>Total Portfolio Revenue</div>
            </div>
-           <div className={styles.cardValue} style={{ color: 'white' }}>₹{totalEarnings.toLocaleString('en-IN')}</div>
+           <div className={styles.cardValue} style={{ color: 'white' }}>
+             {bookingDataLoading ? "Loading..." : `₹${totalEarnings.toLocaleString('en-IN')}`}
+           </div>
         </div>
 
         <div className={styles.glassCard}>
@@ -1366,7 +1383,7 @@ export default function DashboardTab({
               <div style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(14,43,87,0.5)' }}>Total Guest Stays</div>
            </div>
            <div className={styles.cardValue}>
-             {totalStays} <span style={{ fontSize: '14px', opacity: 0.5 }}>Check-ins</span>
+             {bookingDataLoading ? "Loading..." : <>{totalStays} <span style={{ fontSize: '14px', opacity: 0.5 }}>Check-ins</span></>}
            </div>
         </div>
       </div>
@@ -1376,26 +1393,32 @@ export default function DashboardTab({
           <div>
             <div style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#1d4ed8' }}>Room capacity snapshot</div>
             <h3 style={{ margin: '6px 0 0', fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>
-              {roomStats.activeRooms > 0 ? `${roomStats.activeCapacity} guests can be hosted right now` : "No active room capacity yet"}
+              {!roomsLoadedOnce
+                ? "Loading room capacity..."
+                : roomStats.activeRooms > 0
+                  ? `${roomStats.activeCapacity} guests can be hosted right now`
+                  : "No active room capacity yet"}
             </h3>
             <p style={{ margin: '6px 0 0', fontSize: '13px', fontWeight: 600, color: 'rgba(15,23,42,0.68)' }}>
-              {roomStats.activeRooms > 0
-                ? `You have ${roomStats.activeRooms} active room${roomStats.activeRooms === 1 ? "" : "s"} and ${roomStats.totalCapacity} guests of total room inventory.`
-                : "Turn on at least one room to make the listing guest-ready."}
+              {!roomsLoadedOnce
+                ? "We are pulling your latest room setup now."
+                : roomStats.activeRooms > 0
+                  ? `You have ${roomStats.activeRooms} active room${roomStats.activeRooms === 1 ? "" : "s"} and ${roomStats.totalCapacity} guests of total room inventory.`
+                  : "Turn on at least one room to make the listing guest-ready."}
             </p>
           </div>
           <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: 'repeat(2, minmax(120px, 1fr))' }}>
             <div style={{ padding: '12px 14px', borderRadius: '14px', background: '#eff6ff', border: '1px solid rgba(59, 130, 246, 0.12)' }}>
               <div style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', color: '#1d4ed8' }}>Active rooms</div>
-              <div style={{ marginTop: '4px', fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>{roomStats.activeRooms}</div>
+              <div style={{ marginTop: '4px', fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>{roomsLoadedOnce ? roomStats.activeRooms : "..."}</div>
             </div>
             <div style={{ padding: '12px 14px', borderRadius: '14px', background: '#ecfdf5', border: '1px solid rgba(16, 185, 129, 0.12)' }}>
               <div style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', color: '#166534' }}>Active capacity</div>
-              <div style={{ marginTop: '4px', fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>{roomStats.activeCapacity}</div>
+              <div style={{ marginTop: '4px', fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>{roomsLoadedOnce ? roomStats.activeCapacity : "..."}</div>
             </div>
           </div>
         </div>
-        {roomStats.activeCapacity === 0 && roomStats.totalCapacity > 0 ? (
+        {roomsLoadedOnce && roomStats.activeCapacity === 0 && roomStats.totalCapacity > 0 ? (
           <div style={{ marginTop: '14px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               type="button"

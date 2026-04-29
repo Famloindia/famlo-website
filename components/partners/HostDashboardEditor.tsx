@@ -1,7 +1,7 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import styles from "./dashboard.module.css";
@@ -12,13 +12,14 @@ import {
   MessageCircle, ShieldCheck
 } from "lucide-react";
 import DashboardTab from "./tabs/DashboardTab";
-import BookingsTab from "./tabs/BookingsTab";
-import CalendarTab from "./tabs/CalendarTab";
-import EarningsTab from "./tabs/EarningsTab";
-import ProfileTab from "./tabs/ProfileTab";
-import MessagesTab from "./tabs/MessagesTab";
-import DocumentsTab from "./tabs/DocumentsTab";
-import SupportTab from "./tabs/SupportTab";
+
+const BookingsTab = dynamic(() => import("./tabs/BookingsTab"));
+const CalendarTab = dynamic(() => import("./tabs/CalendarTab"));
+const EarningsTab = dynamic(() => import("./tabs/EarningsTab"));
+const ProfileTab = dynamic(() => import("./tabs/ProfileTab"));
+const MessagesTab = dynamic(() => import("./tabs/MessagesTab"));
+const DocumentsTab = dynamic(() => import("./tabs/DocumentsTab"));
+const SupportTab = dynamic(() => import("./tabs/SupportTab"));
 
 interface HostDashboardEditorProps {
   family: Record<string, unknown>;
@@ -56,6 +57,11 @@ export interface PhotoItem {
   isPrimary: boolean;
   family_id?: string;
 }
+
+type BookingSummary = {
+  totalStays: number;
+  totalEarnings: number;
+};
 
 function getActiveRealtimeHostId(family: Record<string, unknown>): string | null {
   return typeof family.v2_host_id === "string" ? family.v2_host_id : null;
@@ -267,7 +273,6 @@ export function HostDashboardEditor({
   globalCommission,
   diagnostics,
 }: Readonly<HostDashboardEditorProps>): React.JSX.Element {
-  const router = useRouter();
   const supabaseClient = useMemo(() => createBrowserSupabaseClient(), []);
 
   const [activeFamilyId, setActiveFamilyId] = useState(String(initialFamily.id));
@@ -321,6 +326,9 @@ export function HostDashboardEditor({
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [localBookingRows, setLocalBookingRows] = useState<Array<Record<string, unknown>>>(bookingRows);
   const [bookingRowsLoading, setBookingRowsLoading] = useState(false);
+  const [bookingSummary, setBookingSummary] = useState<BookingSummary | null>(null);
+  const [bookingSummaryLoading, setBookingSummaryLoading] = useState(false);
+  const [bookingLoadError, setBookingLoadError] = useState<string | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -330,47 +338,85 @@ export function HostDashboardEditor({
     setActiveTab(allowedTabs.has(normalized) ? normalized : "dashboard");
   }, [initialTab]);
 
-  const needsBookingRows = useMemo(
-    () => new Set(["dashboard", "rooms", "bookings", "calendar", "earnings"]).has(activeTab),
+  const needsDetailedBookingRows = useMemo(
+    () => new Set(["bookings", "calendar", "earnings"]).has(activeTab),
     [activeTab]
   );
+  const needsBookingSummary = activeTab === "dashboard";
 
-  useEffect(() => {
-    if (!needsBookingRows || localBookingRows.length > 0 || bookingRowsLoading) return;
+  const loadBookingRows = useCallback(
+    async (familyIdToLoad: string, options?: { silent?: boolean }): Promise<void> => {
+      const silent = options?.silent ?? false;
+      if (!familyIdToLoad) return;
 
-    let cancelled = false;
-
-    void (async () => {
       try {
-        setBookingRowsLoading(true);
-        const response = await fetch(`/api/host/dashboard-bookings?familyId=${encodeURIComponent(activeFamilyId)}`);
+        if (!silent) {
+          setBookingRowsLoading(true);
+        }
+        setBookingLoadError(null);
+        const response = await fetch(`/api/host/dashboard-bookings?familyId=${encodeURIComponent(familyIdToLoad)}`);
         const payload = (await response.json()) as Array<Record<string, unknown>> | { error?: string };
         if (!response.ok || !Array.isArray(payload)) {
           throw new Error((!Array.isArray(payload) && payload.error) || "Failed to load booking rows.");
         }
-
-        if (!cancelled) {
-          setLocalBookingRows(payload);
-        }
+        setLocalBookingRows(payload);
       } catch (error) {
-        if (!cancelled) {
-          console.error("Failed to load booking rows:", error);
-        }
+        console.error("Failed to load booking rows:", error);
+        setBookingLoadError(error instanceof Error ? error.message : "Failed to load booking rows.");
       } finally {
-        if (!cancelled) {
+        if (!silent) {
           setBookingRowsLoading(false);
         }
       }
-    })();
+    },
+    []
+  );
 
-    return () => {
-      cancelled = true;
-    };
-  }, [activeFamilyId, bookingRowsLoading, localBookingRows.length, needsBookingRows]);
+  useEffect(() => {
+    if (!needsDetailedBookingRows || bookingRowsLoading || localBookingRows.length > 0) return;
+    void loadBookingRows(activeFamilyId);
+  }, [activeFamilyId, bookingRowsLoading, loadBookingRows, localBookingRows.length, needsDetailedBookingRows]);
+
+  const loadBookingSummary = useCallback(
+    async (familyIdToLoad: string, options?: { silent?: boolean }): Promise<void> => {
+      const silent = options?.silent ?? false;
+      if (!familyIdToLoad) return;
+
+      try {
+        if (!silent) {
+          setBookingSummaryLoading(true);
+        }
+        setBookingLoadError(null);
+        const response = await fetch(`/api/host/dashboard-bookings?familyId=${encodeURIComponent(familyIdToLoad)}&summary=1`);
+        const payload = (await response.json()) as BookingSummary | { error?: string };
+        if (
+          !response.ok ||
+          typeof (payload as BookingSummary).totalStays !== "number" ||
+          typeof (payload as BookingSummary).totalEarnings !== "number"
+        ) {
+          throw new Error(("error" in payload && payload.error) || "Failed to load dashboard summary.");
+        }
+        setBookingSummary(payload as BookingSummary);
+      } catch (error) {
+        console.error("Failed to load dashboard summary:", error);
+        setBookingLoadError(error instanceof Error ? error.message : "Failed to load dashboard summary.");
+      } finally {
+        if (!silent) {
+          setBookingSummaryLoading(false);
+        }
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!needsBookingSummary || bookingSummaryLoading || bookingSummary) return;
+    void loadBookingSummary(activeFamilyId);
+  }, [activeFamilyId, bookingSummary, bookingSummaryLoading, loadBookingSummary, needsBookingSummary]);
 
   useEffect(() => {
     const realtimeHostId = getActiveRealtimeHostId(activeFamily);
-    if (!realtimeHostId) return;
+    if (!realtimeHostId || (!needsDetailedBookingRows && !needsBookingSummary)) return;
     const client = supabaseClient;
     const channelName = `web_bookings_v2_${realtimeHostId}`;
 
@@ -385,7 +431,13 @@ export function HostDashboardEditor({
           filter: `host_id=eq.${realtimeHostId}`,
         },
         () => {
-          router.refresh();
+          if (needsDetailedBookingRows) {
+            void loadBookingRows(activeFamilyId, { silent: true });
+            return;
+          }
+          if (needsBookingSummary) {
+            void loadBookingSummary(activeFamilyId, { silent: true });
+          }
         }
       )
       .subscribe();
@@ -393,7 +445,7 @@ export function HostDashboardEditor({
     return () => {
       client.removeChannel(channel);
     };
-  }, [activeFamily, router, supabaseClient]);
+  }, [activeFamily, activeFamilyId, loadBookingRows, loadBookingSummary, needsBookingSummary, needsDetailedBookingRows, supabaseClient]);
 
   const complianceRef = useRef(compliance);
   useEffect(() => { complianceRef.current = compliance; }, [compliance]);
@@ -487,21 +539,24 @@ export function HostDashboardEditor({
     [localBookingRows]
   );
 
-  const totalStays = revenueBookings.length;
-
-  const totalEarnings = useMemo(
-    () =>
-      revenueBookings.reduce((acc, b) => {
+  const computedBookingSummary = useMemo(
+    () => ({
+      totalStays: revenueBookings.length,
+      totalEarnings: revenueBookings.reduce((acc, b) => {
         const payout = Number(b.family_payout);
         if (payout > 0) return acc + payout;
 
-        // Fallback: Apply commission to total_price if payout isn't record
         const gross = Number(b.total_price) || 0;
         const commissionFactor = (100 - globalCommission) / 100;
         return acc + (gross * commissionFactor);
       }, 0),
-    [revenueBookings, globalCommission]
+    }),
+    [globalCommission, revenueBookings]
   );
+
+  const totalStays = localBookingRows.length > 0 ? computedBookingSummary.totalStays : (bookingSummary?.totalStays ?? 0);
+  const totalEarnings = localBookingRows.length > 0 ? computedBookingSummary.totalEarnings : (bookingSummary?.totalEarnings ?? 0);
+  const dashboardMetricsLoading = needsBookingSummary && bookingSummaryLoading && localBookingRows.length === 0;
 
   const debugSnapshot = useMemo(() => {
     if (!mounted || process.env.NODE_ENV !== "development") return null;
@@ -553,9 +608,9 @@ export function HostDashboardEditor({
 
   const handleListingSwitch = (nextId: string) => {
     setActiveFamilyId(nextId);
-    if (bookingRows.length === 0) {
-      setLocalBookingRows([]);
-    }
+    setLocalBookingRows([]);
+    setBookingSummary(null);
+    setBookingLoadError(null);
     document.cookie = `famlo_host_family_id=${nextId}; path=/; max-age=${60 * 60 * 24 * 30}`;
   };
 
@@ -639,6 +694,16 @@ export function HostDashboardEditor({
           </div>
         )}
 
+        {bookingLoadError ? (
+          <div
+            className={`${styles.toast} ${styles.toastError}`}
+            style={{ marginBottom: "12px" }}
+          >
+            <AlertCircle size={16} />
+            <span>{bookingLoadError}</span>
+          </div>
+        ) : null}
+
         <div className={styles.contentArea}>
           {activeTab === "dashboard" && (
             <>
@@ -658,6 +723,7 @@ export function HostDashboardEditor({
                 schedule={schedule}
                 setSchedule={setSchedule}
                 mounted={mounted}
+                bookingDataLoading={dashboardMetricsLoading}
                 homeLat={parseCoordinate(activeFamily.lat)}
                 homeLng={parseCoordinate(activeFamily.lng)}
               />
@@ -683,6 +749,7 @@ export function HostDashboardEditor({
               setSchedule={setSchedule}
               mounted={mounted}
               viewMode="rooms"
+              bookingDataLoading={dashboardMetricsLoading}
               homeLat={parseCoordinate(activeFamily.lat)}
               homeLng={parseCoordinate(activeFamily.lng)}
             />
@@ -718,6 +785,7 @@ export function HostDashboardEditor({
               totalStays={totalStays}
               totalEarnings={totalEarnings}
               bookingRows={localBookingRows}
+              loading={bookingRowsLoading}
               hostId={String(activeFamily.v2_host_id ?? activeFamily.host_id ?? "")}
             />
           )}

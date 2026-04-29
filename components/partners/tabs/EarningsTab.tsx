@@ -6,6 +6,7 @@ export default function EarningsTab({
   totalStays,
   totalEarnings,
   bookingRows,
+  loading = false,
   globalCommission = 18,
   mounted = true,
   hostId,
@@ -55,7 +56,7 @@ export default function EarningsTab({
             REVENUE THIS MONTH
           </div>
           <div className={styles.cardValuePrimary} style={{ fontSize: "32px", color: "#0e2b57" }}>
-            ₹{monthlyEarnings.toLocaleString("en-IN")}
+            {loading ? "Loading..." : `₹${monthlyEarnings.toLocaleString("en-IN")}`}
           </div>
           <div style={{ fontSize: "11px", color: "#10b981", fontWeight: 800, marginTop: "8px" }}>
             SYNCED WITH MOBILE WALLET
@@ -69,7 +70,7 @@ export default function EarningsTab({
             TOTAL PORTFOLIO (ALL-TIME)
           </div>
           <div className={styles.cardValue} style={{ fontSize: "32px", color: "#0e2b57" }}>
-            ₹{totalEarnings.toLocaleString("en-IN")}
+            {loading ? "Loading..." : `₹${totalEarnings.toLocaleString("en-IN")}`}
           </div>
         </div>
       </div>
@@ -88,7 +89,7 @@ export default function EarningsTab({
                 Service Fee Scaling
               </h3>
               <h2 style={{ fontSize: "28px", fontWeight: 900, margin: 0, color: "white" }}>
-                Current Tier: {feePercentage}%
+                Current Tier: {loading ? "Loading..." : `${feePercentage}%`}
               </h2>
             </div>
             <div style={{ background: "rgba(255,255,255,0.1)", padding: "8px 16px", borderRadius: "12px", color: "white", fontSize: "12px", fontWeight: 800 }}>
@@ -104,7 +105,7 @@ export default function EarningsTab({
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: "12px", fontSize: "11px", fontWeight: 800, textTransform: "uppercase", color: "rgba(255,255,255,0.6)" }}>
-            <span>{totalStays} CHECKED STAYS</span>
+            <span>{loading ? "Loading..." : `${totalStays} CHECKED STAYS`}</span>
             <span>{nextThreshold} STAYS</span>
           </div>
 
