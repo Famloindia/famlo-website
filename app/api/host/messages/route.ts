@@ -51,7 +51,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "Host session required." }, { status: 401 });
     }
 
-    const access = await resolveConversationAccess(supabase, conversationRef, { createIfMissing: true });
+    const access = await resolveConversationAccess(supabase, conversationRef, { createIfMissing: false });
     if (!access || !canHostAccessConversation(access, hostSession)) {
       return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
     }
@@ -77,7 +77,8 @@ export async function GET(request: Request): Promise<NextResponse> {
     await supabase
       .from("conversations")
       .update({ host_unread: 0 } as never)
-      .eq("id", access.conversationId);
+      .eq("id", access.conversationId)
+      .gt("host_unread", 0);
 
     return NextResponse.json(
       [...(messages ?? [])]

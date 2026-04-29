@@ -3,6 +3,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useUser } from "@/components/auth/UserContext";
+import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 
 type ConversationRow = {
@@ -159,6 +160,8 @@ export function MessagesDashboard({
   const threadRef = useRef<HTMLDivElement | null>(null);
   const activeConversationLastMessageAtRef = useRef<string | null>(null);
   const authRefreshAttemptedRef = useRef(false);
+  const conversationCacheKey = user?.id ? `famlo:guest-conversations:${user.id}` : null;
+  const messageCacheKey = activeConversationId ? `famlo:guest-messages:${activeConversationId}` : null;
 
   const activeConversation = useMemo(
     () => conversations.find((item) => item.id === activeConversationId) ?? null,
@@ -223,6 +226,9 @@ export function MessagesDashboard({
         } else if (activeConversationId && !data.some((conversation) => conversation.id === activeConversationId)) {
           setActiveConversationId(data[0]?.id ?? null);
         }
+        if (conversationCacheKey) {
+          writeSessionCache(conversationCacheKey, data);
+        }
         return data;
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : "Failed to load conversations.");
@@ -231,7 +237,7 @@ export function MessagesDashboard({
         setLoadingConversations(false);
       }
     },
-    [activeConversationId, getAuthHeaders, user]
+    [activeConversationId, conversationCacheKey, getAuthHeaders, user]
   );
 
   const loadMessages = useCallback(async (conversationId: string, silent = false): Promise<void> => {
@@ -250,6 +256,10 @@ export function MessagesDashboard({
           text: message.text || message.content || "",
         }))
       );
+      writeSessionCache(`famlo:guest-messages:${conversationId}`, [...data].map((message) => ({
+        ...message,
+        text: message.text || message.content || "",
+      })));
       activeConversationLastMessageAtRef.current = data.length > 0 ? data[data.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current : activeConversationLastMessageAtRef.current;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to load messages.");
@@ -278,6 +288,20 @@ export function MessagesDashboard({
   );
 
   useEffect(() => {
+    if (!conversationCacheKey) return;
+    const cached = readSessionCache<ConversationRow[]>(conversationCacheKey);
+    if (!cached?.length) return;
+
+    startTransition(() => {
+      setConversations(cached);
+      setLoadingConversations(false);
+      if (!activeConversationId && cached[0]?.id) {
+        setActiveConversationId(cached[0].id);
+      }
+    });
+  }, [activeConversationId, conversationCacheKey]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadConversations(false);
     }, 0);
@@ -297,13 +321,25 @@ export function MessagesDashboard({
         window.clearTimeout(timer);
       };
     }
+
+    if (messageCacheKey) {
+      const cachedMessages = readSessionCache<MessageRow[]>(messageCacheKey);
+      if (cachedMessages?.length) {
+        startTransition(() => {
+          setMessages(cachedMessages);
+        });
+        activeConversationLastMessageAtRef.current =
+          cachedMessages[cachedMessages.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current;
+      }
+    }
+
     const timer = window.setTimeout(() => {
       void loadMessages(activeConversationId);
     }, 0);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [activeConversationId, loadMessages]);
+  }, [activeConversationId, loadMessages, messageCacheKey]);
 
   useEffect(() => {
     activeConversationLastMessageAtRef.current = activeConversation?.last_message_at ?? null;
@@ -361,15 +397,17 @@ export function MessagesDashboard({
 
     const interval = window.setInterval(() => {
       void (async () => {
+        if (document.visibilityState !== "visible") return;
         const latestLastMessageAt = await loadActiveConversationStatus(activeConversationId);
         if (latestLastMessageAt && latestLastMessageAt !== activeConversationLastMessageAtRef.current) {
           activeConversationLastMessageAtRef.current = latestLastMessageAt;
           await loadMessages(activeConversationId, true);
         }
       })();
-    }, 4000);
+    }, 10000);
 
     const onFocus = () => {
+      if (document.visibilityState !== "visible") return;
       void loadConversations(true);
       void (async () => {
         const latestLastMessageAt = await loadActiveConversationStatus(activeConversationId);
@@ -395,6 +433,16 @@ export function MessagesDashboard({
     if (!threadRef.current) return;
     threadRef.current.scrollTop = threadRef.current.scrollHeight;
   }, [messages]);
+
+  useEffect(() => {
+    if (!conversationCacheKey || conversations.length === 0) return;
+    writeSessionCache(conversationCacheKey, conversations);
+  }, [conversationCacheKey, conversations]);
+
+  useEffect(() => {
+    if (!messageCacheKey || messages.length === 0) return;
+    writeSessionCache(messageCacheKey, messages);
+  }, [messageCacheKey, messages]);
 
   useEffect(() => {
     return () => {

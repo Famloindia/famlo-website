@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, CheckCheck, Loader2, MessageSquare, Search, Send, User, MapPin, Trash2 } from "lucide-react";
 
+import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 
 import styles from "../dashboard.module.css";
@@ -66,6 +67,8 @@ export default function MessagesTab({
   const typingTimerRef = useRef<number | null>(null);
   const activeConversationLastMessageAtRef = useRef<string | null>(null);
   const authRefreshAttemptedRef = useRef(false);
+  const conversationCacheKey = familyId && hostUserId ? `famlo:host-conversations:${familyId}:${hostUserId}` : null;
+  const messageCacheKey = activeConvId ? `famlo:host-messages:${activeConvId}` : null;
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConvId) ?? null,
     [activeConvId, conversations]
@@ -107,6 +110,9 @@ export default function MessagesTab({
         throw new Error(typeof data?.error === "string" ? data.error : "Failed to load conversations.");
       }
       setConversations(data);
+      if (conversationCacheKey) {
+        writeSessionCache(conversationCacheKey, data);
+      }
       if ((!preserveSelection || !activeConvId) && data[0]?.id) {
         setActiveConvId(data[0].id);
       } else if (activeConvId && !data.some((conversation: any) => conversation.id === activeConvId)) {
@@ -119,7 +125,7 @@ export default function MessagesTab({
     } finally {
       setLoading(false);
     }
-  }, [activeConvId, familyId, getAuthHeaders, hostUserId]);
+  }, [activeConvId, conversationCacheKey, familyId, getAuthHeaders, hostUserId]);
 
   const fetchMessages = useCallback(async (conversationId: string, silent = false) => {
     if (!silent) setLoadingMessages(true);
@@ -131,7 +137,9 @@ export default function MessagesTab({
       if (!response.ok) {
         throw new Error(typeof data?.error === "string" ? data.error : "Failed to load messages.");
       }
-      setMessages((data ?? []).map((message: any) => ({ ...message, text: message.content || message.text || "" })));
+      const normalizedMessages = (data ?? []).map((message: any) => ({ ...message, text: message.content || message.text || "" }));
+      setMessages(normalizedMessages);
+      writeSessionCache(`famlo:host-messages:${conversationId}`, normalizedMessages);
       activeConversationLastMessageAtRef.current = data?.length > 0 ? data[data.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current : activeConversationLastMessageAtRef.current;
     } catch (err) {
       console.error("Fetch messages error:", err);
@@ -170,6 +178,18 @@ export default function MessagesTab({
   }, [activeConversation?.last_message_at, activeConvId]);
 
   useEffect(() => {
+    if (!conversationCacheKey) return;
+    const cached = readSessionCache<any[]>(conversationCacheKey);
+    if (!cached?.length) return;
+
+    setConversations(cached);
+    setLoading(false);
+    if (!initialConversationId && !activeConvId && cached[0]?.id) {
+      setActiveConvId(cached[0].id);
+    }
+  }, [activeConvId, conversationCacheKey, initialConversationId]);
+
+  useEffect(() => {
     if (!familyId || !hostUserId) {
       setLoading(false);
       return;
@@ -182,8 +202,16 @@ export default function MessagesTab({
       setMessages([]);
       return;
     }
+    if (messageCacheKey) {
+      const cachedMessages = readSessionCache<any[]>(messageCacheKey);
+      if (cachedMessages?.length) {
+        setMessages(cachedMessages);
+        activeConversationLastMessageAtRef.current =
+          cachedMessages[cachedMessages.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current;
+      }
+    }
     void fetchMessages(activeConvId);
-  }, [activeConvId, fetchMessages]);
+  }, [activeConvId, fetchMessages, messageCacheKey]);
 
   useEffect(() => {
     const channel = supabase
@@ -231,15 +259,17 @@ export default function MessagesTab({
 
     const interval = window.setInterval(() => {
       void (async () => {
+        if (document.visibilityState !== "visible") return;
         const latestLastMessageAt = await fetchActiveConversationStatus(activeConvId);
         if (latestLastMessageAt && latestLastMessageAt !== activeConversationLastMessageAtRef.current) {
           activeConversationLastMessageAtRef.current = latestLastMessageAt;
           await fetchMessages(activeConvId, true);
         }
       })();
-    }, 4000);
+    }, 10000);
 
     const onFocus = () => {
+      if (document.visibilityState !== "visible") return;
       void fetchConversations(true);
       void (async () => {
         const latestLastMessageAt = await fetchActiveConversationStatus(activeConvId);
@@ -265,6 +295,16 @@ export default function MessagesTab({
     if (!scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
+
+  useEffect(() => {
+    if (!conversationCacheKey || conversations.length === 0) return;
+    writeSessionCache(conversationCacheKey, conversations);
+  }, [conversationCacheKey, conversations]);
+
+  useEffect(() => {
+    if (!messageCacheKey || messages.length === 0) return;
+    writeSessionCache(messageCacheKey, messages);
+  }, [messageCacheKey, messages]);
 
   useEffect(() => {
     return () => {

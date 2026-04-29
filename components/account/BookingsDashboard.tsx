@@ -797,7 +797,7 @@ export function BookingsDashboard(): React.JSX.Element {
       setLoadingBookings(true);
       setError(null);
       try {
-        const response = await fetch("/api/user/bookings", {
+        const response = await fetch("/api/user/bookings?fast=1", {
           cache: "no-store",
           headers: await getAuthHeaders(),
         });

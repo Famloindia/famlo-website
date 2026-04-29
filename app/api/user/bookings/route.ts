@@ -173,6 +173,7 @@ async function resolveRelatedGuestUserIds(
 export async function GET(request: Request): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const requestedUserId = searchParams.get("userId");
+  const fastMode = searchParams.get("fast") === "1" || searchParams.get("fast") === "true";
   const headerUserId = request.headers.get("x-famlo-user-id")?.trim() || null;
   const bearerToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() || null;
 
@@ -205,14 +206,19 @@ export async function GET(request: Request): Promise<NextResponse> {
     console.info("[guest.bookings.route] load:before_compatibility", {
       url: request.url,
       userId: bookingsUserId,
+      fastMode,
     });
-    await markElapsedBookingsCompleted(supabase, bookingsUserId);
+    if (!fastMode) {
+      await markElapsedBookingsCompleted(supabase, bookingsUserId);
+    }
     let bookings = await loadGuestBookingsCompatibility(supabase, bookingsUserId);
 
     if ((bookings?.length ?? 0) === 0) {
       const relatedUserIds = await resolveRelatedGuestUserIds(supabase, effectiveAuthUser, bookingsUserId);
       for (const relatedUserId of relatedUserIds) {
-        await markElapsedBookingsCompleted(supabase, relatedUserId);
+        if (!fastMode) {
+          await markElapsedBookingsCompleted(supabase, relatedUserId);
+        }
         const relatedBookings = await loadGuestBookingsCompatibility(supabase, relatedUserId);
         if ((relatedBookings?.length ?? 0) > 0) {
           bookings = relatedBookings;

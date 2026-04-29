@@ -51,7 +51,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
 
-    const access = await resolveConversationAccess(supabase, conversationRef, { createIfMissing: true });
+    const access = await resolveConversationAccess(supabase, conversationRef, { createIfMissing: false });
     if (!access || !canGuestAccessConversation(access, authUser.id)) {
       return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
     }
@@ -74,7 +74,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     if (error) throw error;
 
-    await supabase
+    const unreadResetQuery = supabase
       .from("conversations")
       .update(
         access.guestId === authUser.id
@@ -82,6 +82,12 @@ export async function GET(request: Request): Promise<NextResponse> {
           : ({ host_unread: 0 } as never)
       )
       .eq("id", access.conversationId);
+
+    if (access.guestId === authUser.id) {
+      await unreadResetQuery.gt("guest_unread", 0);
+    } else {
+      await unreadResetQuery.gt("host_unread", 0);
+    }
 
     return NextResponse.json(
       [...(messages ?? [])]
