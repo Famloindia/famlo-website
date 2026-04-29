@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { canGuestAccessConversation, resolveConversationAccess } from "@/lib/chat-access";
-import { detectChatSafetyIssue, ensurePendingChatFlag, fetchChatKeywords } from "@/lib/chat-safety";
+import { detectChatSafetyIssue, ensurePendingChatFlag, fetchChatKeywordsCached } from "@/lib/chat-safety";
 import { enqueueNotification } from "@/lib/booking-platform";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -206,13 +206,23 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
-    const keywords = await fetchChatKeywords(supabase);
-    const safety = detectChatSafetyIssue(trimmedText, keywords);
-    if (safety.matched) {
-      await ensurePendingChatFlag(supabase, access.conversationId);
+    const responsePayload = normalizeMessageForClient(message as Record<string, unknown>);
+
+    if (trimmedText.length > 0) {
+      void (async () => {
+        try {
+          const keywords = await fetchChatKeywordsCached(supabase);
+          const safety = detectChatSafetyIssue(trimmedText, keywords);
+          if (safety.matched) {
+            await ensurePendingChatFlag(supabase, access.conversationId);
+          }
+        } catch (safetyError) {
+          console.error("Guest message safety check failed:", safetyError);
+        }
+      })();
     }
 
-    return NextResponse.json(normalizeMessageForClient(message as Record<string, unknown>));
+    return NextResponse.json(responsePayload);
   } catch (error) {
     console.error("Guest message send failed:", error);
     return NextResponse.json({ error: "Failed to send message." }, { status: 500 });

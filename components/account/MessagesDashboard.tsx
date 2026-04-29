@@ -65,6 +65,8 @@ type MessageRow = {
   pending?: boolean;
 };
 
+const INITIAL_MESSAGE_BATCH = 25;
+
 function extractMapsUrl(text: string | null | undefined): string | null {
   if (!text) return null;
   const match = text.match(/https?:\/\/maps\.google\.com\/\?q=[^\s]+/i);
@@ -150,6 +152,8 @@ export function MessagesDashboard({
   const [error, setError] = useState<string | null>(null);
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
@@ -240,31 +244,51 @@ export function MessagesDashboard({
     [activeConversationId, conversationCacheKey, getAuthHeaders, user]
   );
 
-  const loadMessages = useCallback(async (conversationId: string, silent = false): Promise<void> => {
-    if (!silent) setLoadingMessages(true);
+  const loadMessages = useCallback(async (
+    conversationId: string,
+    options?: { silent?: boolean; before?: string | null; appendOlder?: boolean; limit?: number }
+  ): Promise<void> => {
+    const silent = options?.silent ?? false;
+    const appendOlder = options?.appendOlder ?? false;
+    const before = options?.before ?? null;
+    const limit = options?.limit ?? INITIAL_MESSAGE_BATCH;
+    if (!silent && !appendOlder) setLoadingMessages(true);
+    if (appendOlder) setLoadingOlderMessages(true);
     try {
-      const response = await fetch(`/api/user/messages?conversationId=${conversationId}&limit=50`, {
+      const params = new URLSearchParams({
+        conversationId,
+        limit: String(limit),
+      });
+      if (before) {
+        params.set("before", before);
+      }
+      const response = await fetch(`/api/user/messages?${params.toString()}`, {
         headers: await getAuthHeaders(),
       });
       const data = (await response.json()) as MessageRow[] | { error?: string };
       if (!response.ok || !Array.isArray(data)) {
         throw new Error((!Array.isArray(data) && data.error) || "Failed to load messages.");
       }
-      setMessages(
-        [...data].map((message) => ({
-          ...message,
-          text: message.text || message.content || "",
-        }))
-      );
-      writeSessionCache(`famlo:guest-messages:${conversationId}`, [...data].map((message) => ({
+      const normalizedMessages = [...data].map((message) => ({
         ...message,
         text: message.text || message.content || "",
-      })));
-      activeConversationLastMessageAtRef.current = data.length > 0 ? data[data.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current : activeConversationLastMessageAtRef.current;
+      }));
+      setHasOlderMessages(data.length === limit);
+      setMessages((current) =>
+        appendOlder ? [...normalizedMessages, ...current] : normalizedMessages
+      );
+      if (!appendOlder) {
+        writeSessionCache(`famlo:guest-messages:${conversationId}`, normalizedMessages);
+      }
+      activeConversationLastMessageAtRef.current =
+        normalizedMessages.length > 0
+          ? normalizedMessages[normalizedMessages.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current
+          : activeConversationLastMessageAtRef.current;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to load messages.");
     } finally {
-      if (!silent) setLoadingMessages(false);
+      if (!silent && !appendOlder) setLoadingMessages(false);
+      if (appendOlder) setLoadingOlderMessages(false);
     }
   }, [getAuthHeaders]);
 
@@ -334,6 +358,7 @@ export function MessagesDashboard({
     }
 
     const timer = window.setTimeout(() => {
+      setHasOlderMessages(false);
       void loadMessages(activeConversationId);
     }, 0);
     return () => {
@@ -401,7 +426,7 @@ export function MessagesDashboard({
         const latestLastMessageAt = await loadActiveConversationStatus(activeConversationId);
         if (latestLastMessageAt && latestLastMessageAt !== activeConversationLastMessageAtRef.current) {
           activeConversationLastMessageAtRef.current = latestLastMessageAt;
-          await loadMessages(activeConversationId, true);
+          await loadMessages(activeConversationId, { silent: true });
         }
       })();
     }, 10000);
@@ -413,7 +438,7 @@ export function MessagesDashboard({
         const latestLastMessageAt = await loadActiveConversationStatus(activeConversationId);
         if (latestLastMessageAt && latestLastMessageAt !== activeConversationLastMessageAtRef.current) {
           activeConversationLastMessageAtRef.current = latestLastMessageAt;
-          await loadMessages(activeConversationId, true);
+          await loadMessages(activeConversationId, { silent: true });
         }
       })();
     };
@@ -501,6 +526,7 @@ export function MessagesDashboard({
     async (text: string, options?: SendMessageOptions): Promise<void> => {
       const trimmed = text.trim();
       if (!user || !activeConversationId || (!trimmed && options?.messageType !== "image") || sending) return;
+      const draftBeforeSend = draft;
 
       const optimisticId = `temp-${Date.now()}`;
       const previewText =
@@ -525,6 +551,9 @@ export function MessagesDashboard({
 
       setSending(true);
       setError(null);
+      if (options?.messageType !== "image") {
+        setDraft("");
+      }
       setMessages((current) => [...current, optimisticMessage]);
       applyConversationPreview(previewText);
 
@@ -555,24 +584,35 @@ export function MessagesDashboard({
         )
       );
       activeConversationLastMessageAtRef.current = typeof data.created_at === "string" ? data.created_at : activeConversationLastMessageAtRef.current;
-      if (options?.messageType !== "image") {
-        setDraft("");
-      }
         setIsTyping(false);
         if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
         void updateTypingState(false);
       } catch (nextError) {
         setMessages((current) => current.filter((message) => message.id !== optimisticId));
+        if (options?.messageType !== "image") {
+          setDraft(draftBeforeSend);
+        }
         setError(nextError instanceof Error ? nextError.message : "Failed to send message.");
       } finally {
         setSending(false);
       }
     },
-    [activeConversation, activeConversationId, applyConversationPreview, getAuthHeaders, sending, updateTypingState, user]
+    [activeConversation, activeConversationId, applyConversationPreview, draft, getAuthHeaders, sending, updateTypingState, user]
   );
 
   async function handleSend(): Promise<void> {
     await sendMessage(draft);
+  }
+
+  async function handleLoadOlderMessages(): Promise<void> {
+    if (!activeConversationId || loadingOlderMessages || loadingMessages || messages.length === 0) return;
+    const oldestMessageAt = messages[0]?.created_at ?? null;
+    if (!oldestMessageAt) return;
+    await loadMessages(activeConversationId, {
+      before: oldestMessageAt,
+      appendOlder: true,
+      limit: INITIAL_MESSAGE_BATCH,
+    });
   }
 
   async function handleImagePick(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -1147,6 +1187,27 @@ export function MessagesDashboard({
                 </div>
 
                 <div ref={threadRef} className="account-message-thread" style={{ display: "grid", gap: 12, alignContent: "start", minHeight: 320, maxHeight: 460, overflowY: "auto", paddingRight: 4 }}>
+                  {!loadingMessages && hasOlderMessages ? (
+                    <div style={{ display: "flex", justifyContent: "center" }}>
+                      <button
+                        type="button"
+                        onClick={() => void handleLoadOlderMessages()}
+                        disabled={loadingOlderMessages}
+                        style={{
+                          border: "1px solid #dbeafe",
+                          background: "#eff6ff",
+                          color: "#1d4ed8",
+                          borderRadius: 999,
+                          padding: "8px 14px",
+                          fontSize: 12,
+                          fontWeight: 800,
+                          cursor: loadingOlderMessages ? "wait" : "pointer",
+                        }}
+                      >
+                        {loadingOlderMessages ? "Loading older..." : "Load older messages"}
+                      </button>
+                    </div>
+                  ) : null}
                   {loadingMessages ? <p>Loading messages...</p> : null}
                   {!loadingMessages && messages.length === 0 ? <p>No messages yet.</p> : null}
                   {messages.map((message) => {

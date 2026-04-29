@@ -268,6 +268,7 @@ export function HostDashboardEditor({
   diagnostics,
 }: Readonly<HostDashboardEditorProps>): React.JSX.Element {
   const router = useRouter();
+  const supabaseClient = useMemo(() => createBrowserSupabaseClient(), []);
 
   const [activeFamilyId, setActiveFamilyId] = useState(String(initialFamily.id));
 
@@ -318,6 +319,8 @@ export function HostDashboardEditor({
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [localBookingRows, setLocalBookingRows] = useState<Array<Record<string, unknown>>>(bookingRows);
+  const [bookingRowsLoading, setBookingRowsLoading] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -327,8 +330,43 @@ export function HostDashboardEditor({
     setActiveTab(allowedTabs.has(normalized) ? normalized : "dashboard");
   }, [initialTab]);
 
-  // ✅ Shared client — only initialized once per component lifecycle
-  const supabaseClient = useMemo(() => createBrowserSupabaseClient(), []);
+  const needsBookingRows = useMemo(
+    () => new Set(["dashboard", "rooms", "bookings", "calendar", "earnings"]).has(activeTab),
+    [activeTab]
+  );
+
+  useEffect(() => {
+    if (!needsBookingRows || localBookingRows.length > 0 || bookingRowsLoading) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        setBookingRowsLoading(true);
+        const response = await fetch(`/api/host/dashboard-bookings?familyId=${encodeURIComponent(activeFamilyId)}`);
+        const payload = (await response.json()) as Array<Record<string, unknown>> | { error?: string };
+        if (!response.ok || !Array.isArray(payload)) {
+          throw new Error((!Array.isArray(payload) && payload.error) || "Failed to load booking rows.");
+        }
+
+        if (!cancelled) {
+          setLocalBookingRows(payload);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to load booking rows:", error);
+        }
+      } finally {
+        if (!cancelled) {
+          setBookingRowsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFamilyId, bookingRowsLoading, localBookingRows.length, needsBookingRows]);
 
   useEffect(() => {
     const realtimeHostId = getActiveRealtimeHostId(activeFamily);
@@ -438,7 +476,7 @@ export function HostDashboardEditor({
 
   const revenueBookings = useMemo(
     () =>
-      bookingRows.filter(
+      localBookingRows.filter(
         (b) =>
           b.payment_status === "paid" ||
           b.status === "confirmed" ||
@@ -446,7 +484,7 @@ export function HostDashboardEditor({
           b.status === "checked_in" ||
           b.status === "accepted"
       ),
-    [bookingRows]
+    [localBookingRows]
   );
 
   const totalStays = revenueBookings.length;
@@ -467,7 +505,7 @@ export function HostDashboardEditor({
 
   const debugSnapshot = useMemo(() => {
     if (!mounted || process.env.NODE_ENV !== "development") return null;
-    const first = bookingRows[0];
+    const first = localBookingRows[0];
     return {
       activeFamilyId,
       hostCode: diagnostics?.hostCode,
@@ -485,7 +523,7 @@ export function HostDashboardEditor({
           }
         : "No bookings found",
     };
-  }, [mounted, activeFamilyId, bookingRows, diagnostics]);
+  }, [mounted, activeFamilyId, localBookingRows, diagnostics]);
 
   const navigateTab = (tab: string) => {
     setActiveTab(tab);
@@ -515,6 +553,9 @@ export function HostDashboardEditor({
 
   const handleListingSwitch = (nextId: string) => {
     setActiveFamilyId(nextId);
+    if (bookingRows.length === 0) {
+      setLocalBookingRows([]);
+    }
     document.cookie = `famlo_host_family_id=${nextId}; path=/; max-age=${60 * 60 * 24 * 30}`;
   };
 
@@ -604,7 +645,7 @@ export function HostDashboardEditor({
               {/* ✅ activeFamily removed — not in DashboardTab props */}
               <DashboardTab
                 profile={profile}
-                bookingRows={bookingRows}
+                bookingRows={localBookingRows}
                 totalStays={totalStays}
                 totalEarnings={totalEarnings}
                 globalCommission={globalCommission}
@@ -628,7 +669,7 @@ export function HostDashboardEditor({
           {activeTab === "rooms" && (
             <DashboardTab
               profile={profile}
-              bookingRows={bookingRows}
+              bookingRows={localBookingRows}
               totalStays={totalStays}
               totalEarnings={totalEarnings}
               globalCommission={globalCommission}
@@ -648,7 +689,7 @@ export function HostDashboardEditor({
           )}
 
           {activeTab === "bookings" && (
-            <BookingsTab bookingRows={bookingRows} onOpenChat={handleOpenChat} />
+            <BookingsTab bookingRows={localBookingRows} onOpenChat={handleOpenChat} loading={bookingRowsLoading} />
           )}
 
           {activeTab === "messages" && (
@@ -665,7 +706,7 @@ export function HostDashboardEditor({
             <CalendarTab
               schedule={schedule}
               setSchedule={setSchedule}
-              bookingRows={bookingRows}
+              bookingRows={localBookingRows}
               onSave={handleSave}
               saving={saving}
               hostId={String(activeFamily.v2_host_id ?? activeFamily.host_id ?? "")}
@@ -676,7 +717,7 @@ export function HostDashboardEditor({
             <EarningsTab
               totalStays={totalStays}
               totalEarnings={totalEarnings}
-              bookingRows={bookingRows}
+              bookingRows={localBookingRows}
               hostId={String(activeFamily.v2_host_id ?? activeFamily.host_id ?? "")}
             />
           )}

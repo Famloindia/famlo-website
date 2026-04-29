@@ -61,6 +61,33 @@ export async function fetchChatKeywords(supabase: SupabaseClient): Promise<strin
     .filter(Boolean);
 }
 
+let cachedKeywords: string[] | null = null;
+let cachedKeywordsLoadedAt = 0;
+let cachedKeywordsPromise: Promise<string[]> | null = null;
+
+const CHAT_KEYWORDS_TTL_MS = 5 * 60 * 1000;
+
+export async function fetchChatKeywordsCached(supabase: SupabaseClient): Promise<string[]> {
+  const now = Date.now();
+  if (cachedKeywords && now - cachedKeywordsLoadedAt < CHAT_KEYWORDS_TTL_MS) {
+    return cachedKeywords;
+  }
+
+  if (!cachedKeywordsPromise) {
+    cachedKeywordsPromise = fetchChatKeywords(supabase)
+      .then((keywords) => {
+        cachedKeywords = keywords;
+        cachedKeywordsLoadedAt = Date.now();
+        return keywords;
+      })
+      .finally(() => {
+        cachedKeywordsPromise = null;
+      });
+  }
+
+  return cachedKeywordsPromise;
+}
+
 export async function ensurePendingChatFlag(
   supabase: SupabaseClient,
   conversationId: string
@@ -98,4 +125,3 @@ export async function ensurePendingChatFlag(
     console.error("Failed to create chat flag:", error);
   }
 }
-

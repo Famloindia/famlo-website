@@ -8,6 +8,8 @@ import { createBrowserSupabaseClient } from "@/lib/supabase";
 
 import styles from "../dashboard.module.css";
 
+const INITIAL_MESSAGE_BATCH = 25;
+
 function extractMapsUrl(text: string | null | undefined): string | null {
   if (!text) return null;
   const match = text.match(/https?:\/\/maps\.google\.com\/\?q=[^\s]+/i);
@@ -57,6 +59,8 @@ export default function MessagesTab({
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -127,10 +131,25 @@ export default function MessagesTab({
     }
   }, [activeConvId, conversationCacheKey, familyId, getAuthHeaders, hostUserId]);
 
-  const fetchMessages = useCallback(async (conversationId: string, silent = false) => {
-    if (!silent) setLoadingMessages(true);
+  const fetchMessages = useCallback(async (
+    conversationId: string,
+    options?: { silent?: boolean; before?: string | null; appendOlder?: boolean; limit?: number }
+  ) => {
+    const silent = options?.silent ?? false;
+    const appendOlder = options?.appendOlder ?? false;
+    const before = options?.before ?? null;
+    const limit = options?.limit ?? INITIAL_MESSAGE_BATCH;
+    if (!silent && !appendOlder) setLoadingMessages(true);
+    if (appendOlder) setLoadingOlderMessages(true);
     try {
-      const response = await fetch(`/api/host/messages?conversationId=${conversationId}&limit=50`, {
+      const params = new URLSearchParams({
+        conversationId,
+        limit: String(limit),
+      });
+      if (before) {
+        params.set("before", before);
+      }
+      const response = await fetch(`/api/host/messages?${params.toString()}`, {
         headers: await getAuthHeaders(),
       });
       const data = await response.json();
@@ -138,13 +157,18 @@ export default function MessagesTab({
         throw new Error(typeof data?.error === "string" ? data.error : "Failed to load messages.");
       }
       const normalizedMessages = (data ?? []).map((message: any) => ({ ...message, text: message.content || message.text || "" }));
-      setMessages(normalizedMessages);
-      writeSessionCache(`famlo:host-messages:${conversationId}`, normalizedMessages);
-      activeConversationLastMessageAtRef.current = data?.length > 0 ? data[data.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current : activeConversationLastMessageAtRef.current;
+      setHasOlderMessages((data?.length ?? 0) === limit);
+      setMessages((current) => (appendOlder ? [...normalizedMessages, ...current] : normalizedMessages));
+      if (!appendOlder) {
+        writeSessionCache(`famlo:host-messages:${conversationId}`, normalizedMessages);
+      }
+      activeConversationLastMessageAtRef.current =
+        data?.length > 0 ? data[data.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current : activeConversationLastMessageAtRef.current;
     } catch (err) {
       console.error("Fetch messages error:", err);
     } finally {
-      if (!silent) setLoadingMessages(false);
+      if (!silent && !appendOlder) setLoadingMessages(false);
+      if (appendOlder) setLoadingOlderMessages(false);
     }
   }, [getAuthHeaders]);
 
@@ -210,6 +234,7 @@ export default function MessagesTab({
           cachedMessages[cachedMessages.length - 1]?.created_at ?? activeConversationLastMessageAtRef.current;
       }
     }
+    setHasOlderMessages(false);
     void fetchMessages(activeConvId);
   }, [activeConvId, fetchMessages, messageCacheKey]);
 
@@ -263,7 +288,7 @@ export default function MessagesTab({
         const latestLastMessageAt = await fetchActiveConversationStatus(activeConvId);
         if (latestLastMessageAt && latestLastMessageAt !== activeConversationLastMessageAtRef.current) {
           activeConversationLastMessageAtRef.current = latestLastMessageAt;
-          await fetchMessages(activeConvId, true);
+          await fetchMessages(activeConvId, { silent: true });
         }
       })();
     }, 10000);
@@ -275,7 +300,7 @@ export default function MessagesTab({
         const latestLastMessageAt = await fetchActiveConversationStatus(activeConvId);
         if (latestLastMessageAt && latestLastMessageAt !== activeConversationLastMessageAtRef.current) {
           activeConversationLastMessageAtRef.current = latestLastMessageAt;
-          await fetchMessages(activeConvId, true);
+          await fetchMessages(activeConvId, { silent: true });
         }
       })();
     };
@@ -333,6 +358,7 @@ export default function MessagesTab({
     event?.preventDefault();
     const textValue = options?.text ?? newMessage;
     if (!activeConvId || !textValue.trim() || sending) return;
+    const draftBeforeSend = newMessage;
 
     const activeConversation = conversations.find((conversation) => conversation.id === activeConvId);
     const trimmed = textValue.trim();
@@ -340,6 +366,9 @@ export default function MessagesTab({
 
     setSending(true);
     setSendError(null);
+    if (!options?.text) {
+      setNewMessage("");
+    }
     setMessages((current) => [
       ...current,
       {
@@ -385,14 +414,14 @@ export default function MessagesTab({
         mergeMessages(current.filter((message) => message.id !== optimisticId), payload)
       );
       activeConversationLastMessageAtRef.current = typeof payload?.created_at === "string" ? payload.created_at : activeConversationLastMessageAtRef.current;
-      if (!options?.text) {
-        setNewMessage("");
-      }
       setIsTyping(false);
       if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
       void updateTypingState(false);
     } catch (err) {
       setMessages((current) => current.filter((message) => message.id !== optimisticId));
+      if (!options?.text) {
+        setNewMessage(draftBeforeSend);
+      }
       console.error("Send error:", err);
       setSendError(err instanceof Error ? err.message : "Failed to send message.");
     } finally {
@@ -495,6 +524,17 @@ export default function MessagesTab({
     }
   }, [handleSendMessage]);
 
+  const handleLoadOlderMessages = useCallback(async () => {
+    if (!activeConvId || loadingOlderMessages || loadingMessages || messages.length === 0) return;
+    const oldestMessageAt = messages[0]?.created_at ?? null;
+    if (!oldestMessageAt) return;
+    await fetchMessages(activeConvId, {
+      before: oldestMessageAt,
+      appendOlder: true,
+      limit: INITIAL_MESSAGE_BATCH,
+    });
+  }, [activeConvId, fetchMessages, loadingMessages, loadingOlderMessages, messages]);
+
   if (loading && conversations.length === 0) {
     return (
       <div style={{ display: "flex", height: "600px", alignItems: "center", justifyContent: "center" }}>
@@ -586,6 +626,27 @@ export default function MessagesTab({
             </div>
 
             <div className={styles.chatBody} ref={scrollRef}>
+              {!loadingMessages && hasOlderMessages ? (
+                <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleLoadOlderMessages()}
+                    disabled={loadingOlderMessages}
+                    style={{
+                      border: "1px solid #dbeafe",
+                      background: "#eff6ff",
+                      color: "#1d4ed8",
+                      borderRadius: 999,
+                      padding: "8px 14px",
+                      fontSize: 12,
+                      fontWeight: 800,
+                      cursor: loadingOlderMessages ? "wait" : "pointer",
+                    }}
+                  >
+                    {loadingOlderMessages ? "Loading older..." : "Load older messages"}
+                  </button>
+                </div>
+              ) : null}
               {isRecentlyTyping(activeConversation, hostUserId) ? (
                 <div style={{ display: "flex", justifyContent: "center", margin: "10px 0 0" }}>
                   <div style={{ padding: "8px 12px", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", fontSize: 12, fontWeight: 800 }}>

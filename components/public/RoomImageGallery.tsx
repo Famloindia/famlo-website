@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Images, Maximize2, X } from "lucide-react";
 
+import { getBlurDataUrl } from "@/lib/image-placeholders";
 import styles from "@/components/public/RoomDetailPage.module.css";
 
 type RoomImageGalleryProps = {
@@ -58,7 +59,7 @@ export function RoomImageGallery({ roomName, images }: Readonly<RoomImageGallery
         <div className={styles.roomGalleryGridLarge}>
           <button type="button" className={styles.roomGalleryMainButton} onClick={() => openModal(selectedIndex)}>
             {primaryImage ? (
-              <Image className={styles.roomGalleryMainImage} src={primaryImage} alt={`${roomName} photo 1`} width={1200} height={900} sizes="(max-width: 768px) 100vw, 70vw" />
+              <Image className={styles.roomGalleryMainImage} src={primaryImage} alt={`${roomName} photo 1`} width={1200} height={900} sizes="(max-width: 768px) 100vw, 70vw" quality={78} placeholder="blur" blurDataURL={getBlurDataUrl(`${roomName}-primary-${selectedIndex}`)} />
             ) : (
               <div className={styles.roomGalleryPlaceholder}>Room Image</div>
             )}
@@ -82,7 +83,7 @@ export function RoomImageGallery({ roomName, images }: Readonly<RoomImageGallery
                       openModal(imageIndex);
                     }}
                   >
-                    <Image className={styles.roomGalleryThumbImage} src={imageUrl} alt={`${roomName} photo ${imageIndex + 1}`} width={600} height={450} sizes="(max-width: 768px) 33vw, 240px" />
+                    <Image className={styles.roomGalleryThumbImage} src={imageUrl} alt={`${roomName} photo ${imageIndex + 1}`} width={600} height={450} sizes="(max-width: 768px) 33vw, 240px" quality={68} placeholder="blur" blurDataURL={getBlurDataUrl(`${roomName}-thumb-${imageIndex}`)} />
                   </button>
                 );
               })
@@ -119,6 +120,9 @@ export function RoomImageGallery({ roomName, images }: Readonly<RoomImageGallery
                 width={1400}
                 height={1050}
                 sizes="100vw"
+                quality={88}
+                placeholder="blur"
+                blurDataURL={getBlurDataUrl(`${roomName}-modal-${modalIndex}`)}
               />
               <button type="button" className={styles.roomGalleryNavButton} onClick={() => stepImage(1)} aria-label="Next image">
                 <ChevronRight size={18} />
@@ -135,7 +139,7 @@ export function RoomImageGallery({ roomName, images }: Readonly<RoomImageGallery
                     setSelectedIndex(index);
                   }}
                 >
-                  <Image className={styles.roomGalleryModalThumbImage} src={imageUrl} alt={`${roomName} gallery thumbnail ${index + 1}`} width={240} height={180} sizes="120px" />
+                  <Image className={styles.roomGalleryModalThumbImage} src={imageUrl} alt={`${roomName} gallery thumbnail ${index + 1}`} width={240} height={180} sizes="120px" quality={54} placeholder="blur" blurDataURL={getBlurDataUrl(`${roomName}-mini-${index}`)} />
                 </button>
               ))}
             </div>

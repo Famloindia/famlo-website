@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useMemo, useRef, useState } from "react";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
+import { getBlurDataUrl } from "@/lib/image-placeholders";
 
 interface HomeDetailGalleryProps {
   hostId?: string | null;
@@ -123,6 +124,9 @@ export function HomeDetailGallery({
             width={1600}
             height={1000}
             sizes="100vw"
+            quality={84}
+            placeholder="blur"
+            blurDataURL={getBlurDataUrl(`${title}-detail-${activeIndex}`)}
           />
         ) : null}
         <div className="famlo-hero-overlay famlo-hero-overlay-clean">
@@ -147,6 +151,9 @@ export function HomeDetailGallery({
             width={1800}
             height={1200}
             sizes="100vw"
+            quality={90}
+            placeholder="blur"
+            blurDataURL={getBlurDataUrl(`${title}-lightbox-${lightboxIndex}`)}
             onClick={(event) => event.stopPropagation()}
           />
           <div className="home-detail-lightbox-controls" onClick={(event) => event.stopPropagation()} role="presentation">

@@ -29,6 +29,9 @@ type LegacyBookingRow = {
 
 type UniqueRef = string | null | undefined;
 
+const THREAD_CACHE_TTL_MS = 30_000;
+const threadResolutionCache = new Map<string, { expiresAt: number; value: MessageThreadResolution }>();
+
 export type MessageThreadResolution = {
   conversationId: string | null;
   bookingId: string | null;
@@ -40,6 +43,27 @@ export type MessageThreadResolution = {
 
 function uniqueStrings(values: UniqueRef[]): string[] {
   return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
+}
+
+function getThreadCacheKey(referenceId: string, createIfMissing: boolean): string {
+  return `${createIfMissing ? "create" : "read"}:${referenceId}`;
+}
+
+function readThreadCache(cacheKey: string): MessageThreadResolution | null {
+  const cached = threadResolutionCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    threadResolutionCache.delete(cacheKey);
+    return null;
+  }
+  return { ...cached.value, relatedConversationIds: [...cached.value.relatedConversationIds] };
+}
+
+function writeThreadCache(cacheKey: string, value: MessageThreadResolution): void {
+  threadResolutionCache.set(cacheKey, {
+    expiresAt: Date.now() + THREAD_CACHE_TTL_MS,
+    value: { ...value, relatedConversationIds: [...value.relatedConversationIds] },
+  });
 }
 
 async function fetchConversationByReference(
@@ -305,6 +329,10 @@ export async function resolveMessageThread(
 ): Promise<MessageThreadResolution | null> {
   const cleanReference = referenceId.trim();
   if (!cleanReference) return null;
+  const createIfMissing = Boolean(options?.createIfMissing);
+  const cacheKey = getThreadCacheKey(cleanReference, createIfMissing);
+  const cached = readThreadCache(cacheKey);
+  if (cached) return cached;
 
   let conversation = await fetchConversationByReference(supabase, cleanReference);
   let bookingV2: BookingV2Row | null = null;
@@ -332,7 +360,7 @@ export async function resolveMessageThread(
       });
     }
 
-    if (!conversation && bookingV2 && options?.createIfMissing) {
+    if (!conversation && bookingV2 && createIfMissing) {
       conversation = await createConversationForBooking(supabase, bookingV2, cleanReference);
     }
   }
@@ -357,7 +385,7 @@ export async function resolveMessageThread(
     }
   }
 
-  if (!conversation && legacyBooking && options?.createIfMissing) {
+  if (!conversation && legacyBooking && createIfMissing) {
     const familyLookup = legacyBooking.family_id
       ? await supabase.from("families").select("user_id").eq("id", legacyBooking.family_id).maybeSingle()
       : { data: null, error: null };
@@ -443,7 +471,7 @@ export async function resolveMessageThread(
     legacyBooking?.conversation_id,
   ]);
 
-  return {
+  const result = {
     conversationId: conversation.id,
     bookingId: bookingV2?.id ?? legacyBooking?.id ?? conversation.booking_id ?? null,
     legacyBookingId: conversation.booking_id ?? bookingV2?.legacy_booking_id ?? legacyBooking?.id ?? null,
@@ -451,4 +479,7 @@ export async function resolveMessageThread(
     hostUserId: resolvedHostUserId,
     relatedConversationIds,
   };
+
+  writeThreadCache(cacheKey, result);
+  return result;
 }

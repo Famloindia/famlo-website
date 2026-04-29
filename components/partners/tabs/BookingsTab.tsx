@@ -41,10 +41,12 @@ const guestBehaviorTags = [
 
 export default function BookingsTab({ 
   bookingRows,
-  onOpenChat 
+  onOpenChat,
+  loading = false,
 }: { 
   bookingRows: any[],
-  onOpenChat?: (convId: string) => void 
+  onOpenChat?: (convId: string) => void,
+  loading?: boolean,
 }) {
   const supabase = createBrowserSupabaseClient();
   const [localRows, setLocalRows] = useState<any[]>(bookingRows);
@@ -56,6 +58,14 @@ export default function BookingsTab({
   useEffect(() => {
     setLocalRows(bookingRows);
   }, [bookingRows]);
+
+  if (loading && localRows.length === 0) {
+    return (
+      <div style={{ display: "flex", minHeight: "320px", alignItems: "center", justifyContent: "center" }}>
+        <Loader2 className={styles.spin} size={32} color="#165dcc" />
+      </div>
+    );
+  }
 
   async function getAuthHeaders(): Promise<Record<string, string>> {
     const {

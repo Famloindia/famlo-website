@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 
 import type { HomeCardRecord } from "@/lib/discovery";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
+import { getBlurDataUrl } from "@/lib/image-placeholders";
+import { derivePreviewImageUrl } from "@/lib/image-variants";
 
 function pal(id: string): [string, string] {
   const palettes: [string, string][] = [
@@ -64,7 +66,10 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
   const roomImages = Array.isArray(home.roomImageUrls) ? home.roomImageUrls : [];
   const activeRoomImage = roomImages[activeImageIndex] || "";
   const incomingRoomImage = pendingImageIndex != null ? roomImages[pendingImageIndex] || "" : "";
+  const activeRoomPreview = derivePreviewImageUrl(activeRoomImage) || activeRoomImage;
+  const incomingRoomPreview = derivePreviewImageUrl(incomingRoomImage) || incomingRoomImage;
   const hostPortrait = home.hostPhotoUrl || "";
+  const hostPortraitPreview = derivePreviewImageUrl(hostPortrait) || hostPortrait;
   const roomCountToDisplay = home.roomCount != null && home.roomCount > 0 ? home.roomCount : null;
   const roomLabel = roomCountToDisplay != null && roomCountToDisplay > 0
     ? `${roomCountToDisplay} room${roomCountToDisplay > 1 ? "s" : ""}`
@@ -162,10 +167,13 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
     >
       {activeRoomImage ? (
         <Image
-          src={activeRoomImage}
+          src={activeRoomPreview}
           alt=""
           fill
           sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 430px"
+          quality={52}
+          placeholder="blur"
+          blurDataURL={getBlurDataUrl(`${home.id}-room-${activeImageIndex}`)}
           aria-hidden="true"
           style={{
             position: "absolute",
@@ -193,10 +201,13 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
       )}
       {pendingImageIndex != null && incomingRoomImage ? (
         <Image
-          src={incomingRoomImage}
+          src={incomingRoomPreview}
           alt=""
           fill
           sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 430px"
+          quality={52}
+          placeholder="blur"
+          blurDataURL={getBlurDataUrl(`${home.id}-room-${pendingImageIndex}`)}
           aria-hidden="true"
           style={{
             position: "absolute",
@@ -254,11 +265,14 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
           >
             {hostPortrait ? (
               <Image
-                src={hostPortrait}
+                src={hostPortraitPreview}
                 alt={`${home.name} host`}
                 width={128}
                 height={128}
                 sizes="64px"
+                quality={48}
+                placeholder="blur"
+                blurDataURL={getBlurDataUrl(`${home.id}-host`)}
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
               />
             ) : (

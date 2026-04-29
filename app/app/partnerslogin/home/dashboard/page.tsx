@@ -47,6 +47,7 @@ export default async function HostDashboardPage({
   const familyId = params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "";
   const hostCodeParam = params?.hostCode ?? "";
   const initialTab = params?.tab ?? "dashboard";
+  const shouldPreloadBookingRows = !["messages", "support", "profile", "compliance"].includes(initialTab);
   const supabase = createAdminSupabaseClient();
 
   const { data: primaryFamily } = familyId
@@ -128,30 +129,32 @@ export default async function HostDashboardPage({
           .order("created_at", { ascending: true })
       : { data: [] };
 
-  const { data: bookingRowsV2 } =
-    hostIds.length > 0
-      ? await supabase
-          .from("bookings_v2")
-          .select([
-            "id", "status", "start_date", "end_date", "guests_count",
-            "total_price", "partner_payout_amount", "pricing_snapshot",
-            "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
-            "conversation_id", "users!user_id(id,name,city,state,gender,about,kyc_status)",
-          ].join(","))
-          .in("host_id", hostIds)
-          .order("start_date", { ascending: false })
-          .limit(200)
-      : { data: [] };
-  const bookingRows = ((bookingRowsV2 ?? []) as unknown as Array<Record<string, unknown>>)
-    .filter((row) => isHostBookingVisibleToPartner(row.status, row.payment_status))
-    .map((row) => {
-      const mapped = mapV2BookingRow(row);
-      const v2HostId = typeof row.host_id === "string" ? row.host_id : null;
-      return {
-        ...mapped,
-        family_id: v2HostId ? (familyIdByHostId.get(v2HostId) ?? v2HostId) : mapped.family_id,
-      };
-    });
+  const bookingRows = shouldPreloadBookingRows
+    ? (
+        ((hostIds.length > 0
+          ? await supabase
+              .from("bookings_v2")
+              .select([
+                "id", "status", "start_date", "end_date", "guests_count",
+                "total_price", "partner_payout_amount", "pricing_snapshot",
+                "created_at", "user_id", "quarter_type", "quarter_time", "notes", "host_id", "payment_status",
+                "conversation_id", "users!user_id(id,name,city,state,gender,about,kyc_status)",
+              ].join(","))
+              .in("host_id", hostIds)
+              .order("start_date", { ascending: false })
+              .limit(200)
+          : { data: [] }).data ?? []) as unknown as Array<Record<string, unknown>>
+      )
+        .filter((row) => isHostBookingVisibleToPartner(row.status, row.payment_status))
+        .map((row) => {
+          const mapped = mapV2BookingRow(row);
+          const v2HostId = typeof row.host_id === "string" ? row.host_id : null;
+          return {
+            ...mapped,
+            family_id: v2HostId ? (familyIdByHostId.get(v2HostId) ?? v2HostId) : mapped.family_id,
+          };
+        })
+    : [];
 
   const currentFamily: Record<string, unknown> | undefined =
     familyRows.find((f) => String(f.id) === familyId) || familyRows[0];

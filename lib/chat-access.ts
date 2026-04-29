@@ -211,11 +211,52 @@ export type ConversationAccess = {
   chatUnlocked: boolean;
 };
 
+const ACCESS_CACHE_TTL_MS = 30_000;
+const conversationAccessCache = new Map<string, { expiresAt: number; value: ConversationAccess }>();
+
+function getAccessCacheKey(referenceId: string, createIfMissing: boolean): string {
+  return `${createIfMissing ? "create" : "read"}:${referenceId}`;
+}
+
+function readAccessCache(cacheKey: string): ConversationAccess | null {
+  const cached = conversationAccessCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    conversationAccessCache.delete(cacheKey);
+    return null;
+  }
+  return {
+    ...cached.value,
+    thread: {
+      ...cached.value.thread,
+      relatedConversationIds: [...cached.value.thread.relatedConversationIds],
+    },
+  };
+}
+
+function writeAccessCache(cacheKey: string, value: ConversationAccess): void {
+  conversationAccessCache.set(cacheKey, {
+    expiresAt: Date.now() + ACCESS_CACHE_TTL_MS,
+    value: {
+      ...value,
+      thread: {
+        ...value.thread,
+        relatedConversationIds: [...value.thread.relatedConversationIds],
+      },
+    },
+  });
+}
+
 export async function resolveConversationAccess(
   supabase: SupabaseClient,
   referenceId: string,
   options?: { createIfMissing?: boolean }
 ): Promise<ConversationAccess | null> {
+  const createIfMissing = Boolean(options?.createIfMissing);
+  const cacheKey = getAccessCacheKey(referenceId, createIfMissing);
+  const cached = readAccessCache(cacheKey);
+  if (cached) return cached;
+
   const thread = await resolveMessageThread(supabase, referenceId, options);
   if (!thread?.conversationId) return null;
 
@@ -263,7 +304,7 @@ export async function resolveConversationAccess(
   const legacyBookingId = normalizeString(bookingV2?.legacy_booking_id) ?? normalizeString(legacyBooking?.id) ?? normalizeString(thread.legacyBookingId);
   const hostId = normalizeString(bookingV2?.host_id) ?? normalizeString(conversation?.host_id) ?? normalizeString(hostRecord?.id);
 
-  return {
+  const result = {
     thread,
     conversationId: thread.conversationId,
     bookingId,
@@ -277,6 +318,9 @@ export async function resolveConversationAccess(
     kind,
     chatUnlocked: kind === "network" ? true : isBookingChatUnlocked(bookingStatus),
   };
+
+  writeAccessCache(cacheKey, result);
+  return result;
 }
 
 export type AuthorizedHostSession = {
