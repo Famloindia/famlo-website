@@ -1,11 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { renderEmailTemplate } from "@/lib/document-templates";
+import { attachBookingWhatsAppMessageId } from "@/lib/booking-whatsapp-actions";
 import { loadUserProfileCompatibility } from "@/lib/user-profile";
 import { asString, type JsonRecord } from "@/lib/platform-utils";
 import { sendEmail } from "@/lib/resend";
 
-import { sendWhatsAppNotification } from "@/lib/notifications/providers/whatsapp";
+import {
+  sendWhatsAppInteractiveButtons,
+  sendWhatsAppNotification,
+  sendWhatsAppTemplateNotification,
+} from "@/lib/notifications/providers/whatsapp";
 import { buildNotificationContent, buildWhatsAppBody } from "@/lib/notifications/templates";
 import type { NotificationDeliveryResult, NotificationQueueRow } from "@/lib/notifications/types";
 
@@ -128,6 +133,66 @@ async function deliverWhatsAppNotification(
   }
 
   const content = buildNotificationContent(row);
+  const interactiveButtons = Array.isArray(payload.buttons)
+    ? payload.buttons
+        .map((button) => {
+          const record = button as JsonRecord;
+          const id = asString(record.id);
+          const title = asString(record.title);
+          if (!id || !title) return null;
+          return { id, title };
+        })
+        .filter((button): button is { id: string; title: string } => Boolean(button))
+    : [];
+  const templateName = asString(row.template_name);
+  const templateVariables = Array.isArray(payload.template_variables)
+    ? payload.template_variables
+        .map((value) => asString(value))
+        .filter((value): value is string => Boolean(value))
+    : [];
+
+  if (templateName === "host_new_booking_request" && interactiveButtons.length >= 2 && templateVariables.length >= 5) {
+    const result = await sendWhatsAppTemplateNotification({
+      phone,
+      templateName,
+      languageCode: asString(payload.template_language) ?? "en",
+      bodyVariables: templateVariables.slice(0, 5),
+      quickReplyButtons: interactiveButtons.slice(0, 2).map((button, index) => ({
+        index,
+        payload: button.id,
+      })),
+    });
+
+    const actionToken = asString(payload.action_token);
+    if (result.status === "processed" && actionToken && result.providerMessageId) {
+      await attachBookingWhatsAppMessageId(supabase, {
+        actionToken,
+        providerMessageId: result.providerMessageId,
+      });
+    }
+
+    return result;
+  }
+
+  if (interactiveButtons.length > 0) {
+    const result = await sendWhatsAppInteractiveButtons({
+      phone,
+      bodyText: asString(payload.body_text) ?? buildWhatsAppBody(content),
+      buttons: interactiveButtons,
+      templateName: content.templateName,
+    });
+
+    const actionToken = asString(payload.action_token);
+    if (result.status === "processed" && actionToken && result.providerMessageId) {
+      await attachBookingWhatsAppMessageId(supabase, {
+        actionToken,
+        providerMessageId: result.providerMessageId,
+      });
+    }
+
+    return result;
+  }
+
   const actionLines = [
     asString(payload.accept_url) ? `Accept: ${asString(payload.accept_url)}` : null,
     asString(payload.reject_url) ? `Reject: ${asString(payload.reject_url)}` : null,

@@ -51,6 +51,18 @@ function formatBookingDateRange(startDate: string | null, endDate: string | null
   return `${startDate} to ${endDate}`;
 }
 
+function formatTemplateAmount(value: number): string {
+  try {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(value);
+  } catch {
+    return `INR ${value}`;
+  }
+}
+
 function isSchemaCompatibilityError(message: string): boolean {
   const lower = message.toLowerCase();
   return (
@@ -420,6 +432,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const hostListingLabel =
       stayUnitName ??
       hostPropertyLabel;
+    const approvalAmountLabel = formatTemplateAmount(
+      typeof (payment as { amount_total?: number }).amount_total === "number"
+        ? (payment as { amount_total?: number }).amount_total ?? 0
+        : 0
+    );
     const hostLegacyFamilyId =
       typeof hostProfileForFlow?.legacy_family_id === "string" && hostProfileForFlow.legacy_family_id.trim().length > 0
         ? hostProfileForFlow.legacy_family_id
@@ -497,6 +514,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           accept_url: actionLinks?.acceptUrl,
           reject_url: actionLinks?.rejectUrl,
           action_token: whatsappAction?.action_token ?? null,
+          template_language: "en",
+          template_variables: [
+            guestProfile?.name ?? "Famlo guest",
+            hostPropertyLabel,
+            stayUnitName ?? hostListingLabel,
+            bookingDateLabel,
+            approvalAmountLabel,
+          ],
           buttons:
             whatsappAction
               ? [
