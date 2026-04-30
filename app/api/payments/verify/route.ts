@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { createHostBookingActionLinks } from "@/lib/booking-action-tokens";
+import {
+  buildHostApprovalWhatsAppMessage,
+  createOrReuseBookingWhatsAppAction,
+} from "@/lib/booking-whatsapp-actions";
 import { getErrorDiagnostics, getErrorMessage } from "@/lib/error-utils";
 import { appendPaymentEventAudit } from "@/lib/finance/payment-audit";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
@@ -13,6 +17,7 @@ import {
 } from "@/lib/payment-booking-finalization";
 import { verifyRazorpayPaymentSignature } from "@/lib/razorpay";
 import { createAdminSupabaseClient } from "@/lib/supabase";
+import { loadUserProfileCompatibility } from "@/lib/user-profile";
 
 type VerifyBody = {
   bookingId?: string;
@@ -188,7 +193,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const approvalRequired = await resolveBookingApprovalRequirement(supabase, booking as Record<string, unknown> | null | undefined);
-    const nextStatus = approvalRequired ? "pending" : "confirmed";
+    const nextStatus = approvalRequired ? "pending_host_approval" : "confirmed";
+    const hostProfile = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
+    const hostLegacyFamilyIdForLog =
+      typeof hostProfile?.legacy_family_id === "string" && hostProfile.legacy_family_id.trim().length > 0
+        ? hostProfile.legacy_family_id
+        : null;
+    console.info("[payment-finalization]", {
+      source: "payments.verify",
+      approvalRequired,
+      bookingId: payment.booking_id,
+      hostId: typeof booking?.host_id === "string" ? booking.host_id : null,
+      legacyFamilyId: hostLegacyFamilyIdForLog,
+      nextStatus,
+    });
     const { error: bookingUpdateError } = await supabase
       .from("bookings_v2")
       .update({
@@ -269,17 +287,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const hommieRelation = Array.isArray(booking?.hommie_profiles_v2)
       ? booking.hommie_profiles_v2[0]
       : booking?.hommie_profiles_v2;
-    const hostProfile = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
+    const hostProfileForFlow = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
 
     let payoutId: string | null = null;
     if (!approvalRequired) {
       payoutId =
-        booking?.recipient_type === "host" && booking.host_id && hostProfile?.user_id
+        booking?.recipient_type === "host" && booking.host_id && hostProfileForFlow?.user_id
           ? await ensureScheduledPayout(supabase, {
               bookingId: payment.booking_id,
               paymentId: payment.id,
               partnerType: "host",
-              partnerUserId: String(hostProfile.user_id),
+              partnerUserId: String(hostProfileForFlow.user_id),
               partnerProfileId: String(booking.host_id),
               amount:
                 typeof booking.partner_payout_amount === "number"
@@ -391,21 +409,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           : "Your payment was received and your Famlo booking is now confirmed.",
       },
     });
-    const hostUserId = typeof hostProfile?.user_id === "string" ? hostProfile.user_id : null;
+    const hostUserId = typeof hostProfileForFlow?.user_id === "string" ? hostProfileForFlow.user_id : null;
+    const guestProfile = guestUserId ? await loadUserProfileCompatibility(supabase, guestUserId) : null;
+    const hostProfileContact = hostUserId ? await loadUserProfileCompatibility(supabase, hostUserId) : null;
+    const hostPhone = hostProfileContact?.phone ?? null;
+    const hostPropertyLabel =
+      typeof hostProfileForFlow?.display_name === "string" && hostProfileForFlow.display_name.trim().length > 0
+        ? hostProfileForFlow.display_name.trim()
+        : "your Famlo stay";
     const hostListingLabel =
       stayUnitName ??
-      (typeof hostProfile?.display_name === "string" && hostProfile.display_name.trim().length > 0
-        ? hostProfile.display_name.trim()
-        : "your Famlo stay");
+      hostPropertyLabel;
     const hostLegacyFamilyId =
-      typeof hostProfile?.legacy_family_id === "string" && hostProfile.legacy_family_id.trim().length > 0
-        ? hostProfile.legacy_family_id
+      typeof hostProfileForFlow?.legacy_family_id === "string" && hostProfileForFlow.legacy_family_id.trim().length > 0
+        ? hostProfileForFlow.legacy_family_id
         : null;
     const fallbackHostDashboardUrl = hostLegacyFamilyId
       ? `/partnerslogin/home/dashboard?family=${encodeURIComponent(hostLegacyFamilyId)}&tab=bookings`
       : "/partnerslogin/home/dashboard?tab=bookings";
 
     if (approvalRequired && hostUserId) {
+      const whatsappAction = hostPhone
+        ? await createOrReuseBookingWhatsAppAction(supabase, {
+            bookingId: payment.booking_id,
+            hostPhone,
+            familyId: hostLegacyFamilyId,
+          })
+        : null;
       const actionLinks = await createHostBookingActionLinks(supabase, {
         bookingId: payment.booking_id,
         familyId: hostLegacyFamilyId,
@@ -445,12 +475,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         subject: "New Famlo booking request needs your approval",
         templateName: "host_new_booking_request",
         recipientRole: "host",
+        recipientPhone: hostPhone,
         payload: {
           title: "New Booking Request",
+          body_text:
+            whatsappAction && hostPhone
+              ? buildHostApprovalWhatsAppMessage({
+                  guestName: guestProfile?.name ?? null,
+                  propertyName: hostPropertyLabel,
+                  roomName: stayUnitName ?? hostListingLabel,
+                  startDate: asString(booking?.start_date),
+                  endDate: asString(booking?.end_date) ?? asString(booking?.start_date),
+                  amountTotal:
+                    typeof (payment as { amount_total?: number }).amount_total === "number"
+                      ? (payment as { amount_total?: number }).amount_total ?? 0
+                      : 0,
+                })
+              : `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
           message: `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
           view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
           accept_url: actionLinks?.acceptUrl,
           reject_url: actionLinks?.rejectUrl,
+          action_token: whatsappAction?.action_token ?? null,
+          buttons:
+            whatsappAction
+              ? [
+                  { id: whatsappAction.approve_payload, title: "Approve" },
+                  { id: whatsappAction.reject_payload, title: "Reject" },
+                ]
+              : [],
         },
       });
     } else if (hostUserId) {
@@ -516,8 +569,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ? family.property_name
           : typeof family?.name === "string" && family.name.trim().length > 0
             ? family.name
-            : typeof hostProfile?.display_name === "string" && hostProfile.display_name.trim().length > 0
-              ? hostProfile.display_name
+          : typeof hostProfileForFlow?.display_name === "string" && hostProfileForFlow.display_name.trim().length > 0
+              ? hostProfileForFlow.display_name
               : "your Famlo stay");
       const roomLabel = stayUnitName ?? propertyName;
 

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { appendPaymentEventAudit } from "@/lib/finance/payment-audit";
 import { createHostBookingActionLinks } from "@/lib/booking-action-tokens";
+import {
+  buildHostApprovalWhatsAppMessage,
+  createOrReuseBookingWhatsAppAction,
+} from "@/lib/booking-whatsapp-actions";
 import { buildBookingReceiptDocument, enqueueNotification } from "@/lib/booking-platform";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
@@ -13,6 +17,7 @@ import {
 } from "@/lib/payment-booking-finalization";
 import { verifyRazorpayWebhookSignature } from "@/lib/razorpay";
 import { createAdminSupabaseClient } from "@/lib/supabase";
+import { loadUserProfileCompatibility } from "@/lib/user-profile";
 
 type RazorpayWebhookPayload = {
   event?: string;
@@ -446,7 +451,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const approvalRequired = await resolveBookingApprovalRequirement(supabase, booking as Record<string, unknown> | null | undefined);
     const bookingStatus =
-      update.bookingPaymentStatus === "paid" ? (approvalRequired ? "pending" : "confirmed") : booking?.status ?? "pending";
+      update.bookingPaymentStatus === "paid"
+        ? (approvalRequired ? "pending_host_approval" : "confirmed")
+        : booking?.status ?? "pending";
+    const hostRelationForLog = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
+    const hostLegacyFamilyIdForLog =
+      typeof hostRelationForLog?.legacy_family_id === "string" && hostRelationForLog.legacy_family_id.trim().length > 0
+        ? hostRelationForLog.legacy_family_id
+        : null;
+    console.info("[payment-finalization]", {
+      source: "payments.webhook",
+      approvalRequired,
+      bookingId: payment.booking_id,
+      hostId: typeof booking?.host_id === "string" ? booking.host_id : null,
+      legacyFamilyId: hostLegacyFamilyIdForLog,
+      nextStatus: bookingStatus,
+    });
 
     await supabase
       .from("bookings_v2")
@@ -531,11 +551,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         asString(booking?.end_date) ?? asString(booking?.start_date)
       );
       const hostUserId = typeof hostRelation?.user_id === "string" ? hostRelation.user_id : null;
+      const guestProfile =
+        typeof booking?.user_id === "string" ? await loadUserProfileCompatibility(supabase, booking.user_id) : null;
+      const hostProfileContact = hostUserId ? await loadUserProfileCompatibility(supabase, hostUserId) : null;
+      const hostPhone = hostProfileContact?.phone ?? null;
+      const hostPropertyLabel =
+        typeof hostRelation?.display_name === "string" && hostRelation.display_name.trim().length > 0
+          ? hostRelation.display_name.trim()
+          : "your Famlo stay";
       const hostListingLabel =
         stayUnitName ??
-        (typeof hostRelation?.display_name === "string" && hostRelation.display_name.trim().length > 0
-          ? hostRelation.display_name.trim()
-          : "your Famlo stay");
+        hostPropertyLabel;
       const hostLegacyFamilyId =
         typeof hostRelation?.legacy_family_id === "string" && hostRelation.legacy_family_id.trim().length > 0
           ? hostRelation.legacy_family_id
@@ -545,6 +571,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         : "/partnerslogin/home/dashboard?tab=bookings";
 
       if (approvalRequired && hostUserId) {
+        const whatsappAction = hostPhone
+          ? await createOrReuseBookingWhatsAppAction(supabase, {
+              bookingId: payment.booking_id,
+              hostPhone,
+              familyId: hostLegacyFamilyId,
+            })
+          : null;
         const actionLinks = await createHostBookingActionLinks(supabase, {
           bookingId: payment.booking_id,
           familyId: hostLegacyFamilyId,
@@ -584,12 +617,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           subject: "New Famlo booking request needs your approval",
           templateName: "host_new_booking_request",
           recipientRole: "host",
+          recipientPhone: hostPhone,
           payload: {
             title: "New Booking Request",
+            body_text:
+              whatsappAction && hostPhone
+                ? buildHostApprovalWhatsAppMessage({
+                    guestName: guestProfile?.name ?? null,
+                    propertyName: hostPropertyLabel,
+                    roomName: stayUnitName ?? hostListingLabel,
+                    startDate: asString(booking?.start_date),
+                    endDate: asString(booking?.end_date) ?? asString(booking?.start_date),
+                    amountTotal:
+                      typeof (payment as { amount_total?: number }).amount_total === "number"
+                        ? (payment as { amount_total?: number }).amount_total ?? 0
+                        : 0,
+                  })
+                : `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
             message: `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
             view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
             accept_url: actionLinks?.acceptUrl,
             reject_url: actionLinks?.rejectUrl,
+            action_token: whatsappAction?.action_token ?? null,
+            buttons:
+              whatsappAction
+                ? [
+                    { id: whatsappAction.approve_payload, title: "Approve" },
+                    { id: whatsappAction.reject_payload, title: "Reject" },
+                  ]
+                : [],
           },
         });
       } else if (hostUserId) {

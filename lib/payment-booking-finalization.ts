@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { assertBookingSlotStillAvailableForPayment } from "@/lib/booking-compat";
 import { createCalendarConflict } from "@/lib/calendar";
+import { parseHostListingMeta } from "@/lib/host-listing-meta";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -102,17 +103,17 @@ export async function resolveBookingApprovalRequirement(
   const embeddedHostProfile = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
   const hostProfile = embeddedHostProfile && typeof embeddedHostProfile === "object" ? (embeddedHostProfile as JsonRecord) : null;
 
-  if (typeof hostProfile?.booking_requires_host_approval === "boolean") {
-    return hostProfile.booking_requires_host_approval;
-  }
-
   const hostId = asString(booking?.host_id);
   let legacyFamilyId = asString(hostProfile?.legacy_family_id);
+  let hostRequiresApproval =
+    typeof hostProfile?.booking_requires_host_approval === "boolean"
+      ? hostProfile.booking_requires_host_approval
+      : null;
 
-  if (!legacyFamilyId && hostId) {
+  if (hostId && (hostRequiresApproval === null || !legacyFamilyId)) {
     const hostLookup = await supabase
       .from("hosts")
-      .select("legacy_family_id")
+      .select("legacy_family_id,booking_requires_host_approval")
       .eq("id", hostId)
       .maybeSingle();
 
@@ -122,7 +123,14 @@ export async function resolveBookingApprovalRequirement(
       }
     } else {
       legacyFamilyId = asString((hostLookup.data as JsonRecord | null)?.legacy_family_id);
+      if (typeof (hostLookup.data as JsonRecord | null)?.booking_requires_host_approval === "boolean") {
+        hostRequiresApproval = Boolean((hostLookup.data as JsonRecord | null)?.booking_requires_host_approval);
+      }
     }
+  }
+
+  if (typeof hostRequiresApproval === "boolean") {
+    return hostRequiresApproval;
   }
 
   if (!legacyFamilyId) {
@@ -131,18 +139,49 @@ export async function resolveBookingApprovalRequirement(
 
   const familyLookup = await supabase
     .from("families")
-    .select("booking_requires_host_approval")
+    .select("booking_requires_host_approval,admin_notes")
     .eq("id", legacyFamilyId)
     .maybeSingle();
 
-  if (familyLookup.error) {
-    if (isSchemaCompatibilityError(familyLookup.error.message)) {
-      return false;
-    }
+  if (familyLookup.error && !isSchemaCompatibilityError(familyLookup.error.message)) {
     throw familyLookup.error;
   }
 
-  return Boolean((familyLookup.data as JsonRecord | null)?.booking_requires_host_approval);
+  const familyData = (familyLookup.data as JsonRecord | null) ?? null;
+  if (typeof familyData?.booking_requires_host_approval === "boolean") {
+    return familyData.booking_requires_host_approval;
+  }
+
+  const familyMeta = parseHostListingMeta(asString(familyData?.admin_notes));
+  if (typeof familyMeta.bookingRequiresHostApproval === "boolean") {
+    return familyMeta.bookingRequiresHostApproval;
+  }
+
+  const draftLookup = await supabase
+    .from("host_onboarding_drafts")
+    .select("payload")
+    .eq("family_id", legacyFamilyId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (draftLookup.error) {
+    if (isSchemaCompatibilityError(draftLookup.error.message)) {
+      return false;
+    }
+    throw draftLookup.error;
+  }
+
+  const draftPayload =
+    draftLookup.data?.payload && typeof draftLookup.data.payload === "object" && !Array.isArray(draftLookup.data.payload)
+      ? (draftLookup.data.payload as JsonRecord)
+      : null;
+
+  if (typeof draftPayload?.bookingRequiresHostApproval === "boolean") {
+    return draftPayload.bookingRequiresHostApproval;
+  }
+
+  return false;
 }
 
 export async function assertBookingCanFinalizePayment(
@@ -453,6 +492,7 @@ function isPaymentWinnerCandidate(
     normalizedStatus === "accepted" ||
     normalizedStatus === "checked_in" ||
     normalizedStatus === "completed" ||
-    normalizedStatus === "pending"
+    normalizedStatus === "pending" ||
+    normalizedStatus === "pending_host_approval"
   );
 }
