@@ -16,6 +16,42 @@ const AuthModal = dynamic(
   () => import("@/components/auth/AuthModal").then((module) => module.AuthModal),
   { ssr: false }
 );
+
+function RecentViewAvatar({ src, label }: { src?: string | null; label: string }) {
+  const [failed, setFailed] = useState(false);
+  const initial = (label.trim().slice(0, 1) || "F").toUpperCase();
+
+  if (!src || failed) {
+    return (
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "grid",
+          placeItems: "center",
+          color: "#fff",
+          fontSize: "15px",
+          fontWeight: 800,
+        }}
+      >
+        {initial}
+      </div>
+    );
+  }
+
+  return (
+    <Image
+      src={src}
+      alt={`${label} host`}
+      width={68}
+      height={68}
+      sizes="34px"
+      unoptimized
+      onError={() => setFailed(true)}
+      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+    />
+  );
+}
 interface Props {
   homes: HomeCardRecord[];
   mostInteractedHomes?: HomeCardRecord[];
@@ -214,6 +250,9 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
           alt="Famlo"
           width={1024}
           height={344}
+          priority
+          fetchPriority="high"
+          loading="eager"
           sizes="128px"
           style={{ height: "32px", width: "auto", display: "block" }}
         />
@@ -641,11 +680,27 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
   }, []);
 
   useEffect(() => {
-    const revealDeferredSections = () => setShowDeferredSections(true);
-    const timeoutHandle = window.setTimeout(revealDeferredSections, 500);
+    let cancelled = false;
+    const revealDeferredSections = () => {
+      if (!cancelled) setShowDeferredSections(true);
+    };
+    const scheduleDeferredReveal = () => {
+      if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+        const idleHandle = window.requestIdleCallback(revealDeferredSections, { timeout: 1400 });
+        return () => window.cancelIdleCallback(idleHandle);
+      }
+
+      const timeoutHandle = globalThis.setTimeout(revealDeferredSections, 900);
+      return () => {
+        globalThis.clearTimeout(timeoutHandle);
+      };
+    };
+
+    const cleanup = scheduleDeferredReveal();
 
     return () => {
-      window.clearTimeout(timeoutHandle);
+      cancelled = true;
+      cleanup();
     };
   }, []);
 
@@ -883,14 +938,12 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
             fontSize: "clamp(36px, 7vw, 72px)", fontWeight: 700, color: "#fff",
             textAlign: "center", lineHeight: 1.1, margin: 0,
             textShadow: "0 4px 32px rgba(0,0,0,0.5)",
-            animation: "fadeUp 0.9s ease both",
           }}>
             Where will you<br />belong next?
           </h1>
           <p style={{
             fontSize: "clamp(14px, 2vw, 18px)", color: "rgba(255,255,255,0.82)",
             textAlign: "center", margin: 0, lineHeight: 1.6,
-            animation: "fadeUp 0.9s 0.15s ease both",
           }}>
             Book real homes, travel city with locals — all in one place.
           </p>
@@ -901,7 +954,6 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
             borderRadius: "16px", padding: "8px 8px 8px 20px", gap: "12px",
             width: "100%", maxWidth: "600px",
             boxShadow: "0 16px 48px rgba(0,0,0,0.32)", marginTop: "8px",
-            animation: "fadeUp 0.9s 0.3s ease both",
           }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5">
               <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
@@ -963,7 +1015,6 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
               color: "#fff",
               fontSize: "12px",
               fontWeight: 600,
-              animation: "fadeUp 0.9s 0.35s ease both",
             }}>
               {locationError
                 ? locationError
@@ -972,7 +1023,7 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
           )}
 
           {/* dots — placed below search */}
-          <div style={{ display: "flex", gap: "8px", marginTop: "12px", animation: "fadeUp 0.9s 0.4s ease both" }}>
+          <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
             {banners.map((_, i) => (
               <button key={i} onClick={() => setBannerIdx(i)} style={{
                 width: i === safeBannerIdx ? "28px" : "8px", height: "8px",
@@ -1067,30 +1118,7 @@ export default function DiscoveryHomepage({ homes, mostInteractedHomes: mostInte
                         left: "8px",
                       }}
                     >
-                      {rv.hostPhotoUrl ? (
-                        <Image
-                          src={rv.hostPhotoUrl}
-                          alt={`${rv.hostName || rv.title} host`}
-                          width={68}
-                          height={68}
-                          sizes="34px"
-                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            display: "grid",
-                            placeItems: "center",
-                            color: "#fff",
-                            fontSize: "15px",
-                            fontWeight: 800,
-                          }}
-                        >
-                          {(rv.hostName || rv.title).slice(0, 1).toUpperCase()}
-                        </div>
-                      )}
+                      <RecentViewAvatar src={rv.hostPhotoUrl} label={rv.hostName || rv.title || "Famlo"} />
                     </div>
                   </div>
 

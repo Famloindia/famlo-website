@@ -3,6 +3,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useUser } from "@/components/auth/UserContext";
+import { compressImageForUpload } from "@/lib/client-image-upload";
 import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 
@@ -628,8 +629,9 @@ export function MessagesDashboard({
     setError(null);
 
     try {
+      const optimizedFile = await compressImageForUpload(file, { maxWidth: 1440, quality: 0.8 });
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", optimizedFile);
 
       const uploadResponse = await fetch("/api/user/messages/upload", {
         method: "POST",

@@ -511,7 +511,9 @@ function RoomBookingPanel(_a) {
                                     var _a;
                                     return __generator(this, function (_b) {
                                         switch (_b.label) {
-                                            case 0: return [4 /*yield*/, fetch("/api/payments/verify", {
+                                            case 0:
+                                                setSubmitting(true);
+                                                return [4 /*yield*/, fetch("/api/payments/verify", {
                                                     method: "POST",
                                                     headers: { "Content-Type": "application/json" },
                                                     body: JSON.stringify({
@@ -540,15 +542,18 @@ function RoomBookingPanel(_a) {
                                                     ? "Your booking is under approval. Check it out on My Bookings."
                                                     : "Your booking is confirmed. Check it out on My Bookings.");
                                                 void refreshProfile();
+                                                window.location.assign("/bookings");
                                                 return [2 /*return*/];
                                         }
                                     });
                                 }); })().catch(function (error) {
+                                    setSubmitting(false);
                                     setBookingError(error instanceof Error ? error.message : "Payment verification failed.");
                                 });
                             },
                             modal: {
                                 ondismiss: function () {
+                                    setSubmitting(false);
                                     void releasePendingBooking(order_1.bookingId).catch(function (cancelError) {
                                         console.error("[room-booking-panel] release_pending_booking_failed", cancelError);
                                     });
@@ -562,12 +567,14 @@ function RoomBookingPanel(_a) {
                         });
                         checkout.on("payment.failed", function (failureResponse) {
                             var _a, _b, _c, _d;
+                            setSubmitting(false);
                             void releasePendingBooking(order_1.bookingId).catch(function (cancelError) {
                                 console.error("[room-booking-panel] release_pending_booking_failed", cancelError);
                             });
                             setReceipt(null);
                             setBookingError((_d = (_b = (_a = failureResponse.error) === null || _a === void 0 ? void 0 : _a.description) !== null && _b !== void 0 ? _b : (_c = failureResponse.error) === null || _c === void 0 ? void 0 : _c.reason) !== null && _d !== void 0 ? _d : "Payment failed, so the booking was not saved.");
                         });
+                        setSubmitting(false);
                         checkout.open();
                         setReceipt(null);
                         setSuccessMessage("Complete payment in the Razorpay window to confirm this booking.");
@@ -593,12 +600,12 @@ function RoomBookingPanel(_a) {
       {submitting ? (<div className="famlo-booking-loader" role="status" aria-live="polite" aria-label="Opening booking checkout">
           <div className="famlo-booking-loader-card">
             <div className="famlo-booking-loader-logo-wrap">
-              <image_1.default className="famlo-booking-loader-logo" src="/logo-blue.png" alt="Famlo" width={1024} height={344} sizes="120px"/>
+              <image_1.default className="famlo-booking-loader-logo" src="/logo-blue.png" alt="Famlo" width={132} height={44} sizes="132px" style={{ width: "132px", height: "44px" }}/>
               <div className="famlo-booking-loader-wave"/>
             </div>
-            <div className="famlo-booking-loader-title">Opening your booking</div>
+            <div className="famlo-booking-loader-title">Preparing your checkout</div>
             <div className="famlo-booking-loader-copy">
-              We are preparing your room and payment checkout.
+              We are setting up Razorpay for this room.
             </div>
           </div>
         </div>) : null}
@@ -796,6 +803,6 @@ function RoomBookingPanel(_a) {
         <AuthModal_1.AuthModal isOpen={showAuthModal} onClose={function () { return setShowAuthModal(false); }}/>
       </section>
 
-      <style jsx>{"\n        .famlo-booking-loader {\n          position: fixed;\n          inset: 0;\n          z-index: 1200;\n          display: grid;\n          place-items: center;\n          background: rgba(255, 255, 255, 0.76);\n          backdrop-filter: blur(10px);\n        }\n\n        .famlo-booking-loader-card {\n          width: min(360px, calc(100vw - 32px));\n          border-radius: 28px;\n          padding: 28px 24px;\n          background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.96));\n          border: 1px solid rgba(24, 144, 255, 0.16);\n          box-shadow: 0 24px 64px rgba(14, 43, 87, 0.18);\n          display: grid;\n          justify-items: center;\n          gap: 14px;\n          text-align: center;\n        }\n\n        .famlo-booking-loader-logo-wrap {\n          position: relative;\n          overflow: hidden;\n          border-radius: 18px;\n          padding: 14px 22px;\n          background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(219,234,254,0.76));\n        }\n\n        .famlo-booking-loader-logo {\n          position: relative;\n          z-index: 1;\n          height: 44px;\n          width: auto;\n          display: block;\n          filter: saturate(1.08);\n        }\n\n        .famlo-booking-loader-wave {\n          position: absolute;\n          inset: 0;\n          transform: translateX(-120%);\n          background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.18) 28%, rgba(255,255,255,0.92) 52%, rgba(255,255,255,0.18) 74%, rgba(255,255,255,0) 100%);\n          animation: famloLoaderWave 1.45s ease-in-out infinite;\n        }\n\n        .famlo-booking-loader-title {\n          font-size: 22px;\n          font-weight: 900;\n          color: #0f172a;\n          letter-spacing: -0.03em;\n        }\n\n        .famlo-booking-loader-copy {\n          font-size: 13px;\n          line-height: 1.7;\n          font-weight: 700;\n          color: rgba(15, 23, 42, 0.68);\n          max-width: 260px;\n        }\n\n        @keyframes famloLoaderWave {\n          0% {\n            transform: translateX(-120%);\n          }\n          100% {\n            transform: translateX(120%);\n          }\n        }\n      "}</style>
+      <style jsx>{"\n        .famlo-booking-loader {\n          position: fixed;\n          inset: 0;\n          z-index: 1200;\n          display: grid;\n          place-items: center;\n          background: rgba(255, 255, 255, 0.76);\n          backdrop-filter: blur(10px);\n        }\n\n        .famlo-booking-loader-card {\n          width: min(360px, calc(100vw - 32px));\n          border-radius: 28px;\n          padding: 28px 24px;\n          background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.96));\n          border: 1px solid rgba(24, 144, 255, 0.16);\n          box-shadow: 0 24px 64px rgba(14, 43, 87, 0.18);\n          display: grid;\n          justify-items: center;\n          gap: 14px;\n          text-align: center;\n        }\n\n        .famlo-booking-loader-logo-wrap {\n          position: relative;\n          width: 132px;\n          height: 44px;\n          overflow: hidden;\n          border-radius: 0;\n          padding: 0;\n          background: transparent;\n          display: grid;\n          place-items: center;\n          flex: 0 0 auto;\n        }\n\n        .famlo-booking-loader-logo {\n          position: relative;\n          z-index: 1;\n          height: 44px;\n          width: 132px;\n          max-width: 132px;\n          display: block;\n          object-fit: contain;\n          filter: saturate(1.08);\n        }\n\n        .famlo-booking-loader-wave {\n          position: absolute;\n          inset: 0;\n          transform: translateX(-120%);\n          background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.18) 28%, rgba(255,255,255,0.92) 52%, rgba(255,255,255,0.18) 74%, rgba(255,255,255,0) 100%);\n          animation: famloLoaderWave 1.45s ease-in-out infinite;\n        }\n\n        .famlo-booking-loader-title {\n          font-size: 22px;\n          font-weight: 900;\n          color: #0f172a;\n          letter-spacing: -0.03em;\n        }\n\n        .famlo-booking-loader-copy {\n          font-size: 13px;\n          line-height: 1.7;\n          font-weight: 700;\n          color: rgba(15, 23, 42, 0.68);\n          max-width: 260px;\n        }\n\n        @keyframes famloLoaderWave {\n          0% {\n            transform: translateX(-120%);\n          }\n          100% {\n            transform: translateX(120%);\n          }\n        }\n      "}</style>
     </>);
 }

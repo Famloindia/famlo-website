@@ -982,7 +982,7 @@ const getCachedHomepageData = unstable_cache(
     }
   },
   ["homepage-discovery"],
-  { revalidate: 60, tags: ["homepage-discovery"] }
+  { revalidate: 300, tags: ["homepage-discovery"] }
 );
 
 export async function getHomepageData(): Promise<HomepageData> {
@@ -1040,7 +1040,7 @@ const getCachedHomesDiscoveryData = unstable_cache(
     }
   },
   ["homes-discovery"],
-  { revalidate: 60, tags: ["homepage-discovery", "homes-discovery"] }
+  { revalidate: 300, tags: ["homepage-discovery", "homes-discovery"] }
 );
 
 export async function getHomesDiscoveryData(): Promise<HomeCardRecord[]> {

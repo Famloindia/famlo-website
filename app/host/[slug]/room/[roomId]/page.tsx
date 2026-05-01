@@ -10,6 +10,7 @@ import { getCalendarEventStayUnitId, loadCanonicalCalendar } from "@/lib/calenda
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { resolveHomeRoute } from "@/lib/home-route-resolution";
 import { getPublicCoordinates } from "@/lib/location-utils";
+import { getCachedStayUnitRatingSummary } from "@/lib/stay-unit-ratings";
 import { loadStayUnitById, loadStayUnitsForHome, type StayUnitHomeInput, type StayUnitRecord } from "@/lib/stay-units";
 import { buildHomestayPath } from "@/lib/slug";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -21,7 +22,7 @@ interface HostRoomPageProps {
   }>;
 }
 
-export const revalidate = 60;
+export const revalidate = 300;
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -80,7 +81,7 @@ async function hydrateRoomWithBlockedDates(
   unit: StayUnitRecord
 ): Promise<StayUnitRecord> {
   const from = getTodayInIndia();
-  const to = addIndiaDays(from, 365);
+  const to = addIndiaDays(from, 120);
 
   try {
     const [hostEvents, stayUnitEvents] = await Promise.all([
@@ -202,13 +203,15 @@ export default async function HostRoomPage({
   const hostId = resolved.hostId;
 
   const meta = parseHostListingMeta(asString(resolved.familyRow?.admin_notes) || null);
-  const fallbackRoom = await loadStayUnitsForHome(supabase, buildFallbackHomeInput(resolved, meta));
+  const [fallbackRoom, directRoom] = await Promise.all([
+    loadStayUnitsForHome(supabase, buildFallbackHomeInput(resolved, meta)),
+    loadStayUnitById(supabase, roomId, {
+      hostId: resolved.hostId,
+      legacyFamilyId: resolved.familyId,
+    }),
+  ]);
   const matchedFallbackRoom =
     fallbackRoom.find((unit) => unit.id === roomId || unit.unitKey === roomId) ?? null;
-  const directRoom = await loadStayUnitById(supabase, roomId, {
-    hostId: resolved.hostId,
-    legacyFamilyId: resolved.familyId,
-  });
   const hydratedDirectRoom = directRoom
     ? fallbackRoom.find((unit) => unit.id === directRoom.id || unit.unitKey === directRoom.unitKey) ?? directRoom
     : null;
@@ -247,6 +250,7 @@ export default async function HostRoomPage({
     };
 
   const room = await hydrateRoomWithBlockedDates(supabase, resolvedRoom as StayUnitRecord);
+  const roomRatingSummary = await getCachedStayUnitRatingSummary(room.id);
   const homeName = meta.listingTitle || asString(resolved.familyRow?.name) || asString(resolved.hostRow?.display_name) || "Famlo Home";
   const hostName =
     meta.hostDisplayName ||
@@ -340,6 +344,28 @@ export default async function HostRoomPage({
               <div className={styles.areaLabel}>{areaLabel}</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 14px",
+                  borderRadius: 999,
+                  background: "#FEF3C7",
+                  border: "1px solid #FDE68A",
+                  color: "#92400E",
+                  fontWeight: 800,
+                  fontSize: 14,
+                }}
+              >
+                <span>★</span>
+                <span>
+                  {roomRatingSummary?.averageRating != null ? roomRatingSummary.averageRating.toFixed(1) : "New"} room rating
+                </span>
+                <span style={{ color: "#B45309", fontWeight: 700 }}>
+                  ({roomRatingSummary?.reviewCount ?? 0})
+                </span>
+              </div>
 
               <div className={styles.verifiedPill}>
                 <span>Verified</span>
@@ -423,36 +449,42 @@ export default async function HostRoomPage({
           />
             </div>
 
-            <aside className={styles.rightColumnSticky}>
-              <RoomBookingPanel
-                home={{
-                  id: routeId,
-                  hostId: resolved.hostId,
-                  legacyFamilyId: resolved.familyId,
-                  hostUserId: resolved.hostUserId,
-                  name: homeName,
-                  listingTitle: homeName,
-                  city: asString(resolved.familyRow?.city) || asString(resolved.hostRow?.city),
-                  state: asString(resolved.familyRow?.state) || asString(resolved.hostRow?.state),
-                  googleMapsLink: asString(resolved.familyRow?.google_maps_link) || asString(resolved.hostRow?.google_maps_link) || null,
-                  platformCommissionPct: asNumber(resolved.familyRow?.platform_commission_pct ?? resolved.hostRow?.platform_commission_pct) ?? 18,
-                  bookingRequiresHostApproval: Boolean(resolved.familyRow?.booking_requires_host_approval ?? resolved.hostRow?.booking_requires_host_approval),
-                  isActive: Boolean(
-                    resolved.familyRow
-                      ? resolved.familyRow.is_active
-                      : typeof resolved.hostRow?.status === "string"
-                        ? resolved.hostRow.status === "published"
-                        : room.isActive
-                  ),
-                  isAccepting: Boolean(resolved.familyRow?.is_accepting ?? resolved.hostRow?.is_accepting ?? room.isActive),
-                  checkInTime,
-                  checkOutTime,
-                  blockedDates: homeBlockedDates,
-                }}
-                room={room}
-                areaLabel={areaLabel}
-              />
-            </aside>
+            <div className={styles.rightColumnWrapper}>
+              <aside className={styles.rightColumnSticky}>
+                <RoomBookingPanel
+                  home={{
+                    id: routeId,
+                    hostId: resolved.hostId,
+                    legacyFamilyId: resolved.familyId,
+                    hostUserId: resolved.hostUserId,
+                    name: homeName,
+                    listingTitle: homeName,
+                    city: asString(resolved.familyRow?.city) || asString(resolved.hostRow?.city),
+                    state: asString(resolved.familyRow?.state) || asString(resolved.hostRow?.state),
+                    googleMapsLink: asString(resolved.familyRow?.google_maps_link) || asString(resolved.hostRow?.google_maps_link) || null,
+                    platformCommissionPct: asNumber(resolved.familyRow?.platform_commission_pct ?? resolved.hostRow?.platform_commission_pct) ?? 18,
+                    bookingRequiresHostApproval: Boolean(
+                      resolved.hostRow?.booking_requires_host_approval ??
+                        resolved.familyRow?.booking_requires_host_approval ??
+                        meta.bookingRequiresHostApproval
+                    ),
+                    isActive: Boolean(
+                      resolved.familyRow
+                        ? resolved.familyRow.is_active
+                        : typeof resolved.hostRow?.status === "string"
+                          ? resolved.hostRow.status === "published"
+                          : room.isActive
+                    ),
+                    isAccepting: Boolean(resolved.familyRow?.is_accepting ?? resolved.hostRow?.is_accepting ?? room.isActive),
+                    checkInTime,
+                    checkOutTime,
+                    blockedDates: homeBlockedDates,
+                  }}
+                  room={room}
+                  areaLabel={areaLabel}
+                />
+              </aside>
+            </div>
           </div>
         </section>
       </div>

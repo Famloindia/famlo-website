@@ -14,7 +14,9 @@ declare global {
 }
 
 function appendStatus(returnUrl: string, params: Record<string, string>): string {
-  const url = new URL(returnUrl);
+  const fallbackBase =
+    typeof window !== "undefined" ? window.location.origin : "https://www.famlo.in";
+  const url = new URL(returnUrl || "/bookings", fallbackBase);
   Object.entries(params).forEach(([key, value]) => {
     url.searchParams.set(key, value);
   });
@@ -58,7 +60,14 @@ function PaymentCheckoutScreen(): React.JSX.Element {
     setLaunching(true);
 
     const redirect = (params: Record<string, string>) => {
-      window.location.href = appendStatus(payload.returnUrl, params);
+      const bookingUrl = payload.bookingId
+        ? `/bookings?bookingId=${encodeURIComponent(payload.bookingId)}`
+        : "/bookings";
+      const nextUrl =
+        params.status === "success"
+          ? appendStatus(bookingUrl, params)
+          : appendStatus(payload.returnUrl || bookingUrl, params);
+      window.location.assign(nextUrl);
     };
 
     const instance = new window.Razorpay({

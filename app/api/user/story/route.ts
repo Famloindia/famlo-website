@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 
 import { isCompletedStayStatus } from "@/lib/chat-access";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
@@ -16,6 +17,73 @@ function isSchemaCompatibilityError(message: string): boolean {
     lower.includes("does not exist") ||
     lower.includes("column")
   );
+}
+
+export async function GET(request: Request): Promise<NextResponse> {
+  try {
+    const { searchParams } = new URL(request.url);
+    const bookingId = searchParams.get("bookingId")?.trim() ?? "";
+    if (!bookingId) {
+      return NextResponse.json({ error: "bookingId is required." }, { status: 400 });
+    }
+
+    const supabase = createAdminSupabaseClient();
+    const authUser = await resolveAuthenticatedUser(supabase, request);
+    if (!authUser) {
+      return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
+    }
+
+    const { data: bookingV2 } = await supabase
+      .from("bookings_v2")
+      .select("id,legacy_booking_id,user_id")
+      .or(`id.eq.${bookingId},legacy_booking_id.eq.${bookingId}`)
+      .maybeSingle();
+    const { data: legacyBooking } = await supabase
+      .from("bookings")
+      .select("id,user_id")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    const resolvedBookingId = asString(bookingV2?.id) ?? bookingId;
+
+    const bookingOwnerId = asString(bookingV2?.user_id) ?? asString(legacyBooking?.user_id);
+    if (bookingOwnerId && bookingOwnerId !== authUser.id) {
+      return NextResponse.json({ error: "You can only view your own story." }, { status: 403 });
+    }
+
+    const { data: storyRows, error } = await supabase
+      .from("stories_v2")
+      .select("id,title,body,rating,liked_host,guest_consent_to_feature,cover_image_url,created_at,updated_at")
+      .eq("booking_id", resolvedBookingId)
+      .eq("author_user_id", authUser.id)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+    const story = (storyRows?.[0] ?? null) as Record<string, unknown> | null;
+
+    return NextResponse.json({
+      story: story
+        ? {
+            id: asString(story.id),
+            title: asString(story.title),
+            body: asString(story.body),
+            rating: typeof story.rating === "number" ? story.rating : null,
+            liked: typeof story.liked_host === "boolean" ? story.liked_host : null,
+            guestConsentToFeature: story.guest_consent_to_feature === true,
+            imageUrls: asString(story.cover_image_url) ? [asString(story.cover_image_url)] : [],
+            createdAt: asString(story.created_at),
+            updatedAt: asString(story.updated_at),
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("Story load failed:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to load story." },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -153,49 +221,54 @@ export async function POST(request: Request): Promise<NextResponse> {
       created_at: now,
       updated_at: now,
     };
-
-    const { data: insertedStory, error: storyV2Error } = await supabase
+    const { data: existingStoryRows, error: existingStoryError } = await supabase
       .from("stories_v2")
-      .insert(storyV2Payload as never)
       .select("id")
-      .single();
-    if (storyV2Error) {
-      console.error("[story.submit] stories_v2 insert failed", {
-        message: storyV2Error.message,
-        code: storyV2Error.code,
-        details: storyV2Error.details,
-      });
-      return NextResponse.json(
-        { error: "Guest story storage is not set up correctly for the live schema." },
-        { status: 503 }
-      );
-    }
+      .eq("booking_id", bookingV2?.id ?? bookingId)
+      .eq("author_user_id", authUser.id)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (existingStoryError) throw existingStoryError;
+    const existingStoryId = asString((existingStoryRows?.[0] as Record<string, unknown> | undefined)?.id);
 
-    if (!insertedStory?.id) {
-      console.warn("Story inserted without an id; skipping metadata patch.");
-    } else {
-      const { error: patchError } = await supabase
+    let storedStoryId: string | null = null;
+    if (existingStoryId) {
+      const { data: updatedStory, error: updateStoryError } = await supabase
         .from("stories_v2")
-        .update({
-          booking_id: bookingV2?.id ?? bookingId,
-          host_id: resolvedHostId,
-          rating: Number.isFinite(normalizedRating) ? normalizedRating : null,
-          liked_host: typeof liked === "boolean" ? liked : null,
-          guest_consent_to_feature: guestConsentToFeature === true,
-          stay_highlight: typeof stayHighlight === "string" && stayHighlight.trim().length > 0 ? stayHighlight.trim().slice(0, 140) : null,
-          experience_tags: Array.isArray(experienceTags)
-            ? experienceTags
-                .filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
-                .map((tag) => tag.trim().slice(0, 32))
-                .slice(0, 5)
-            : [],
-          review_status: "pending",
-        } as never)
-        .eq("id", insertedStory.id);
-
-      if (patchError && !isSchemaCompatibilityError(patchError.message)) {
-        console.error("Story metadata patch warning:", patchError);
+        .update(storyV2Payload as never)
+        .eq("id", existingStoryId)
+        .select("id")
+        .single();
+      if (updateStoryError) {
+        console.error("[story.submit] stories_v2 update failed", {
+          message: updateStoryError.message,
+          code: updateStoryError.code,
+          details: updateStoryError.details,
+        });
+        return NextResponse.json(
+          { error: "Guest story could not be updated right now." },
+          { status: 503 }
+        );
       }
+      storedStoryId = asString(updatedStory?.id);
+    } else {
+      const { data: insertedStory, error: storyV2Error } = await supabase
+        .from("stories_v2")
+        .insert(storyV2Payload as never)
+        .select("id")
+        .single();
+      if (storyV2Error) {
+        console.error("[story.submit] stories_v2 insert failed", {
+          message: storyV2Error.message,
+          code: storyV2Error.code,
+          details: storyV2Error.details,
+        });
+        return NextResponse.json(
+          { error: "Guest story storage is not set up correctly for the live schema." },
+          { status: 503 }
+        );
+      }
+      storedStoryId = asString(insertedStory?.id);
     }
 
     const bookingPatch: Record<string, unknown> = {
@@ -254,14 +327,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     console.info("[story.submit] stored stories_v2 row", {
-      storyId: insertedStory?.id ?? null,
+      storyId: storedStoryId,
       resolvedHostId,
       resolvedFamilyId,
       liked: typeof liked === "boolean" ? liked : null,
       featureConsent: guestConsentToFeature === true,
     });
+    revalidateTag("public-home-side-data", "max");
+    revalidateTag("home-detail-public-data", "max");
 
-    return NextResponse.json({ success: true, storedIn: "stories_v2", status: "pending_review" });
+    return NextResponse.json({ success: true, storedIn: "stories_v2", status: "pending_review", storyId: storedStoryId });
   } catch (error) {
     console.error("Story submission failed:", error);
     return NextResponse.json(

@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useUser } from "@/components/auth/UserContext";
+import { compressImageForUpload } from "@/lib/client-image-upload";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 
 type BookingRow = {
   id: string;
   legacy_booking_id?: string | null;
+  stay_unit_id?: string | null;
   family_id: string | null;
   guide_id: string | null;
   status: string | null;
@@ -48,6 +51,18 @@ type SupportDraft = {
   message: string;
   status: "idle" | "sending" | "sent" | "error";
   feedback: string | null;
+};
+
+type ExistingStory = {
+  id: string | null;
+  title: string | null;
+  body: string | null;
+  rating: number | null;
+  liked: boolean | null;
+  guestConsentToFeature: boolean;
+  imageUrls: string[];
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 type CancellationQuote = {
@@ -139,7 +154,9 @@ function isPastBooking(booking: BookingRow): boolean {
 }
 
 function canGuestCancelBooking(booking: BookingRow): boolean {
-  return ["awaiting_payment", "pending", "accepted", "confirmed"].includes(String(booking.status ?? ""));
+  return ["awaiting_payment", "pending", "pending_host_approval", "accepted", "confirmed"].includes(
+    String(booking.status ?? "")
+  );
 }
 
 function formatInr(amount: number): string {
@@ -211,6 +228,7 @@ function BookingStoryForm({
   const [consentToFeature, setConsentToFeature] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [loadingExistingStory, setLoadingExistingStory] = useState(true);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     const {
@@ -226,9 +244,47 @@ function BookingStoryForm({
     return headers;
   }, [supabase, userId]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadExistingStory(): Promise<void> {
+      setLoadingExistingStory(true);
+      setMessage(null);
+      try {
+        const response = await fetch(`/api/user/story?bookingId=${encodeURIComponent(booking.id)}`, {
+          headers: await getAuthHeaders(),
+        });
+        const data = (await response.json()) as { error?: string; story?: ExistingStory | null };
+        if (!response.ok || data.error) {
+          throw new Error(data.error ?? "Could not load your story.");
+        }
+        if (cancelled || !data.story) return;
+
+        setTitle(data.story.title ?? "");
+        setStory(data.story.body ?? "");
+        setLiked(data.story.liked ?? null);
+        setConsentToFeature(data.story.guestConsentToFeature ?? true);
+        setImageUrls(Array.isArray(data.story.imageUrls) ? data.story.imageUrls : []);
+        setMessage("Your story is saved here. You can edit and update it any time.");
+      } catch (error) {
+        if (!cancelled && error instanceof Error && !error.message.includes("Could not load your story.")) {
+          setMessage(error.message);
+        }
+      } finally {
+        if (!cancelled) setLoadingExistingStory(false);
+      }
+    }
+
+    void loadExistingStory();
+    return () => {
+      cancelled = true;
+    };
+  }, [booking.id, getAuthHeaders]);
+
   async function uploadStoryImage(file: File): Promise<string> {
+    const optimizedFile = await compressImageForUpload(file, { maxWidth: 1440, quality: 0.8 });
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", optimizedFile);
 
     const response = await fetch("/api/user/story/upload", {
       method: "POST",
@@ -301,7 +357,7 @@ function BookingStoryForm({
         throw new Error(data.error ?? "Feedback submission failed.");
       }
 
-      setMessage("Story submitted to Famlo.");
+      setMessage("Story saved. You can keep editing it here, and Team Famlo will review it for featuring.");
       onSaved(booking.id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Feedback failed.");
@@ -320,6 +376,9 @@ function BookingStoryForm({
       background: "#F8FAFC", 
       border: "1px solid #E0E8F5" 
     }}>
+      {loadingExistingStory ? (
+        <div style={{ color: "#64748B", fontSize: 13, fontWeight: 700 }}>Loading your saved story...</div>
+      ) : null}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
@@ -432,14 +491,14 @@ function BookingStoryForm({
         <input type="checkbox" checked={consentToFeature} onChange={(event) => setConsentToFeature(event.target.checked)} style={{ width: 16, height: 16 }} />
         Famlo can feature this story on the website after approval.
       </label>
-      {message ? <div style={{ color: message.includes("failed") ? "#B91C1C" : "#059669", fontWeight: 700, fontSize: 14 }}>{message}</div> : null}
+      {message ? <div style={{ color: message.toLowerCase().includes("could not") || message.toLowerCase().includes("failed") ? "#B91C1C" : "#059669", fontWeight: 700, fontSize: 14 }}>{message}</div> : null}
       <button 
         className="button-like" 
         disabled={saving} 
         type="submit"
         style={{ background: "#1A56DB", height: 48 }}
       >
-        {saving ? "Submitting..." : "Submit story"}
+        {saving ? "Saving..." : "Save story"}
       </button>
     </form>
   );
@@ -455,8 +514,46 @@ function BookingRoomRatingForm({
   getAuthHeaders: () => Promise<Record<string, string>>;
 }>): React.JSX.Element {
   const [rating, setRating] = useState(5);
+  const [hoverRating, setHoverRating] = useState(0);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [loadingExistingRating, setLoadingExistingRating] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadExistingRating(): Promise<void> {
+      setLoadingExistingRating(true);
+      setMessage(null);
+      try {
+        const response = await fetch(`/api/user/bookings/room-rating?bookingId=${encodeURIComponent(booking.id)}`, {
+          headers: await getAuthHeaders(),
+        });
+        const data = (await response.json()) as { error?: string; rating?: number | null };
+        if (!response.ok || data.error) {
+          throw new Error(data.error ?? "Could not load room rating.");
+        }
+
+        if (cancelled) return;
+        if (typeof data.rating === "number" && Number.isInteger(data.rating) && data.rating >= 1 && data.rating <= 5) {
+          setRating(data.rating);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : "Could not load room rating.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingExistingRating(false);
+        }
+      }
+    }
+
+    void loadExistingRating();
+    return () => {
+      cancelled = true;
+    };
+  }, [booking.id, getAuthHeaders]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -472,15 +569,19 @@ function BookingRoomRatingForm({
         },
         body: JSON.stringify({
           bookingId: booking.id,
+          stayUnitId: booking.stay_unit_id ?? null,
           rating,
         }),
       });
 
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as { error?: string; rating?: number };
       if (!response.ok || data.error) {
         throw new Error(data.error ?? "Could not save room rating.");
       }
 
+      if (typeof data.rating === "number" && Number.isInteger(data.rating)) {
+        setRating(data.rating);
+      }
       setMessage("Room rating saved. You can update it any time from this stay.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not save room rating.");
@@ -507,31 +608,41 @@ function BookingRoomRatingForm({
         <p style={{ margin: 0, color: "#64748B", fontSize: 13, lineHeight: 1.5 }}>
           Only guests who completed this stay can rate <strong>{stayName}</strong>.
         </p>
+        {loadingExistingRating ? (
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B" }}>Loading your saved rating...</div>
+        ) : null}
       </div>
 
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <button
-            key={star}
-            type="button"
-            onClick={() => setRating(star)}
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 12,
-              border: rating === star ? "2px solid #1A56DB" : "1px solid #CBD5E1",
-              background: rating === star ? "#EBF1FF" : "#FFFFFF",
-              color: rating === star ? "#1A56DB" : "#94A3B8",
-              fontSize: 20,
-              fontWeight: 900,
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-            aria-label={`${star} star${star === 1 ? "" : "s"}`}
-          >
-            ★
-          </button>
-        ))}
+      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        {[1, 2, 3, 4, 5].map((star) => {
+          const active = (hoverRating || rating) >= star;
+          return (
+            <button
+              key={star}
+              type="button"
+              onMouseEnter={() => setHoverRating(star)}
+              onMouseLeave={() => setHoverRating(0)}
+              onClick={() => setRating(star)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: "4px",
+                cursor: "pointer",
+                fontSize: 32,
+                color: active ? "#1A56DB" : "#CBD5E1",
+                transition: "transform 0.1s ease, color 0.1s ease",
+                transform: hoverRating === star ? "scale(1.2)" : "scale(1)",
+                lineHeight: 1,
+              }}
+              aria-label={`${star} star${star === 1 ? "" : "s"}`}
+            >
+              ★
+            </button>
+          );
+        })}
+        <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: "#64748B" }}>
+          {hoverRating || rating} / 5
+        </span>
       </div>
 
       <button
@@ -558,19 +669,37 @@ function BookingSupportCard({
   userId,
   userName,
   getAuthHeaders,
+  preferredMode = "support",
 }: Readonly<{
   booking: BookingRow;
   userId: string;
   userName: string;
   getAuthHeaders: () => Promise<Record<string, string>>;
+  preferredMode?: SupportDraft["mode"];
 }>): React.JSX.Element {
   const [draft, setDraft] = useState<SupportDraft>({
-    mode: "support",
-    subject: `Help with booking ${booking.id.slice(0, 8)}`,
+    mode: preferredMode,
+    subject:
+      preferredMode === "emergency"
+        ? `Emergency for booking ${booking.id.slice(0, 8)}`
+        : `Help with booking ${booking.id.slice(0, 8)}`,
     message: "",
     status: "idle",
     feedback: null,
   });
+
+  useEffect(() => {
+    setDraft({
+      mode: preferredMode,
+      subject:
+        preferredMode === "emergency"
+          ? `Emergency for booking ${booking.id.slice(0, 8)}`
+          : `Help with booking ${booking.id.slice(0, 8)}`,
+      message: "",
+      status: "idle",
+      feedback: null,
+    });
+  }, [booking.id, preferredMode]);
 
   async function createTicket(withLocation: boolean): Promise<void> {
     if (!draft.subject.trim() || !draft.message.trim()) {
@@ -754,6 +883,7 @@ function BookingSupportCard({
 
 export function BookingsDashboard(): React.JSX.Element {
   const { user, profile, loading } = useUser();
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
@@ -761,7 +891,6 @@ export function BookingsDashboard(): React.JSX.Element {
   const [expandedFeedback, setExpandedFeedback] = useState<string | null>(null);
   const [expandedRoomRating, setExpandedRoomRating] = useState<string | null>(null);
   const [expandedSupport, setExpandedSupport] = useState<string | null>(null);
-  const [submittedStories, setSubmittedStories] = useState<string[]>([]);
   const [checkInCodeByBookingId, setCheckInCodeByBookingId] = useState<Record<string, string>>({});
   const [checkInMessageByBookingId, setCheckInMessageByBookingId] = useState<Record<string, string>>({});
   const [checkInLoadingByBookingId, setCheckInLoadingByBookingId] = useState<Record<string, boolean>>({});
@@ -827,6 +956,12 @@ export function BookingsDashboard(): React.JSX.Element {
 
   const upcoming = useMemo(() => bookings.filter((booking) => !isPastBooking(booking)), [bookings]);
   const past = useMemo(() => bookings.filter((booking) => isPastBooking(booking)), [bookings]);
+  const emergencyRequested = searchParams.get("emergency") === "1";
+
+  useEffect(() => {
+    if (!emergencyRequested || expandedSupport || upcoming.length === 0) return;
+    setExpandedSupport(upcoming[0]?.id ?? null);
+  }, [emergencyRequested, expandedSupport, upcoming]);
 
   async function requestGuestCheckInCode(booking: BookingRow): Promise<void> {
     if (!user) return;
@@ -1014,8 +1149,7 @@ export function BookingsDashboard(): React.JSX.Element {
                 const location = [booking.families?.city ?? booking.companions?.city, booking.families?.state ?? booking.companions?.state].filter(Boolean).join(", ");
                 const canLeaveStory =
                   Boolean(booking.family_id || booking.families?.id) &&
-                  booking.status === "completed" &&
-                  !submittedStories.includes(booking.id);
+                  booking.status === "completed";
                 const statusMeta = getBookingStatusMeta(booking.status, canLeaveStory);
                 const canOpenChat = Boolean(booking.conversation_id) && isChatUnlocked(booking.status);
                 const canCancel = canGuestCancelBooking(booking);
@@ -1265,21 +1399,21 @@ export function BookingsDashboard(): React.JSX.Element {
                           type="button"
                           className="btn-ghost"
                           style={{ 
-                            borderColor: "#E2E8F0",
-                            color: "#475569",
+                            borderColor: "#FACC15",
+                            color: "#854D0E",
                             fontSize: 14,
                             padding: "0 20px",
                             height: 48,
                             borderRadius: 14,
-                            background: "#FFFFFF",
-                            fontWeight: 600,
+                            background: expandedFeedback === booking.id ? "#FDE68A" : "#FEF9C3",
+                            fontWeight: 700,
                             display: "inline-flex",
                             alignItems: "center",
-                            justifyContent: "center"
+                            justifyContent: "center",
                           }}
                           onClick={() => setExpandedFeedback((current) => (current === booking.id ? null : booking.id))}
                         >
-                          {expandedFeedback === booking.id ? "Hide story form" : "Write your story"}
+                          {expandedFeedback === booking.id ? "Hide story form" : "Write or edit your story"}
                         </button>
                       ) : null}
                       {booking.status === "completed" ? (
@@ -1287,14 +1421,14 @@ export function BookingsDashboard(): React.JSX.Element {
                           type="button"
                           className="btn-ghost"
                           style={{
-                            borderColor: "#E2E8F0",
-                            color: "#475569",
+                            borderColor: "#FACC15",
+                            color: "#854D0E",
                             fontSize: 14,
                             padding: "0 20px",
                             height: 48,
                             borderRadius: 14,
-                            background: "#FFFFFF",
-                            fontWeight: 600,
+                            background: expandedRoomRating === booking.id ? "#FDE68A" : "#FEF9C3",
+                            fontWeight: 700,
                             display: "inline-flex",
                             alignItems: "center",
                             justifyContent: "center",
@@ -1323,7 +1457,13 @@ export function BookingsDashboard(): React.JSX.Element {
                     ) : null}
 
                     {expandedSupport === booking.id ? (
-                      <BookingSupportCard booking={booking} userId={user.id} userName={profile?.name ?? "Famlo guest"} getAuthHeaders={getAuthHeaders} />
+                      <BookingSupportCard
+                        booking={booking}
+                        userId={user.id}
+                        userName={profile?.name ?? "Famlo guest"}
+                        getAuthHeaders={getAuthHeaders}
+                        preferredMode={emergencyRequested ? "emergency" : "support"}
+                      />
                     ) : null}
 
                     {expandedFeedback === booking.id && canLeaveStory ? (
@@ -1332,8 +1472,7 @@ export function BookingsDashboard(): React.JSX.Element {
                         userName={profile?.name ?? "Famlo guest"}
                         userCity={profile?.city ?? ""}
                         onSaved={(bookingId) => {
-                          setSubmittedStories((current) => [...current, bookingId]);
-                          setExpandedFeedback(null);
+                          void bookingId;
                         }}
                       />
                     ) : null}

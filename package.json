@@ -11,6 +11,7 @@
     "db:v2:verify": "node scripts/verify-v2.mjs",
     "db:v2:backfill": "node scripts/backfill-v2.mjs",
     "images:backfill": "node scripts/backfill-image-variants.mjs",
+    "images:cache-backfill": "node scripts/backfill-r2-cache-control.mjs",
     "stay-units:scan": "node scripts/scan-stay-unit-integrity.cjs"
   },
   "dependencies": {

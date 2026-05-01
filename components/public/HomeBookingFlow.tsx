@@ -666,7 +666,6 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
                     {quote.discountAmount > 0 ? (
                       <div className="booking-summary-row"><span>Discount</span><strong>- Rs. {quote.discountAmount.toLocaleString("en-IN")}</strong></div>
                     ) : null}
-                    <div className="booking-summary-row"><span>GST and taxes</span><strong>Rs. {quote.taxAmount.toLocaleString("en-IN")}</strong></div>
                   </>
                 ) : null}
                 <label className="famlo-picker-field">
@@ -684,7 +683,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
                 <small>{isFullDayBooking ? `Total for ${bookingDayLabel}` : "Total for booking"}</small>
                 <strong>Rs. {(quote?.totalPrice ?? estimatedTotalPrice).toLocaleString("en-IN")}</strong>
               </div>
-              <span>{quoteLoading ? "Updating..." : quote ? "GST included" : "Taxes calculated at checkout"}</span>
+              <span>{quoteLoading ? "Updating..." : quote ? "No extra GST added" : "Final amount shown at checkout"}</span>
             </div>
 
             {step !== "confirm" ? (
@@ -1242,10 +1241,7 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
                   });
 
                   const bookingPageUrl = `/bookings?bookingId=${encodeURIComponent(order.bookingId)}`;
-                  const bookingTab = window.open(bookingPageUrl, "_blank", "noopener,noreferrer");
-                  if (!bookingTab) {
-                    window.location.href = bookingPageUrl;
-                  }
+                  window.location.assign(bookingPageUrl);
 
                   const hostLabel = home.hostName ?? home.listingTitle ?? home.name;
                   setBookingReceipt({

@@ -64,12 +64,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>): React.JSX.Element {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth">
       <head>
         <link rel="preconnect" href="https://pub-8e2cb60fdd79431fa41db047fa09d02b.r2.dev" crossOrigin="" />
         <link rel="dns-prefetch" href="https://pub-8e2cb60fdd79431fa41db047fa09d02b.r2.dev" />
-        <link rel="preconnect" href="https://images.unsplash.com" crossOrigin="" />
-        <link rel="dns-prefetch" href="https://images.unsplash.com" />
       </head>
       <body className={`${playfair.variable} ${dmSans.variable}`}>
         <UserProvider>

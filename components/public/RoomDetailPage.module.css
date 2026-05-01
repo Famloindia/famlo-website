@@ -90,19 +90,23 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 24px;
-  align-items: start;
 }
 
 .leftColumn {
   min-width: 0;
   display: grid;
   gap: 24px;
+  align-self: start;
+}
+
+.rightColumnWrapper {
+  height: 100%;
+  min-width: 0;
 }
 
 .rightColumnSticky {
   position: sticky;
   top: 100px;
-  align-self: start;
   max-height: calc(100vh - 120px);
   overflow-y: auto;
 }

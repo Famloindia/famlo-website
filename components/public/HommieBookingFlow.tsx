@@ -513,7 +513,6 @@ export function HommieBookingFlow({
                     </label>
                     <div>Subtotal: Rs. {(quote?.subtotal ?? estimatedTotalPrice).toLocaleString("en-IN")}</div>
                     <div>Discount: Rs. {(quote?.discountAmount ?? 0).toLocaleString("en-IN")}</div>
-                    <div>Tax: Rs. {(quote?.taxAmount ?? 0).toLocaleString("en-IN")}</div>
                     <div>Platform fee: Rs. {(quote?.platformFee ?? 0).toLocaleString("en-IN")}</div>
                     <div>Partner payout: Rs. {(quote?.partnerPayoutAmount ?? 0).toLocaleString("en-IN")}</div>
                     <div>Total: {quoteLoading ? "Updating..." : `Rs. ${(quote?.totalPrice ?? estimatedTotalPrice).toLocaleString("en-IN")}`}</div>

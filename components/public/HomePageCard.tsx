@@ -2,12 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 import type { HomeCardRecord } from "@/lib/discovery";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
 import { getBlurDataUrl } from "@/lib/image-placeholders";
-import { derivePreviewImageUrl } from "@/lib/image-variants";
+import { toSupabaseImageUrl } from "@/lib/supabase-image";
 
 function pal(id: string): [string, string] {
   const palettes: [string, string][] = [
@@ -55,21 +56,25 @@ function minPrice(home: HomeCardRecord): number {
 }
 
 export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord; distance?: string }>): React.JSX.Element {
+  const router = useRouter();
   const [c1, c2] = pal(home.id);
   const price = minPrice(home);
   const [hov, setHov] = useState(false);
+  const [isOpening, setIsOpening] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [pendingImageIndex, setPendingImageIndex] = useState<number | null>(null);
   const [isCrossfading, setIsCrossfading] = useState(false);
   const transitionTimeoutRef = useRef<number | null>(null);
+  const cardRef = useRef<HTMLAnchorElement | null>(null);
+  const warmedRouteRef = useRef(false);
 
   const roomImages = Array.isArray(home.roomImageUrls) ? home.roomImageUrls : [];
   const activeRoomImage = roomImages[activeImageIndex] || "";
   const incomingRoomImage = pendingImageIndex != null ? roomImages[pendingImageIndex] || "" : "";
-  const activeRoomPreview = derivePreviewImageUrl(activeRoomImage) || activeRoomImage;
-  const incomingRoomPreview = derivePreviewImageUrl(incomingRoomImage) || incomingRoomImage;
+  const activeRoomPreview = toSupabaseImageUrl(activeRoomImage, { width: 960, quality: 76 }) || activeRoomImage;
+  const incomingRoomPreview = toSupabaseImageUrl(incomingRoomImage, { width: 960, quality: 76 }) || incomingRoomImage;
   const hostPortrait = home.hostPhotoUrl || "";
-  const hostPortraitPreview = derivePreviewImageUrl(hostPortrait) || hostPortrait;
+  const hostPortraitPreview = toSupabaseImageUrl(hostPortrait, { width: 160, quality: 72 }) || hostPortrait;
   const roomCountToDisplay = home.roomCount != null && home.roomCount > 0 ? home.roomCount : null;
   const roomLabel = roomCountToDisplay != null && roomCountToDisplay > 0
     ? `${roomCountToDisplay} room${roomCountToDisplay > 1 ? "s" : ""}`
@@ -121,10 +126,41 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
     };
   }, []);
 
+  const warmRoute = useCallback(() => {
+    if (warmedRouteRef.current) return;
+    warmedRouteRef.current = true;
+    router.prefetch(home.href);
+  }, [home.href, router]);
+
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node || typeof window === "undefined" || warmedRouteRef.current) return;
+    if (!("IntersectionObserver" in window)) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            warmRoute();
+            observer.disconnect();
+            break;
+          }
+        }
+      },
+      { rootMargin: "180px 0px" }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [warmRoute]);
+
   return (
     <Link
+      ref={cardRef}
       href={home.href}
+      prefetch
       onClick={() => {
+        setIsOpening(true);
         void recordHostInteractionEvent({
           eventType: "profile_click",
           hostId: home.hostId ?? null,
@@ -137,10 +173,13 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
         });
       }}
       onMouseEnter={() => {
+        warmRoute();
         setHov(true);
         setPendingImageIndex(null);
         setIsCrossfading(false);
       }}
+      onTouchStart={warmRoute}
+      onFocus={warmRoute}
       onMouseLeave={() => {
         setHov(false);
         setPendingImageIndex(null);
@@ -171,7 +210,7 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
           alt=""
           fill
           sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 430px"
-          quality={52}
+          quality={72}
           placeholder="blur"
           blurDataURL={getBlurDataUrl(`${home.id}-room-${activeImageIndex}`)}
           aria-hidden="true"
@@ -205,7 +244,7 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
           alt=""
           fill
           sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 430px"
-          quality={52}
+          quality={72}
           placeholder="blur"
           blurDataURL={getBlurDataUrl(`${home.id}-room-${pendingImageIndex}`)}
           aria-hidden="true"
@@ -234,10 +273,39 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
         style={{
           position: "absolute",
           inset: 0,
-          background: "linear-gradient(90deg, rgba(11,16,32,0.3) 0%, rgba(11,16,32,0) 40%)",
-          pointerEvents: "none",
-        }}
+        background: "linear-gradient(90deg, rgba(11,16,32,0.3) 0%, rgba(11,16,32,0) 40%)",
+        pointerEvents: "none",
+      }}
       />
+      {isOpening ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            background: "linear-gradient(180deg, rgba(11,16,32,0.3), rgba(11,16,32,0.58))",
+            zIndex: 2,
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            style={{
+              padding: "10px 14px",
+              borderRadius: "999px",
+              background: "rgba(255,255,255,0.94)",
+              color: "#0f172a",
+              fontSize: "12px",
+              fontWeight: 900,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              boxShadow: "0 10px 24px rgba(15,23,42,0.18)",
+            }}
+          >
+            Opening stay
+          </div>
+        </div>
+      ) : null}
 
       <div
         style={{
@@ -270,7 +338,7 @@ export function HomePageCard({ home, distance }: Readonly<{ home: HomeCardRecord
                 width={128}
                 height={128}
                 sizes="64px"
-                quality={48}
+                quality={68}
                 placeholder="blur"
                 blurDataURL={getBlurDataUrl(`${home.id}-host`)}
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}

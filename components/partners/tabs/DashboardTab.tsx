@@ -7,6 +7,7 @@ import {
   Plus, Trash2, RefreshCw, ShieldCheck, Upload, Check, Loader2, MapPin
 } from "lucide-react";
 import type { StayUnitRecord } from "@/lib/stay-units";
+import { compressImageListForUpload } from "@/lib/client-image-upload";
 import { normalizeAmenityList, ROOM_AMENITY_OPTIONS } from "@/lib/room-amenities";
 import { buildHomestayPath } from "@/lib/slug";
 import ChannelManagerTab from "./ChannelManagerTab";
@@ -556,11 +557,12 @@ export default function DashboardTab({
     setRoomsMessage(null);
 
     try {
+      const optimizedFiles = await compressImageListForUpload(Array.from(files));
       const formData = new FormData();
       formData.append("familyId", familyId);
       formData.append("unitId", roomId);
       formData.append("kind", "room");
-      Array.from(files).forEach((file) => formData.append("photos", file));
+      optimizedFiles.forEach((file) => formData.append("photos", file));
 
       const response = await fetch("/api/host/stay-units/upload-photos", {
         method: "POST",
@@ -601,11 +603,12 @@ export default function DashboardTab({
     setRoomsMessage(null);
 
     try {
+      const optimizedFiles = await compressImageListForUpload(Array.from(files));
       const formData = new FormData();
       formData.append("familyId", familyId);
       formData.append("unitId", roomId);
       formData.append("kind", "locality");
-      Array.from(files).forEach((file) => formData.append("photos", file));
+      optimizedFiles.forEach((file) => formData.append("photos", file));
 
       const response = await fetch("/api/host/stay-units/upload-photos", {
         method: "POST",

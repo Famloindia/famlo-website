@@ -3,6 +3,7 @@
 // app/homes/[id]/page.tsx
 
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Bath, Bed, Coffee, Globe, Heart, Lock, MapPin, MessageCircle, Monitor, ShieldCheck, ShowerHead, Snowflake, Sunrise, Sun, Sunset, SunMoon, Users, Wifi } from "lucide-react";
@@ -11,7 +12,9 @@ import { HomeBookingPreview } from "@/components/public/HomeBookingPreview";
 import { HomeDetailTopBar } from "@/components/public/HomeDetailTopBar";
 import { HomeCoverCard } from "@/components/public/HomeCoverCard";
 import { HostGalleryViewer } from "@/components/public/HostGalleryViewer";
+import { GuestStoriesRail } from "@/components/public/GuestStoriesRail";
 import { RecentHomeViewTracker } from "@/components/public/RecentHomeViewTracker";
+import { RouteWarmup } from "@/components/public/RouteWarmup";
 import { getCachedPublicHomeSideData, getCachedPublicHomeStayData } from "@/lib/home-detail-public-data";
 import { DEFAULT_EXPERIENCE_CARDS, parseMultiValueList } from "@/lib/home-listing-options";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
@@ -22,7 +25,76 @@ import { buildHomestayPath } from "@/lib/slug";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import styles from "./home-details.module.css";
 
-export const revalidate = 60;
+export const revalidate = 300;
+
+async function MoreHomesSection({
+  currentHomeId,
+  currentHostId,
+  currentLegacyFamilyId,
+  activeStayUnitCount,
+  visibleStayUnits,
+}: {
+  currentHomeId: string;
+  currentHostId: string | null | undefined;
+  currentLegacyFamilyId: string | null | undefined;
+  activeStayUnitCount: number;
+  visibleStayUnits: Array<{ photos?: string[]; id: string }>;
+}): Promise<React.JSX.Element | null> {
+  const moreHomes = await getHomesDiscoveryData();
+  const moreHomesList = moreHomes
+    .filter((item) => item.id !== currentHomeId)
+    .filter((item) => item.isActive && item.isAccepting)
+    .slice(0, 4);
+
+  return (
+    <section
+      style={{
+        background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+        borderRadius: "32px",
+        padding: "28px",
+        border: "1px solid #dbeafe",
+        boxShadow: "0 18px 40px rgba(15, 23, 42, 0.08)",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", gap: "12px" }}>
+        <h2 style={{ fontSize: "24px", fontWeight: 800, margin: 0 }}>More Homes</h2>
+        <Link href="/homestays" style={{ color: "#1890ff", fontWeight: 700, textDecoration: "none" }}>
+          See more
+        </Link>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: "18px",
+          overflowX: "auto",
+          paddingBottom: "10px",
+          scrollbarWidth: "none",
+          scrollSnapType: "x proximity",
+        }}
+      >
+        {moreHomesList.length > 0 ? moreHomesList.map((item) => {
+          const isSameListing = item.hostId === currentHostId || item.legacyFamilyId === currentLegacyFamilyId;
+          return (
+            <HomeCoverCard
+              key={item.id}
+              home={item}
+              roomCountOverride={isSameListing ? activeStayUnitCount : item.roomCount ?? undefined}
+              roomImageUrlsOverride={isSameListing
+                ? visibleStayUnits.flatMap((unit) => unit.photos ?? []).filter((photo): photo is string => typeof photo === "string" && photo.trim().length > 0)
+                : item.roomImageUrls}
+              suppressHomeFallback={false}
+            />
+          );
+        }) : (
+          <>
+            <div style={{ minWidth: "clamp(280px, 25vw, 340px)", height: "220px", borderRadius: "22px", background: "#f1f5f9" }} />
+            <div style={{ minWidth: "clamp(280px, 25vw, 340px)", height: "220px", borderRadius: "22px", background: "#f1f5f9" }} />
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export async function generateMetadata({
   params,
@@ -166,9 +238,11 @@ function formatRoomType(value: string | null | undefined): string {
 
 type StoryItem = {
   id: string;
+  title: string;
   authorName: string;
   fromCity: string;
   storyText: string;
+  imageUrls: string[];
   rating: number | null;
   createdAt?: string;
 };
@@ -197,7 +271,6 @@ export default async function HomeDetailPage({
   const familyId = resolved.familyId;
   const hostId = resolved.hostId;
   const metricsId = familyId ?? hostId ?? id;
-  const moreHomesPromise = getHomesDiscoveryData();
 
   // 3. Fetch the independent data in parallel.
   const familyPhotosPromise = familyId
@@ -229,7 +302,7 @@ export default async function HomeDetailPage({
         .maybeSingle()
     : Promise.resolve({ data: null as { payload?: unknown; updated_at?: string | null } | null });
 
-  const [familyPhotosResult, hostMediaResult, approvedDraftResult, publicSideData, moreHomes] = await Promise.all([
+  const [familyPhotosResult, hostMediaResult, approvedDraftResult, publicSideData] = await Promise.all([
     familyPhotosPromise,
     hostMediaPromise,
     approvedDraftPromise,
@@ -238,7 +311,6 @@ export default async function HomeDetailPage({
       hostId,
       familyId,
     }),
-    moreHomesPromise,
   ]);
   const existingBookings = publicSideData.stayBookingRows;
 
@@ -328,7 +400,12 @@ export default async function HomeDetailPage({
         : typeof host?.platform_commission_pct === "number"
           ? host.platform_commission_pct
           : 18,
-    bookingRequiresHostApproval: Boolean(family?.booking_requires_host_approval ?? host?.booking_requires_host_approval),
+    bookingRequiresHostApproval: Boolean(
+      host?.booking_requires_host_approval ??
+        family?.booking_requires_host_approval ??
+        meta.bookingRequiresHostApproval ??
+        onboardingPayload.bookingRequiresHostApproval
+    ),
     price_morning: asNumber(family?.price_morning ?? host?.price_morning),
     price_afternoon: asNumber(family?.price_afternoon ?? host?.price_afternoon),
     price_evening: asNumber(family?.price_evening ?? host?.price_evening),
@@ -356,6 +433,9 @@ export default async function HomeDetailPage({
     stayUnits.find((unit) => unit.isPrimary) ??
     stayUnits[0] ??
     null;
+  const primaryRoomHref = primaryStayUnit
+    ? `/host/${home.legacyFamilyId ?? home.hostId ?? home.id}/room/${primaryStayUnit.id}`
+    : null;
   const homeAmenities = primaryStayUnit?.amenities.length ? primaryStayUnit.amenities : home.amenities;
   const homeQuarterPrices = {
     morning: primaryStayUnit?.priceMorning && primaryStayUnit.priceMorning > 0 ? primaryStayUnit.priceMorning : home.price_morning,
@@ -487,13 +567,9 @@ export default async function HomeDetailPage({
       icon: <Monitor size={18} />,
     },
   ];
-  const moreHomesList = moreHomes
-    .filter((item) => item.id !== home.id)
-    .filter((item) => item.isActive && item.isAccepting)
-    .slice(0, 4);
-
   return (
     <main className="shell famlo-booking-page home-details-page" style={{ maxWidth: 1280, paddingTop: 20 }}>
+      <RouteWarmup href={primaryRoomHref} enabled={Boolean(primaryRoomHref)} />
       <RecentHomeViewTracker
         id={home.id}
         hostId={resolved.hostId}
@@ -584,6 +660,10 @@ export default async function HomeDetailPage({
                         const roomCoverImage = unit.photos[0] || null;
                         const roomRating = roomRatingSummaryMap.get(unit.id) ?? null;
                         const roomRatingLabel = roomRating?.averageRating != null ? roomRating.averageRating.toFixed(1) : "New";
+                        const roomReviewCountLabel =
+                          roomRating?.reviewCount && roomRating.reviewCount > 0
+                            ? `${roomRating.reviewCount} review${roomRating.reviewCount === 1 ? "" : "s"}`
+                            : "No reviews yet";
                         const roomMeta = [
                           `${unit.maxGuests || 1} guest${(unit.maxGuests || 1) === 1 ? "" : "s"}`,
                           unit.bedInfo || null,
@@ -593,6 +673,7 @@ export default async function HomeDetailPage({
                           <Link
                             key={unit.id}
                             href={`/host/${home.legacyFamilyId ?? home.hostId ?? home.id}/room/${unit.id}`}
+                            prefetch
                             style={{ textDecoration: "none", color: "inherit", display: "block" }}
                           >
                             <div className={styles.roomCard}>
@@ -632,6 +713,9 @@ export default async function HomeDetailPage({
                                         <span>{roomRatingLabel}</span>
                                         <span style={{ color: "#fbbf24" }}>★</span>
                                       </div>
+                                    </div>
+                                    <div style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.82)" }}>
+                                      {roomReviewCountLabel}
                                     </div>
                                   </div>
                                 </div>
@@ -888,52 +972,40 @@ export default async function HomeDetailPage({
               </div>
             ) : null}
 
-            <section
-              style={{
-                background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
-                borderRadius: "32px",
-                padding: "28px",
-                border: "1px solid #dbeafe",
-                boxShadow: "0 18px 40px rgba(15, 23, 42, 0.08)",
-              }}
+            {home.stories.length > 0 ? <GuestStoriesRail hostName={home.hostName} stories={home.stories} /> : null}
+
+            <Suspense
+              fallback={
+                <section
+                  style={{
+                    background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+                    borderRadius: "32px",
+                    padding: "28px",
+                    border: "1px solid #dbeafe",
+                    boxShadow: "0 18px 40px rgba(15, 23, 42, 0.08)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", gap: "12px" }}>
+                    <h2 style={{ fontSize: "24px", fontWeight: 800, margin: 0 }}>More Homes</h2>
+                    <Link href="/homestays" style={{ color: "#1890ff", fontWeight: 700, textDecoration: "none" }}>
+                      See more
+                    </Link>
+                  </div>
+                  <div style={{ display: "flex", gap: "18px", overflowX: "auto", paddingBottom: "10px" }}>
+                    <div style={{ minWidth: "clamp(280px, 25vw, 340px)", height: "220px", borderRadius: "22px", background: "#f1f5f9" }} />
+                    <div style={{ minWidth: "clamp(280px, 25vw, 340px)", height: "220px", borderRadius: "22px", background: "#f1f5f9" }} />
+                  </div>
+                </section>
+              }
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", gap: "12px" }}>
-                <h2 style={{ fontSize: "24px", fontWeight: 800, margin: 0 }}>More Homes</h2>
-                <Link href="/homestays" style={{ color: "#1890ff", fontWeight: 700, textDecoration: "none" }}>
-                  See more
-                </Link>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: "18px",
-                  overflowX: "auto",
-                  paddingBottom: "10px",
-                  scrollbarWidth: "none",
-                  scrollSnapType: "x proximity",
-                }}
-              >
-                {moreHomesList.length > 0 ? moreHomesList.map((item) => {
-                  const isSameListing = item.hostId === home.hostId || item.legacyFamilyId === home.legacyFamilyId;
-                  return (
-                    <HomeCoverCard
-                      key={item.id}
-                      home={item}
-                      roomCountOverride={isSameListing ? activeStayUnitCount : item.roomCount ?? undefined}
-                      roomImageUrlsOverride={isSameListing
-                        ? visibleStayUnits.flatMap((unit) => unit.photos ?? []).filter((photo): photo is string => typeof photo === "string" && photo.trim().length > 0)
-                        : item.roomImageUrls}
-                      suppressHomeFallback={false}
-                    />
-                  );
-                }) : (
-                  <>
-                    <div style={{ minWidth: "clamp(280px, 25vw, 340px)", height: "220px", borderRadius: "22px", background: "#f1f5f9" }} />
-                    <div style={{ minWidth: "clamp(280px, 25vw, 340px)", height: "220px", borderRadius: "22px", background: "#f1f5f9" }} />
-                  </>
-                )}
-              </div>
-            </section>
+              <MoreHomesSection
+                currentHomeId={home.id}
+                currentHostId={home.hostId}
+                currentLegacyFamilyId={home.legacyFamilyId}
+                activeStayUnitCount={activeStayUnitCount}
+                visibleStayUnits={visibleStayUnits}
+              />
+            </Suspense>
           </div>
         </div>
 
@@ -954,6 +1026,10 @@ export default async function HomeDetailPage({
               const roomCoverImage = unit.photos[0] || null;
               const roomRating = roomRatingSummaryMap.get(unit.id) ?? null;
               const roomRatingLabel = roomRating?.averageRating != null ? roomRating.averageRating.toFixed(1) : "New";
+              const roomReviewCountLabel =
+                roomRating?.reviewCount && roomRating.reviewCount > 0
+                  ? `${roomRating.reviewCount} review${roomRating.reviewCount === 1 ? "" : "s"}`
+                  : "No reviews yet";
               const roomMeta = [
                 `${unit.maxGuests || 1} guest${(unit.maxGuests || 1) === 1 ? "" : "s"}`,
                 unit.bedInfo || null,
@@ -963,6 +1039,7 @@ export default async function HomeDetailPage({
                 <Link
                   key={unit.id}
                   href={`/host/${home.legacyFamilyId ?? home.hostId ?? home.id}/room/${unit.id}`}
+                  prefetch
                   style={{ textDecoration: "none", color: "inherit", display: "block" }}
                 >
                   <div className={styles.roomCard}>
@@ -1020,6 +1097,9 @@ export default async function HomeDetailPage({
                               <span>{roomRatingLabel}</span>
                               <span style={{ color: "#fbbf24" }}>★</span>
                             </div>
+                          </div>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.82)" }}>
+                            {roomReviewCountLabel}
                           </div>
                         </div>
                       </div>

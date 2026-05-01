@@ -223,7 +223,11 @@ export default async function BookingPage({
     activeQuarters: activeQuarterSource.length > 0 ? activeQuarterSource : ["morning", "afternoon", "evening", "fullday"],
     blockedDates: blockedDateSource,
     platformCommissionPct: asNumber(family?.platform_commission_pct ?? host?.platform_commission_pct) ?? 18,
-    bookingRequiresHostApproval: Boolean(family?.booking_requires_host_approval ?? host?.booking_requires_host_approval),
+    bookingRequiresHostApproval: Boolean(
+      host?.booking_requires_host_approval ??
+        family?.booking_requires_host_approval ??
+        meta.bookingRequiresHostApproval
+    ),
     checkInTime: asString(meta.checkInTime) || asString(family?.check_in_time) || asString(host?.check_in_time) || null,
     checkOutTime: asString(meta.checkOutTime) || asString(family?.check_out_time) || asString(host?.check_out_time) || null,
     lat: publicCoords?.lat ?? null,

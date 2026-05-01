@@ -65,7 +65,7 @@ function tokeniseRoomCalendarBlock(event: {
 async function hydrateStayUnitsWithBlockedDates(stayUnits: StayUnitRecord[]): Promise<StayUnitRecord[]> {
   const supabase = createAdminSupabaseClient();
   const from = getTodayInIndia();
-  const to = addIndiaDays(from, 365);
+  const to = addIndiaDays(from, 120);
   const uniqueHostIds = Array.from(
     new Set(
       stayUnits
@@ -132,7 +132,7 @@ const getCachedPublicHomeSideDataInternal = unstable_cache(
   }): Promise<PublicHomeSideData> => {
     const supabase = createAdminSupabaseClient();
     const [stories, likedCountMap, stayBookingRows, guestNetwork] = await Promise.all([
-      loadFamilyStories(input.routeId, 4),
+      loadFamilyStories(input.routeId, 24, { includeUnpublished: true }),
       loadLikedGuestCounts([input.routeId]),
       loadHostStayBookingRecordsCompatibility(supabase, {
         hostId: input.hostId,
@@ -161,15 +161,18 @@ const getCachedPublicHomeSideDataInternal = unstable_cache(
     };
   },
   ["public-home-side-data"],
-  { revalidate: 60, tags: ["public-home-side-data", "home-detail-public-data"] }
+  { revalidate: 300, tags: ["public-home-side-data", "home-detail-public-data"] }
 );
 
 const getCachedPublicHomeStayDataInternal = unstable_cache(
   async (home: StayUnitHomeInput): Promise<PublicHomeStayData> => {
     const supabase = createAdminSupabaseClient();
     const stayUnitsRaw = await loadStayUnitsForHome(supabase, home);
-    const stayUnits = await hydrateStayUnitsWithBlockedDates(stayUnitsRaw);
-    const visibleStayUnits = stayUnits.filter((unit) => unit.isActive);
+    const activeStayUnitsRaw = stayUnitsRaw.filter((unit) => unit.isActive);
+    const hydratedActiveStayUnits = await hydrateStayUnitsWithBlockedDates(activeStayUnitsRaw);
+    const hydratedActiveStayUnitMap = new Map(hydratedActiveStayUnits.map((unit) => [unit.id, unit]));
+    const stayUnits = stayUnitsRaw.map((unit) => hydratedActiveStayUnitMap.get(unit.id) ?? unit);
+    const visibleStayUnits = hydratedActiveStayUnits;
     const roomRatingSummaryEntries = Array.from(
       (
         await loadStayUnitRatingSummaries(
@@ -185,7 +188,7 @@ const getCachedPublicHomeStayDataInternal = unstable_cache(
     };
   },
   ["public-home-stay-data"],
-  { revalidate: 60, tags: ["public-home-stay-data", "home-detail-public-data"] }
+  { revalidate: 300, tags: ["public-home-stay-data", "home-detail-public-data"] }
 );
 
 export async function getCachedPublicHomeSideData(input: {

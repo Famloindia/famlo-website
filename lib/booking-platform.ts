@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
+import { processBookingActionJobBatch } from "@/lib/booking-whatsapp-actions";
 import { createCalendarConflict, loadCanonicalCalendar, logCalendarSync, parseIcs, upsertCalendarEvent, toCalendarEventUid, type CanonicalCalendarEvent } from "@/lib/calendar";
 import { renderBookingReceipt, renderCompliancePack, renderPayoutStatement } from "@/lib/document-templates";
 import { enqueueNotificationRecord } from "@/lib/notifications/enqueue";
@@ -469,8 +470,21 @@ export async function enqueueNotification(
 
 export async function processNotificationQueue(
   supabase: SupabaseClient
-): Promise<{ processed: number; failed: number; skipped: number }> {
-  return processNotificationQueueBatch(supabase);
+): Promise<{
+  processed: number;
+  failed: number;
+  skipped: number;
+  bookingActions: { processed: number; failed: number; ignored: number };
+}> {
+  const notifications = await processNotificationQueueBatch(supabase);
+  const bookingActions = await processBookingActionJobBatch(supabase);
+
+  return {
+    processed: notifications.processed + bookingActions.processed,
+    failed: notifications.failed + bookingActions.failed,
+    skipped: notifications.skipped + bookingActions.ignored,
+    bookingActions,
+  };
 }
 
 export async function buildBookingReceiptDocument(

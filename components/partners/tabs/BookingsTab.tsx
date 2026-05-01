@@ -97,6 +97,9 @@ export default function BookingsTab({
     if (booking.checked_in_at) {
       return "checked_in";
     }
+    if (status === "pending_host_approval") {
+      return "pending";
+    }
     if (status === "cancelled" || status === "cancelled_by_user" || status === "cancelled_by_partner" || status === "rejected") {
       return status;
     }

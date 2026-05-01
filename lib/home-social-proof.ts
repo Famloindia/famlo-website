@@ -4,6 +4,7 @@ import { getCachedHomeRouteResolution } from "@/lib/home-route-resolution";
 export type FamilyStory = {
   id: string;
   familyId: string;
+  title: string;
   authorName: string;
   fromCity: string;
   storyText: string;
@@ -85,7 +86,7 @@ async function loadBookingIdsForScope(scope: { hostId: string | null; familyId: 
 async function loadStoryRowsForScope(
   routeId: string,
   limit: number,
-  options?: { includeImageColumns?: boolean }
+  options?: { includeImageColumns?: boolean; includeUnpublished?: boolean }
 ): Promise<{ resolvedFamilyId: string | null; resolvedHostId: string | null; resolvedHostUserId: string | null; rows: Record<string, unknown>[] }> {
   const resolved = await resolveRouteIdToHostId(routeId);
   const resolvedHostId = resolved.hostId;
@@ -93,8 +94,9 @@ async function loadStoryRowsForScope(
   const resolvedHostUserId = resolved.hostUserId;
   const supabase = createAdminSupabaseClient();
   const bookingIds = await loadBookingIdsForScope({ hostId: resolvedHostId, familyId: resolvedFamilyId });
-  const selectColumns = "id,host_id,booking_id,author_user_id,author_name,city,body,rating,created_at,cover_image_url";
+  const selectColumns = "id,host_id,booking_id,author_user_id,author_name,title,city,body,rating,created_at,cover_image_url";
   const merged = new Map<string, Record<string, unknown>>();
+  const includeUnpublished = options?.includeUnpublished === true;
 
   const pushRows = (rows: Record<string, unknown>[]) => {
     for (const row of rows) {
@@ -105,13 +107,16 @@ async function loadStoryRowsForScope(
   };
 
   if (resolvedHostId) {
-    const hostStoriesResult = await supabase
+    let hostStoriesQuery = supabase
       .from("stories_v2")
       .select(selectColumns)
-      .eq("is_published", true)
       .eq("host_id", resolvedHostId)
       .order("created_at", { ascending: false })
       .limit(limit);
+    if (!includeUnpublished) {
+      hostStoriesQuery = hostStoriesQuery.eq("is_published", true);
+    }
+    const hostStoriesResult = await hostStoriesQuery;
 
     if (hostStoriesResult.error && !isMissingSchemaError(hostStoriesResult.error.message)) {
       console.error("Failed to load host stories from stories_v2:", hostStoriesResult.error);
@@ -121,13 +126,16 @@ async function loadStoryRowsForScope(
   }
 
   if (resolvedHostUserId) {
-    const authorStoriesResult = await supabase
+    let authorStoriesQuery = supabase
       .from("stories_v2")
       .select(selectColumns)
-      .eq("is_published", true)
       .eq("author_user_id", resolvedHostUserId)
       .order("created_at", { ascending: false })
       .limit(limit);
+    if (!includeUnpublished) {
+      authorStoriesQuery = authorStoriesQuery.eq("is_published", true);
+    }
+    const authorStoriesResult = await authorStoriesQuery;
 
     if (authorStoriesResult.error && !isMissingSchemaError(authorStoriesResult.error.message)) {
       console.error("Failed to load author-linked stories from stories_v2:", authorStoriesResult.error);
@@ -137,13 +145,16 @@ async function loadStoryRowsForScope(
   }
 
   if (bookingIds.length > 0) {
-    const bookingStoriesResult = await supabase
+    let bookingStoriesQuery = supabase
       .from("stories_v2")
       .select(selectColumns)
-      .eq("is_published", true)
       .in("booking_id", bookingIds)
       .order("created_at", { ascending: false })
       .limit(limit);
+    if (!includeUnpublished) {
+      bookingStoriesQuery = bookingStoriesQuery.eq("is_published", true);
+    }
+    const bookingStoriesResult = await bookingStoriesQuery;
 
     if (bookingStoriesResult.error && !isMissingSchemaError(bookingStoriesResult.error.message)) {
       console.error("Failed to load booking-linked stories from stories_v2:", bookingStoriesResult.error);
@@ -240,14 +251,19 @@ export async function loadFamilyStoryCounts(familyIds: string[]): Promise<Map<st
   return counts;
 }
 
-export async function loadFamilyStories(familyId: string, limit = 4): Promise<FamilyStory[]> {
+export async function loadFamilyStories(
+  familyId: string,
+  limit = 4,
+  options?: { includeUnpublished?: boolean }
+): Promise<FamilyStory[]> {
   if (!familyId) return [];
 
-  const { resolvedFamilyId, rows } = await loadStoryRowsForScope(familyId, limit);
+  const { resolvedFamilyId, rows } = await loadStoryRowsForScope(familyId, limit, options);
   if (rows.length > 0) {
     return rows.map((row) => ({
       id: asString(row.id),
       familyId: resolvedFamilyId ?? asString(row.host_id) ?? familyId,
+      title: asString(row.title) || "Guest story",
       authorName: asString(row.author_name) || "Famlo guest",
       fromCity: asString(row.city) || "India",
       storyText: asString(row.body),

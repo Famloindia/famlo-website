@@ -2,8 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import Script from "next/script";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronRight, IndianRupee, MapPin, ShieldCheck, Users } from "lucide-react";
 
 import { AuthModal } from "@/components/auth/AuthModal";
@@ -50,6 +49,8 @@ type BookingReceipt = {
   paymentId: string | null;
   totalLabel: string;
 };
+
+type BookingPhase = "idle" | "preparing" | "verifying";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -199,15 +200,18 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
   const [anchorMonth, setAnchorMonth] = useState(() => startOfMonth(parseDateString(addIndiaDays(getTodayInIndia(), 1))));
   const [calendarTouched, setCalendarTouched] = useState(false);
   const [guests, setGuests] = useState(1);
-  const [submitting, setSubmitting] = useState(false);
+  const [bookingPhase, setBookingPhase] = useState<BookingPhase>("idle");
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<BookingReceipt | null>(null);
-  const [scriptReady, setScriptReady] = useState(false);
   const [bookHovered, setBookHovered] = useState(false);
   const [optimisticBlockedDates, setOptimisticBlockedDates] = useState<string[]>([]);
+  const checkoutWarmedRef = useRef(false);
+  const isBusy = bookingPhase !== "idle";
 
-  useEffect(() => {
+  const warmCheckoutIntent = useCallback(() => {
+    if (checkoutWarmedRef.current) return;
+    checkoutWarmedRef.current = true;
     warmRazorpayCheckout();
   }, []);
 
@@ -291,6 +295,12 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
   const monthOne = anchorMonth;
 
   const selectedGuests = Math.min(Math.max(1, guests), guestLimit);
+
+  useEffect(() => {
+    if (calendarTouched) {
+      warmCheckoutIntent();
+    }
+  }, [calendarTouched, warmCheckoutIntent]);
 
   function pickDate(dateString: string): void {
     const today = getTodayInIndia();
@@ -473,13 +483,15 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
       return;
     }
 
-    setSubmitting(true);
+    setBookingPhase("preparing");
     setBookingError(null);
+    setSuccessMessage(null);
 
     try {
       const { data: session } = await supabase.auth.getUser();
       const currentUserId = session.user?.id ?? user?.id;
       if (!currentUserId) {
+        setBookingPhase("idle");
         setShowAuthModal(true);
         return;
       }
@@ -562,6 +574,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             },
             handler: (paymentResponse: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => {
               void (async () => {
+                setBookingPhase("verifying");
                 const verifyResponse = await fetch("/api/payments/verify", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
@@ -591,16 +604,20 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
                     : "Your booking is confirmed. Check it out on My Bookings."
                 );
                 void refreshProfile();
+                window.location.assign("/bookings");
               })().catch((error) => {
+                setBookingPhase("idle");
                 setBookingError(error instanceof Error ? error.message : "Payment verification failed.");
               });
             },
             modal: {
               ondismiss: () => {
+                setBookingPhase("idle");
                 void releasePendingBooking(order.bookingId).catch((cancelError) => {
                   console.error("[room-booking-panel] release_pending_booking_failed", cancelError);
                 });
                 setReceipt(null);
+                setBookingError(null);
                 setSuccessMessage("Payment was not completed, so this room was not booked.");
               },
             },
@@ -609,11 +626,14 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             },
           });
 
+          setBookingPhase("idle");
           checkout.on("payment.failed", (failureResponse) => {
+            setBookingPhase("idle");
             void releasePendingBooking(order.bookingId).catch((cancelError) => {
               console.error("[room-booking-panel] release_pending_booking_failed", cancelError);
             });
             setReceipt(null);
+            setSuccessMessage(null);
             setBookingError(
               failureResponse.error?.description ??
                 failureResponse.error?.reason ??
@@ -625,29 +645,43 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           setReceipt(null);
           setSuccessMessage("Complete payment in the Razorpay window to confirm this booking.");
         } else {
+          setBookingPhase("idle");
           setReceipt(null);
           setSuccessMessage("Payment setup is pending on the server, so this room is not booked yet.");
         }
+      } else {
+        setBookingPhase("idle");
       }
     } catch (error) {
+      setBookingPhase("idle");
       setBookingError(error instanceof Error ? error.message : "Booking failed.");
-    } finally {
-      setSubmitting(false);
     }
   }
 
   return (
     <>
-      {submitting ? (
+      {isBusy ? (
         <div className="famlo-booking-loader" role="status" aria-live="polite" aria-label="Opening booking checkout">
           <div className="famlo-booking-loader-card">
             <div className="famlo-booking-loader-logo-wrap">
-              <Image className="famlo-booking-loader-logo" src="/logo-blue.png" alt="Famlo" width={1024} height={344} sizes="120px" />
+              <Image
+                className="famlo-booking-loader-logo"
+                src="/logo-blue.png"
+                alt="Famlo"
+                width={132}
+                height={44}
+                sizes="132px"
+                style={{ width: "132px", height: "44px" }}
+              />
               <div className="famlo-booking-loader-wave" />
             </div>
-            <div className="famlo-booking-loader-title">Opening your booking</div>
+            <div className="famlo-booking-loader-title">
+              {bookingPhase === "verifying" ? "Confirming your payment" : "Preparing your checkout"}
+            </div>
             <div className="famlo-booking-loader-copy">
-              We are preparing your room and payment checkout.
+              {bookingPhase === "verifying"
+                ? "Please wait while we confirm your payment and move you to My Bookings."
+                : "We are setting up Razorpay for this room."}
             </div>
           </div>
         </div>
@@ -670,7 +704,6 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           zIndex: 4,
         }}
       >
-        <Script src="https://checkout.razorpay.com/v1/checkout.js" onLoad={() => setScriptReady(true)} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
         <div style={{ display: "grid", gap: 4 }}>
           <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#1890ff" }}>
@@ -849,13 +882,18 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         <button
           type="button"
           onClick={() => void handleBooking()}
-          onMouseEnter={() => setBookHovered(true)}
+          onMouseEnter={() => {
+            setBookHovered(true);
+            warmCheckoutIntent();
+          }}
           onMouseLeave={() => setBookHovered(false)}
-          disabled={submitting || loading || !room.isActive}
+          onFocus={warmCheckoutIntent}
+          onTouchStart={warmCheckoutIntent}
+          disabled={isBusy || loading || !room.isActive}
           style={{
             border: "none",
             borderRadius: 16,
-            background: submitting
+            background: isBusy
               ? "linear-gradient(135deg, #93c5fd, #60a5fa)"
               : "linear-gradient(120deg, #0e2b57 0%, #1890ff 50%, #0e2b57 100%)",
             backgroundSize: "220% 100%",
@@ -864,7 +902,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             padding: "14px 16px",
             fontSize: 16,
             fontWeight: 900,
-            cursor: submitting ? "not-allowed" : "pointer",
+            cursor: isBusy ? "not-allowed" : "pointer",
             boxShadow: "0 10px 24px rgba(24, 144, 255, 0.28)",
             display: "inline-flex",
             justifyContent: "center",
@@ -873,7 +911,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             transition: "background-position 220ms ease, transform 180ms ease, box-shadow 180ms ease",
           }}
         >
-          {submitting ? "Creating booking..." : room.isActive ? "Book Now" : "Room closed"}
+          {isBusy ? (bookingPhase === "verifying" ? "Confirming payment..." : "Opening checkout...") : room.isActive ? "Book Now" : "Room closed"}
           <ChevronRight size={18} />
         </button>
       )}
@@ -907,18 +945,25 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
 
         .famlo-booking-loader-logo-wrap {
           position: relative;
+          width: 132px;
+          height: 44px;
           overflow: hidden;
-          border-radius: 18px;
-          padding: 14px 22px;
-          background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(219,234,254,0.76));
+          border-radius: 0;
+          padding: 0;
+          background: transparent;
+          display: grid;
+          place-items: center;
+          flex: 0 0 auto;
         }
 
         .famlo-booking-loader-logo {
           position: relative;
           z-index: 1;
           height: 44px;
-          width: auto;
+          width: 132px;
+          max-width: 132px;
           display: block;
+          object-fit: contain;
           filter: saturate(1.08);
         }
 

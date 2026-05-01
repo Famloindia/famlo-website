@@ -16,6 +16,11 @@ interface HostDashboardPageProps {
 
 export const dynamic = "force-dynamic";
 
+function isSchemaCompatibilityError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes("column") || lower.includes("schema cache") || lower.includes("does not exist") || lower.includes("relation");
+}
+
 export default async function HostDashboardPage({
   searchParams
 }: Readonly<HostDashboardPageProps>): Promise<React.JSX.Element> {
@@ -76,15 +81,36 @@ export default async function HostDashboardPage({
     }
     latestDraftByFamilyId.set(nextFamilyId, payload);
   }
-  const { data: v2Hosts } =
+  const v2Hosts =
     familyIds.length > 0
-      ? await supabase
-          .from("hosts")
-          .select("id,legacy_family_id")
-          .in("legacy_family_id", familyIds)
-      : { data: [] };
+      ? await (async () => {
+          const result = await supabase
+            .from("hosts")
+            .select("id,legacy_family_id,booking_requires_host_approval,is_accepting,status")
+            .in("legacy_family_id", familyIds);
+
+          if (!result.error || !isSchemaCompatibilityError(result.error.message)) {
+            return result.data ?? [];
+          }
+
+          const fallback = await supabase
+            .from("hosts")
+            .select("id,legacy_family_id,is_accepting,status")
+            .in("legacy_family_id", familyIds);
+
+          return fallback.data ?? [];
+        })()
+      : [];
+  const hostRowByFamilyId = new Map(
+    (v2Hosts as Array<Record<string, unknown>>)
+      .map((row) => {
+        const legacyFamilyId = typeof row.legacy_family_id === "string" ? row.legacy_family_id : null;
+        return legacyFamilyId ? [legacyFamilyId, row] : null;
+      })
+      .filter((entry): entry is [string, Record<string, unknown>] => Boolean(entry))
+  );
   const hostIdByFamilyId = new Map(
-    ((v2Hosts ?? []) as Array<Record<string, unknown>>)
+    (v2Hosts as Array<Record<string, unknown>>)
       .map((row) => {
         const hostId = typeof row.id === "string" ? row.id : null;
         const legacyFamilyId = typeof row.legacy_family_id === "string" ? row.legacy_family_id : null;
@@ -94,6 +120,18 @@ export default async function HostDashboardPage({
   );
   const familyRows: Array<Record<string, unknown> & { v2_host_id: string | null }> = familyRowsBase.map((family) => ({
     ...family,
+    booking_requires_host_approval:
+      typeof hostRowByFamilyId.get(String(family.id))?.booking_requires_host_approval === "boolean"
+        ? hostRowByFamilyId.get(String(family.id))?.booking_requires_host_approval
+        : typeof family.booking_requires_host_approval === "boolean"
+          ? family.booking_requires_host_approval
+          : undefined,
+    is_accepting:
+      typeof hostRowByFamilyId.get(String(family.id))?.is_accepting === "boolean"
+        ? hostRowByFamilyId.get(String(family.id))?.is_accepting
+        : typeof family.is_accepting === "boolean"
+          ? family.is_accepting
+          : true,
     latest_onboarding_payload: latestDraftByFamilyId.get(String(family.id)) ?? null,
     v2_host_id: hostIdByFamilyId.get(String(family.id)) ?? null,
   }));

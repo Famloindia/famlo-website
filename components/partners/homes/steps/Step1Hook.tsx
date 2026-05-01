@@ -459,9 +459,20 @@ export default function Step1Profile({ data, update, onStepComplete }: any) {
 
     getCurrentPositionWithFallback()
       .then(async (pos) => {
+        const { latitude, longitude } = pos.coords;
+
+        update("latitude", String(latitude));
+        update("longitude", String(longitude));
+        update("googleMapsLink", `https://www.google.com/maps?q=${latitude},${longitude}`);
+
         try {
-          const { latitude, longitude } = pos.coords;
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&zoom=18`);
+          const params = new URLSearchParams({
+            lat: String(latitude),
+            lng: String(longitude),
+          });
+          const res = await fetch(`/api/onboarding/home/reverse-geocode?${params.toString()}`, {
+            cache: "no-store",
+          });
           if (!res.ok) throw new Error("Location service busy");
 
           const geo = await res.json();
@@ -479,9 +490,6 @@ export default function Step1Profile({ data, update, onStepComplete }: any) {
           if (country) update("country", country);
           if (areaName) update("areaName", areaName);
           if (addressLine && !data.streetAddress) update("streetAddress", addressLine);
-          update("latitude", String(latitude));
-          update("longitude", String(longitude));
-          update("googleMapsLink", `https://www.google.com/maps?q=${latitude},${longitude}`);
           if (addr.postcode) update("pincode", addr.postcode);
 
           if (!city && !state) {
@@ -489,7 +497,7 @@ export default function Step1Profile({ data, update, onStepComplete }: any) {
           }
         } catch (err) {
           console.error("Geo error:", err);
-          setError("Location was found, but address lookup failed. Please type city and state manually.");
+          setError("Location detected. Please confirm city and state manually if they do not auto-fill.");
         } finally {
           setDetecting(false);
         }

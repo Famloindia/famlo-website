@@ -6,11 +6,44 @@ import { updateHostBookingStatusCompatibility } from "@/lib/booking-compat";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { asString, type JsonRecord } from "@/lib/platform-utils";
 
-export function buildHostBookingStatusMessage(status: string): string {
+type HostBookingStatusMessageContext = {
+  guestName?: string | null;
+  hostName?: string | null;
+  hostFullAddress?: string | null;
+  hostMapPinUrl?: string | null;
+  cityName?: string | null;
+};
+
+export function buildHostBookingStatusMessage(
+  status: string,
+  context: HostBookingStatusMessageContext = {}
+): string {
+  const guestName = asString(context.guestName) || "there";
+  const hostName = asString(context.hostName) || "your host";
+  const hostFullAddress = asString(context.hostFullAddress) || "Your host will share the final location shortly.";
+  const hostMapPinUrl = asString(context.hostMapPinUrl) || "Map pin will be shared shortly.";
+  const cityName = asString(context.cityName) || "your stay city";
+
   switch (status) {
     case "accepted":
     case "confirmed":
-      return "Famlo update: your host has accepted this booking. You can now message the family and prepare for your stay.";
+      return [
+        `Hi ${guestName},`,
+        "",
+        `Good news! ${hostName} has confirmed your arrival, and your booking is now confirmed.`,
+        "",
+        "Your stay location:",
+        hostFullAddress,
+        "",
+        "Map pin location:",
+        hostMapPinUrl,
+        "",
+        "If you have any questions, you can message your host directly or reach out to us at hello@famlo.in.",
+        "",
+        `For any emergency during your trip in ${cityName}, tap the Emergency button in your profile. We’re here to support you throughout your Famlo stay.`,
+        "",
+        "Welcome to Famlo — live like a local.",
+      ].join("\n");
     case "rejected":
       return "Famlo update: this booking was not accepted by the host. Team Famlo can help you choose another live home if needed.";
     case "checked_in":
@@ -29,9 +62,10 @@ export async function applyHostBookingStatusUpdate(
     familyId?: string | null;
     hostId?: string | null;
     status: string;
+    skipGuestNotifications?: boolean;
   }
 ): Promise<JsonRecord | null> {
-  const { bookingId, familyId, hostId, status } = params;
+  const { bookingId, familyId, hostId, status, skipGuestNotifications = false } = params;
 
   const { data: v2Booking, error: v2BookingError } = await supabase
     .from("bookings_v2")
@@ -94,14 +128,54 @@ export async function applyHostBookingStatusUpdate(
   const notificationEventType = status === "rejected" ? "booking_rejected" : "booking_confirmed";
   const notificationSubject =
     status === "rejected" ? "Your Famlo booking was not accepted" : "Your Famlo booking was accepted";
+  const { data: guestProfile } = guestUserId
+    ? await supabase
+        .from("users")
+        .select("name,city,state")
+        .eq("id", guestUserId)
+        .maybeSingle()
+    : { data: null };
+  const resolvedFamilyId = familyId ?? hostRelation?.legacy_family_id ?? null;
+  const { data: familyProfile } = resolvedFamilyId
+    ? await supabase
+        .from("families")
+        .select("id,name,property_name,city,state,village,google_maps_link")
+        .eq("id", resolvedFamilyId)
+        .maybeSingle()
+    : { data: null };
+  const hostDisplayName =
+    asString(hostRelation?.display_name) ||
+    asString(familyProfile?.property_name) ||
+    asString(familyProfile?.name) ||
+    "your host";
+  const hostFullAddress = [familyProfile?.village, familyProfile?.city, familyProfile?.state]
+    .map((part) => asString(part))
+    .filter(Boolean)
+    .join(", ");
+  const bookingContext = {
+    guestName: asString(guestProfile?.name),
+    hostName: hostDisplayName,
+    hostFullAddress,
+    hostMapPinUrl: asString(familyProfile?.google_maps_link),
+    cityName: asString(familyProfile?.city) || asString(guestProfile?.city) || asString(guestProfile?.state),
+  };
   const notificationPayload = {
-    message: buildHostBookingStatusMessage(status),
+    message: buildHostBookingStatusMessage(status, bookingContext),
     cta_label: "View booking",
     cta_url: "/bookings",
   };
 
+  await supabase.from("booking_status_history_v2").insert({
+    booking_id: bookingId,
+    old_status: v2Booking?.status ?? null,
+    new_status: status,
+    changed_by_user_id: null,
+    reason: "host_booking_status_update",
+    created_at: new Date().toISOString(),
+  } as never);
+
   if (!thread) {
-    if (guestUserId) {
+    if (guestUserId && !skipGuestNotifications) {
       await enqueueNotification(supabase, {
         eventType: notificationEventType,
         channel: "email",
@@ -135,7 +209,7 @@ export async function applyHostBookingStatusUpdate(
 
   if (thread.conversationId) {
     const now = new Date().toISOString();
-    const statusMessage = buildHostBookingStatusMessage(status);
+    const statusMessage = buildHostBookingStatusMessage(status, bookingContext);
 
     const { error: insertMessageError } = await supabase.from("messages").insert({
       conversation_id: thread.conversationId,
@@ -165,7 +239,7 @@ export async function applyHostBookingStatusUpdate(
     }
   }
 
-  if (guestUserId) {
+  if (guestUserId && !skipGuestNotifications) {
     await enqueueNotification(supabase, {
       eventType: notificationEventType,
       channel: "email",

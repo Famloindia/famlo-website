@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useUser } from "@/components/auth/UserContext";
-import { useSearchParams, usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const AuthModal = dynamic(
   () => import("@/components/auth/AuthModal").then((module) => module.AuthModal),
@@ -23,6 +23,7 @@ export default function Header() {
 
 function HeaderContent() {
   const { user, profile, loading, signOut } = useUser();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const [isScrolled, setIsScrolled] = useState(false);
@@ -55,6 +56,13 @@ function HeaderContent() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  function handleEmergencyShortcut(): void {
+    const confirmed = window.confirm("Do you want to open Emergency Help now?");
+    if (!confirmed) return;
+    setDropdownOpen(false);
+    router.push("/bookings?emergency=1");
+  }
+
   return (
     <header className={`header ${isScrolled ? "scrolled" : ""} ${isJoinPage ? "join-header" : ""}`}>
       <div className="shell header-inner">
@@ -64,6 +72,9 @@ function HeaderContent() {
             alt="Famlo"
             width={1024}
             height={344}
+            priority
+            fetchPriority="high"
+            loading="eager"
             sizes="120px"
             className={`logo-image ${isJoinPage ? "join-logo" : ""}`}
             style={{
@@ -145,6 +156,25 @@ function HeaderContent() {
                             {item.label}
                           </Link>
                         ))}
+                        <button
+                          type="button"
+                          onClick={handleEmergencyShortcut}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "4px 8px",
+                            background: "#FEF2F2",
+                            border: "1px solid #FECACA",
+                            borderRadius: "6px",
+                            color: "#B91C1C",
+                            fontSize: "11px",
+                            fontWeight: "800",
+                            cursor: "pointer",
+                            transition: "all 200ms ease",
+                          }}
+                        >
+                          Emergency
+                        </button>
                          <button
                            className="logout-btn"
                            onClick={() => { signOut(); setDropdownOpen(false); }}

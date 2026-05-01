@@ -144,8 +144,11 @@ export function HomeBookingPreview({
   const [showProfileGate, setShowProfileGate] = useState(false);
   const [profileUnlocked, setProfileUnlocked] = useState(false);
   const [resumeAfterProfileSave, setResumeAfterProfileSave] = useState(false);
+  const checkoutWarmedRef = useRef(false);
 
-  useEffect(() => {
+  const warmCheckoutIntent = useCallback(() => {
+    if (checkoutWarmedRef.current) return;
+    checkoutWarmedRef.current = true;
     warmRazorpayCheckout();
   }, []);
 
@@ -548,6 +551,11 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
     void handleContinue(true);
   }, [handleContinue, profileUnlocked, resumeAfterProfileSave]);
 
+  useEffect(() => {
+    if (!selectedQuarter || !selectedDate || selectedDateHasExpired) return;
+    warmCheckoutIntent();
+  }, [selectedDate, selectedDateHasExpired, selectedQuarter, warmCheckoutIntent]);
+
   return (
     <div
       className="booking-preview famlo-preview-card"
@@ -668,7 +676,14 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         </div>
       </div>
 
-      <button className="famlo-preview-cta" disabled={!canBook || submitting} onClick={() => void handleContinue()}>
+      <button
+        className="famlo-preview-cta"
+        disabled={!canBook || submitting}
+        onClick={() => void handleContinue()}
+        onMouseEnter={warmCheckoutIntent}
+        onFocus={warmCheckoutIntent}
+        onTouchStart={warmCheckoutIntent}
+      >
         {submitting ? "Processing..." : "Get it now"}
       </button>
       <div className="famlo-preview-certified">Famlo certified home</div>

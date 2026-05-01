@@ -54,6 +54,7 @@ export type HostListingMeta = {
   pincode?: string;
   checkInTime?: string;
   checkOutTime?: string;
+  bookingRequiresHostApproval?: boolean;
 };
 
 export function parseHostListingMeta(value: string | null | undefined): HostListingMeta {

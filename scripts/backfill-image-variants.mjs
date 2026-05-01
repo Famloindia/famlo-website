@@ -96,6 +96,7 @@ async function uploadBufferToR2(buffer, key, contentType) {
       Key: key,
       Body: buffer,
       ContentType: contentType,
+      CacheControl: "public, max-age=31536000, immutable",
     })
   );
 }

@@ -250,6 +250,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       idDocumentType: toTrimmedString(body.compliancePatch?.idDocumentType) ?? currentMeta.idDocumentType,
       idDocumentUrl: toTrimmedString(body.compliancePatch?.idDocumentUrl) ?? currentMeta.idDocumentUrl,
       liveSelfieUrl: toTrimmedString(body.compliancePatch?.liveSelfieUrl) ?? currentMeta.liveSelfieUrl,
+      bookingRequiresHostApproval:
+        typeof body.schedule?.bookingRequiresHostApproval === "boolean"
+          ? body.schedule.bookingRequiresHostApproval
+          : currentMeta.bookingRequiresHostApproval,
     };
 
     // ── Build families row patch (only real schema columns) ───────────────
@@ -499,6 +503,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         includedItems: toStringListPatch(body.listing?.includedItems) ?? existingPayload.includedItems,
         houseRules: toStringListPatch(body.listing?.houseRules) ?? existingPayload.houseRules,
         foodType: toTrimmedString(body.listing?.foodType) ?? existingPayload.foodType,
+        bookingRequiresHostApproval:
+          typeof body.schedule?.bookingRequiresHostApproval === "boolean"
+            ? body.schedule.bookingRequiresHostApproval
+            : existingPayload.bookingRequiresHostApproval,
         bathroomType: toTrimmedString(body.listing?.bathroomType) ?? existingPayload.bathroomType,
         googleMapsLink: toTrimmedString(body.listing?.googleMapsLink) ?? existingPayload.googleMapsLink,
         neighborhoodDesc: toTrimmedString(body.listing?.neighborhoodDesc) ?? existingPayload.neighborhoodDesc,

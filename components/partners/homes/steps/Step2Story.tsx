@@ -5,7 +5,7 @@ import { Camera, ChevronDown, MapPin, Plus, Sparkles, Trash2, Upload, X } from "
 
 import { ROOM_AMENITY_GROUPS } from "@/lib/room-amenities";
 import styles from "../../onboarding.module.css";
-import { formatGalleryImageUploadLimitLabel } from "@/lib/upload-limits";
+import { formatGalleryImageUploadLimitLabel, formatImageUploadLimitLabel, MAX_IMAGE_UPLOAD_BYTES } from "@/lib/upload-limits";
 
 const LANGUAGE_OPTIONS = ["English", "Hindi", "Marwari", "Rajasthani", "Gujarati", "Punjabi", "Marathi", "Tamil", "Telugu"];
 const HOUSE_TYPES = ["Joint family", "Nuclear family", "Couple", "Solo host", "Shared household"];
@@ -103,6 +103,10 @@ async function uploadFiles(files: File[], folder: string): Promise<string[]> {
     const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif)$/.test(lowerName);
     if (!isImage) {
       throw new Error("Please upload image files only.");
+    }
+
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+      throw new Error(`Please upload image below ${formatImageUploadLimitLabel()}.`);
     }
 
     const formData = new FormData();
@@ -811,7 +815,7 @@ export default function Step2Story({ data, update }: any) {
                 onChange={(event) => void handleHostGalleryUpload(event)}
               />
               <div className={styles.helperText}>
-                Show guests what a stay feels like, not just what the room looks like. Uploads up to {formatGalleryImageUploadLimitLabel()} are allowed.
+                Show guests what a stay feels like, not just what the room looks like. Uploads up to {formatImageUploadLimitLabel()} are allowed.
               </div>
             </div>
 
@@ -920,6 +924,9 @@ export default function Step2Story({ data, update }: any) {
 
                 <div className={styles.helperText} style={{ marginBottom: "12px" }}>
                   Smart pricing raises the price when demand is strong in this area and falls back to the standard price when demand is low.
+                </div>
+                <div className={styles.helperText} style={{ marginBottom: "12px", color: "#0f172a", fontWeight: 500 }}>
+                  Please upload image below {formatImageUploadLimitLabel()} which is coded.
                 </div>
 
                 <div className={styles.choiceGrid}>
@@ -1087,7 +1094,7 @@ export default function Step2Story({ data, update }: any) {
                       hidden
                       onChange={(event) => void handleRoomPhotosUpload(event, index)}
                     />
-                    <div className={styles.helperText}>Minimum 5 photos for the primary room. Uploads up to {formatGalleryImageUploadLimitLabel()} are allowed.</div>
+                    <div className={styles.helperText}>Minimum 5 photos for the primary room. Uploads up to {formatImageUploadLimitLabel()} are allowed.</div>
                   </div>
                   {uploading === `room-${index}` ? <div className={styles.uploadState}>Uploading room photos...</div> : null}
                   {Array.isArray(room.roomPhotos) && room.roomPhotos.length > 0 ? (

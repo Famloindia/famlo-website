@@ -3,7 +3,6 @@ import { getPaymentGatewayFeeConfig, getWithholdingConfig, isClientPricingFallba
 import { computeFinanceContractV1 } from "@/lib/finance/engine";
 import { resolveBookingUnitPrice } from "@/lib/finance/pricing";
 import { resolveFinanceRules } from "@/lib/finance/rules";
-import { calculateIndiaHostStayGst } from "@/lib/finance/stay-tax";
 import { getTodayInIndia } from "@/lib/booking-time";
 import { computeHoldExpiry, enforceInventoryRules } from "@/lib/booking-platform";
 import { getCalendarEventStayUnitId, loadCanonicalCalendar } from "@/lib/calendar";
@@ -661,14 +660,6 @@ export async function buildBookingQuote(
 
   const effectiveAt = new Date().toISOString();
   const productType = input.activityId ? "activity" : input.bookingType;
-  const taxableAccommodationAmount = Math.max(0, subtotal - discountAmount);
-  const hostStayGst =
-    input.bookingType === "host_stay"
-      ? calculateIndiaHostStayGst({
-          unitPrice: pricingResolution.unitPrice,
-          taxableBase: taxableAccommodationAmount,
-        })
-      : null;
   const financeRules = await resolveFinanceRules(supabase, {
     effectiveAt,
     productType,
@@ -681,8 +672,8 @@ export async function buildBookingQuote(
     bookingAmount: subtotal,
     discountAmount,
     commissionRateBps: financeRules.commissionRateBps,
-    gstRateBps: financeRules.gstRateBps,
-    stayTaxAmount: hostStayGst?.amount ?? 0,
+    gstRateBps: 0,
+    stayTaxAmount: 0,
     payoutGatewayFeeBurden: financeRules.payoutGatewayFeeBurden,
     paymentGatewayFee: getPaymentGatewayFeeConfig(),
     withholding: getWithholdingConfig(),
@@ -730,7 +721,7 @@ export async function buildBookingQuote(
       splitMode: "igst",
       platformFeeTaxRatePct: contract.gst_rate_bps / 100,
       platformFeeTaxAmount: contract.gst_on_platform_fee,
-      stayTaxRatePct: (hostStayGst?.rateBps ?? 0) / 100,
+      stayTaxRatePct: 0,
       stayTaxAmount: contract.stay_tax_amount,
       cgstAmount: 0,
       sgstAmount: 0,
@@ -753,20 +744,7 @@ export async function buildBookingQuote(
       stay_gst_base: "amount_after_discount",
       guest_total: "amount_after_discount + gst_on_platform_fee + stay_tax",
     },
-    stay_gst: hostStayGst
-      ? {
-          country: "IN",
-          product: "hotel_accommodation",
-          taxable_base: hostStayGst.taxableBase,
-          rate_bps: hostStayGst.rateBps,
-          rate_pct: hostStayGst.rateBps / 100,
-          amount: hostStayGst.amount,
-          threshold_per_unit_per_day: hostStayGst.thresholdPerUnitPerDay,
-          rate_basis: "resolved unit price per room per day",
-          source_note:
-            "GST Council/CBIC hotel accommodation slab: value of supply up to Rs. 7,500 per unit per day at 12%; above Rs. 7,500 at 18%.",
-        }
-      : null,
+    stay_gst: null,
     contract_v1: contract,
   };
 
@@ -889,6 +867,7 @@ function mapV2BookingToLegacyRow(row: JsonRecord): JsonRecord {
     id: String(row.id),
     booking_type: asString(row.booking_type),
     legacy_booking_id: asString(row.legacy_booking_id),
+    stay_unit_id: resolveStayUnitIdFromRecord(row),
     family_id: asString(host?.legacy_family_id) ?? asString(row.host_id),
     guide_id: asString(row.hommie_id),
     status: asString(row.status),

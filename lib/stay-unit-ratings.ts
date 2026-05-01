@@ -1,4 +1,7 @@
+import { unstable_cache } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export type StayUnitRatingSummary = {
   averageRating: number | null;
@@ -67,4 +70,22 @@ export async function loadStayUnitRatingSummaries(
   }
 
   return summaryMap;
+}
+
+const getCachedStayUnitRatingSummaryInternal = unstable_cache(
+  async (stayUnitId: string): Promise<StayUnitRatingSummary | null> => {
+    const supabase = createAdminSupabaseClient();
+    return (await loadStayUnitRatingSummaries(supabase, [stayUnitId])).get(stayUnitId) ?? null;
+  },
+  ["stay-unit-rating-summary"],
+  { revalidate: 300, tags: ["public-home-stay-data", "home-detail-public-data"] }
+);
+
+export async function getCachedStayUnitRatingSummary(stayUnitId: string): Promise<StayUnitRatingSummary | null> {
+  const normalizedStayUnitId = asString(stayUnitId);
+  if (!normalizedStayUnitId) {
+    return null;
+  }
+
+  return getCachedStayUnitRatingSummaryInternal(normalizedStayUnitId);
 }

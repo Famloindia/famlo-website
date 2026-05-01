@@ -7,7 +7,7 @@ import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
-const CANCELLABLE_STATUSES = new Set(["awaiting_payment", "pending", "accepted", "confirmed"]);
+const CANCELLABLE_STATUSES = new Set(["awaiting_payment", "pending", "pending_host_approval", "accepted", "confirmed"]);
 const CANCELLED_STATUSES = new Set(["cancelled", "cancelled_by_user", "cancelled_by_partner"]);
 
 type CancellationBookingRow = {

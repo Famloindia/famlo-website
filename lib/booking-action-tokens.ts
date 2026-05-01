@@ -230,7 +230,7 @@ export async function loadBookingActionPreview(
     totalPrice: asNumber(booking.total_price, 0),
   };
 
-  if (currentStatus && currentStatus !== "pending") {
+  if (currentStatus && currentStatus !== "pending" && currentStatus !== "pending_host_approval") {
     return {
       status: "already_resolved",
       ...preview,

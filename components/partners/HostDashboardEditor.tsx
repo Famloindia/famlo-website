@@ -222,10 +222,17 @@ function buildListingFromFamily(
 }
 
 function buildScheduleFromFamily(family: Record<string, unknown>) {
+  const onboardingPayload = pickObject(family.latest_onboarding_payload);
+  const meta = parseHostListingMeta(typeof family.admin_notes === "string" ? family.admin_notes : null);
   return {
     isActive: Boolean(family.is_active),
     isAccepting: Boolean(family.is_accepting),
-    bookingRequiresHostApproval: Boolean(family.booking_requires_host_approval),
+    bookingRequiresHostApproval:
+      typeof family.booking_requires_host_approval === "boolean"
+        ? family.booking_requires_host_approval
+        : typeof onboardingPayload.bookingRequiresHostApproval === "boolean"
+          ? onboardingPayload.bookingRequiresHostApproval
+          : Boolean(meta.bookingRequiresHostApproval),
     maxGuests: String(family.max_guests ?? 3),
     activeQuarters: joinList(
       family.active_quarters ?? ["morning", "afternoon", "evening", "fullday"]
@@ -384,7 +391,9 @@ export function HostDashboardEditor({
         }
         setBookingRowsRequestedForFamilyId(familyIdToLoad);
         setBookingLoadError(null);
-        const response = await fetch(`/api/host/dashboard-bookings?familyId=${encodeURIComponent(familyIdToLoad)}`);
+        const response = await fetch(`/api/host/dashboard-bookings?familyId=${encodeURIComponent(familyIdToLoad)}`, {
+          cache: "no-store",
+        });
         const payload = (await response.json()) as Array<Record<string, unknown>> | { error?: string };
         if (!response.ok || !Array.isArray(payload)) {
           throw new Error((!Array.isArray(payload) && payload.error) || "Failed to load booking rows.");
@@ -431,7 +440,10 @@ export function HostDashboardEditor({
           setBookingSummaryLoading(true);
         }
         setBookingLoadError(null);
-        const response = await fetch(`/api/host/dashboard-bookings?familyId=${encodeURIComponent(familyIdToLoad)}&summary=1`);
+        const response = await fetch(
+          `/api/host/dashboard-bookings?familyId=${encodeURIComponent(familyIdToLoad)}&summary=1`,
+          { cache: "no-store" }
+        );
         const payload = (await response.json()) as BookingSummary | { error?: string };
         if (
           !response.ok ||
@@ -475,10 +487,7 @@ export function HostDashboardEditor({
           filter: `host_id=eq.${realtimeHostId}`,
         },
         () => {
-          if (needsDetailedBookingRows) {
-            void loadBookingRows(activeFamilyId, { silent: true });
-            return;
-          }
+          void loadBookingRows(activeFamilyId, { silent: true });
           if (needsBookingSummary) {
             void loadBookingSummary(activeFamilyId, { silent: true });
           }
