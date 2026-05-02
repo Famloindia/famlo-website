@@ -151,12 +151,12 @@ async function deliverWhatsAppNotification(
         .filter((value): value is string => Boolean(value))
     : [];
 
-  if (templateName === "host_new_booking_request" && interactiveButtons.length >= 2 && templateVariables.length >= 5) {
+  if (templateName === "host_booking_approval_request" && interactiveButtons.length >= 2 && templateVariables.length >= 6) {
     const result = await sendWhatsAppTemplateNotification({
       phone,
       templateName,
       languageCode: asString(payload.template_language) ?? "en",
-      bodyVariables: templateVariables.slice(0, 5),
+      bodyVariables: templateVariables.slice(0, 6),
       quickReplyButtons: interactiveButtons.slice(0, 2).map((button, index) => ({
         index,
         payload: button.id,

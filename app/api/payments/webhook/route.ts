@@ -48,6 +48,9 @@ type RazorpayWebhookPayload = {
   };
 };
 
+const HOST_APPROVAL_WHATSAPP_TEMPLATE_LANGUAGE =
+  process.env.WHATSAPP_HOST_APPROVAL_TEMPLATE_LANGUAGE?.trim() || "en_US";
+
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -567,6 +570,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         typeof booking?.user_id === "string" ? await loadUserProfileCompatibility(supabase, booking.user_id) : null;
       const hostProfileContact = hostUserId ? await loadUserProfileCompatibility(supabase, hostUserId) : null;
       const hostPhone = hostProfileContact?.phone ?? null;
+      const ownerName =
+        typeof hostProfileContact?.name === "string" && hostProfileContact.name.trim().length > 0
+          ? hostProfileContact.name.trim()
+          : null;
       const hostPropertyLabel =
         typeof hostRelation?.display_name === "string" && hostRelation.display_name.trim().length > 0
           ? hostRelation.display_name.trim()
@@ -612,7 +619,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           bookingId: payment.booking_id,
           dedupeKey: `booking_host_action_required:${payment.booking_id}:email`,
           subject: "New Famlo booking request needs your approval",
-          templateName: "host_new_booking_request",
+          templateName: "host_booking_approval_request",
           recipientRole: "host",
           payload: {
             title: "New Booking Request",
@@ -632,7 +639,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           bookingId: payment.booking_id,
           dedupeKey: `booking_host_action_required:${payment.booking_id}:whatsapp`,
           subject: "New Famlo booking request needs your approval",
-          templateName: "host_new_booking_request",
+          templateName: "host_booking_approval_request",
           recipientRole: "host",
           recipientPhone: hostPhone,
           payload: {
@@ -656,8 +663,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             accept_url: actionLinks?.acceptUrl,
             reject_url: actionLinks?.rejectUrl,
             action_token: whatsappAction?.action_token ?? null,
-            template_language: "en",
+            template_language: HOST_APPROVAL_WHATSAPP_TEMPLATE_LANGUAGE,
             template_variables: [
+              ownerName ?? hostPropertyLabel,
               guestProfile?.name ?? "Famlo guest",
               hostPropertyLabel,
               stayUnitName ?? hostListingLabel,

@@ -10,11 +10,21 @@ import styles from "../dashboard.module.css";
 
 const INITIAL_MESSAGE_BATCH = 25;
 const LOCAL_MESSAGE_COOLDOWN_MS = 15000;
+const FAMLO_MAP_TAG_REGEX = /\[famlo_map_url\]([\s\S]*?)\[\/famlo_map_url\]/i;
 
 function extractMapsUrl(text: string | null | undefined): string | null {
   if (!text) return null;
-  const match = text.match(/https?:\/\/maps\.google\.com\/\?q=[^\s]+/i);
+  const markerMatch = text.match(FAMLO_MAP_TAG_REGEX);
+  if (markerMatch?.[1]) {
+    return markerMatch[1].trim();
+  }
+  const match = text.match(/https?:\/\/(?:www\.)?(?:maps\.google\.[^\s/]+\/[^\s]*|google\.com\/maps[^\s]*|maps\.app\.goo\.gl\/[^\s]+)[^\s]*/i);
   return match ? match[0] : null;
+}
+
+function getVisibleMessageText(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.replace(FAMLO_MAP_TAG_REGEX, "").trim();
 }
 
 function isRecentlyTyping(conversation: any, currentUserId: string): boolean {
@@ -75,6 +85,7 @@ export default function MessagesTab({
   const [isTyping, setIsTyping] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+  const [guestProfileOpen, setGuestProfileOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingTimerRef = useRef<number | null>(null);
   const activeConversationLastMessageAtRef = useRef<string | null>(null);
@@ -86,6 +97,14 @@ export default function MessagesTab({
     () => conversations.find((conversation) => conversation.id === activeConvId) ?? null,
     [activeConvId, conversations]
   );
+
+  const openConversation = useCallback((conversationId: string) => {
+    setGuestProfileOpen(false);
+    setSendError(null);
+    setHasOlderMessages(false);
+    setMessages([]);
+    setActiveConvId(conversationId);
+  }, []);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     let {
@@ -129,7 +148,11 @@ export default function MessagesTab({
       if ((!preserveSelection || !activeConvId) && data[0]?.id) {
         setActiveConvId(data[0].id);
       } else if (activeConvId && !data.some((conversation: any) => conversation.id === activeConvId)) {
-        setActiveConvId(data[0]?.id ?? null);
+        const mergedMatch = data.find((conversation: any) =>
+          Array.isArray(conversation.merged_conversation_ids) &&
+          conversation.merged_conversation_ids.includes(activeConvId)
+        );
+        setActiveConvId(mergedMatch?.id ?? data[0]?.id ?? null);
       }
       return data;
     } catch (err) {
@@ -234,6 +257,10 @@ export default function MessagesTab({
   }, [initialConversationId]);
 
   useEffect(() => {
+    setGuestProfileOpen(false);
+  }, [activeConvId]);
+
+  useEffect(() => {
     setActiveConversationId(activeConvId);
   }, [activeConvId, setActiveConversationId]);
 
@@ -258,7 +285,7 @@ export default function MessagesTab({
       setLoading(false);
       return;
     }
-    void fetchConversations(false);
+    void fetchConversations(true);
   }, [fetchConversations]);
 
   useEffect(() => {
@@ -609,7 +636,7 @@ export default function MessagesTab({
           <div
             key={conv.id}
             className={styles.storyItem}
-            onClick={() => setActiveConvId(conv.id)}
+            onClick={() => openConversation(conv.id)}
           >
             <div className={`${styles.storyAvatarWrapper} ${activeConvId !== conv.id ? styles.inactive : ""}`}>
               {conv.guest?.avatar_url ? (
@@ -645,14 +672,34 @@ export default function MessagesTab({
             conversations.map((conversation) => (
               <div
                 key={conversation.id}
-                onClick={() => setActiveConvId(conversation.id)}
+                onClick={() => openConversation(conversation.id)}
                 className={`${styles.chatThreadItem} ${activeConvId === conversation.id ? styles.activeThread : ""}`}
               >
                 <div style={{ position: "relative" }}>
-                  {conversation.guest?.avatar_url ? (
-                    <img src={conversation.guest.avatar_url} className={styles.chatAvatar} alt="" />
+                {conversation.guest?.avatar_url ? (
+                    <img
+                      src={conversation.guest.avatar_url}
+                      className={styles.chatAvatar}
+                      alt=""
+                      style={{ cursor: "pointer" }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openConversation(conversation.id);
+                        setGuestProfileOpen(true);
+                      }}
+                    />
                   ) : (
-                    <div className={styles.chatAvatarFallback}><User size={18} /></div>
+                    <div
+                      className={styles.chatAvatarFallback}
+                      style={{ cursor: "pointer" }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openConversation(conversation.id);
+                        setGuestProfileOpen(true);
+                      }}
+                    >
+                      <User size={18} />
+                    </div>
                   )}
                   {conversation.host_unread > 0 ? <div className={styles.unreadDot} /> : null}
                 </div>
@@ -687,14 +734,24 @@ export default function MessagesTab({
                 </button>
 
                 {activeConversation.guest?.avatar_url ? (
-                  <img src={activeConversation.guest.avatar_url} className={styles.bannerAvatar} alt="" />
+                  <img
+                    src={activeConversation.guest.avatar_url}
+                    className={styles.bannerAvatar}
+                    alt=""
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setGuestProfileOpen((current) => !current)}
+                  />
                 ) : (
-                  <div className={styles.bannerAvatar} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)' }}>
+                  <div
+                    className={styles.bannerAvatar}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.1)', cursor: "pointer" }}
+                    onClick={() => setGuestProfileOpen((current) => !current)}
+                  >
                     <User size={24} color="white" />
                   </div>
                 )}
 
-                <div style={{ textAlign: 'left' }}>
+                <div style={{ textAlign: 'left', cursor: "pointer" }} onClick={() => setGuestProfileOpen((current) => !current)}>
                   <h3 className={styles.bannerName}>{activeConversation.guest?.name || "Guest"}</h3>
                   <div className={styles.bannerSub}>
                     {activeConversation.guest?.city || "Traveler"} · {activeFamily?.property_name || "Stay"}
@@ -702,6 +759,60 @@ export default function MessagesTab({
                 </div>
               </div>
             </div>
+
+            {guestProfileOpen ? (
+              <div
+                style={{
+                  margin: "12px 16px 0",
+                  padding: "16px 18px",
+                  borderRadius: 18,
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 900, color: "#0e2b57" }}>
+                      {activeConversation.guest?.name || "Guest"}
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>
+                      {[activeConversation.guest?.city, activeConversation.guest?.state].filter(Boolean).join(", ") || "Traveler profile"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setGuestProfileOpen(false)}
+                    style={{ border: "none", background: "transparent", color: "#64748b", fontWeight: 800, cursor: "pointer", padding: 0 }}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {activeConversation.guest?.gender ? (
+                    <span style={{ padding: "6px 10px", borderRadius: 999, background: "#fff", border: "1px solid #e2e8f0", fontSize: 12, fontWeight: 800, color: "#0e2b57" }}>
+                      Gender: {activeConversation.guest.gender}
+                    </span>
+                  ) : null}
+                  {activeConversation.guest?.kyc_status ? (
+                    <span style={{ padding: "6px 10px", borderRadius: 999, background: "#fff", border: "1px solid #e2e8f0", fontSize: 12, fontWeight: 800, color: "#0e2b57" }}>
+                      KYC: {String(activeConversation.guest.kyc_status).replaceAll("_", " ")}
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#64748b" }}>
+                    About
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.7, color: "#334155", fontWeight: 600, whiteSpace: "pre-wrap" }}>
+                    {typeof activeConversation.guest?.about === "string" && activeConversation.guest.about.trim().length > 0
+                      ? activeConversation.guest.about
+                      : "This guest has not added a profile bio yet."}
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className={styles.chatBody} ref={scrollRef}>
               {!loadingMessages && hasOlderMessages ? (
@@ -785,7 +896,7 @@ export default function MessagesTab({
                               textAlign: "center",
                             }}
                           >
-                            {message.text}
+                            {getVisibleMessageText(message.text || message.content || "")}
                             {mapsUrl ? (
                               <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", marginTop: 8, color: "#1d4ed8", fontWeight: 800 }}>
                                 Open map
@@ -808,7 +919,7 @@ export default function MessagesTab({
                               />
                             </a>
                           ) : null}
-                          <div>{isDeleted ? "Message deleted" : message.text}</div>
+                          <div>{isDeleted ? "Message deleted" : getVisibleMessageText(message.text || message.content || "")}</div>
                           {mapsUrl ? (
                             <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", marginTop: 8, color: isMe ? "#dbeafe" : "#1d4ed8", fontWeight: 800 }}>
                               Open map

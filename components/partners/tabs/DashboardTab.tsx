@@ -4,7 +4,7 @@ import styles from "../dashboard.module.css";
 import { 
   Users, Calendar, IndianRupee,
   Clock, CheckCircle2, User, Eye,
-  Plus, Trash2, RefreshCw, ShieldCheck, Upload, Check, Loader2, MapPin
+  Plus, Trash2, RefreshCw, ShieldCheck, Upload, Check, Loader2, MapPin, ChevronDown, ChevronUp
 } from "lucide-react";
 import type { StayUnitRecord } from "@/lib/stay-units";
 import { compressImageListForUpload } from "@/lib/client-image-upload";
@@ -193,6 +193,7 @@ export default function DashboardTab({
   const [roomsMessage, setRoomsMessage] = useState<string | null>(null);
   const [customAmenityDrafts, setCustomAmenityDrafts] = useState<Record<string, string>>({});
   const [detectingRoomLocationId, setDetectingRoomLocationId] = useState<string>("");
+  const [openCalendars, setOpenCalendars] = useState<Record<string, boolean>>({});
 
   const roomStats = useMemo(() => {
     const activeRooms = roomDrafts.filter((room) => room.isActive).length;
@@ -953,24 +954,6 @@ export default function DashboardTab({
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
-                    <div style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#1d4ed8' }}>Room calendar & OTA sync</div>
-                    {canManageRoomCalendar ? (
-                      <div style={{ border: '1px solid #e2e8f0', borderRadius: '18px', padding: '18px', background: '#f8fafc', minWidth: 0 }}>
-                        <ChannelManagerTab
-                          ownerType="stay_unit"
-                          ownerId={room.id}
-                          title={`${room.name || `Room ${index + 1}`} Calendar`}
-                          description="Connect Airbnb, Booking.com, Google Calendar, or any ICS feed for this room only. Imports and exports stay attached to this room calendar."
-                        />
-                      </div>
-                    ) : (
-                      <div style={{ padding: '14px 16px', borderRadius: '14px', background: '#fff7ed', color: '#9a3412', fontSize: '13px', fontWeight: 700 }}>
-                        Save this room once to unlock its separate iCal and OTA sync links.
-                      </div>
-                    )}
-                  </div>
-
                   <div style={{ display: 'grid', gap: '10px', minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', minWidth: 0 }}>
                       <span style={{ fontSize: '11px', fontWeight: 900, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase' }}>Amenities</span>
@@ -1178,6 +1161,48 @@ export default function DashboardTab({
                       </div>
                       <div style={{ fontSize: '18px', fontWeight: 900, color: '#165dcc' }}>₹{smartPriceMidpoint}</div>
                     </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '10px', minWidth: 0, marginTop: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenCalendars(prev => ({ ...prev, [room.id]: !prev[room.id] }))}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        background: 'none',
+                        border: 'none',
+                        padding: '0',
+                        cursor: 'pointer',
+                        color: '#1d4ed8',
+                        fontSize: '11px',
+                        fontWeight: 900,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.1em'
+                      }}
+                    >
+                      Room calendar & OTA sync
+                      {openCalendars[room.id] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                    {openCalendars[room.id] && (
+                      <div style={{ display: 'grid', gap: '14px', minWidth: 0, marginTop: '8px', marginBottom: '12px' }}>
+                        {canManageRoomCalendar ? (
+                          <div style={{ border: '1px solid #e2e8f0', borderRadius: '18px', padding: '18px', background: '#f8fafc', minWidth: 0 }}>
+                            <ChannelManagerTab
+                              ownerType="stay_unit"
+                              ownerId={room.id}
+                              title={`${room.name || `Room ${index + 1}`} Calendar`}
+                              description="Connect Airbnb, Booking.com, Google Calendar, or any ICS feed for this room only. Imports and exports stay attached to this room calendar."
+                            />
+                          </div>
+                        ) : (
+                          <div style={{ padding: '14px 16px', borderRadius: '14px', background: '#fff7ed', color: '#9a3412', fontSize: '13px', fontWeight: 700 }}>
+                            Save this room once to unlock its separate iCal and OTA sync links.
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', paddingTop: '4px', borderTop: '1px solid #f1f5f9', minWidth: 0 }}>

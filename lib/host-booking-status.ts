@@ -14,36 +14,49 @@ type HostBookingStatusMessageContext = {
   cityName?: string | null;
 };
 
+const FAMLO_MAP_TAG_START = "[famlo_map_url]";
+const FAMLO_MAP_TAG_END = "[/famlo_map_url]";
+
+function appendFamloMapTag(message: string, mapUrl: string | null): string {
+  const cleanMapUrl = asString(mapUrl);
+  if (!cleanMapUrl) {
+    return message;
+  }
+  return `${message}\n\n${FAMLO_MAP_TAG_START}${cleanMapUrl}${FAMLO_MAP_TAG_END}`;
+}
+
+function stripFamloMapTag(message: string): string {
+  return message.replace(/\n?\[famlo_map_url\][\s\S]*?\[\/famlo_map_url\]/gi, "").trim();
+}
+
 export function buildHostBookingStatusMessage(
   status: string,
   context: HostBookingStatusMessageContext = {}
 ): string {
   const guestName = asString(context.guestName) || "there";
   const hostName = asString(context.hostName) || "your host";
-  const hostFullAddress = asString(context.hostFullAddress) || "Your host will share the final location shortly.";
-  const hostMapPinUrl = asString(context.hostMapPinUrl) || "Map pin will be shared shortly.";
+  const hostMapPinUrl = asString(context.hostMapPinUrl) || null;
   const cityName = asString(context.cityName) || "your stay city";
 
   switch (status) {
     case "accepted":
     case "confirmed":
-      return [
+      return appendFamloMapTag(
+        [
         `Hi ${guestName},`,
         "",
-        `Good news! ${hostName} has confirmed your arrival, and your booking is now confirmed.`,
+        `Good news! ${hostName} has confirmed your arrival.`,
         "",
-        "Your stay location:",
-        hostFullAddress,
-        "",
-        "Map pin location:",
-        hostMapPinUrl,
+        `${hostName} will share the final location shortly.`,
         "",
         "If you have any questions, you can message your host directly or reach out to us at hello@famlo.in.",
         "",
         `For any emergency during your trip in ${cityName}, tap the Emergency button in your profile. We’re here to support you throughout your Famlo stay.`,
         "",
         "Welcome to Famlo — live like a local.",
-      ].join("\n");
+      ].join("\n"),
+        hostMapPinUrl
+      );
     case "rejected":
       return "Famlo update: this booking was not accepted by the host. Team Famlo can help you choose another live home if needed.";
     case "checked_in":
@@ -210,6 +223,7 @@ export async function applyHostBookingStatusUpdate(
   if (thread.conversationId) {
     const now = new Date().toISOString();
     const statusMessage = buildHostBookingStatusMessage(status, bookingContext);
+    const conversationPreviewMessage = stripFamloMapTag(statusMessage);
 
     const { error: insertMessageError } = await supabase.from("messages").insert({
       conversation_id: thread.conversationId,
@@ -227,7 +241,7 @@ export async function applyHostBookingStatusUpdate(
       const { error: conversationError } = await supabase
         .from("conversations")
         .update({
-          last_message: statusMessage,
+          last_message: conversationPreviewMessage,
           last_message_at: now,
           guest_unread: 1,
         } as never)

@@ -82,6 +82,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     return NextResponse.json(
       [...(messages ?? [])]
+        .filter((message) => message.sender_type !== "system")
         .reverse()
         .map((message) => normalizeMessageForClient(message as Record<string, unknown>))
     );

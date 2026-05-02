@@ -279,10 +279,7 @@ export default function ProfileTab({
                 <label style={{ fontSize: '12px', fontWeight: 800, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Display Name</label>
                 <input className={styles.inputField} placeholder="E.g., Aryan Krishan" value={profile.hostDisplayName} onChange={(e) => setProfile((c: any) => ({...c, hostDisplayName: e.target.value}))} />
               </div>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 800, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Host Catchphrase / Tagline</label>
-                <input className={styles.inputField} placeholder="E.g., Hosted by a warm local family in Jodhpur." value={profile.hostCatchphrase} onChange={(e) => setProfile((c: any) => ({...c, hostCatchphrase: e.target.value}))} />
-              </div>
+
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 800, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>City</label>
                 <input list="city-list" className={styles.inputField} placeholder="Start typing..." value={profile.city} onChange={e => setProfile((c: any) => ({...c, city: e.target.value}))}/>

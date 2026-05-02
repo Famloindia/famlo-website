@@ -172,6 +172,30 @@ async function findConversationForBooking(
   return row ? (row as ConversationRow) : null;
 }
 
+async function findRelatedParticipantConversationIds(
+  supabase: SupabaseClient,
+  input: { guestId: string | null; hostUserId: string | null; primaryConversationId: string | null }
+): Promise<string[]> {
+  if (!input.guestId || !input.hostUserId) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("guest_id", input.guestId)
+    .eq("host_user_id", input.hostUserId)
+    .order("last_message_at", { ascending: false })
+    .limit(25);
+
+  if (error) {
+    console.error("[chat-thread] participant conversation id lookup failed", error);
+    return input.primaryConversationId ? [input.primaryConversationId] : [];
+  }
+
+  return uniqueStrings([input.primaryConversationId, ...((data ?? []) as Array<{ id?: string | null }>).map((row) => row.id ?? null)]);
+}
+
 async function resolveHostUserId(
   supabase: SupabaseClient,
   hostProfileId: string | null
@@ -443,6 +467,11 @@ export async function resolveMessageThread(
   const resolvedHostUserId = conversation.host_user_id ?? bookingV2HostUserId ?? legacyHostUserId ?? null;
   const resolvedFamilyId = legacyBooking?.family_id ?? bookingV2FamilyId ?? null;
   const resolvedBookingId = conversation.booking_id ?? bookingV2?.legacy_booking_id ?? bookingV2?.id ?? legacyBooking?.id ?? null;
+  const participantConversationIds = await findRelatedParticipantConversationIds(supabase, {
+    guestId: resolvedGuestId,
+    hostUserId: resolvedHostUserId,
+    primaryConversationId: conversation.id,
+  });
 
   const currentFamilyId = (conversation as ConversationRow & { family_id?: string | null }).family_id ?? null;
   if (
@@ -464,6 +493,7 @@ export async function resolveMessageThread(
     conversation.id,
     cleanReference,
     conversation.booking_id,
+    ...participantConversationIds,
     bookingV2?.id,
     bookingV2?.legacy_booking_id,
     bookingV2?.conversation_id,

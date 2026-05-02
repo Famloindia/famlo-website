@@ -115,6 +115,7 @@
   .mainLayoutGrid {
     grid-template-columns: 1fr;
   }
+
   .rightColumnSticky {
     position: static;
     max-height: none;
@@ -1225,4 +1226,9 @@
   .roomLocationHeader {
     flex-direction: column;
   }
+}
+
+.roomLocalityHeader,
+.roomLocationHeader {
+  flex-direction: column;
 }

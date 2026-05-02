@@ -508,27 +508,27 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
       const response = await fetch("/api/bookings/create", {
         method: "POST",
         headers: authHeaders,
-          body: JSON.stringify({
-            bookingType: "host_stay",
-            userId: currentUserId,
-            hostId: home.hostId,
-            legacyFamilyId: home.legacyFamilyId,
-            stayUnitId: room.id,
-            quarterType: "fullday",
-            quarterTime: "Full day",
-            startDate: selectedStartDate,
-            endDate: selectedEndDate,
-            guestsCount: selectedGuests,
-            unitPrice: price,
-            commissionPct: home.platformCommissionPct,
-            guestName: profileName,
-            guestCity: profileCity || null,
-            listingName: home.listingTitle ?? home.name,
-            hostArea: areaLabel,
-            hostUserId: home.hostUserId,
-            welcomeMessage: `Welcome to ${home.listingTitle ?? home.name}. Booking created from the room page.`,
-            requestPaymentIntent: true,
-            gateway: "razorpay",
+        body: JSON.stringify({
+          bookingType: "host_stay",
+          userId: currentUserId,
+          hostId: home.hostId,
+          legacyFamilyId: home.legacyFamilyId,
+          stayUnitId: room.id,
+          quarterType: "fullday",
+          quarterTime: "Full day",
+          startDate: selectedStartDate,
+          endDate: selectedEndDate,
+          guestsCount: selectedGuests,
+          unitPrice: price,
+          commissionPct: home.platformCommissionPct,
+          guestName: profileName,
+          guestCity: profileCity || null,
+          listingName: home.listingTitle ?? home.name,
+          hostArea: areaLabel,
+          hostUserId: home.hostUserId,
+          welcomeMessage: `Welcome to ${home.listingTitle ?? home.name}. Booking created from the room page.`,
+          requestPaymentIntent: true,
+          gateway: "razorpay",
         }),
       });
 
@@ -636,8 +636,8 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             setSuccessMessage(null);
             setBookingError(
               failureResponse.error?.description ??
-                failureResponse.error?.reason ??
-                "Payment failed, so the booking was not saved."
+              failureResponse.error?.reason ??
+              "Payment failed, so the booking was not saved."
             );
           });
 
@@ -705,216 +705,216 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-        <div style={{ display: "grid", gap: 4 }}>
-          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#1890ff" }}>
-            Booking
+          <div style={{ display: "grid", gap: 4 }}>
+            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#1890ff" }}>
+              Booking
+            </div>
+            <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900, color: "#0f172a" }}>Book this room here</h3>
           </div>
-          <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900, color: "#0f172a" }}>Book this room here</h3>
+          <div style={{ padding: "8px 12px", borderRadius: 999, background: "#eff6ff", color: "#165dcc", fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            Stay here
+          </div>
         </div>
-        <div style={{ padding: "8px 12px", borderRadius: 999, background: "#eff6ff", color: "#165dcc", fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          Stay here
-        </div>
-      </div>
 
         <div style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "grid", gap: 8 }}>
             <div style={{ display: "grid", gap: 6, gridTemplateColumns: "1fr 1fr" }}>
-            <div style={{ borderRadius: 16, border: "1px solid rgba(14,43,87,0.16)", padding: "12px 14px", background: "#fff" }}>
-              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0e2b57", marginBottom: 6 }}>
-                Check-in time
+              <div style={{ borderRadius: 16, border: "1px solid rgba(14,43,87,0.16)", padding: "12px 14px", background: "#fff" }}>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0e2b57", marginBottom: 6 }}>
+                  Check-in time
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <CalendarDays size={18} color="#1890ff" />
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{formatTimeLabel(home.checkInTime, "11:00 AM")}</div>
+                </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <CalendarDays size={18} color="#1890ff" />
-                <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{formatTimeLabel(home.checkInTime, "11:00 AM")}</div>
+              <div style={{ borderRadius: 16, border: "1px solid rgba(14,43,87,0.16)", padding: "12px 14px", background: "#fff" }}>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0e2b57", marginBottom: 6 }}>
+                  Check-out time
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <CalendarDays size={18} color="#1890ff" />
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{formatTimeLabel(home.checkOutTime, "1:00 PM")}</div>
+                </div>
               </div>
             </div>
-            <div style={{ borderRadius: 16, border: "1px solid rgba(14,43,87,0.16)", padding: "12px 14px", background: "#fff" }}>
-              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0e2b57", marginBottom: 6 }}>
-                Check-out time
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <CalendarDays size={18} color="#1890ff" />
-                <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{formatTimeLabel(home.checkOutTime, "1:00 PM")}</div>
-              </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(15,23,42,0.68)", lineHeight: 1.6 }}>
+              {rangeLabel}. Booked dates are blocked for this specific room.
             </div>
           </div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(15,23,42,0.68)", lineHeight: 1.6 }}>
-            {rangeLabel}. Booked dates are blocked for this specific room.
-          </div>
-        </div>
 
-        {renderCalendar(monthOne)}
+          {renderCalendar(monthOne)}
 
-        <label style={{ display: "grid", gap: 8, fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0e2b57" }}>
-          <span>Guests</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 16, border: "1px solid rgba(14,43,87,0.16)", padding: "12px 14px" }}>
-            <Users size={18} color="#1890ff" />
-            <select
-              aria-label={`Guests, up to ${guestLimit}`}
-              value={selectedGuests}
-              onChange={(event) => setGuests(Math.max(1, Math.min(guestLimit, Number(event.target.value) || 1)))}
-              style={{
-                border: "none",
-                outline: "none",
-                width: "100%",
-                fontSize: 15,
-                fontWeight: 700,
-                color: "#0f172a",
-                background: "transparent",
-                appearance: "none",
-                cursor: "pointer",
-              }}
-            >
-              {guestOptions.map((count) => (
-                <option key={count} value={count}>
-                  {count} guest{count === 1 ? "" : "s"}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(15,23,42,0.6)", textTransform: "none", letterSpacing: 0 }}>
-            Up to {guestLimit} guest{guestLimit === 1 ? "" : "s"} allowed for this room. Guests do not change room price.
-          </div>
-        </label>
-      </div>
-
-      <div style={{ display: "grid", gap: 8, background: "#f8fbff", border: "1px solid rgba(24,144,255,0.12)", borderRadius: 18, padding: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0e2b57" }}>
-            Estimated total
-          </span>
-          <span style={{ fontSize: 18, fontWeight: 900, color: "#165dcc" }}>
-            <IndianRupee size={16} style={{ display: "inline", verticalAlign: "-2px" }} />
-            {getRupeeLabel(estimatedTotal)}
-          </span>
-        </div>
-        <div style={{ display: "grid", gap: 8, fontSize: 12, fontWeight: 700, color: "rgba(15,23,42,0.68)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>Room price per day</span>
-            <span>₹{getRupeeLabel(price)}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>Stay dates</span>
-            <span>{rangeLabel}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>Selected days</span>
-            <span>{selectedDays}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <label style={{ display: "grid", gap: 8, fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0e2b57" }}>
             <span>Guests</span>
-            <span>{selectedGuests}</span>
-          </div>
-          {hasBlockedSelection ? (
-            <div style={{ color: "#b91c1c", fontWeight: 800 }}>
-              One or more selected dates are already booked for this room.
-            </div>
-          ) : null}
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, fontWeight: 700, color: "rgba(15,23,42,0.68)" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <MapPin size={14} color="#1890ff" />
-            {areaLabel}
-          </span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <ShieldCheck size={14} color="#1890ff" />
-            {home.isAccepting ? "Accepting bookings" : "Closed"}
-          </span>
-        </div>
-      </div>
-
-      {bookingError ? (
-        <div style={{ borderRadius: 16, padding: "12px 14px", background: "#fef2f2", color: "#991b1b", fontSize: 13, fontWeight: 700, lineHeight: 1.6 }}>
-          {bookingError}
-        </div>
-      ) : null}
-
-      {successMessage ? (
-        <div style={{ borderRadius: 16, padding: "12px 14px", background: "#ecfdf5", color: "#166534", fontSize: 13, fontWeight: 700, lineHeight: 1.6 }}>
-          {successMessage}
-          {receipt ? (
-            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.9 }}>
-                Booking #{receipt.bookingId.slice(0, 8)} • Total {receipt.totalLabel}
-              </div>
-              <Link
-                href="/bookings"
+            <div style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 16, border: "1px solid rgba(14,43,87,0.16)", padding: "12px 14px" }}>
+              <Users size={18} color="#1890ff" />
+              <select
+                aria-label={`Guests, up to ${guestLimit}`}
+                value={selectedGuests}
+                onChange={(event) => setGuests(Math.max(1, Math.min(guestLimit, Number(event.target.value) || 1)))}
                 style={{
-                  display: "inline-flex",
-                  width: "fit-content",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "10px 14px",
-                  borderRadius: 12,
-                  background: "#166534",
-                  color: "#fff",
-                  textDecoration: "none",
-                  fontSize: 13,
-                  fontWeight: 800,
+                  border: "none",
+                  outline: "none",
+                  width: "100%",
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "#0f172a",
+                  background: "transparent",
+                  appearance: "none",
+                  cursor: "pointer",
                 }}
               >
-                My Bookings
-              </Link>
+                {guestOptions.map((count) => (
+                  <option key={count} value={count}>
+                    {count} guest{count === 1 ? "" : "s"}
+                  </option>
+                ))}
+              </select>
             </div>
-          ) : null}
+            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(15,23,42,0.6)", textTransform: "none", letterSpacing: 0 }}>
+              Up to {guestLimit} guest{guestLimit === 1 ? "" : "s"} allowed for this room. Guests do not change room price.
+            </div>
+          </label>
         </div>
-      ) : null}
 
-      {!hasUser ? (
-        <button
-          type="button"
-          onClick={() => setShowAuthModal(true)}
-          style={{
-            border: "none",
-            borderRadius: 16,
-            background: "linear-gradient(135deg, #0e2b57, #1890ff)",
-            color: "#fff",
-            padding: "14px 16px",
-            fontSize: 16,
-            fontWeight: 900,
-            cursor: "pointer",
-            boxShadow: "0 10px 24px rgba(24, 144, 255, 0.28)",
-          }}
-        >
-          Sign in to book
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => void handleBooking()}
-          onMouseEnter={() => {
-            setBookHovered(true);
-            warmCheckoutIntent();
-          }}
-          onMouseLeave={() => setBookHovered(false)}
-          onFocus={warmCheckoutIntent}
-          onTouchStart={warmCheckoutIntent}
-          disabled={isBusy || loading || !room.isActive}
-          style={{
-            border: "none",
-            borderRadius: 16,
-            background: isBusy
-              ? "linear-gradient(135deg, #93c5fd, #60a5fa)"
-              : "linear-gradient(120deg, #0e2b57 0%, #1890ff 50%, #0e2b57 100%)",
-            backgroundSize: "220% 100%",
-            backgroundPosition: bookHovered ? "100% 0" : "0% 0",
-            color: "#fff",
-            padding: "14px 16px",
-            fontSize: 16,
-            fontWeight: 900,
-            cursor: isBusy ? "not-allowed" : "pointer",
-            boxShadow: "0 10px 24px rgba(24, 144, 255, 0.28)",
-            display: "inline-flex",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: 8,
-            transition: "background-position 220ms ease, transform 180ms ease, box-shadow 180ms ease",
-          }}
-        >
-          {isBusy ? (bookingPhase === "verifying" ? "Confirming payment..." : "Opening checkout...") : room.isActive ? "Book Now" : "Room closed"}
-          <ChevronRight size={18} />
-        </button>
-      )}
+        <div style={{ display: "grid", gap: 8, background: "#f8fbff", border: "1px solid rgba(24,144,255,0.12)", borderRadius: 18, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0e2b57" }}>
+              Estimated total
+            </span>
+            <span style={{ fontSize: 18, fontWeight: 900, color: "#165dcc" }}>
+              <IndianRupee size={16} style={{ display: "inline", verticalAlign: "-2px" }} />
+              {getRupeeLabel(estimatedTotal)}
+            </span>
+          </div>
+          <div style={{ display: "grid", gap: 8, fontSize: 12, fontWeight: 700, color: "rgba(15,23,42,0.68)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <span>Room price per day</span>
+              <span>₹{getRupeeLabel(price)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <span>Stay dates</span>
+              <span>{rangeLabel}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <span>Selected days</span>
+              <span>{selectedDays}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <span>Guests</span>
+              <span>{selectedGuests}</span>
+            </div>
+            {hasBlockedSelection ? (
+              <div style={{ color: "#b91c1c", fontWeight: 800 }}>
+                One or more selected dates are already booked for this room.
+              </div>
+            ) : null}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, fontWeight: 700, color: "rgba(15,23,42,0.68)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <MapPin size={14} color="#1890ff" />
+              {areaLabel}
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <ShieldCheck size={14} color="#1890ff" />
+              {home.isAccepting ? "Accepting bookings" : "Closed"}
+            </span>
+          </div>
+        </div>
+
+        {bookingError ? (
+          <div style={{ borderRadius: 16, padding: "12px 14px", background: "#fef2f2", color: "#991b1b", fontSize: 13, fontWeight: 700, lineHeight: 1.6 }}>
+            {bookingError}
+          </div>
+        ) : null}
+
+        {successMessage ? (
+          <div style={{ borderRadius: 16, padding: "12px 14px", background: "#ecfdf5", color: "#166534", fontSize: 13, fontWeight: 700, lineHeight: 1.6 }}>
+            {successMessage}
+            {receipt ? (
+              <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                <div style={{ fontSize: 12, opacity: 0.9 }}>
+                  Booking #{receipt.bookingId.slice(0, 8)} • Total {receipt.totalLabel}
+                </div>
+                <Link
+                  href="/bookings"
+                  style={{
+                    display: "inline-flex",
+                    width: "fit-content",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "10px 14px",
+                    borderRadius: 12,
+                    background: "#166534",
+                    color: "#fff",
+                    textDecoration: "none",
+                    fontSize: 13,
+                    fontWeight: 800,
+                  }}
+                >
+                  My Bookings
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!hasUser ? (
+          <button
+            type="button"
+            onClick={() => setShowAuthModal(true)}
+            style={{
+              border: "none",
+              borderRadius: 16,
+              background: "linear-gradient(135deg, #0e2b57, #1890ff)",
+              color: "#fff",
+              padding: "14px 16px",
+              fontSize: 16,
+              fontWeight: 900,
+              cursor: "pointer",
+              boxShadow: "0 10px 24px rgba(24, 144, 255, 0.28)",
+            }}
+          >
+            Sign in to book
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleBooking()}
+            onMouseEnter={() => {
+              setBookHovered(true);
+              warmCheckoutIntent();
+            }}
+            onMouseLeave={() => setBookHovered(false)}
+            onFocus={warmCheckoutIntent}
+            onTouchStart={warmCheckoutIntent}
+            disabled={isBusy || loading || !room.isActive}
+            style={{
+              border: "none",
+              borderRadius: 16,
+              background: isBusy
+                ? "linear-gradient(135deg, #93c5fd, #60a5fa)"
+                : "linear-gradient(120deg, #0e2b57 0%, #1890ff 50%, #0e2b57 100%)",
+              backgroundSize: "220% 100%",
+              backgroundPosition: bookHovered ? "100% 0" : "0% 0",
+              color: "#fff",
+              padding: "14px 16px",
+              fontSize: 16,
+              fontWeight: 900,
+              cursor: isBusy ? "not-allowed" : "pointer",
+              boxShadow: "0 10px 24px rgba(24, 144, 255, 0.28)",
+              display: "inline-flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 8,
+              transition: "background-position 220ms ease, transform 180ms ease, box-shadow 180ms ease",
+            }}
+          >
+            {isBusy ? (bookingPhase === "verifying" ? "Confirming payment..." : "Opening checkout...") : room.isActive ? "Book Now" : "Room closed"}
+            <ChevronRight size={18} />
+          </button>
+        )}
 
         <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
       </section>

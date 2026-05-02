@@ -67,11 +67,21 @@ type MessageRow = {
 };
 
 const INITIAL_MESSAGE_BATCH = 25;
+const FAMLO_MAP_TAG_REGEX = /\[famlo_map_url\]([\s\S]*?)\[\/famlo_map_url\]/i;
 
 function extractMapsUrl(text: string | null | undefined): string | null {
   if (!text) return null;
-  const match = text.match(/https?:\/\/maps\.google\.com\/\?q=[^\s]+/i);
+  const markerMatch = text.match(FAMLO_MAP_TAG_REGEX);
+  if (markerMatch?.[1]) {
+    return markerMatch[1].trim();
+  }
+  const match = text.match(/https?:\/\/(?:www\.)?(?:maps\.google\.[^\s/]+\/[^\s]*|google\.com\/maps[^\s]*|maps\.app\.goo\.gl\/[^\s]+)[^\s]*/i);
   return match ? match[0] : null;
+}
+
+function getVisibleMessageText(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.replace(FAMLO_MAP_TAG_REGEX, "").trim();
 }
 
 function buildMapUrl(lat: number | null | undefined, lng: number | null | undefined, label?: string | null): string | null {
@@ -1235,7 +1245,7 @@ export function MessagesDashboard({
                               gap: 6,
                             }}
                           >
-                            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{message.text || message.content || ""}</div>
+                            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{getVisibleMessageText(message.text || message.content || "")}</div>
                             {mapsUrl ? (
                               <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", fontWeight: 800, color: "#1d4ed8", width: "fit-content" }}>
                                 Open map
@@ -1279,7 +1289,7 @@ export function MessagesDashboard({
                           </a>
                         ) : null}
                         <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
-                          {isDeleted ? "Message deleted" : (message.text || message.content || "")}
+                          {isDeleted ? "Message deleted" : getVisibleMessageText(message.text || message.content || "")}
                         </div>
                         {mapsUrl ? (
                           <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", fontWeight: 800, color: mine ? "#dbeafe" : "#1d4ed8", width: "fit-content" }}>

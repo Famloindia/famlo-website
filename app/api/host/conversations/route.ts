@@ -17,6 +17,13 @@ type ConversationRow = {
   typing_updated_at: string | null;
 };
 
+type MessagePreviewRow = {
+  conversation_id: string | null;
+  text: string | null;
+  created_at: string | null;
+  sender_type: string | null;
+};
+
 type LightweightConversationRow = Pick<ConversationRow, "id" | "last_message_at" | "host_unread" | "guest_unread" | "typing_user_id" | "typing_updated_at">;
 
 export async function GET(request: Request) {
@@ -159,18 +166,87 @@ export async function GET(request: Request) {
       );
     }
 
-    const result = visibleConversations.map((conversation) => ({
-      ...conversation,
-      guest: guestMap[conversation.guest_id ?? ""] ?? {
-        name: "Guest",
-        avatar_url: null,
-        city: null,
-        state: null,
-        gender: null,
-        about: null,
-        kyc_status: null,
-      },
-    }));
+    const visibleConversationIds = visibleConversations.map((conversation) => conversation.id);
+    const { data: previewMessages, error: previewMessagesError } =
+      visibleConversationIds.length > 0
+        ? await supabase
+            .from("messages")
+            .select("conversation_id,text,created_at,sender_type")
+            .in("conversation_id", visibleConversationIds)
+            .neq("sender_type", "system")
+            .order("created_at", { ascending: false })
+            .limit(500)
+        : { data: [], error: null };
+
+    if (previewMessagesError) throw previewMessagesError;
+
+    const previewByConversationId = new Map<string, { text: string | null; created_at: string | null }>();
+    for (const row of (previewMessages ?? []) as MessagePreviewRow[]) {
+      if (!row.conversation_id || previewByConversationId.has(row.conversation_id)) {
+        continue;
+      }
+      previewByConversationId.set(row.conversation_id, {
+        text: row.text,
+        created_at: row.created_at,
+      });
+    }
+
+    const groupedConversations = new Map<string, Array<ConversationRow>>();
+    for (const conversation of visibleConversations) {
+      const groupKey = [
+        conversation.guest_id ?? "guest",
+        conversation.host_user_id ?? "host",
+        conversation.family_id ?? "family",
+      ].join("::");
+      const existing = groupedConversations.get(groupKey) ?? [];
+      existing.push(conversation);
+      groupedConversations.set(groupKey, existing);
+    }
+
+    const result = Array.from(groupedConversations.values())
+      .map((group) => {
+        const canonicalConversation = [...group].sort(
+          (left, right) =>
+            new Date(right.last_message_at ?? 0).getTime() - new Date(left.last_message_at ?? 0).getTime()
+        )[0];
+        const guest = guestMap[canonicalConversation.guest_id ?? ""] ?? {
+          name: "Guest",
+          avatar_url: null,
+          city: null,
+          state: null,
+          gender: null,
+          about: null,
+          kyc_status: null,
+        };
+
+        let latestPreviewText = canonicalConversation.last_message;
+        let latestPreviewAt = canonicalConversation.last_message_at;
+        for (const conversation of group) {
+          const preview = previewByConversationId.get(conversation.id);
+          if (!preview) continue;
+          if (
+            !latestPreviewAt ||
+            new Date(preview.created_at ?? 0).getTime() > new Date(latestPreviewAt ?? 0).getTime()
+          ) {
+            latestPreviewText = preview.text;
+            latestPreviewAt = preview.created_at;
+          }
+        }
+
+        return {
+          ...canonicalConversation,
+          merged_conversation_ids: group.map((conversation) => conversation.id),
+          host_unread: group.reduce((sum, conversation) => sum + Number(conversation.host_unread ?? 0), 0),
+          guest_unread: group.reduce((sum, conversation) => sum + Number(conversation.guest_unread ?? 0), 0),
+          last_message: latestPreviewText,
+          last_message_at: latestPreviewAt,
+          guest,
+        };
+      })
+      .sort(
+        (left, right) =>
+          new Date(right.last_message_at ?? 0).getTime() - new Date(left.last_message_at ?? 0).getTime()
+      );
 
     return NextResponse.json(result);
   } catch (err) {
