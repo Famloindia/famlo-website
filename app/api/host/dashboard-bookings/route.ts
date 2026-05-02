@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
+import { loadUserProfileCompatibility } from "@/lib/user-profile";
 
 function isMissingColumnError(error: unknown, columnName: string): boolean {
   if (!error || typeof error !== "object") return false;
@@ -45,6 +46,67 @@ function mapV2BookingRow(row: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  return null;
+}
+
+async function loadFamilyRows(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  familyIds: string[]
+): Promise<Array<Record<string, unknown>>> {
+  if (familyIds.length === 0) return [];
+
+  let result = await supabase
+    .from("families")
+    .select("id,name,property_name,city,state,village")
+    .in("id", familyIds);
+
+  if (result.error && isMissingColumnError(result.error, "property_name")) {
+    result = await supabase
+      .from("families")
+      .select("id,name,city,state,village")
+      .in("id", familyIds);
+  }
+
+  if (result.error) {
+    console.warn("[host.dashboard-bookings] family enrichment skipped", result.error);
+    return [];
+  }
+
+  return (result.data ?? []) as Array<Record<string, unknown>>;
+}
+
+async function loadStayUnitRows(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  stayUnitIds: string[]
+): Promise<Array<Record<string, unknown>>> {
+  if (stayUnitIds.length === 0) return [];
+
+  let result = await supabase
+    .from("stay_units_v2")
+    .select("id,name,unit_key,host_id")
+    .in("id", stayUnitIds);
+
+  if (result.error && isMissingColumnError(result.error, "unit_key")) {
+    result = await supabase
+      .from("stay_units_v2")
+      .select("id,name,host_id")
+      .in("id", stayUnitIds);
+  }
+
+  if (result.error) {
+    console.warn("[host.dashboard-bookings] stay unit enrichment skipped", result.error);
+    return [];
+  }
+
+  return (result.data ?? []) as Array<Record<string, unknown>>;
+}
+
 export async function GET(request: Request): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const requestedFamilyId = searchParams.get("familyId");
@@ -82,6 +144,7 @@ export async function GET(request: Request): Promise<NextResponse> {
         })
         .filter((entry): entry is [string, string] => Boolean(entry))
     );
+    const uniqueFamilyIds = Array.from(new Set(familyIdByHostId.values()));
 
     if (hostIds.length === 0) {
       return NextResponse.json(summaryOnly ? { totalStays: 0, totalEarnings: 0 } : []);
@@ -159,7 +222,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       });
     }
 
-    const bookingRows = ((bookingRowsV2 ?? []) as unknown as Array<Record<string, unknown>>)
+    const bookingRows: Array<Record<string, unknown>> = ((bookingRowsV2 ?? []) as unknown as Array<Record<string, unknown>>)
       .filter((row) => isHostBookingVisibleToPartner(row.status, row.payment_status))
       .map((row) => {
         const mapped = mapV2BookingRow(row);
@@ -170,7 +233,87 @@ export async function GET(request: Request): Promise<NextResponse> {
         };
       });
 
-    return NextResponse.json(bookingRows);
+    const guestUserIds = Array.from(
+      new Set(
+        bookingRows
+          .map((row) => (typeof row.user_id === "string" ? row.user_id : null))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    const stayUnitIds = Array.from(
+      new Set(
+        bookingRows
+          .map((row) => (typeof row.stay_unit_id === "string" ? row.stay_unit_id : null))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+
+    const [familyRows, stayUnitRows, guestProfiles] = await Promise.all([
+      loadFamilyRows(supabase, uniqueFamilyIds),
+      loadStayUnitRows(supabase, stayUnitIds),
+      Promise.all(
+        guestUserIds.map(async (userId) => {
+          try {
+            const profile = await loadUserProfileCompatibility(supabase, userId);
+            return [userId, profile] as const;
+          } catch (error) {
+            console.warn("[host.dashboard-bookings] guest profile enrichment skipped", { userId, error });
+            return [userId, null] as const;
+          }
+        })
+      ),
+    ]);
+
+    const familyById = new Map(
+      familyRows
+        .map((row) => (typeof row.id === "string" ? [row.id, row] : null))
+        .filter((entry): entry is [string, Record<string, unknown>] => Boolean(entry))
+    );
+    const stayUnitById = new Map(
+      stayUnitRows
+        .map((row) => (typeof row.id === "string" ? [row.id, row] : null))
+        .filter((entry): entry is [string, Record<string, unknown>] => Boolean(entry))
+    );
+    const guestProfileById = new Map(guestProfiles);
+
+    const enrichedRows = bookingRows.map((row) => {
+      const familyRow = typeof row.family_id === "string" ? familyById.get(row.family_id) : null;
+      const stayUnitRow = typeof row.stay_unit_id === "string" ? stayUnitById.get(row.stay_unit_id) : null;
+      const guestProfile = typeof row.user_id === "string" ? guestProfileById.get(row.user_id) : null;
+      const userRecord =
+        row.users && typeof row.users === "object" && !Array.isArray(row.users)
+          ? ({ ...(row.users as Record<string, unknown>) } as Record<string, unknown>)
+          : {};
+
+      if (guestProfile?.avatar_url) {
+        userRecord.avatar_url = guestProfile.avatar_url;
+      }
+      if (!userRecord.city && guestProfile?.city) {
+        userRecord.city = guestProfile.city;
+      }
+      if (!userRecord.state && guestProfile?.state) {
+        userRecord.state = guestProfile.state;
+      }
+      if (!userRecord.about && guestProfile?.about) {
+        userRecord.about = guestProfile.about;
+      }
+      if (!userRecord.gender && guestProfile?.gender) {
+        userRecord.gender = guestProfile.gender;
+      }
+      if (!userRecord.date_of_birth && guestProfile?.date_of_birth) {
+        userRecord.date_of_birth = guestProfile.date_of_birth;
+      }
+
+      return {
+        ...row,
+        users: userRecord,
+        property_name: firstString(familyRow?.property_name, familyRow?.name, stayUnitRow?.name, "Famlo Stay"),
+        property_location: firstString(familyRow?.village, familyRow?.city, familyRow?.state),
+        stay_unit_name: firstString(stayUnitRow?.name, stayUnitRow?.unit_key),
+      };
+    });
+
+    return NextResponse.json(enrichedRows);
   } catch (error) {
     console.error("[host.dashboard-bookings] load:error", error);
     return NextResponse.json({ error: "Failed to load booking rows." }, { status: 500 });

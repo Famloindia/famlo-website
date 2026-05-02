@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { createBrowserSupabaseClient } from "@/lib/supabase";
+import { toSupabaseImageUrl } from "@/lib/supabase-image";
 import styles from "../dashboard.module.css";
 import { MessageCircle, Compass, User, Clock, CheckCircle2, ShieldCheck, MapPin, Sparkles, Loader2 } from "lucide-react";
 
@@ -29,6 +30,21 @@ function formatAge(dateOfBirth: unknown): string {
   }
 
   return age > 0 ? `${age} years` : "Not added";
+}
+
+function getBookingSortTime(value: unknown): number {
+  if (typeof value !== "string" || value.length === 0) return Number.MAX_SAFE_INTEGER;
+  const parsed = new Date(`${value}T00:00:00+05:30`);
+  const time = parsed.getTime();
+  return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
+}
+
+function sortBookingsByNearestDate(rows: any[]): any[] {
+  return [...rows].sort((left, right) => {
+    const startDelta = getBookingSortTime(left?.date_from) - getBookingSortTime(right?.date_from);
+    if (startDelta !== 0) return startDelta;
+    return getBookingSortTime(left?.date_to) - getBookingSortTime(right?.date_to);
+  });
 }
 
 function isCheckInWindowOpen(booking: any): boolean {
@@ -73,6 +89,10 @@ export default function BookingsTab({
   useEffect(() => {
     setLocalRows(bookingRows);
   }, [bookingRows]);
+
+  const sortedRows = sortBookingsByNearestDate(localRows);
+  const pendingApprovalRows = sortedRows.filter((booking) => normalizeStatus(booking) === "pending");
+  const otherRows = sortedRows.filter((booking) => normalizeStatus(booking) !== "pending");
 
   if (loading && localRows.length === 0) {
     return (
@@ -322,12 +342,12 @@ export default function BookingsTab({
           </p>
         </div>
         <div style={{ background: "#f4f8ff", padding: "8px 16px", borderRadius: "12px", fontSize: "12px", fontWeight: 800, color: "#165dcc" }}>
-          {localRows.length} Total Records
+          {sortedRows.length} Total Records
         </div>
       </div>
 
       <div className={styles.flexCol} style={{ gap: "20px" }}>
-        {localRows.length === 0 ? (
+        {sortedRows.length === 0 ? (
           <div className={styles.glassCard} style={{ textAlign: "center", padding: "80px 20px" }}>
             <div style={{ color: "#cbd5e1", display: "flex", justifyContent: "center", marginBottom: "24px" }}>
               <Compass size={64} />
@@ -341,19 +361,51 @@ export default function BookingsTab({
             </p>
           </div>
         ) : (
-          localRows.map((booking) => {
+          <>
+            {pendingApprovalRows.length > 0 ? (
+              <div
+                className={styles.glassCard}
+                style={{
+                  padding: "20px 24px",
+                  border: "1px solid #fde68a",
+                  background: "linear-gradient(180deg, #fffbeb, #fff)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#b45309", marginBottom: "6px" }}>
+                      Pending Approval
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: "20px", fontWeight: 900, color: "#0e2b57" }}>
+                      {pendingApprovalRows.length} booking{pendingApprovalRows.length === 1 ? "" : "s"} waiting for your action
+                    </h3>
+                  </div>
+                  <div style={{ padding: "8px 14px", borderRadius: "999px", background: "#fff7ed", color: "#9a3412", fontSize: "12px", fontWeight: 800, border: "1px solid #fed7aa" }}>
+                    Nearest request first
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {[...pendingApprovalRows, ...otherRows].map((booking) => {
             const userData = (booking.users as Record<string, unknown>) || {};
             const realName = String(userData.name || "Verified Guest");
             const propertyName = typeof booking.property_name === "string" && booking.property_name.length > 0 ? booking.property_name : "Famlo Stay";
             const propertyLocation = typeof booking.property_location === "string" ? booking.property_location : "";
+            const stayUnitName = typeof booking.stay_unit_name === "string" ? booking.stay_unit_name : "";
             const guestCity = typeof userData.city === "string" ? userData.city : null;
             const guestState = typeof userData.state === "string" ? userData.state : null;
             const guestGender = typeof userData.gender === "string" ? userData.gender : null;
             const guestAge = formatAge(userData.date_of_birth);
             const guestAbout = typeof userData.about === "string" ? userData.about : "";
+            const guestAvatarUrl =
+              typeof userData.avatar_url === "string" && userData.avatar_url.trim().length > 0
+                ? toSupabaseImageUrl(userData.avatar_url, { width: 128, height: 128, quality: 80 })
+                : "";
             const stayVibe = typeof booking.vibe === "string" ? booking.vibe : "";
             const quarterLabel = String(booking.quarter_type ?? booking.quarter_time ?? "Reservation");
             const normalizedStatus = normalizeStatus(booking);
+            const guestInitial = realName.trim().charAt(0).toUpperCase() || "G";
 
             const isConfirmed = normalizedStatus === "confirmed" || normalizedStatus === "completed" || normalizedStatus === "checked_in" || normalizedStatus === "accepted";
             const isPending = normalizedStatus === "pending";
@@ -383,6 +435,21 @@ export default function BookingsTab({
                 >
                   <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
                     <div style={{ position: "relative" }}>
+                      {guestAvatarUrl ? (
+                        <img
+                          src={guestAvatarUrl}
+                          alt={realName}
+                          style={{
+                            width: "56px",
+                            height: "56px",
+                            borderRadius: "50%",
+                            objectFit: "cover",
+                            border: "3px solid white",
+                            boxShadow: "0 4px 10px rgba(0,0,0,0.1)",
+                            display: "block",
+                          }}
+                        />
+                      ) : (
                         <div
                           style={{
                             width: "56px",
@@ -395,10 +462,13 @@ export default function BookingsTab({
                             justifyContent: "center",
                             border: "3px solid white",
                             boxShadow: "0 4px 10px rgba(0,0,0,0.1)",
+                            fontSize: "20px",
+                            fontWeight: 900,
                           }}
                         >
-                          <User size={24} />
+                          {guestInitial}
                         </div>
+                      )}
                       {isConfirmed && !isCancelled && (
                         <div
                           style={{
@@ -427,6 +497,12 @@ export default function BookingsTab({
                         <span style={{ color: "#165dcc", background: "#f4f8ff", padding: "2px 8px", borderRadius: "4px" }}>
                           {quarterLabel}
                         </span>
+                        {stayUnitName ? (
+                          <>
+                            <span style={{ color: "rgba(14,43,87,0.4)" }}>•</span>
+                            <span style={{ color: "#0e2b57" }}>Room: {stayUnitName}</span>
+                          </>
+                        ) : null}
                         <span style={{ color: "rgba(14,43,87,0.4)" }}>•</span>
                         <span style={{ color: "rgba(14,43,87,0.6)" }}>
                           ID: {String(booking.user_id ?? "").slice(0, 8)}
@@ -494,10 +570,18 @@ export default function BookingsTab({
                     </div>
                       <div>
                         <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(14,43,87,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>
-                          Group Info
+                          Room booked
+                        </div>
+                        <div style={{ fontSize: "15px", fontWeight: 900, color: "#0e2b57" }}>
+                          {stayUnitName || "Room details not added"}
+                        </div>
                       </div>
-                      <div style={{ fontSize: "15px", fontWeight: 900, color: "#0e2b57" }}>
-                        {String(booking.guests_count || 1)} Guest{Number(booking.guests_count) > 1 ? "s" : ""}
+                      <div>
+                        <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(14,43,87,0.4)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>
+                          Group Info
+                        </div>
+                        <div style={{ fontSize: "15px", fontWeight: 900, color: "#0e2b57" }}>
+                          {String(booking.guests_count || 1)} Guest{Number(booking.guests_count) > 1 ? "s" : ""}
                         </div>
                       </div>
                     </div>
@@ -832,7 +916,8 @@ export default function BookingsTab({
                 </div>      </div>
               </div>
             );
-          })
+          })}
+          </>
         )}
       </div>
     </div>
