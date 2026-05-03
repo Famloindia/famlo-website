@@ -17,6 +17,7 @@ interface AdminLayoutProps {
 
 const tabs = [
   { id: "entities", label: "All Entities", icon: Users, group: "Operations" },
+  { id: "famlo-plus", label: "Famlo+ Access", icon: Zap, group: "Operations" },
   { id: "vetting", label: "Vetting Queue", icon: LayoutDashboard, group: "Operations" },
   { id: "ads", label: "Ads Control", icon: Megaphone, group: "Operations" },
   { id: "coupons", label: "Coupons", icon: TicketPercent, group: "Financial" },

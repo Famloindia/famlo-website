@@ -23,6 +23,7 @@ import KillSwitch from "@/components/admin/KillSwitch";
 import BulkMailbox from "@/components/admin/BulkMailbox";
 import ChannelManagerConsole from "@/components/admin/ChannelManagerConsole";
 import CompliancePacksDashboard from "@/components/admin/CompliancePacksDashboard";
+import FamloPlusDesk from "@/components/admin/FamloPlusDesk";
 import GrowthDashboard from "@/components/admin/GrowthDashboard";
 import GrievanceDashboard from "@/components/admin/GrievanceDashboard";
 import GSTExport from "@/components/admin/GSTExport";
@@ -180,6 +181,46 @@ export default async function AdminPage({ searchParams }: Readonly<AdminPageProp
       }))
     ];
     content = <MasterEntityTable entities={entities as any} />;
+
+  } else if (activeTab === "famlo-plus") {
+    const { data: families } = await supabase
+      .from("families")
+      .select("id,name,host_id,city,state")
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    const familyIds = (families ?? []).map((family) => family.id).filter(Boolean);
+    const { data: subscriptions } = familyIds.length > 0
+      ? await supabase
+          .from("host_pro_subscriptions")
+          .select("id,family_id,status,current_period_end,grace_until,created_at")
+          .in("family_id", familyIds)
+          .order("created_at", { ascending: false })
+      : { data: [] };
+
+    const latestSubscriptionByFamilyId = new Map<string, Record<string, unknown>>();
+    for (const row of (subscriptions ?? []) as Record<string, unknown>[]) {
+      const familyId = typeof row.family_id === "string" ? row.family_id : null;
+      if (!familyId || latestSubscriptionByFamilyId.has(familyId)) continue;
+      latestSubscriptionByFamilyId.set(familyId, row);
+    }
+
+    const famloPlusRows = (families ?? []).map((family) => {
+      const subscription = latestSubscriptionByFamilyId.get(family.id);
+      return {
+        familyId: family.id,
+        familyName: family.name || "Famlo Home",
+        hostCode: family.host_id ?? null,
+        city: family.city ?? null,
+        state: family.state ?? null,
+        famloPlusStatus: typeof subscription?.status === "string" ? subscription.status : "inactive",
+        currentPeriodEnd:
+          typeof subscription?.current_period_end === "string" ? subscription.current_period_end : null,
+        graceUntil: typeof subscription?.grace_until === "string" ? subscription.grace_until : null,
+      };
+    });
+
+    content = <FamloPlusDesk rows={famloPlusRows} />;
 
   } else if (activeTab === "vetting") {
     const { data: familyApps } = await supabase
