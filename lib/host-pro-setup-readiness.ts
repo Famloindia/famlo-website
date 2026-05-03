@@ -9,8 +9,12 @@ import {
 
 export type ProSetupRoomReadiness = {
   name: string;
+  isActive: boolean;
   maxGuests: number;
   priceFullday: number;
+  bedInfo: string | null;
+  bathroomType: string | null;
+  photosCount: number;
 };
 
 export type ProSetupReadinessItem = {
@@ -83,8 +87,19 @@ export function buildHostProSetupReadiness(input: {
   const checkInTime = asString(input.settings.checkInTime);
   const checkOutTime = asString(input.settings.checkOutTime);
   const roomsExist = input.rooms.length > 0;
-  const everyRoomHasMaxGuests = roomsExist && input.rooms.every((room) => room.maxGuests > 0);
-  const everyRoomHasBasePrice = roomsExist && input.rooms.every((room) => room.priceFullday > 0);
+  const activeRooms = input.rooms.filter((room) => room.isActive);
+  const activeRoomsExist = activeRooms.length > 0;
+  const everyActiveRoomHasMaxGuests = activeRoomsExist && activeRooms.every((room) => room.maxGuests > 0);
+  const everyActiveRoomHasBasePrice = activeRoomsExist && activeRooms.every((room) => room.priceFullday > 0);
+  const everyActiveRoomHasBasicDetails =
+    activeRoomsExist &&
+    activeRooms.every((room) =>
+      room.name.trim().length > 0 &&
+      room.maxGuests > 0 &&
+      Boolean(asString(room.bedInfo)) &&
+      Boolean(asString(room.bathroomType)) &&
+      room.photosCount > 0
+    );
   const hasSavedSettings = input.settings.exists;
   const savedTimezone = asString(input.settings.timezone) ?? PRO_DEFAULT_TIMEZONE;
   const savedCurrency = asString(input.settings.currency) ?? PRO_DEFAULT_CURRENCY;
@@ -164,21 +179,36 @@ export function buildHostProSetupReadiness(input: {
     },
     {
       key: "room-max-guests",
-      title: "Each room has max guests",
-      complete: everyRoomHasMaxGuests,
-      hint: everyRoomHasMaxGuests
-        ? "Each surfaced room has a guest-capacity value in normalized inventory output."
-        : "At least one room is missing a guest-capacity signal in current inventory.",
-      valueLabel: everyRoomHasMaxGuests ? "Ready" : null,
+      title: "All active rooms have max guests",
+      complete: everyActiveRoomHasMaxGuests,
+      hint: everyActiveRoomHasMaxGuests
+        ? "Every active room has a guest-capacity value in normalized inventory output."
+        : activeRoomsExist
+          ? "At least one active room is missing a guest-capacity signal in current inventory."
+          : "No active rooms are available yet for guest-capacity validation.",
+      valueLabel: everyActiveRoomHasMaxGuests ? "Ready" : null,
     },
     {
       key: "room-base-price",
-      title: "Each room has base price",
-      complete: everyRoomHasBasePrice,
-      hint: everyRoomHasBasePrice
-        ? "Each surfaced room has a base price available for future rate setup."
-        : "One or more rooms are missing a full-day base price in current inventory.",
-      valueLabel: everyRoomHasBasePrice ? "Ready" : null,
+      title: "All active rooms have base price",
+      complete: everyActiveRoomHasBasePrice,
+      hint: everyActiveRoomHasBasePrice
+        ? "Every active room has a base price available for future rate setup."
+        : activeRoomsExist
+          ? "One or more active rooms are missing a full-day base price in current inventory."
+          : "No active rooms are available yet for base-price validation.",
+      valueLabel: everyActiveRoomHasBasePrice ? "Ready" : null,
+    },
+    {
+      key: "room-basic-details",
+      title: "All active rooms have basic room details",
+      complete: everyActiveRoomHasBasicDetails,
+      hint: everyActiveRoomHasBasicDetails
+        ? "Every active room has name, capacity, bed info, bathroom type, and at least one photo."
+        : activeRoomsExist
+          ? "One or more active rooms are still missing name, bed info, bathroom type, or photo coverage."
+          : "No active rooms are available yet for room-detail validation.",
+      valueLabel: everyActiveRoomHasBasicDetails ? "Ready" : null,
     },
     {
       key: "standard-rate-plan",
