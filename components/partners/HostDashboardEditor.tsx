@@ -9,7 +9,7 @@ import {
   Home, BookmarkCheck, Calendar as CalendarIcon, IndianRupee,
   UserCircle2, MessagesSquare, CheckCircle2, AlertCircle,
   BedDouble,
-  MessageCircle, ShieldCheck
+  MessageCircle, ShieldCheck, Sparkles
 } from "lucide-react";
 import DashboardTab from "./tabs/DashboardTab";
 
@@ -20,6 +20,15 @@ const ProfileTab = dynamic(() => import("./tabs/ProfileTab"));
 const MessagesTab = dynamic(() => import("./tabs/MessagesTab"));
 const DocumentsTab = dynamic(() => import("./tabs/DocumentsTab"));
 const SupportTab = dynamic(() => import("./tabs/SupportTab"));
+const FamloPlusTab = dynamic(() => import("./tabs/FamloPlusTab"));
+
+type HostProAccessSnapshot = {
+  allowed: boolean;
+  status: string;
+  current_period_end: string | null;
+  grace_until: string | null;
+  reason: string;
+};
 
 interface HostDashboardEditorProps {
   family: Record<string, unknown>;
@@ -49,6 +58,9 @@ interface HostDashboardEditorProps {
     familyCount: number;
     photoCount: number;
   };
+  famloPlusEnabled?: boolean;
+  proDashboardEnabled?: boolean;
+  proAccessByFamilyId?: Record<string, HostProAccessSnapshot>;
 }
 
 export interface PhotoItem {
@@ -72,6 +84,7 @@ const ALLOWED_DASHBOARD_TABS = new Set([
   "earnings",
   "profile",
   "compliance",
+  "famlo-plus",
   "support",
 ]);
 
@@ -296,6 +309,9 @@ export function HostDashboardEditor({
   hostUserId,
   globalCommission,
   diagnostics,
+  famloPlusEnabled = false,
+  proDashboardEnabled = false,
+  proAccessByFamilyId = {},
 }: Readonly<HostDashboardEditorProps>): React.JSX.Element {
   const supabaseClient = useMemo(() => createBrowserSupabaseClient(), []);
 
@@ -610,6 +626,13 @@ export function HostDashboardEditor({
   const totalStays = localBookingRows.length > 0 ? computedBookingSummary.totalStays : (bookingSummary?.totalStays ?? 0);
   const totalEarnings = localBookingRows.length > 0 ? computedBookingSummary.totalEarnings : (bookingSummary?.totalEarnings ?? 0);
   const dashboardMetricsLoading = needsBookingSummary && bookingSummaryLoading && localBookingRows.length === 0;
+  const activeProAccess = proAccessByFamilyId[activeFamilyId] ?? {
+    allowed: false,
+    status: "inactive",
+    current_period_end: null,
+    grace_until: null,
+    reason: "no_subscription",
+  };
 
   const debugSnapshot = useMemo(() => {
     if (!mounted || process.env.NODE_ENV !== "development") return null;
@@ -703,6 +726,9 @@ export function HostDashboardEditor({
             { id: "earnings",   label: "Earnings",      icon: <IndianRupee size={20} /> },
             { id: "profile",    label: "Profile",       icon: <UserCircle2 size={20} /> },
             { id: "compliance", label: "Documents",     icon: <ShieldCheck size={20} /> },
+            ...(famloPlusEnabled
+              ? [{ id: "famlo-plus", label: "Famlo+", icon: <Sparkles size={20} /> }]
+              : []),
             { id: "support",    label: "Contact Famlo", icon: <MessagesSquare size={20} /> },
           ].map((tab) => (
             <button
@@ -722,7 +748,13 @@ export function HostDashboardEditor({
         <header className={styles.topHeader}>
           <div className={styles.brandSideLeft}>
             <h1 className={styles.pageTitle}>
-              {activeTab === "support" ? "Support & Resolution" : activeTab === "rooms" ? "Rooms" : activeTab}
+              {activeTab === "support"
+                ? "Support & Resolution"
+                : activeTab === "rooms"
+                  ? "Rooms"
+                  : activeTab === "famlo-plus"
+                    ? "Famlo+"
+                    : activeTab}
             </h1>
           </div>
       <div className={styles.brandSideRight}>
@@ -835,6 +867,18 @@ export function HostDashboardEditor({
               onSave={handleSave}
               saving={saving}
               hostId={String(activeFamily.v2_host_id ?? activeFamily.host_id ?? "")}
+            />
+          )}
+
+          {activeTab === "famlo-plus" && (
+            <FamloPlusTab
+              familyId={activeFamilyId}
+              familyName={String(activeFamily.property_name ?? activeFamily.name ?? "Famlo Home")}
+              famloPlusEnabled={famloPlusEnabled}
+              proDashboardEnabled={proDashboardEnabled}
+              access={activeProAccess}
+              proDashboardUrl={`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(activeFamilyId)}`}
+              onNavigate={navigateTab}
             />
           )}
 

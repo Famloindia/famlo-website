@@ -4,6 +4,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 
 import { HostDashboardEditor } from "@/components/partners/HostDashboardEditor";
+import { isFamloPlusPageEnabled, isFamloProDashboardEnabled, loadHostProAccessMap } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 interface HostDashboardPageProps {
@@ -144,6 +145,7 @@ export default async function HostDashboardPage({
           .order("is_primary", { ascending: false })
           .order("created_at", { ascending: true })
       : { data: [] };
+  const proAccessByFamilyId = await loadHostProAccessMap(supabase, familyIds);
   const enrichedBookingRows: Array<Record<string, unknown>> = [];
 
   const currentFamily: (Record<string, unknown> & { v2_host_id: string | null }) | undefined =
@@ -170,6 +172,9 @@ export default async function HostDashboardPage({
             initialTab={initialTab}
             hostUserId={hostUserId ?? undefined}
             globalCommission={globalCommission}
+            famloPlusEnabled={isFamloPlusPageEnabled()}
+            proDashboardEnabled={isFamloProDashboardEnabled()}
+            proAccessByFamilyId={proAccessByFamilyId}
             diagnostics={{
               familyIds,
               hostCode,
