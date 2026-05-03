@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Fragment, useMemo, useState, useTransition } from "react";
 import {
   Activity,
   ArrowRightLeft,
@@ -31,6 +32,13 @@ import {
   X,
 } from "lucide-react";
 
+import {
+  PRO_PROPERTY_MODEL_OPTIONS,
+  PRO_PROPERTY_TYPE_OPTIONS,
+  propertyModelLabel,
+  propertyTypeLabel,
+  type HostProSettings,
+} from "@/lib/host-pro-settings";
 import styles from "./pro-dashboard.module.css";
 
 type ProSectionId =
@@ -92,6 +100,7 @@ type DashboardMetric = {
 };
 
 interface FamloProDashboardShellProps {
+  familyId: string;
   propertyName: string;
   hostCode: string | null;
   locationLabel: string;
@@ -105,6 +114,7 @@ interface FamloProDashboardShellProps {
   actionItems: ActionItem[];
   feedItems: FeedItem[];
   basicDashboardUrl: string;
+  initialSettings: HostProSettings;
 }
 
 type NavItem = {
@@ -152,6 +162,12 @@ const CHANNEL_CARDS = [
 ];
 
 const BOOKING_FILTERS = ["All", "Famlo Direct", "Airbnb", "Booking.com", "Agoda", "Expedia", "Cancelled", "Modified", "Unmapped"];
+const MEAL_PLAN_OPTIONS = [
+  { value: "room_only", label: "Room Only" },
+  { value: "breakfast", label: "Breakfast" },
+  { value: "half_board", label: "Half Board" },
+  { value: "full_board", label: "Full Board" },
+];
 
 const ROLE_CARDS = [
   { title: "Owner", copy: "Full control over go-live settings, channel strategy, and operational approvals." },
@@ -371,6 +387,7 @@ function buildSectionDescriptor(
 }
 
 export default function FamloProDashboardShell({
+  familyId,
   propertyName,
   hostCode,
   locationLabel,
@@ -384,6 +401,7 @@ export default function FamloProDashboardShell({
   actionItems,
   feedItems,
   basicDashboardUrl,
+  initialSettings,
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
 
@@ -700,6 +718,11 @@ export default function FamloProDashboardShell({
                 <div className={styles.recommendationCard}>
                   <div className={styles.summaryLabel}>Recommended next action</div>
                   <div className={styles.recommendationText}>{recommendedNextAction}</div>
+                  <div className={styles.inlineActionRow}>
+                    <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("settings")}>
+                      Open Pro Settings
+                    </button>
+                  </div>
                 </div>
 
                 <div className={styles.checkGrid}>
@@ -1147,7 +1170,25 @@ export default function FamloProDashboardShell({
                   </div>
                   <div className={styles.placeholderRow}>
                     <div className={styles.placeholderTitle}>Business Model</div>
-                    <div className={styles.placeholderCopy}>Placeholder: vacation rental / hotel selection will live here.</div>
+                    <div className={styles.placeholderValue}>
+                      {propertyModelLabel(initialSettings.propertyModel)}
+                    </div>
+                    <div className={styles.placeholderCopy}>
+                      {initialSettings.exists
+                        ? "Read-only from saved Famlo Pro settings."
+                        : "Save business model in Famlo Pro settings to prepare this property for OTA sync."}
+                    </div>
+                  </div>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Property Type</div>
+                    <div className={styles.placeholderValue}>
+                      {propertyTypeLabel(initialSettings.propertyType)}
+                    </div>
+                    <div className={styles.placeholderCopy}>
+                      {initialSettings.exists
+                        ? "Read-only from saved Famlo Pro settings."
+                        : "Save a Pro property type such as Homestay, Villa, or Hotel/B&B."}
+                    </div>
                   </div>
                   <div className={styles.placeholderRow}>
                     <div className={styles.placeholderTitle}>Channel Readiness</div>
@@ -1191,11 +1232,18 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Settings</h3>
                   <p className={styles.cardCopy}>
-                    Provider environment placeholders for future distribution setup.
+                    Save operational Pro setup so your property is genuinely ready for future OTA sync and channel mapping.
                   </p>
                 </div>
               </div>
               <div className={styles.cardBody}>
+                <ProSettingsForm
+                  key={`${familyId}:${initialSettings.updatedAt ?? "new"}:${initialSettings.exists ? "saved" : "draft"}`}
+                  familyId={familyId}
+                  initialSettings={initialSettings}
+                  onOpenSetupGuide={() => setActiveSection("setup-guide")}
+                />
+
                 <div className={styles.placeholderGrid}>
                   <div className={styles.placeholderRow}>
                     <div className={styles.placeholderTitle}>Provider</div>
@@ -1245,6 +1293,200 @@ export default function FamloProDashboardShell({
         </div>
       </main>
     </div>
+  );
+}
+
+function ProSettingsForm({
+  familyId,
+  initialSettings,
+  onOpenSetupGuide,
+}: Readonly<{
+  familyId: string;
+  initialSettings: HostProSettings;
+  onOpenSetupGuide: () => void;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isSavingSettings, startSavingSettings] = useTransition();
+  const [settingsForm, setSettingsForm] = useState({
+    propertyModel: initialSettings.propertyModel ?? "",
+    propertyType: initialSettings.propertyType ?? "",
+    timezone: initialSettings.timezone,
+    currency: initialSettings.currency,
+    checkInTime: initialSettings.checkInTime ?? "",
+    checkOutTime: initialSettings.checkOutTime ?? "",
+    defaultMealPlan: initialSettings.defaultMealPlan,
+    standardRatePlanName: initialSettings.standardRatePlanName,
+  });
+  const [settingsFeedback, setSettingsFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  const handleSettingsFieldChange = (field: keyof typeof settingsForm, value: string): void => {
+    setSettingsForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const handleSettingsSave = (): void => {
+    setSettingsFeedback(null);
+    startSavingSettings(async () => {
+      try {
+        const response = await fetch("/api/host/pro/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            familyId,
+            propertyModel: settingsForm.propertyModel || null,
+            propertyType: settingsForm.propertyType || null,
+            timezone: settingsForm.timezone || null,
+            currency: settingsForm.currency || null,
+            checkInTime: settingsForm.checkInTime || null,
+            checkOutTime: settingsForm.checkOutTime || null,
+            defaultMealPlan: settingsForm.defaultMealPlan || null,
+            standardRatePlanName: settingsForm.standardRatePlanName || null,
+          }),
+        });
+
+        const payload = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to save Pro settings.");
+        }
+
+        setSettingsFeedback({
+          type: "success",
+          text: "Famlo Pro settings saved. Setup readiness is refreshing.",
+        });
+        router.refresh();
+      } catch (error) {
+        setSettingsFeedback({
+          type: "error",
+          text: error instanceof Error ? error.message : "Failed to save Pro settings.",
+        });
+      }
+    });
+  };
+
+  return (
+    <>
+      <div className={styles.settingsGrid}>
+        <label className={styles.fieldBlock}>
+          <span className={styles.fieldLabel}>Business Model</span>
+          <select
+            className={styles.fieldInput}
+            value={settingsForm.propertyModel}
+            onChange={(event) => handleSettingsFieldChange("propertyModel", event.target.value)}
+          >
+            <option value="">Select business model</option>
+            {PRO_PROPERTY_MODEL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className={styles.fieldBlock}>
+          <span className={styles.fieldLabel}>Property Type</span>
+          <select
+            className={styles.fieldInput}
+            value={settingsForm.propertyType}
+            onChange={(event) => handleSettingsFieldChange("propertyType", event.target.value)}
+          >
+            <option value="">Select property type</option>
+            {PRO_PROPERTY_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className={styles.fieldBlock}>
+          <span className={styles.fieldLabel}>Timezone</span>
+          <input
+            className={styles.fieldInput}
+            value={settingsForm.timezone}
+            onChange={(event) => handleSettingsFieldChange("timezone", event.target.value)}
+            placeholder="Asia/Kolkata"
+          />
+        </label>
+
+        <label className={styles.fieldBlock}>
+          <span className={styles.fieldLabel}>Currency</span>
+          <input
+            className={styles.fieldInput}
+            value={settingsForm.currency}
+            onChange={(event) => handleSettingsFieldChange("currency", event.target.value)}
+            placeholder="INR"
+          />
+        </label>
+
+        <label className={styles.fieldBlock}>
+          <span className={styles.fieldLabel}>Check-in Time</span>
+          <input
+            className={styles.fieldInput}
+            type="time"
+            value={settingsForm.checkInTime}
+            onChange={(event) => handleSettingsFieldChange("checkInTime", event.target.value)}
+          />
+        </label>
+
+        <label className={styles.fieldBlock}>
+          <span className={styles.fieldLabel}>Check-out Time</span>
+          <input
+            className={styles.fieldInput}
+            type="time"
+            value={settingsForm.checkOutTime}
+            onChange={(event) => handleSettingsFieldChange("checkOutTime", event.target.value)}
+          />
+        </label>
+
+        <label className={styles.fieldBlock}>
+          <span className={styles.fieldLabel}>Default Meal Plan</span>
+          <select
+            className={styles.fieldInput}
+            value={settingsForm.defaultMealPlan}
+            onChange={(event) => handleSettingsFieldChange("defaultMealPlan", event.target.value)}
+          >
+            {MEAL_PLAN_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className={styles.fieldBlock}>
+          <span className={styles.fieldLabel}>Standard Rate Plan Name</span>
+          <input
+            className={styles.fieldInput}
+            value={settingsForm.standardRatePlanName}
+            onChange={(event) => handleSettingsFieldChange("standardRatePlanName", event.target.value)}
+            placeholder="Standard Rate"
+          />
+        </label>
+      </div>
+
+      <div className={styles.inlineActionRow}>
+        <button
+          type="button"
+          className={styles.primaryActionButton}
+          onClick={handleSettingsSave}
+          disabled={isSavingSettings}
+        >
+          {isSavingSettings ? "Saving..." : "Save Pro Settings"}
+        </button>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          onClick={onOpenSetupGuide}
+        >
+          Review Setup Guide
+        </button>
+      </div>
+
+      {settingsFeedback ? (
+        <div className={`${styles.feedbackBox} ${settingsFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}>
+          {settingsFeedback.text}
+        </div>
+      ) : null}
+    </>
   );
 }
 

@@ -6,6 +6,8 @@ import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardS
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
+import { loadHostProSettings } from "@/lib/host-pro-settings";
+import { buildHostProSetupReadiness } from "@/lib/host-pro-setup-readiness";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -194,6 +196,7 @@ export default async function FamloProDashboardPage({
     [asString(family?.city), asString(family?.state)].filter(Boolean).join(", ") || "Location pending";
   const hostCode = asString(family?.host_id);
   const meta = parseHostListingMeta(asString(family?.admin_notes));
+  const proSettings = await loadHostProSettings(supabase, familyId);
   const rooms = (
     await loadStayUnitsForSelector(supabase, {
       hostId: asString(host?.id),
@@ -234,84 +237,25 @@ export default async function FamloProDashboardPage({
     })
     .reduce((sum, row) => sum + asNumber(row.total_price), 0);
 
-  const setupItems = [
-    {
-      key: "property-identity",
-      title: "Property identity complete",
-      complete: Boolean(propertyName && propertyName !== "Famlo Property" && locationLabel !== "Location pending"),
-      hint: "Property name and core location are being read from existing family records.",
-    },
-    {
-      key: "property-type",
-      title: "Property type selected",
-      complete: Boolean(asString(meta.houseType)),
-      hint: asString(meta.houseType) ?? "Set property type later in the Pro setup flow.",
-    },
-    {
-      key: "business-model",
-      title: "Business model selected",
-      complete: false,
-      hint: "Vacation rental / hotel selection is still a shell placeholder in this phase.",
-    },
-    {
-      key: "timezone",
-      title: "Timezone",
-      complete: false,
-      hint: "Default operating timezone is not explicitly configured yet.",
-    },
-    {
-      key: "currency",
-      title: "Currency",
-      complete: false,
-      hint: "Future provider mappings will expose explicit currency configuration.",
-    },
-    {
-      key: "check-times",
-      title: "Check-in / check-out time",
-      complete: Boolean(asString(meta.checkInTime) && asString(meta.checkOutTime)),
-      hint:
-        asString(meta.checkInTime) && asString(meta.checkOutTime)
-          ? `${asString(meta.checkInTime)} / ${asString(meta.checkOutTime)}`
-          : "Arrival and departure windows are not fully configured yet.",
-    },
-    {
-      key: "rooms-ready",
-      title: "Rooms & Units ready",
-      complete: rooms.length > 0,
-      hint: rooms.length > 0 ? `${rooms.length} stay units detected from existing Famlo data.` : "No safe room inventory surfaced yet.",
-    },
-    {
-      key: "rate-plan",
-      title: "Standard rate plan ready",
-      complete: rooms.some((room) => room.priceFullday > 0),
-      hint: rooms.some((room) => room.priceFullday > 0)
-        ? "At least one room has a base full-day price in existing inventory."
-        : "Base price shells are waiting for future rate configuration.",
-    },
-    {
-      key: "availability-rules",
-      title: "Availability rules ready",
-      complete: false,
-      hint: "Restriction logic is intentionally UI-only in this phase.",
-    },
-    {
-      key: "channel-mapping",
-      title: "Channel mapping ready",
-      complete: false,
-      hint: "No provider accounts or room mappings are connected yet.",
-    },
-    {
-      key: "sync-readiness",
-      title: "Full sync readiness",
-      complete: false,
-      hint: "Provider sync, webhooks, and booking acknowledgements remain disabled.",
-    },
-  ];
+  const setupReadiness = buildHostProSetupReadiness({
+    propertyName,
+    locationLabel,
+    familyExists: Boolean(family?.id),
+    hostExists: Boolean(host?.id),
+    settings: proSettings,
+    legacyHouseTypeHint: asString(meta.houseType),
+    rooms: rooms.map((room) => ({
+      name: room.name,
+      maxGuests: room.maxGuests,
+      priceFullday: room.priceFullday,
+    })),
+  });
+  const setupItems = setupReadiness.items;
 
   const metrics = [
     {
       label: "Setup Progress",
-      value: `${setupItems.filter((item) => item.complete).length}/${setupItems.length}`,
+      value: `${setupReadiness.progressPercent}%`,
       hint: "Core readiness across property identity, inventory, and future channel setup.",
     },
     {
@@ -356,8 +300,10 @@ export default async function FamloProDashboardPage({
     },
     {
       title: "Prepare standard rate plan",
-      body: "Base pricing exists for some rooms, but provider-neutral rate plans will be introduced in a later phase.",
-      badge: rooms.some((room) => room.priceFullday > 0) ? "Draft" : "Needed",
+      body: setupReadiness.completedItems.some((item) => item.key === "room-base-price")
+        ? "Base pricing exists across the surfaced rooms, but provider-neutral rate plans will be introduced in a later phase."
+        : "One or more rooms still need base pricing before future rate mapping becomes viable.",
+      badge: setupReadiness.completedItems.some((item) => item.key === "room-base-price") ? "Draft" : "Needed",
     },
     {
       title: "Wait for provider pilot",
@@ -385,6 +331,11 @@ export default async function FamloProDashboardPage({
       tone: rooms.length > 0 ? ("success" as const) : ("warning" as const),
     },
     {
+      title: "Setup readiness scored",
+      body: `${setupReadiness.completedCount} of ${setupReadiness.totalCount} setup signals are complete. Next action: ${setupReadiness.nextAction}`,
+      tone: setupReadiness.missingItems.length === 0 ? ("success" as const) : ("info" as const),
+    },
+    {
       title: "Bookings remain source-of-truth in Famlo",
       body: `${nonCancelledBookings.length} read-only bookings were considered for dashboard context. OTA imports remain disabled.`,
       tone: "info" as const,
@@ -410,6 +361,8 @@ export default async function FamloProDashboardPage({
       actionItems={actionItems}
       feedItems={feedItems}
       basicDashboardUrl={basicDashboardUrl}
+      familyId={familyId}
+      initialSettings={proSettings}
     />
   );
 }
