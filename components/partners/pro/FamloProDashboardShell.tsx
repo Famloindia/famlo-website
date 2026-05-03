@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   Activity,
   ArrowRightLeft,
@@ -70,6 +70,7 @@ type SetupItem = {
   title: string;
   complete: boolean;
   hint: string;
+  valueLabel?: string | null;
 };
 
 type FeedItem = {
@@ -141,7 +142,6 @@ const NAV_ITEMS: NavItem[] = [
 const GROUP_ORDER = ["Core", "Inventory", "Channel Manager", "Operations", "Insights", "Admin"];
 
 const CHANNEL_CARDS = [
-  "Channex",
   "Airbnb",
   "Booking.com",
   "Agoda",
@@ -180,6 +180,196 @@ function toneBadgeClass(tone: FeedItem["tone"]): string {
   return tone === "success" ? styles.badge : tone === "warning" ? `${styles.badge} ${styles.badgeMuted}` : styles.badge;
 }
 
+function buildSectionDescriptor(
+  section: ProSectionId,
+  setupProgressPercent: number,
+  missingSetupCount: number,
+  roomsCount: number
+): {
+  eyebrow: string;
+  title: string;
+  copy: string;
+  status: string;
+} {
+  if (section === "setup-guide") {
+    return {
+      eyebrow: "Core setup",
+      title: "Setup Guide",
+      copy: "Readiness view for property identity, inventory quality, and future PMS go-live requirements.",
+      status: `${setupProgressPercent}% ready`,
+    };
+  }
+
+  if (section === "rooms-units") {
+    return {
+      eyebrow: "Inventory",
+      title: "Rooms & Units",
+      copy: "Read-only stay-unit inventory sourced from current Famlo data without creating duplicate room records.",
+      status: `${roomsCount} units`,
+    };
+  }
+
+  if (section === "rates-restrictions") {
+    return {
+      eyebrow: "Inventory",
+      title: "Rates & Restrictions",
+      copy: "Professional pricing shell for future rate plans and restriction controls. No push or sync is active.",
+      status: "Shell only",
+    };
+  }
+
+  if (section === "inventory-calendar") {
+    return {
+      eyebrow: "Inventory",
+      title: "Calendar",
+      copy: "Compact Pro calendar shell with no changes to existing Famlo calendar or iCal behavior.",
+      status: "Read-only shell",
+    };
+  }
+
+  if (section === "availability-rules") {
+    return {
+      eyebrow: "Inventory",
+      title: "Availability Rules",
+      copy: "Placeholder for future stay controls, stop-sell logic, and seasonal restriction patterns.",
+      status: "Coming soon",
+    };
+  }
+
+  if (section === "check-times") {
+    return {
+      eyebrow: "Inventory",
+      title: "Check-in / Check-out Time",
+      copy: "Operating-time shell for future distribution mirroring and arrival policy management.",
+      status: missingSetupCount === 0 ? "Ready to map" : "Read-only",
+    };
+  }
+
+  if (section === "connected-channels") {
+    return {
+      eyebrow: "Channel manager",
+      title: "Connected Channels",
+      copy: "Provider-neutral channel overview. Channex remains the first planned provider, but nothing is connected yet.",
+      status: "Not connected",
+    };
+  }
+
+  if (section === "room-mapping") {
+    return {
+      eyebrow: "Channel manager",
+      title: "Room Mapping",
+      copy: "Future workspace for matching Famlo stay units with external provider room types and sellable units.",
+      status: "Mapping pending",
+    };
+  }
+
+  if (section === "rate-mapping") {
+    return {
+      eyebrow: "Channel manager",
+      title: "Rate Mapping",
+      copy: "Future workspace for connecting Famlo base pricing to external provider rate plans.",
+      status: "Mapping pending",
+    };
+  }
+
+  if (section === "sync-logs") {
+    return {
+      eyebrow: "Channel manager",
+      title: "Sync Logs",
+      copy: "Operational history for future ARI jobs, webhook runs, and booking acknowledgements.",
+      status: "No sync activity",
+    };
+  }
+
+  if (section === "conflicts") {
+    return {
+      eyebrow: "Channel manager",
+      title: "Conflicts",
+      copy: "Future review queue for inventory mismatches, booking import exceptions, and mapping gaps.",
+      status: "No conflicts",
+    };
+  }
+
+  if (section === "bookings") {
+    return {
+      eyebrow: "Operations",
+      title: "Bookings",
+      copy: "Source-aware booking workspace shell. Existing booking flows and booking APIs remain unchanged.",
+      status: "Read-only shell",
+    };
+  }
+
+  if (section === "messages-reviews") {
+    return {
+      eyebrow: "Operations",
+      title: "Messages & Reviews",
+      copy: "Compact placeholder for future OTA inbox, guest communication threads, and review workflows.",
+      status: "Coming soon",
+    };
+  }
+
+  if (section === "revenue") {
+    return {
+      eyebrow: "Insights",
+      title: "Revenue",
+      copy: "Commercial summary shell for source mix, ADR, occupancy, and payout timing.",
+      status: "Coming soon",
+    };
+  }
+
+  if (section === "reports") {
+    return {
+      eyebrow: "Insights",
+      title: "Reports",
+      copy: "Placeholder for exportable operational and commercial reporting across reservations and sync health.",
+      status: "Coming soon",
+    };
+  }
+
+  if (section === "property") {
+    return {
+      eyebrow: "Admin",
+      title: "Property",
+      copy: "Read-only property identity shell backed by existing Famlo source-of-truth records.",
+      status: "Read-only",
+    };
+  }
+
+  if (section === "team-groups") {
+    return {
+      eyebrow: "Admin",
+      title: "Team & Groups",
+      copy: "Professional role and permissions shell with no invite or write flow enabled yet.",
+      status: "Placeholder roles",
+    };
+  }
+
+  if (section === "settings") {
+    return {
+      eyebrow: "Admin",
+      title: "Settings",
+      copy: "Provider environment placeholders for future connectivity and sync readiness.",
+      status: "Not connected",
+    };
+  }
+
+  if (section === "support") {
+    return {
+      eyebrow: "Admin",
+      title: "Support",
+      copy: "Pilot support shell for early Pro launches before live provider connectivity is introduced.",
+      status: "Pilot support",
+    };
+  }
+
+  return {
+    eyebrow: "Core",
+    title: "Dashboard",
+    copy: "Operational overview for setup, inventory health, and future multi-channel readiness.",
+    status: `${setupProgressPercent}% ready`,
+  };
+}
+
 export default function FamloProDashboardShell({
   propertyName,
   hostCode,
@@ -207,6 +397,17 @@ export default function FamloProDashboardShell({
   );
 
   const completedSetupCount = setupItems.filter((item) => item.complete).length;
+  const missingSetupItems = setupItems.filter((item) => !item.complete);
+  const setupProgressPercent = Math.round((completedSetupCount / setupItems.length) * 100);
+  const recommendedNextAction =
+    missingSetupItems[0]?.hint ??
+    "Core Pro setup signals look healthy. Provider mapping and sync steps can follow in a future phase.";
+  const sectionDescriptor = buildSectionDescriptor(
+    activeSection,
+    setupProgressPercent,
+    missingSetupItems.length,
+    rooms.length
+  );
 
   return (
     <div className={styles.shell}>
@@ -247,10 +448,10 @@ export default function FamloProDashboardShell({
         <div className={styles.sidebarFooter}>
           <div className={styles.brandEyebrow}>Go-live</div>
           <div style={{ fontSize: 20, fontWeight: 900, color: "white" }}>
-            {completedSetupCount}/{setupItems.length}
+            {setupProgressPercent}%
           </div>
           <p className={styles.brandCopy}>
-            Setup items are placeholders for future PMS readiness. Channel sync remains intentionally disconnected.
+            {completedSetupCount}/{setupItems.length} readiness signals are complete. Channel sync remains intentionally disconnected.
           </p>
         </div>
       </aside>
@@ -280,60 +481,60 @@ export default function FamloProDashboardShell({
         </header>
 
         <div className={styles.content}>
-          <section className={styles.heroCard}>
-            <div className={styles.heroGrid}>
-              <div>
-                <div className={styles.eyebrow}>Provider-neutral foundation</div>
-                <h2 className={styles.heroTitle}>
-                  PMS + Channel Manager shell for operational teams
-                </h2>
-                <p className={styles.heroText}>
-                  This Pro workspace is designed around Famlo as the source of truth for property identity, rooms,
-                  bookings, and availability. Future providers like Channex can plug in as distribution mirrors without
-                  replacing Famlo data ownership.
-                </p>
-                <div className={styles.heroMeta}>
-                  <div className={styles.heroMetaItem}>
-                    <span className={styles.heroMetaLabel}>Property</span>
-                    <span className={styles.heroMetaValue}>{propertyName}</span>
-                  </div>
-                  <div className={styles.heroMetaItem}>
-                    <span className={styles.heroMetaLabel}>Host ID</span>
-                    <span className={styles.heroMetaValue}>{hostCode ?? "Pending"}</span>
-                  </div>
-                  <div className={styles.heroMetaItem}>
-                    <span className={styles.heroMetaLabel}>Access</span>
-                    <span className={styles.heroMetaValue}>{accessReason}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className={styles.heroPanel}>
-                <div className={styles.heroPanelTitle}>Current Pro Readiness</div>
-                <div className={styles.heroPanelList}>
-                  <div className={styles.heroPanelItem}>
-                    <span>Provider environment</span>
-                    <strong>Not connected</strong>
-                  </div>
-                  <div className={styles.heroPanelItem}>
-                    <span>Inventory foundation</span>
-                    <strong>{rooms.length > 0 ? `${rooms.length} room units found` : "Needs review"}</strong>
-                  </div>
-                  <div className={styles.heroPanelItem}>
-                    <span>Channel sync</span>
-                    <strong>Coming soon</strong>
-                  </div>
-                  <div className={styles.heroPanelItem}>
-                    <span>Mapping readiness</span>
-                    <strong>{completedSetupCount >= 6 ? "Preparing" : "Blocked by setup"}</strong>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
           {activeSection === "dashboard" && (
             <>
+              <section className={styles.heroCard}>
+                <div className={styles.heroGrid}>
+                  <div>
+                    <div className={styles.eyebrow}>Provider-neutral foundation</div>
+                    <h2 className={styles.heroTitle}>
+                      PMS + Channel Manager shell for operational teams
+                    </h2>
+                    <p className={styles.heroText}>
+                      This Pro workspace is designed around Famlo as the source of truth for property identity, rooms,
+                      bookings, and availability. Future providers like Channex can plug in as distribution mirrors without
+                      replacing Famlo data ownership.
+                    </p>
+                    <div className={styles.heroMeta}>
+                      <div className={styles.heroMetaItem}>
+                        <span className={styles.heroMetaLabel}>Property</span>
+                        <span className={styles.heroMetaValue}>{propertyName}</span>
+                      </div>
+                      <div className={styles.heroMetaItem}>
+                        <span className={styles.heroMetaLabel}>Host ID</span>
+                        <span className={styles.heroMetaValue}>{hostCode ?? "Pending"}</span>
+                      </div>
+                      <div className={styles.heroMetaItem}>
+                        <span className={styles.heroMetaLabel}>Access</span>
+                        <span className={styles.heroMetaValue}>{accessReason}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.heroPanel}>
+                    <div className={styles.heroPanelTitle}>Current Pro Readiness</div>
+                    <div className={styles.heroPanelList}>
+                      <div className={styles.heroPanelItem}>
+                        <span>Provider environment</span>
+                        <strong>Not connected</strong>
+                      </div>
+                      <div className={styles.heroPanelItem}>
+                        <span>Inventory foundation</span>
+                        <strong>{rooms.length > 0 ? `${rooms.length} room units found` : "Needs review"}</strong>
+                      </div>
+                      <div className={styles.heroPanelItem}>
+                        <span>Channel sync</span>
+                        <strong>Coming soon</strong>
+                      </div>
+                      <div className={styles.heroPanelItem}>
+                        <span>Mapping readiness</span>
+                        <strong>{setupProgressPercent >= 50 ? "Preparing" : "Blocked by setup"}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
               <section className={styles.statGrid}>
                 {metrics.map((metric) => (
                   <article key={metric.label} className={`${styles.card} ${styles.statCard}`}>
@@ -353,7 +554,7 @@ export default function FamloProDashboardShell({
                         Go-live readiness for inventory, identity, and future provider mapping.
                       </p>
                     </div>
-                    <span className={styles.badge}>{completedSetupCount}/{setupItems.length} complete</span>
+                    <span className={styles.badge}>{setupProgressPercent}% ready</span>
                   </div>
                   <div className={styles.cardBody}>
                     <div className={styles.checkGrid}>
@@ -455,18 +656,52 @@ export default function FamloProDashboardShell({
             </>
           )}
 
+          {activeSection !== "dashboard" && (
+            <section className={styles.sectionIntro}>
+              <div>
+                <div className={styles.sectionEyebrow}>{sectionDescriptor.eyebrow}</div>
+                <h2 className={styles.sectionTitle}>{sectionDescriptor.title}</h2>
+                <p className={styles.sectionCopy}>{sectionDescriptor.copy}</p>
+              </div>
+              <span className={styles.sectionStatus}>{sectionDescriptor.status}</span>
+            </section>
+          )}
+
           {activeSection === "setup-guide" && (
             <section className={styles.card}>
               <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.cardTitle}>Setup Guide</h3>
-                  <p className={styles.cardCopy}>
-                    Future PMS onboarding checklist for property identity, rates, rules, and channel readiness.
-                  </p>
-                </div>
-                <span className={styles.badge}>{completedSetupCount}/{setupItems.length} complete</span>
+                    <div>
+                      <h3 className={styles.cardTitle}>Setup Guide</h3>
+                      <p className={styles.cardCopy}>
+                        Future PMS onboarding checklist for property identity, rates, rules, and channel readiness.
+                      </p>
+                    </div>
+                <span className={styles.badge}>{setupProgressPercent}% ready</span>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.summaryGrid}>
+                  <div className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>Progress</div>
+                    <div className={styles.summaryValue}>{setupProgressPercent}%</div>
+                    <div className={styles.summaryCopy}>{completedSetupCount} of {setupItems.length} signals complete</div>
+                  </div>
+                  <div className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>Completed</div>
+                    <div className={styles.summaryValue}>{completedSetupCount}</div>
+                    <div className={styles.summaryCopy}>Readiness signals already available from current Famlo data</div>
+                  </div>
+                  <div className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>Missing</div>
+                    <div className={styles.summaryValue}>{missingSetupItems.length}</div>
+                    <div className={styles.summaryCopy}>Signals still blocked by missing Pro settings or future integrations</div>
+                  </div>
+                </div>
+
+                <div className={styles.recommendationCard}>
+                  <div className={styles.summaryLabel}>Recommended next action</div>
+                  <div className={styles.recommendationText}>{recommendedNextAction}</div>
+                </div>
+
                 <div className={styles.checkGrid}>
                   {setupItems.map((item) => (
                     <div key={item.key} className={styles.checkItem}>
@@ -475,10 +710,37 @@ export default function FamloProDashboardShell({
                       </div>
                       <div>
                         <div className={styles.checkTitle}>{item.title}</div>
+                        {item.valueLabel ? <div className={styles.checkValue}>{item.valueLabel}</div> : null}
                         <div className={styles.checkMeta}>{item.hint}</div>
                       </div>
                     </div>
                   ))}
+                </div>
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Completed items</div>
+                    <div className={styles.stack}>
+                      {setupItems.filter((item) => item.complete).map((item) => (
+                        <div key={item.key} className={styles.feedItem}>
+                          <div className={styles.feedTitle}>{item.title}</div>
+                          <div className={styles.feedCopy}>{item.hint}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Missing items</div>
+                    <div className={styles.stack}>
+                      {missingSetupItems.map((item) => (
+                        <div key={item.key} className={styles.feedItem}>
+                          <div className={styles.feedTitle}>{item.title}</div>
+                          <div className={styles.feedCopy}>{item.hint}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
                 </div>
               </div>
             </section>
@@ -615,16 +877,43 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "check-times" && (
-            <PlaceholderSection
-              title="Check-in / Check-out Time"
-              copy="Operational shell for arrival windows that future channels can mirror."
-              items={[
-                "Default check-in time",
-                "Default check-out time",
-                "Early check-in policy placeholder",
-                "Late check-out policy placeholder",
-              ]}
-            />
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Check-in / Check-out Time</h3>
+                  <p className={styles.cardCopy}>
+                    Read-only operating-time state from current Famlo setup, with future policy controls held back for a later phase.
+                  </p>
+                </div>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>Read-only</span>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.placeholderGrid}>
+                  {[
+                    setupItems.find((item) => item.key === "check-in-time"),
+                    setupItems.find((item) => item.key === "check-out-time"),
+                  ]
+                    .filter((item): item is SetupItem => Boolean(item))
+                    .map((item) => (
+                      <div key={item.key} className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>{item.title}</div>
+                        <div className={styles.placeholderValue}>{item.valueLabel ?? "Not set"}</div>
+                        <div className={styles.placeholderCopy}>{item.hint}</div>
+                      </div>
+                    ))}
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Early check-in policy</div>
+                    <div className={styles.placeholderValue}>Coming soon</div>
+                    <div className={styles.placeholderCopy}>Future Pro policy controls will appear here without changing current booking flows.</div>
+                  </div>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Late check-out policy</div>
+                    <div className={styles.placeholderValue}>Coming soon</div>
+                    <div className={styles.placeholderCopy}>Distribution-facing departure rules remain intentionally inactive in this phase.</div>
+                  </div>
+                </div>
+              </div>
+            </section>
           )}
 
           {activeSection === "connected-channels" && (
@@ -661,55 +950,117 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "room-mapping" && (
-            <PlaceholderSection
-              title="Room Mapping"
-              copy="Placeholder for mapping Famlo room units to future external room types or unit records."
-              items={[
-                "Famlo room ↔ provider room type",
-                "Primary sellable unit selection",
-                "Unmapped room warnings",
-                "Draft mapping review",
-              ]}
-            />
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Room Mapping</h3>
+                  <p className={styles.cardCopy}>
+                    Placeholder mapping workspace for future room-type linking. No provider mapping exists yet.
+                  </p>
+                </div>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>Not connected</span>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.mappingTable}>
+                  <div className={styles.mappingHeader}>Famlo Room</div>
+                  <div className={styles.mappingHeader}>Provider Room Type</div>
+                  <div className={styles.mappingHeader}>Status</div>
+                  {(rooms.length > 0 ? rooms : [{ id: "placeholder", name: "No rooms surfaced", unitType: "", maxGuests: 0, priceFullday: 0, isActive: false, amenitiesCount: 0 }]).map((room) => (
+                    <Fragment key={room.id}>
+                      <div className={styles.mappingCell}>
+                        <div className={styles.mappingTitle}>{room.name}</div>
+                        <div className={styles.mappingSubcopy}>{room.unitType || "Famlo inventory unit"}</div>
+                      </div>
+                      <div className={styles.mappingCellMuted}>Not mapped</div>
+                      <div className={styles.mappingCell}>
+                        <span className={`${styles.badge} ${styles.badgeMuted}`}>Pending</span>
+                      </div>
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            </section>
           )}
 
           {activeSection === "rate-mapping" && (
-            <PlaceholderSection
-              title="Rate Mapping"
-              copy="Placeholder for linking Famlo rates to future external rate plans."
-              items={[
-                "Standard rate plan mapping",
-                "Derived rate plan placeholder",
-                "Meal plan placeholder",
-                "Unmapped rate warnings",
-              ]}
-            />
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Rate Mapping</h3>
+                  <p className={styles.cardCopy}>
+                    Placeholder mapping workspace for future standard and derived rate plans.
+                  </p>
+                </div>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>Not connected</span>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.mappingTable}>
+                  <div className={styles.mappingHeader}>Famlo Rate</div>
+                  <div className={styles.mappingHeader}>Provider Rate Plan</div>
+                  <div className={styles.mappingHeader}>Status</div>
+                  {[
+                    "Standard Rate",
+                    "Weekend Premium",
+                    "Long Stay Offer",
+                  ].map((rate) => (
+                    <Fragment key={rate}>
+                      <div className={styles.mappingCell}>
+                        <div className={styles.mappingTitle}>{rate}</div>
+                        <div className={styles.mappingSubcopy}>Provider-neutral placeholder</div>
+                      </div>
+                      <div className={styles.mappingCellMuted}>Not mapped</div>
+                      <div className={styles.mappingCell}>
+                        <span className={`${styles.badge} ${styles.badgeMuted}`}>Pending</span>
+                      </div>
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            </section>
           )}
 
           {activeSection === "sync-logs" && (
-            <PlaceholderSection
-              title="Sync Logs"
-              copy="Placeholder for future ARI sync jobs, import runs, webhook processing, and acknowledgement logs."
-              items={[
-                "Availability push jobs",
-                "Rate push jobs",
-                "Restriction push jobs",
-                "Webhook event processing",
-              ]}
-            />
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Sync Logs</h3>
+                  <p className={styles.cardCopy}>
+                    Future ARI and webhook activity will appear here after provider connectivity is enabled.
+                  </p>
+                </div>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>No activity</span>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.emptyState}>
+                  <div className={styles.emptyTitle}>No sync jobs yet</div>
+                  <div className={styles.emptyCopy}>
+                    Channel sync is intentionally disabled. Availability, rate, restriction, and booking-import logs will populate here later.
+                  </div>
+                </div>
+              </div>
+            </section>
           )}
 
           {activeSection === "conflicts" && (
-            <PlaceholderSection
-              title="Conflicts"
-              copy="Placeholder for mismatches between Famlo source-of-truth inventory and future external provider states."
-              items={[
-                "Room mapping mismatch",
-                "Rate mapping mismatch",
-                "Booking import mismatch",
-                "Availability conflict review",
-              ]}
-            />
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Conflicts</h3>
+                  <p className={styles.cardCopy}>
+                    This queue will flag future inventory mismatches, mapping gaps, and booking-import exceptions.
+                  </p>
+                </div>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>No conflicts</span>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.emptyState}>
+                  <div className={styles.emptyTitle}>Nothing to reconcile</div>
+                  <div className={styles.emptyCopy}>
+                    With no connected providers, there are no room, rate, or booking conflicts to resolve in this phase.
+                  </div>
+                </div>
+              </div>
+            </section>
           )}
 
           {activeSection === "bookings" && (

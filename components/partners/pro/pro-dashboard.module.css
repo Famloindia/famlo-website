@@ -214,6 +214,53 @@
   gap: 20px;
 }
 
+.sectionIntro {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 4px 2px 2px;
+}
+
+.sectionEyebrow {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #165dcc;
+}
+
+.sectionTitle {
+  margin: 6px 0 0;
+  font-size: 30px;
+  line-height: 1.04;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+}
+
+.sectionCopy {
+  margin: 8px 0 0;
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.sectionStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: white;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .heroCard,
 .card {
   background: rgba(255, 255, 255, 0.88);
@@ -496,11 +543,79 @@
   font-weight: 900;
 }
 
+.checkValue {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #165dcc;
+}
+
 .checkMeta {
   margin-top: 4px;
   font-size: 12px;
   line-height: 1.6;
   color: rgba(15, 23, 42, 0.6);
+}
+
+.summaryGrid,
+.listGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.summaryGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.summaryCard,
+.recommendationCard,
+.listCard {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f8fbff;
+  padding: 16px;
+}
+
+.summaryLabel {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(15, 23, 42, 0.46);
+}
+
+.summaryValue {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+}
+
+.summaryCopy {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.recommendationText {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.7;
+  color: #0f172a;
+}
+
+.listGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.listTitle {
+  font-size: 15px;
+  font-weight: 900;
+  color: #0f172a;
+  margin-bottom: 12px;
 }
 
 .channelGrid {
@@ -568,6 +683,59 @@
 .placeholderRow {
   display: grid;
   gap: 10px;
+}
+
+.placeholderValue {
+  font-size: 14px;
+  font-weight: 900;
+  color: #165dcc;
+}
+
+.mappingTable {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(220px, 1fr) 150px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.mappingHeader,
+.mappingCell,
+.mappingCellMuted {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.mappingHeader {
+  background: #eef4fb;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.mappingCell,
+.mappingCellMuted {
+  background: #f8fbff;
+}
+
+.mappingCellMuted {
+  color: rgba(15, 23, 42, 0.54);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mappingTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.mappingSubcopy {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.58);
 }
 
 .filterRow {
@@ -649,9 +817,11 @@
   .heroGrid,
   .twoCol,
   .checkGrid,
+  .summaryGrid,
   .roomGrid,
   .placeholderGrid,
-  .feedGrid {
+  .feedGrid,
+  .listGrid {
     grid-template-columns: 1fr;
   }
 }
@@ -680,8 +850,21 @@
     padding: 20px;
   }
 
+  .sectionIntro {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .statGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mappingTable {
+    grid-template-columns: 1fr;
+  }
+
+  .mappingHeader {
+    display: none;
   }
 }
 
