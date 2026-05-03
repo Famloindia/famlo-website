@@ -24,6 +24,11 @@ function buildBasicFamloPlusUrl(familyId: string): string {
   return familyId ? `${base}&family=${encodeURIComponent(familyId)}` : base;
 }
 
+function buildBasicRoomUrl(familyId: string): string {
+  const base = "/partnerslogin/home/dashboard?tab=room";
+  return familyId ? `${base}&family=${encodeURIComponent(familyId)}` : base;
+}
+
 async function canCurrentHostAccessFamily(
   familyId: string
 ): Promise<boolean> {
@@ -115,6 +120,7 @@ export default async function FamloProDashboardPage({
   const cookieStore = await cookies();
   const familyId = params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "";
   const basicDashboardUrl = buildBasicFamloPlusUrl(familyId);
+  const basicRoomUrl = buildBasicRoomUrl(familyId);
 
   if (!familyId) {
     return (
@@ -196,7 +202,14 @@ export default async function FamloProDashboardPage({
     [asString(family?.city), asString(family?.state)].filter(Boolean).join(", ") || "Location pending";
   const hostCode = asString(family?.host_id);
   const meta = parseHostListingMeta(asString(family?.admin_notes));
-  const proSettings = await loadHostProSettings(supabase, familyId);
+  const storedProSettings = await loadHostProSettings(supabase, familyId);
+  const proSettings = {
+    ...storedProSettings,
+    otaTitle: storedProSettings.otaTitle ?? propertyName,
+    state: storedProSettings.state ?? asString(family?.state),
+    city: storedProSettings.city ?? asString(family?.city),
+    addressLine: storedProSettings.addressLine ?? asString(meta.propertyAddress),
+  };
   const rooms = (
     await loadStayUnitsForSelector(supabase, {
       hostId: asString(host?.id),
@@ -206,10 +219,14 @@ export default async function FamloProDashboardPage({
     id: room.id,
     name: room.name,
     unitType: room.unitType,
+    description: room.description,
     maxGuests: room.maxGuests,
+    bedInfo: room.bedInfo,
+    bathroomType: room.bathroomType,
     priceFullday: room.priceFullday,
     isActive: room.isActive,
     amenitiesCount: room.amenities.length,
+    photosCount: room.photos.length + room.localityPhotos.length,
   }));
 
   const { data: bookingRows } =
@@ -246,8 +263,12 @@ export default async function FamloProDashboardPage({
     legacyHouseTypeHint: asString(meta.houseType),
     rooms: rooms.map((room) => ({
       name: room.name,
+      isActive: room.isActive,
       maxGuests: room.maxGuests,
       priceFullday: room.priceFullday,
+      bedInfo: room.bedInfo,
+      bathroomType: room.bathroomType,
+      photosCount: room.photosCount,
     })),
   });
   const setupItems = setupReadiness.items;
@@ -361,6 +382,7 @@ export default async function FamloProDashboardPage({
       actionItems={actionItems}
       feedItems={feedItems}
       basicDashboardUrl={basicDashboardUrl}
+      basicRoomUrl={basicRoomUrl}
       familyId={familyId}
       initialSettings={proSettings}
     />

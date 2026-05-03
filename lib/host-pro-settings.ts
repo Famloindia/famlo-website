@@ -18,6 +18,7 @@ export const PRO_DEFAULT_TIMEZONE = "Asia/Kolkata";
 export const PRO_DEFAULT_CURRENCY = "INR";
 export const PRO_DEFAULT_MEAL_PLAN = "room_only";
 export const PRO_DEFAULT_RATE_PLAN_NAME = "Standard Rate";
+export const PRO_DEFAULT_COUNTRY = "India";
 
 export type HostProPropertyModel = (typeof PRO_PROPERTY_MODEL_OPTIONS)[number]["value"];
 export type HostProPropertyType = (typeof PRO_PROPERTY_TYPE_OPTIONS)[number]["value"];
@@ -36,6 +37,21 @@ export type HostProSettings = {
   checkOutTime: string | null;
   defaultMealPlan: string;
   standardRatePlanName: string;
+  otaTitle: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  website: string | null;
+  country: string;
+  state: string | null;
+  city: string | null;
+  postalCode: string | null;
+  addressLine: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  propertyDescription: string | null;
+  checkInInstructions: string | null;
+  houseRules: string | null;
+  cancellationPolicyLabel: string | null;
   metadata: JsonRecord;
   createdAt: string | null;
   updatedAt: string | null;
@@ -50,6 +66,21 @@ export type HostProSettingsInput = {
   checkOutTime: string | null;
   defaultMealPlan: string | null;
   standardRatePlanName: string | null;
+  otaTitle?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  website?: string | null;
+  country?: string | null;
+  state?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  addressLine?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  propertyDescription?: string | null;
+  checkInInstructions?: string | null;
+  houseRules?: string | null;
+  cancellationPolicyLabel?: string | null;
 };
 
 function asString(value: unknown): string | null {
@@ -73,6 +104,15 @@ function asPropertyType(value: unknown): HostProPropertyType | null {
     : null;
 }
 
+function asNullableNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function normalizeMetadata(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
@@ -90,6 +130,21 @@ export function createDefaultHostProSettings(familyId: string): HostProSettings 
     checkOutTime: null,
     defaultMealPlan: PRO_DEFAULT_MEAL_PLAN,
     standardRatePlanName: PRO_DEFAULT_RATE_PLAN_NAME,
+    otaTitle: null,
+    contactEmail: null,
+    contactPhone: null,
+    website: null,
+    country: PRO_DEFAULT_COUNTRY,
+    state: null,
+    city: null,
+    postalCode: null,
+    addressLine: null,
+    latitude: null,
+    longitude: null,
+    propertyDescription: null,
+    checkInInstructions: null,
+    houseRules: null,
+    cancellationPolicyLabel: null,
     metadata: {},
     createdAt: null,
     updatedAt: null,
@@ -109,6 +164,21 @@ function mapHostProSettingsRow(row: Record<string, unknown>, familyId: string): 
     checkOutTime: asString(row.check_out_time),
     defaultMealPlan: asString(row.default_meal_plan) ?? PRO_DEFAULT_MEAL_PLAN,
     standardRatePlanName: asString(row.standard_rate_plan_name) ?? PRO_DEFAULT_RATE_PLAN_NAME,
+    otaTitle: asString(row.ota_title),
+    contactEmail: asString(row.contact_email),
+    contactPhone: asString(row.contact_phone),
+    website: asString(row.website),
+    country: asString(row.country) ?? PRO_DEFAULT_COUNTRY,
+    state: asString(row.state),
+    city: asString(row.city),
+    postalCode: asString(row.postal_code),
+    addressLine: asString(row.address_line),
+    latitude: asNullableNumber(row.latitude),
+    longitude: asNullableNumber(row.longitude),
+    propertyDescription: asString(row.property_description),
+    checkInInstructions: asString(row.check_in_instructions),
+    houseRules: asString(row.house_rules),
+    cancellationPolicyLabel: asString(row.cancellation_policy_label),
     metadata: normalizeMetadata(row.metadata),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
@@ -126,7 +196,7 @@ export async function loadHostProSettings(
 
   const { data, error } = await supabase
     .from("host_pro_settings")
-    .select("id,family_id,property_model,property_type,timezone,currency,check_in_time,check_out_time,default_meal_plan,standard_rate_plan_name,metadata,created_at,updated_at")
+    .select("id,family_id,property_model,property_type,timezone,currency,check_in_time,check_out_time,default_meal_plan,standard_rate_plan_name,ota_title,contact_email,contact_phone,website,country,state,city,postal_code,address_line,latitude,longitude,property_description,check_in_instructions,house_rules,cancellation_policy_label,metadata,created_at,updated_at")
     .eq("family_id", normalizedFamilyId)
     .maybeSingle();
 
@@ -155,6 +225,21 @@ export function sanitizeHostProSettingsInput(input: HostProSettingsInput): HostP
     checkOutTime: asString(input.checkOutTime),
     defaultMealPlan: asString(input.defaultMealPlan) ?? PRO_DEFAULT_MEAL_PLAN,
     standardRatePlanName: asString(input.standardRatePlanName) ?? PRO_DEFAULT_RATE_PLAN_NAME,
+    otaTitle: asString(input.otaTitle),
+    contactEmail: asString(input.contactEmail),
+    contactPhone: asString(input.contactPhone),
+    website: asString(input.website),
+    country: asString(input.country) ?? PRO_DEFAULT_COUNTRY,
+    state: asString(input.state),
+    city: asString(input.city),
+    postalCode: asString(input.postalCode),
+    addressLine: asString(input.addressLine),
+    latitude: asNullableNumber(input.latitude),
+    longitude: asNullableNumber(input.longitude),
+    propertyDescription: asString(input.propertyDescription),
+    checkInInstructions: asString(input.checkInInstructions),
+    houseRules: asString(input.houseRules),
+    cancellationPolicyLabel: asString(input.cancellationPolicyLabel),
   };
 }
 
@@ -183,6 +268,21 @@ export function buildHostProSettingsUpsert(
     check_out_time: sanitized.checkOutTime,
     default_meal_plan: sanitized.defaultMealPlan,
     standard_rate_plan_name: sanitized.standardRatePlanName,
+    ota_title: sanitized.otaTitle,
+    contact_email: sanitized.contactEmail,
+    contact_phone: sanitized.contactPhone,
+    website: sanitized.website,
+    country: sanitized.country,
+    state: sanitized.state,
+    city: sanitized.city,
+    postal_code: sanitized.postalCode,
+    address_line: sanitized.addressLine,
+    latitude: sanitized.latitude,
+    longitude: sanitized.longitude,
+    property_description: sanitized.propertyDescription,
+    check_in_instructions: sanitized.checkInInstructions,
+    house_rules: sanitized.houseRules,
+    cancellation_policy_label: sanitized.cancellationPolicyLabel,
     metadata,
     updated_at: options?.nowIso ?? new Date().toISOString(),
   };

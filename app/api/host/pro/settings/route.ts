@@ -18,6 +18,21 @@ type SettingsRequestBody = {
   checkOutTime?: string | null;
   defaultMealPlan?: string | null;
   standardRatePlanName?: string | null;
+  otaTitle?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  website?: string | null;
+  country?: string | null;
+  state?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  addressLine?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  propertyDescription?: string | null;
+  checkInInstructions?: string | null;
+  houseRules?: string | null;
+  cancellationPolicyLabel?: string | null;
 };
 
 function asString(value: unknown): string {
@@ -42,14 +57,29 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const currentSettings = await loadHostProSettings(supabase, familyId);
     const sanitizedInput = sanitizeHostProSettingsInput({
-      propertyModel: body.propertyModel ?? null,
-      propertyType: body.propertyType ?? null,
-      timezone: body.timezone ?? null,
-      currency: body.currency ?? null,
-      checkInTime: body.checkInTime ?? null,
-      checkOutTime: body.checkOutTime ?? null,
-      defaultMealPlan: body.defaultMealPlan ?? null,
-      standardRatePlanName: body.standardRatePlanName ?? null,
+      propertyModel: body.propertyModel !== undefined ? body.propertyModel : currentSettings.propertyModel,
+      propertyType: body.propertyType !== undefined ? body.propertyType : currentSettings.propertyType,
+      timezone: body.timezone !== undefined ? body.timezone : currentSettings.timezone,
+      currency: body.currency !== undefined ? body.currency : currentSettings.currency,
+      checkInTime: body.checkInTime !== undefined ? body.checkInTime : currentSettings.checkInTime,
+      checkOutTime: body.checkOutTime !== undefined ? body.checkOutTime : currentSettings.checkOutTime,
+      defaultMealPlan: body.defaultMealPlan !== undefined ? body.defaultMealPlan : currentSettings.defaultMealPlan,
+      standardRatePlanName: body.standardRatePlanName !== undefined ? body.standardRatePlanName : currentSettings.standardRatePlanName,
+      otaTitle: body.otaTitle !== undefined ? body.otaTitle : currentSettings.otaTitle,
+      contactEmail: body.contactEmail !== undefined ? body.contactEmail : currentSettings.contactEmail,
+      contactPhone: body.contactPhone !== undefined ? body.contactPhone : currentSettings.contactPhone,
+      website: body.website !== undefined ? body.website : currentSettings.website,
+      country: body.country !== undefined ? body.country : currentSettings.country,
+      state: body.state !== undefined ? body.state : currentSettings.state,
+      city: body.city !== undefined ? body.city : currentSettings.city,
+      postalCode: body.postalCode !== undefined ? body.postalCode : currentSettings.postalCode,
+      addressLine: body.addressLine !== undefined ? body.addressLine : currentSettings.addressLine,
+      latitude: body.latitude !== undefined ? body.latitude : currentSettings.latitude,
+      longitude: body.longitude !== undefined ? body.longitude : currentSettings.longitude,
+      propertyDescription: body.propertyDescription !== undefined ? body.propertyDescription : currentSettings.propertyDescription,
+      checkInInstructions: body.checkInInstructions !== undefined ? body.checkInInstructions : currentSettings.checkInInstructions,
+      houseRules: body.houseRules !== undefined ? body.houseRules : currentSettings.houseRules,
+      cancellationPolicyLabel: body.cancellationPolicyLabel !== undefined ? body.cancellationPolicyLabel : currentSettings.cancellationPolicyLabel,
     });
 
     const nowIso = new Date().toISOString();

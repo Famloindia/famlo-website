@@ -59,6 +59,7 @@ type ProSectionId =
   | "revenue"
   | "reports"
   | "property"
+  | "ota-content"
   | "team-groups"
   | "settings"
   | "support";
@@ -67,10 +68,14 @@ type RoomSummary = {
   id: string;
   name: string;
   unitType: string;
+  description: string | null;
   maxGuests: number;
+  bedInfo: string | null;
+  bathroomType: string | null;
   priceFullday: number;
   isActive: boolean;
   amenitiesCount: number;
+  photosCount: number;
 };
 
 type SetupItem = {
@@ -114,6 +119,7 @@ interface FamloProDashboardShellProps {
   actionItems: ActionItem[];
   feedItems: FeedItem[];
   basicDashboardUrl: string;
+  basicRoomUrl: string;
   initialSettings: HostProSettings;
 }
 
@@ -144,6 +150,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "revenue", title: "Revenue", hint: "Commercial summary", icon: WalletCards, group: "Insights" },
   { id: "reports", title: "Reports", hint: "Exports later", icon: FileBarChart2, group: "Insights" },
   { id: "property", title: "Property", hint: "Identity & structure", icon: Building2, group: "Admin" },
+  { id: "ota-content", title: "OTA Content", hint: "Listing readiness", icon: ClipboardList, group: "Admin" },
   { id: "team-groups", title: "Team & Groups", hint: "Role placeholders", icon: Users, group: "Admin" },
   { id: "settings", title: "Settings", hint: "Provider env", icon: Settings2, group: "Admin" },
   { id: "support", title: "Support", hint: "Pilot help", icon: BellRing, group: "Admin" },
@@ -194,6 +201,35 @@ function formatCurrency(value: number): string {
 
 function toneBadgeClass(tone: FeedItem["tone"]): string {
   return tone === "success" ? styles.badge : tone === "warning" ? `${styles.badge} ${styles.badgeMuted}` : styles.badge;
+}
+
+function roomReadinessChecklist(room: RoomSummary): Array<{ label: string; complete: boolean }> {
+  return [
+    { label: "Name", complete: room.name.trim().length > 0 },
+    { label: "Max guests", complete: room.maxGuests > 0 },
+    { label: "Base price", complete: room.priceFullday > 0 },
+    { label: "Bathroom type", complete: Boolean(room.bathroomType) },
+    { label: "Bed info", complete: Boolean(room.bedInfo) },
+    { label: "Photos", complete: room.photosCount > 0 },
+    { label: "Active", complete: room.isActive },
+  ];
+}
+
+function contentStatusLabel(complete: number, total: number): string {
+  if (complete === 0) return "Missing";
+  if (complete === total) return "Complete";
+  return "Needs review";
+}
+
+function contentStatusClass(complete: number, total: number): string {
+  if (complete === 0) return styles.readinessPillMissing;
+  if (complete === total) return styles.readinessPillOk;
+  return styles.readinessPillReview;
+}
+
+function joinMissingLabels(items: Array<{ label: string; ready: boolean }>): string {
+  const missing = items.filter((item) => !item.ready).map((item) => item.label);
+  return missing.length > 0 ? missing.join(", ") : "Nothing missing";
 }
 
 function buildSectionDescriptor(
@@ -351,6 +387,15 @@ function buildSectionDescriptor(
     };
   }
 
+  if (section === "ota-content") {
+    return {
+      eyebrow: "Admin",
+      title: "OTA Content",
+      copy: "Basic Famlo listing can stay simple. OTA channels need extra structured fields before sync can begin.",
+      status: "Readiness layer",
+    };
+  }
+
   if (section === "team-groups") {
     return {
       eyebrow: "Admin",
@@ -401,6 +446,7 @@ export default function FamloProDashboardShell({
   actionItems,
   feedItems,
   basicDashboardUrl,
+  basicRoomUrl,
   initialSettings,
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
@@ -426,6 +472,57 @@ export default function FamloProDashboardShell({
     missingSetupItems.length,
     rooms.length
   );
+  const standardRatePlanName = initialSettings.standardRatePlanName || "Standard Rate";
+  const propertyContentChecks = [
+    { label: "OTA title", ready: Boolean(initialSettings.otaTitle) && initialSettings.exists },
+    { label: "Property description", ready: Boolean(initialSettings.propertyDescription) },
+  ];
+  const contactChecks = [
+    { label: "Contact email", ready: Boolean(initialSettings.contactEmail) },
+    { label: "Contact phone", ready: Boolean(initialSettings.contactPhone) },
+    { label: "Website", ready: Boolean(initialSettings.website) },
+  ];
+  const locationChecks = [
+    { label: "Country", ready: Boolean(initialSettings.country) && initialSettings.exists },
+    { label: "State", ready: Boolean(initialSettings.state) && initialSettings.exists },
+    { label: "City", ready: Boolean(initialSettings.city) && initialSettings.exists },
+    { label: "Postal code", ready: Boolean(initialSettings.postalCode) },
+    { label: "Address line", ready: Boolean(initialSettings.addressLine) },
+    { label: "Latitude", ready: initialSettings.latitude != null },
+    { label: "Longitude", ready: initialSettings.longitude != null },
+  ];
+  const policyChecks = [
+    { label: "Check-in instructions", ready: Boolean(initialSettings.checkInInstructions) },
+    { label: "House rules", ready: Boolean(initialSettings.houseRules) },
+    { label: "Cancellation policy", ready: Boolean(initialSettings.cancellationPolicyLabel) },
+  ];
+  const roomContentRows = rooms.map((room) => {
+    const roomChecks = [
+      { label: "Room title", ready: room.name.trim().length > 0 },
+      { label: "Room type", ready: room.unitType.trim().length > 0 },
+      { label: "Count of rooms preview", ready: true },
+      { label: "Max guests", ready: room.maxGuests > 0 },
+      { label: "Adult spaces", ready: false },
+      { label: "Children spaces", ready: false },
+      { label: "Cot spaces", ready: false },
+      { label: "Bed info", ready: Boolean(room.bedInfo) },
+      { label: "Bathroom type", ready: Boolean(room.bathroomType) },
+      { label: "Base price", ready: room.priceFullday > 0 },
+      { label: "Photo count", ready: room.photosCount > 0 },
+      { label: "Description", ready: Boolean(room.description) },
+    ];
+
+    return {
+      room,
+      roomChecks,
+      readyCount: roomChecks.filter((item) => item.ready).length,
+      statusLabel: contentStatusLabel(roomChecks.filter((item) => item.ready).length, roomChecks.length),
+    };
+  });
+  const photosReadiness = {
+    readyRooms: rooms.filter((room) => room.photosCount > 0).length,
+    missingRooms: rooms.filter((room) => room.photosCount <= 0).length,
+  };
 
   return (
     <div className={styles.shell}>
@@ -782,35 +879,75 @@ export default function FamloProDashboardShell({
               </div>
               <div className={styles.cardBody}>
                 {rooms.length > 0 ? (
-                  <div className={styles.roomGrid}>
-                    {rooms.map((room) => (
-                      <article key={room.id} className={styles.roomCard}>
-                        <div className={styles.roomHeader}>
-                          <div>
-                            <div className={styles.roomTitle}>{room.name}</div>
-                            <div className={styles.roomCopy}>{room.unitType}</div>
-                          </div>
-                          <span className={`${styles.badge} ${room.isActive ? "" : styles.badgeMuted}`}>
-                            {room.isActive ? "Open" : "Closed"}
-                          </span>
-                        </div>
-                        <div className={styles.roomStats}>
-                          <div className={styles.miniStat}>
-                            <div className={styles.miniLabel}>Guests</div>
-                            <div className={styles.miniValue}>{room.maxGuests}</div>
-                          </div>
-                          <div className={styles.miniStat}>
-                            <div className={styles.miniLabel}>Base price</div>
-                            <div className={styles.miniValue}>{formatCurrency(room.priceFullday)}</div>
-                          </div>
-                          <div className={styles.miniStat}>
-                            <div className={styles.miniLabel}>Amenities</div>
-                            <div className={styles.miniValue}>{room.amenitiesCount}</div>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
+                  <>
+                    <div className={styles.inlineActionRow}>
+                      <Link href={basicRoomUrl} className={styles.secondaryActionLink}>
+                        Manage room in Basic Dashboard
+                      </Link>
+                    </div>
+                    <div className={styles.roomGrid}>
+                      {rooms.map((room) => {
+                        const readiness = roomReadinessChecklist(room);
+                        const completedReadiness = readiness.filter((item) => item.complete).length;
+                        return (
+                          <article key={room.id} className={styles.roomCard}>
+                            <div className={styles.roomHeader}>
+                              <div>
+                                <div className={styles.roomTitle}>{room.name}</div>
+                                <div className={styles.roomCopy}>{room.unitType}</div>
+                              </div>
+                              <span className={`${styles.badge} ${room.isActive ? "" : styles.badgeMuted}`}>
+                                {room.isActive ? "Open" : "Closed"}
+                              </span>
+                            </div>
+                            <div className={styles.roomStats}>
+                              <div className={styles.miniStat}>
+                                <div className={styles.miniLabel}>Guests</div>
+                                <div className={styles.miniValue}>{room.maxGuests}</div>
+                              </div>
+                              <div className={styles.miniStat}>
+                                <div className={styles.miniLabel}>Base price</div>
+                                <div className={styles.miniValue}>{formatCurrency(room.priceFullday)}</div>
+                              </div>
+                              <div className={styles.miniStat}>
+                                <div className={styles.miniLabel}>Amenities</div>
+                                <div className={styles.miniValue}>{room.amenitiesCount}</div>
+                              </div>
+                            </div>
+                            <div className={styles.roomMetaGrid}>
+                              <div className={styles.roomMetaItem}>
+                                <span className={styles.roomMetaLabel}>Bed info</span>
+                                <strong>{room.bedInfo ?? "Missing"}</strong>
+                              </div>
+                              <div className={styles.roomMetaItem}>
+                                <span className={styles.roomMetaLabel}>Bathroom</span>
+                                <strong>{room.bathroomType ?? "Missing"}</strong>
+                              </div>
+                              <div className={styles.roomMetaItem}>
+                                <span className={styles.roomMetaLabel}>Photos</span>
+                                <strong>{room.photosCount}</strong>
+                              </div>
+                              <div className={styles.roomMetaItem}>
+                                <span className={styles.roomMetaLabel}>Provider mapping</span>
+                                <strong>Not mapped</strong>
+                              </div>
+                            </div>
+                            <div className={styles.roomReadinessRow}>
+                              <span className={styles.badge}>{completedReadiness}/{readiness.length} ready</span>
+                              {readiness.map((item) => (
+                                <span
+                                  key={item.label}
+                                  className={`${styles.readinessPill} ${item.complete ? styles.readinessPillOk : styles.readinessPillMissing}`}
+                                >
+                                  {item.label}: {item.complete ? "Done" : "Missing"}
+                                </span>
+                              ))}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </>
                 ) : (
                   <div className={styles.emptyState}>
                     <div className={styles.emptyTitle}>No room units surfaced yet</div>
@@ -837,20 +974,43 @@ export default function FamloProDashboardShell({
               </div>
               <div className={styles.cardBody}>
                 <div className={styles.placeholderGrid}>
-                  {[
-                    ["Standard Rate", "Primary rate plan for future distribution mapping."],
-                    ["Base Price", "Read-only placeholder for future nightly or base rate controls."],
-                    ["Min Stay", "Placeholder for minimum stay restrictions."],
-                    ["Max Stay", "Placeholder for maximum stay restrictions."],
-                    ["Stop Sell", "Prevent new sales when inventory must close."],
-                    ["Closed to Arrival", "Block check-in on selected dates."],
-                    ["Closed to Departure", "Block check-out on selected dates."],
-                    ["Meal Plan", "Placeholder for future meal-plan mapping."],
-                  ].map(([title, copy]) => (
-                    <div key={title} className={styles.placeholderRow}>
-                      <div className={styles.placeholderTitle}>{title}</div>
-                      <div className={styles.placeholderCopy}>{copy}</div>
-                    </div>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Standard Rate Plan</div>
+                    <div className={styles.placeholderValue}>{standardRatePlanName}</div>
+                    <div className={styles.placeholderCopy}>Saved from Famlo Pro settings and ready for future distribution mapping.</div>
+                  </div>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Provider Sync</div>
+                    <div className={styles.placeholderValue}>Not connected</div>
+                    <div className={styles.placeholderCopy}>No pricing push or provider rate sync is active in this phase.</div>
+                  </div>
+                </div>
+                <div className={styles.rateTable}>
+                  <div className={styles.mappingHeader}>Room</div>
+                  <div className={styles.mappingHeader}>Standard Base Price</div>
+                  <div className={styles.mappingHeader}>Weekend Rate</div>
+                  <div className={styles.mappingHeader}>Min Stay</div>
+                  <div className={styles.mappingHeader}>Max Stay</div>
+                  <div className={styles.mappingHeader}>Stop Sell</div>
+                  <div className={styles.mappingHeader}>CTA / CTD</div>
+                  <div className={styles.mappingHeader}>Meal Plan</div>
+                  {(rooms.length > 0 ? rooms : [{ id: "placeholder", name: "No rooms surfaced", unitType: "", description: null, maxGuests: 0, bedInfo: null, bathroomType: null, priceFullday: 0, isActive: false, amenitiesCount: 0, photosCount: 0 }]).map((room) => (
+                    <Fragment key={room.id}>
+                      <div className={styles.mappingCell}>
+                        <div className={styles.mappingTitle}>{room.name}</div>
+                        <div className={styles.mappingSubcopy}>{room.unitType || "Famlo room"}</div>
+                      </div>
+                      <div className={styles.mappingCell}>
+                        <div className={styles.mappingTitle}>{room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing"}</div>
+                        <div className={styles.mappingSubcopy}>Derived from existing room price fields</div>
+                      </div>
+                      <div className={styles.mappingCellMuted}>Coming soon</div>
+                      <div className={styles.mappingCellMuted}>Coming soon</div>
+                      <div className={styles.mappingCellMuted}>Coming soon</div>
+                      <div className={styles.mappingCellMuted}>Coming soon</div>
+                      <div className={styles.mappingCellMuted}>Coming soon</div>
+                      <div className={styles.mappingCellMuted}>{initialSettings.defaultMealPlan.replaceAll("_", " ")}</div>
+                    </Fragment>
                   ))}
                 </div>
               </div>
@@ -988,7 +1148,7 @@ export default function FamloProDashboardShell({
                   <div className={styles.mappingHeader}>Famlo Room</div>
                   <div className={styles.mappingHeader}>Provider Room Type</div>
                   <div className={styles.mappingHeader}>Status</div>
-                  {(rooms.length > 0 ? rooms : [{ id: "placeholder", name: "No rooms surfaced", unitType: "", maxGuests: 0, priceFullday: 0, isActive: false, amenitiesCount: 0 }]).map((room) => (
+                  {(rooms.length > 0 ? rooms : [{ id: "placeholder", name: "No rooms surfaced", unitType: "", description: null, maxGuests: 0, bedInfo: null, bathroomType: null, priceFullday: 0, isActive: false, amenitiesCount: 0, photosCount: 0 }]).map((room) => (
                     <Fragment key={room.id}>
                       <div className={styles.mappingCell}>
                         <div className={styles.mappingTitle}>{room.name}</div>
@@ -1195,10 +1355,171 @@ export default function FamloProDashboardShell({
                     <div className={styles.placeholderCopy}>Property mapping, room mapping, and rate mapping readiness will be tracked here.</div>
                   </div>
                   <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>OTA Listing Readiness</div>
+                    <div className={styles.placeholderCopy}>Open the OTA Content section to prepare structured fields required by providers like Channex and Booking.com.</div>
+                    <div className={styles.inlineActionRow}>
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("ota-content")}>
+                        Open OTA Content
+                      </button>
+                    </div>
+                  </div>
+                  <div className={styles.placeholderRow}>
                     <div className={styles.placeholderTitle}>Property Content</div>
                     <div className={styles.placeholderCopy}>Photos and media remain untouched and continue using existing Famlo sources only.</div>
                   </div>
                 </div>
+              </div>
+            </section>
+          )}
+
+          {activeSection === "ota-content" && (
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>OTA Content Readiness</h3>
+                  <p className={styles.cardCopy}>
+                    Basic Famlo listing can stay simple. OTA channels need extra structured fields before sync can begin.
+                  </p>
+                </div>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>No provider sync yet</span>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.mappingPreviewGrid}>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Famlo Property → Provider Property</div>
+                    <div className={styles.placeholderCopy}>Future provider property creation will use saved OTA title, address, contacts, policies, and property content.</div>
+                  </div>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Famlo Room / Stay Unit → Provider Room Type</div>
+                    <div className={styles.placeholderCopy}>Current stay units remain the source of truth for room title, occupancy, bathroom type, base price, and photo counts.</div>
+                  </div>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Famlo Standard Rate → Provider Rate Plan</div>
+                    <div className={styles.placeholderCopy}>The Pro standard rate plan and room base prices will later map to provider rate plans.</div>
+                  </div>
+                </div>
+
+                <div className={styles.contentReadinessGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Property content</div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(propertyContentChecks.filter((item) => item.ready).length, propertyContentChecks.length)}`}>
+                        {contentStatusLabel(propertyContentChecks.filter((item) => item.ready).length, propertyContentChecks.length)}
+                      </span>
+                    </div>
+                    <div className={styles.feedCopy}>Missing: {joinMissingLabels(propertyContentChecks)}</div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Contact details</div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(contactChecks.filter((item) => item.ready).length, contactChecks.length)}`}>
+                        {contentStatusLabel(contactChecks.filter((item) => item.ready).length, contactChecks.length)}
+                      </span>
+                    </div>
+                    <div className={styles.feedCopy}>Missing: {joinMissingLabels(contactChecks)}</div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Location</div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(locationChecks.filter((item) => item.ready).length, locationChecks.length)}`}>
+                        {contentStatusLabel(locationChecks.filter((item) => item.ready).length, locationChecks.length)}
+                      </span>
+                    </div>
+                    <div className={styles.feedCopy}>Missing: {joinMissingLabels(locationChecks)}</div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Policies</div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(policyChecks.filter((item) => item.ready).length, policyChecks.length)}`}>
+                        {contentStatusLabel(policyChecks.filter((item) => item.ready).length, policyChecks.length)}
+                      </span>
+                    </div>
+                    <div className={styles.feedCopy}>Missing: {joinMissingLabels(policyChecks)}</div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Room content readiness</div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(roomContentRows.filter((row) => row.readyCount === row.roomChecks.length).length, Math.max(roomContentRows.length, 1))}`}>
+                        {roomContentRows.length > 0 ? `${roomContentRows.filter((row) => row.readyCount === row.roomChecks.length).length}/${roomContentRows.length} complete` : "Missing"}
+                      </span>
+                    </div>
+                    <div className={styles.feedCopy}>Adult/children/cot occupancy splits remain missing until a future Pro room-content layer is added.</div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Photos readiness</div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(photosReadiness.readyRooms, Math.max(rooms.length, 1))}`}>
+                        {contentStatusLabel(photosReadiness.readyRooms, Math.max(rooms.length, 1))}
+                      </span>
+                    </div>
+                    <div className={styles.feedCopy}>
+                      {photosReadiness.readyRooms} rooms have photos counted. {photosReadiness.missingRooms} rooms still need photo coverage for OTA readiness.
+                    </div>
+                  </article>
+                </div>
+
+                <OtaContentForm
+                  key={`${familyId}:${initialSettings.updatedAt ?? "new"}:ota`}
+                  familyId={familyId}
+                  initialSettings={initialSettings}
+                />
+
+                <section className={styles.cardInset}>
+                  <div className={styles.listTitle}>Room content readiness</div>
+                  <div className={styles.otaRoomGrid}>
+                    {roomContentRows.length > 0 ? roomContentRows.map(({ room, roomChecks, readyCount, statusLabel }) => (
+                      <article key={room.id} className={styles.roomCard}>
+                        <div className={styles.roomHeader}>
+                          <div>
+                            <div className={styles.roomTitle}>{room.name}</div>
+                            <div className={styles.roomCopy}>{room.unitType}</div>
+                          </div>
+                          <span className={`${styles.readinessPill} ${contentStatusClass(readyCount, roomChecks.length)}`}>
+                            {statusLabel}
+                          </span>
+                        </div>
+                        <div className={styles.roomMetaGrid}>
+                          <div className={styles.roomMetaItem}>
+                            <span className={styles.roomMetaLabel}>Count of rooms preview</span>
+                            <strong>1</strong>
+                          </div>
+                          <div className={styles.roomMetaItem}>
+                            <span className={styles.roomMetaLabel}>Photo count</span>
+                            <strong>{room.photosCount}</strong>
+                          </div>
+                          <div className={styles.roomMetaItem}>
+                            <span className={styles.roomMetaLabel}>Description</span>
+                            <strong>{room.description ? "Available" : "Missing"}</strong>
+                          </div>
+                          <div className={styles.roomMetaItem}>
+                            <span className={styles.roomMetaLabel}>Provider room type</span>
+                            <strong>Not mapped</strong>
+                          </div>
+                        </div>
+                        <div className={styles.roomReadinessRow}>
+                          {roomChecks.map((item) => (
+                            <span
+                              key={item.label}
+                              className={`${styles.readinessPill} ${item.ready ? styles.readinessPillOk : styles.readinessPillMissing}`}
+                            >
+                              {item.label}: {item.ready ? "Done" : "Missing"}
+                            </span>
+                          ))}
+                        </div>
+                      </article>
+                    )) : (
+                      <div className={styles.emptyState}>
+                        <div className={styles.emptyTitle}>No stay units surfaced yet</div>
+                        <div className={styles.emptyCopy}>Room OTA readiness will populate from existing stay units once inventory is available.</div>
+                      </div>
+                    )}
+                  </div>
+                </section>
               </div>
             </section>
           )}
@@ -1487,6 +1808,194 @@ function ProSettingsForm({
         </div>
       ) : null}
     </>
+  );
+}
+
+function OtaContentForm({
+  familyId,
+  initialSettings,
+}: Readonly<{
+  familyId: string;
+  initialSettings: HostProSettings;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isSaving, startSaving] = useTransition();
+  const [form, setForm] = useState({
+    otaTitle: initialSettings.otaTitle ?? "",
+    contactEmail: initialSettings.contactEmail ?? "",
+    contactPhone: initialSettings.contactPhone ?? "",
+    website: initialSettings.website ?? "",
+    country: initialSettings.country ?? "India",
+    state: initialSettings.state ?? "",
+    city: initialSettings.city ?? "",
+    postalCode: initialSettings.postalCode ?? "",
+    addressLine: initialSettings.addressLine ?? "",
+    latitude: initialSettings.latitude != null ? String(initialSettings.latitude) : "",
+    longitude: initialSettings.longitude != null ? String(initialSettings.longitude) : "",
+    propertyDescription: initialSettings.propertyDescription ?? "",
+    checkInInstructions: initialSettings.checkInInstructions ?? "",
+    houseRules: initialSettings.houseRules ?? "",
+    cancellationPolicyLabel: initialSettings.cancellationPolicyLabel ?? "",
+  });
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  const updateField = (field: keyof typeof form, value: string): void => {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const handleSave = (): void => {
+    setFeedback(null);
+    startSaving(async () => {
+      try {
+        const response = await fetch("/api/host/pro/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            familyId,
+            otaTitle: form.otaTitle || null,
+            contactEmail: form.contactEmail || null,
+            contactPhone: form.contactPhone || null,
+            website: form.website || null,
+            country: form.country || null,
+            state: form.state || null,
+            city: form.city || null,
+            postalCode: form.postalCode || null,
+            addressLine: form.addressLine || null,
+            latitude: form.latitude || null,
+            longitude: form.longitude || null,
+            propertyDescription: form.propertyDescription || null,
+            checkInInstructions: form.checkInInstructions || null,
+            houseRules: form.houseRules || null,
+            cancellationPolicyLabel: form.cancellationPolicyLabel || null,
+          }),
+        });
+
+        const payload = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to save OTA content settings.");
+        }
+
+        setFeedback({
+          type: "success",
+          text: "OTA content readiness settings saved. Refreshing the checklist now.",
+        });
+        router.refresh();
+      } catch (error) {
+        setFeedback({
+          type: "error",
+          text: error instanceof Error ? error.message : "Failed to save OTA content settings.",
+        });
+      }
+    });
+  };
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.listTitle}>Save OTA content</div>
+      <div className={styles.contentSectionGrid}>
+        <div className={styles.fieldGroup}>
+          <div className={styles.groupTitle}>Property content</div>
+          <div className={styles.settingsGrid}>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>OTA title</span>
+              <input className={styles.fieldInput} value={form.otaTitle} onChange={(event) => updateField("otaTitle", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>Website</span>
+              <input className={styles.fieldInput} value={form.website} onChange={(event) => updateField("website", event.target.value)} placeholder="https://..." />
+            </label>
+            <label className={styles.fieldBlock} style={{ gridColumn: "1 / -1" }}>
+              <span className={styles.fieldLabel}>Property description</span>
+              <textarea className={styles.fieldTextarea} value={form.propertyDescription} onChange={(event) => updateField("propertyDescription", event.target.value)} />
+            </label>
+          </div>
+        </div>
+
+        <div className={styles.fieldGroup}>
+          <div className={styles.groupTitle}>Contact details</div>
+          <div className={styles.settingsGrid}>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>Contact email</span>
+              <input className={styles.fieldInput} value={form.contactEmail} onChange={(event) => updateField("contactEmail", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>Contact phone</span>
+              <input className={styles.fieldInput} value={form.contactPhone} onChange={(event) => updateField("contactPhone", event.target.value)} />
+            </label>
+          </div>
+        </div>
+
+        <div className={styles.fieldGroup}>
+          <div className={styles.groupTitle}>Location</div>
+          <div className={styles.settingsGrid}>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>Country</span>
+              <input className={styles.fieldInput} value={form.country} onChange={(event) => updateField("country", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>State</span>
+              <input className={styles.fieldInput} value={form.state} onChange={(event) => updateField("state", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>City</span>
+              <input className={styles.fieldInput} value={form.city} onChange={(event) => updateField("city", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>Postal code</span>
+              <input className={styles.fieldInput} value={form.postalCode} onChange={(event) => updateField("postalCode", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock} style={{ gridColumn: "1 / -1" }}>
+              <span className={styles.fieldLabel}>Address line</span>
+              <input className={styles.fieldInput} value={form.addressLine} onChange={(event) => updateField("addressLine", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>Latitude</span>
+              <input className={styles.fieldInput} value={form.latitude} onChange={(event) => updateField("latitude", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>Longitude</span>
+              <input className={styles.fieldInput} value={form.longitude} onChange={(event) => updateField("longitude", event.target.value)} />
+            </label>
+          </div>
+        </div>
+
+        <div className={styles.fieldGroup}>
+          <div className={styles.groupTitle}>Policies</div>
+          <div className={styles.settingsGrid}>
+            <label className={styles.fieldBlock}>
+              <span className={styles.fieldLabel}>Cancellation policy label</span>
+              <input className={styles.fieldInput} value={form.cancellationPolicyLabel} onChange={(event) => updateField("cancellationPolicyLabel", event.target.value)} placeholder="Flexible / Moderate / Strict" />
+            </label>
+            <label className={styles.fieldBlock} style={{ gridColumn: "1 / -1" }}>
+              <span className={styles.fieldLabel}>Check-in instructions</span>
+              <textarea className={styles.fieldTextarea} value={form.checkInInstructions} onChange={(event) => updateField("checkInInstructions", event.target.value)} />
+            </label>
+            <label className={styles.fieldBlock} style={{ gridColumn: "1 / -1" }}>
+              <span className={styles.fieldLabel}>House rules</span>
+              <textarea className={styles.fieldTextarea} value={form.houseRules} onChange={(event) => updateField("houseRules", event.target.value)} />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.inlineActionRow}>
+        <button type="button" className={styles.primaryActionButton} onClick={handleSave} disabled={isSaving}>
+          {isSaving ? "Saving..." : "Save OTA Content"}
+        </button>
+      </div>
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}>
+          {feedback.text}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
