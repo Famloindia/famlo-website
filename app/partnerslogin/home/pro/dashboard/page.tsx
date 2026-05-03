@@ -6,6 +6,7 @@ import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardS
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
+import { loadHostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
 import { loadHostProSettings } from "@/lib/host-pro-settings";
 import { buildHostProSetupReadiness } from "@/lib/host-pro-setup-readiness";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
@@ -203,6 +204,7 @@ export default async function FamloProDashboardPage({
   const hostCode = asString(family?.host_id);
   const meta = parseHostListingMeta(asString(family?.admin_notes));
   const storedProSettings = await loadHostProSettings(supabase, familyId);
+  const channelFoundation = await loadHostProChannelFoundation(supabase, familyId);
   const proSettings = {
     ...storedProSettings,
     otaTitle: storedProSettings.otaTitle ?? propertyName,
@@ -228,6 +230,20 @@ export default async function FamloProDashboardPage({
     amenitiesCount: room.amenities.length,
     photosCount: room.photos.length + room.localityPhotos.length,
   }));
+  const activeRoomIds = rooms.filter((room) => room.isActive).map((room) => room.id);
+  const roomMappingsByRoomId = new Map(
+    channelFoundation.roomMappings.map((mapping) => [mapping.stayUnitId, mapping])
+  );
+  const providerRowsExist = channelFoundation.providers.length > 0;
+  const propertyConnected = channelFoundation.properties.some(
+    (property) => property.syncStatus === "connected"
+  );
+  const roomMappingsReady =
+    activeRoomIds.length > 0 &&
+    activeRoomIds.every((roomId) => Boolean(roomMappingsByRoomId.get(roomId)?.externalRoomTypeId));
+  const ratePlansReady =
+    channelFoundation.ratePlans.length > 0 &&
+    channelFoundation.ratePlans.some((ratePlan) => Boolean(ratePlan.externalRatePlanId));
 
   const { data: bookingRows } =
     host?.id
@@ -270,6 +286,12 @@ export default async function FamloProDashboardPage({
       bathroomType: room.bathroomType,
       photosCount: room.photosCount,
     })),
+    channelReadiness: {
+      providerRowsExist,
+      propertyConnected,
+      roomMappingsReady,
+      ratePlansReady,
+    },
   });
   const setupItems = setupReadiness.items;
 
@@ -286,8 +308,12 @@ export default async function FamloProDashboardPage({
     },
     {
       label: "Active Channels",
-      value: "0",
-      hint: "Channex and other providers remain disconnected placeholders.",
+      value: String(
+        channelFoundation.properties.filter((property) => property.syncStatus === "connected").length
+      ),
+      hint: providerRowsExist
+        ? "Provider-neutral foundation is present, but providers remain disconnected unless a property row is marked connected."
+        : "No provider rows are seeded yet, so channel readiness remains blocked.",
     },
     {
       label: "Rooms Open / Closed",
@@ -331,6 +357,13 @@ export default async function FamloProDashboardPage({
       body: "Channel connections, mappings, sync jobs, and OTA booking import remain intentionally disabled.",
       badge: "Coming soon",
     },
+    {
+      title: "Prepare provider foundation",
+      body: providerRowsExist
+        ? "Provider seed rows exist. The next future step is mapping Famlo property, rooms, and rates without making the provider the source of truth."
+        : "Provider foundation rows are missing, so future mapping cannot begin until the provider-neutral base is present.",
+      badge: providerRowsExist ? "Foundation ready" : "Needed",
+    },
   ];
 
   const feedItems = [
@@ -343,6 +376,11 @@ export default async function FamloProDashboardPage({
       title: "Provider environment still disconnected",
       body: "Channex appears first in the future roadmap, but no provider API, webhook, or sync job is active yet.",
       tone: "info" as const,
+    },
+    {
+      title: "Channel foundation loaded",
+      body: `${channelFoundation.providers.length} provider rows, ${channelFoundation.roomMappings.length} room mappings, ${channelFoundation.ratePlans.length} rate plans, and ${channelFoundation.syncLogs.length} sync logs were loaded from the provider-neutral foundation.`,
+      tone: channelFoundation.providers.length > 0 ? ("success" as const) : ("warning" as const),
     },
     {
       title: "Inventory foundation reviewed",
@@ -385,6 +423,7 @@ export default async function FamloProDashboardPage({
       basicRoomUrl={basicRoomUrl}
       familyId={familyId}
       initialSettings={proSettings}
+      channelFoundation={channelFoundation}
     />
   );
 }

@@ -39,6 +39,7 @@ import {
   propertyTypeLabel,
   type HostProSettings,
 } from "@/lib/host-pro-settings";
+import { type HostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
 import styles from "./pro-dashboard.module.css";
 
 type ProSectionId =
@@ -121,6 +122,7 @@ interface FamloProDashboardShellProps {
   basicDashboardUrl: string;
   basicRoomUrl: string;
   initialSettings: HostProSettings;
+  channelFoundation: HostProChannelFoundation;
 }
 
 type NavItem = {
@@ -197,6 +199,23 @@ function formatCurrency(value: number): string {
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "Not synced";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not synced";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function labelizeToken(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback;
+  return value.replaceAll("_", " ");
 }
 
 function toneBadgeClass(tone: FeedItem["tone"]): string {
@@ -448,6 +467,7 @@ export default function FamloProDashboardShell({
   basicDashboardUrl,
   basicRoomUrl,
   initialSettings,
+  channelFoundation,
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
 
@@ -473,6 +493,26 @@ export default function FamloProDashboardShell({
     rooms.length
   );
   const standardRatePlanName = initialSettings.standardRatePlanName || "Standard Rate";
+  const primaryProvider =
+    channelFoundation.providers.find((provider) => provider.code === "channex") ??
+    channelFoundation.providers[0] ??
+    null;
+  const primaryProperty =
+    (primaryProvider
+      ? channelFoundation.properties.find((property) => property.providerCode === primaryProvider.code)
+      : null) ?? null;
+  const roomMappingsByRoomId = new Map(
+    channelFoundation.roomMappings.map((mapping) => [mapping.stayUnitId, mapping])
+  );
+  const ratePlansByRoomId = new Map(
+    channelFoundation.ratePlans
+      .filter((plan) => Boolean(plan.stayUnitId))
+      .map((plan) => [plan.stayUnitId as string, plan])
+  );
+  const providerFoundationReady = channelFoundation.providers.length > 0;
+  const connectedPropertyCount = channelFoundation.properties.filter(
+    (property) => property.syncStatus === "connected"
+  ).length;
   const propertyContentChecks = [
     { label: "OTA title", ready: Boolean(initialSettings.otaTitle) && initialSettings.exists },
     { label: "Property description", ready: Boolean(initialSettings.propertyDescription) },
@@ -523,6 +563,52 @@ export default function FamloProDashboardShell({
     readyRooms: rooms.filter((room) => room.photosCount > 0).length,
     missingRooms: rooms.filter((room) => room.photosCount <= 0).length,
   };
+  const roomMappingRows = (rooms.length > 0
+    ? rooms
+    : [{
+        id: "placeholder",
+        name: "No rooms surfaced",
+        unitType: "",
+        description: null,
+        maxGuests: 0,
+        bedInfo: null,
+        bathroomType: null,
+        priceFullday: 0,
+        isActive: false,
+        amenitiesCount: 0,
+        photosCount: 0,
+      }]).map((room) => {
+    const mapping = room.id === "placeholder" ? null : roomMappingsByRoomId.get(room.id) ?? null;
+    return {
+      room,
+      mapping,
+      providerRoomType: mapping?.externalRoomTypeId ?? "Not mapped",
+      statusLabel: mapping?.externalRoomTypeId ? "Mapped" : labelizeToken(mapping?.syncStatus, "Not mapped"),
+    };
+  });
+  const rateMappingRows = (rooms.length > 0
+    ? rooms
+    : [{
+        id: "placeholder",
+        name: "No rooms surfaced",
+        unitType: "",
+        description: null,
+        maxGuests: 0,
+        bedInfo: null,
+        bathroomType: null,
+        priceFullday: 0,
+        isActive: false,
+        amenitiesCount: 0,
+        photosCount: 0,
+      }]).map((room) => {
+    const ratePlan = room.id === "placeholder" ? null : ratePlansByRoomId.get(room.id) ?? null;
+    return {
+      room,
+      ratePlan,
+      providerRatePlan: ratePlan?.externalRatePlanId ?? "Not mapped",
+      statusLabel: ratePlan?.externalRatePlanId ? "Mapped" : labelizeToken(ratePlan?.syncStatus, "Not mapped"),
+    };
+  });
 
   return (
     <div className={styles.shell}>
@@ -1111,6 +1197,33 @@ export default function FamloProDashboardShell({
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>Not connected</span>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.providerCard}>
+                  <div className={styles.providerCardHeader}>
+                    <div>
+                      <div className={styles.cardTitle}>{primaryProvider?.name ?? "Channex"}</div>
+                      <div className={styles.cardCopy}>
+                        First planned provider inside a provider-neutral Famlo foundation.
+                      </div>
+                    </div>
+                    <span className={`${styles.badge} ${styles.badgeMuted}`}>
+                      {labelizeToken(primaryProperty?.syncStatus ?? "not_connected", "Not connected")}
+                    </span>
+                  </div>
+                  <div className={styles.providerMetaRow}>
+                    <span className={styles.filterChip}>Environment: Staging planned</span>
+                    <span className={styles.filterChip}>Foundation: {providerFoundationReady ? "Ready" : "Missing"}</span>
+                    <span className={styles.filterChip}>Last sync: {formatDateTime(primaryProperty?.lastSyncedAt ?? null)}</span>
+                  </div>
+                  <div className={styles.providerActionRow}>
+                    <button
+                      type="button"
+                      className={styles.secondaryActionButton}
+                      onClick={() => setActiveSection("room-mapping")}
+                    >
+                      Prepare mapping
+                    </button>
+                  </div>
+                </div>
                 <div className={styles.channelGrid}>
                   {CHANNEL_CARDS.map((channel) => (
                     <article key={channel} className={styles.channelCard}>
@@ -1148,15 +1261,17 @@ export default function FamloProDashboardShell({
                   <div className={styles.mappingHeader}>Famlo Room</div>
                   <div className={styles.mappingHeader}>Provider Room Type</div>
                   <div className={styles.mappingHeader}>Status</div>
-                  {(rooms.length > 0 ? rooms : [{ id: "placeholder", name: "No rooms surfaced", unitType: "", description: null, maxGuests: 0, bedInfo: null, bathroomType: null, priceFullday: 0, isActive: false, amenitiesCount: 0, photosCount: 0 }]).map((room) => (
+                  {roomMappingRows.map(({ room, mapping, providerRoomType, statusLabel }) => (
                     <Fragment key={room.id}>
                       <div className={styles.mappingCell}>
                         <div className={styles.mappingTitle}>{room.name}</div>
                         <div className={styles.mappingSubcopy}>{room.unitType || "Famlo inventory unit"}</div>
                       </div>
-                      <div className={styles.mappingCellMuted}>Not mapped</div>
+                      <div className={styles.mappingCellMuted}>{providerRoomType}</div>
                       <div className={styles.mappingCell}>
-                        <span className={`${styles.badge} ${styles.badgeMuted}`}>Pending</span>
+                        <span className={`${styles.badge} ${mapping?.externalRoomTypeId ? "" : styles.badgeMuted}`.trim()}>
+                          {statusLabel}
+                        </span>
                       </div>
                     </Fragment>
                   ))}
@@ -1181,19 +1296,17 @@ export default function FamloProDashboardShell({
                   <div className={styles.mappingHeader}>Famlo Rate</div>
                   <div className={styles.mappingHeader}>Provider Rate Plan</div>
                   <div className={styles.mappingHeader}>Status</div>
-                  {[
-                    "Standard Rate",
-                    "Weekend Premium",
-                    "Long Stay Offer",
-                  ].map((rate) => (
-                    <Fragment key={rate}>
+                  {rateMappingRows.map(({ room, ratePlan, providerRatePlan, statusLabel }) => (
+                    <Fragment key={room.id}>
                       <div className={styles.mappingCell}>
-                        <div className={styles.mappingTitle}>{rate}</div>
-                        <div className={styles.mappingSubcopy}>Provider-neutral placeholder</div>
+                        <div className={styles.mappingTitle}>{standardRatePlanName}</div>
+                        <div className={styles.mappingSubcopy}>{room.name}</div>
                       </div>
-                      <div className={styles.mappingCellMuted}>Not mapped</div>
+                      <div className={styles.mappingCellMuted}>{providerRatePlan}</div>
                       <div className={styles.mappingCell}>
-                        <span className={`${styles.badge} ${styles.badgeMuted}`}>Pending</span>
+                        <span className={`${styles.badge} ${ratePlan?.externalRatePlanId ? "" : styles.badgeMuted}`.trim()}>
+                          {statusLabel}
+                        </span>
                       </div>
                     </Fragment>
                   ))}
@@ -1211,15 +1324,36 @@ export default function FamloProDashboardShell({
                     Future ARI and webhook activity will appear here after provider connectivity is enabled.
                   </p>
                 </div>
-                <span className={`${styles.badge} ${styles.badgeMuted}`}>No activity</span>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>
+                  {channelFoundation.syncLogs.length > 0 ? "History available" : "No activity"}
+                </span>
               </div>
               <div className={styles.cardBody}>
-                <div className={styles.emptyState}>
-                  <div className={styles.emptyTitle}>No sync jobs yet</div>
-                  <div className={styles.emptyCopy}>
-                    Channel sync is intentionally disabled. Availability, rate, restriction, and booking-import logs will populate here later.
+                {channelFoundation.syncLogs.length > 0 ? (
+                  <div className={styles.logList}>
+                    {channelFoundation.syncLogs.map((log) => (
+                      <article key={log.id} className={styles.logRow}>
+                        <div>
+                          <div className={styles.logTitle}>{labelizeToken(log.action, "Sync action")}</div>
+                          <div className={styles.logCopy}>{log.message ?? "No detail message stored."}</div>
+                        </div>
+                        <div className={styles.logMeta}>
+                          <span className={`${styles.badge} ${log.status === "success" ? "" : styles.badgeMuted}`.trim()}>
+                            {labelizeToken(log.status, "Unknown")}
+                          </span>
+                          <span className={styles.logTimestamp}>{formatDateTime(log.createdAt)}</span>
+                        </div>
+                      </article>
+                    ))}
                   </div>
-                </div>
+                ) : (
+                  <div className={styles.emptyState}>
+                    <div className={styles.emptyTitle}>No sync jobs yet</div>
+                    <div className={styles.emptyCopy}>
+                      Channel sync is intentionally disabled. Availability, rate, restriction, and booking-import logs will populate here later.
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -1239,7 +1373,7 @@ export default function FamloProDashboardShell({
                 <div className={styles.emptyState}>
                   <div className={styles.emptyTitle}>Nothing to reconcile</div>
                   <div className={styles.emptyCopy}>
-                    With no connected providers, there are no room, rate, or booking conflicts to resolve in this phase.
+                    With {connectedPropertyCount} connected properties and no active provider API, there are no room, rate, or booking conflicts to resolve in this phase.
                   </div>
                 </div>
               </div>

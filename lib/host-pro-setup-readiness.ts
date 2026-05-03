@@ -35,6 +35,13 @@ export type ProSetupReadinessSummary = {
   nextAction: string;
 };
 
+export type ProSetupChannelReadiness = {
+  providerRowsExist: boolean;
+  propertyConnected: boolean;
+  roomMappingsReady: boolean;
+  ratePlansReady: boolean;
+};
+
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -70,6 +77,22 @@ function buildNextAction(missingItems: ProSetupReadinessItem[]): string {
     return "Make sure every room has a base price in existing Famlo inventory before future rate mapping is introduced.";
   }
 
+  if (firstMissing.key === "provider-foundation") {
+    return "Seed the provider-neutral foundation first so future adapters like Channex can map Famlo data without becoming the source of truth.";
+  }
+
+  if (firstMissing.key === "channel-connection") {
+    return "Provider rows can exist before connectivity. Keep this disconnected until future connection and sync phases are approved.";
+  }
+
+  if (firstMissing.key === "room-mapping") {
+    return "Map each active Famlo room to a future provider room type before any availability or booking sync can be attempted.";
+  }
+
+  if (firstMissing.key === "rate-mapping") {
+    return "Map the Famlo standard rate plan to a future provider rate plan after room mappings are in place.";
+  }
+
   return `Resolve "${firstMissing.title}" to improve PMS and channel-manager readiness.`;
 }
 
@@ -81,6 +104,7 @@ export function buildHostProSetupReadiness(input: {
   settings: HostProSettings;
   legacyHouseTypeHint?: string | null;
   rooms: ProSetupRoomReadiness[];
+  channelReadiness: ProSetupChannelReadiness;
 }): ProSetupReadinessSummary {
   const propertyModel = input.settings.propertyModel;
   const propertyType = input.settings.propertyType;
@@ -227,11 +251,40 @@ export function buildHostProSetupReadiness(input: {
       valueLabel: null,
     },
     {
-      key: "channel-mapping",
-      title: "Channel mapping readiness",
-      complete: false,
-      hint: "Provider accounts, room mappings, and rate mappings are intentionally not implemented yet.",
-      valueLabel: null,
+      key: "provider-foundation",
+      title: "Provider foundation ready",
+      complete: input.channelReadiness.providerRowsExist,
+      hint: input.channelReadiness.providerRowsExist
+        ? "Provider-neutral channel foundation rows exist and can support future adapters like Channex."
+        : "Provider foundation tables are still empty, so future mapping has no seeded provider base yet.",
+      valueLabel: input.channelReadiness.providerRowsExist ? "Ready" : null,
+    },
+    {
+      key: "channel-connection",
+      title: "Channel connection readiness",
+      complete: input.channelReadiness.propertyConnected,
+      hint: input.channelReadiness.propertyConnected
+        ? "At least one provider property row is marked connected."
+        : "No provider property is connected yet. Distribution stays intentionally disconnected in this phase.",
+      valueLabel: input.channelReadiness.propertyConnected ? "Connected" : null,
+    },
+    {
+      key: "room-mapping",
+      title: "Room mapping readiness",
+      complete: input.channelReadiness.roomMappingsReady,
+      hint: input.channelReadiness.roomMappingsReady
+        ? "Every active room has a mapped external room-type id in the provider-neutral foundation."
+        : "One or more active rooms still have no external room-type id in the mapping foundation.",
+      valueLabel: input.channelReadiness.roomMappingsReady ? "Mapped" : null,
+    },
+    {
+      key: "rate-mapping",
+      title: "Rate mapping readiness",
+      complete: input.channelReadiness.ratePlansReady,
+      hint: input.channelReadiness.ratePlansReady
+        ? "At least one provider-neutral rate plan already has a mapped external rate-plan id."
+        : "Provider-neutral rate plans are still missing external rate-plan ids.",
+      valueLabel: input.channelReadiness.ratePlansReady ? "Mapped" : null,
     },
   ];
 
