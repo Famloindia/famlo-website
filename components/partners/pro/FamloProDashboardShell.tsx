@@ -617,6 +617,19 @@ export default function FamloProDashboardShell({
     const mapping = roomMappingsByRoomId.get(room.id);
     return Boolean(mapping?.externalRoomTypeId);
   });
+  const ariSyncEligibleRooms = rooms.filter((room) => {
+    if (!room.isActive) return false;
+    const roomMapping = roomMappingsByRoomId.get(room.id);
+    const ratePlan = ratePlansByRoomId.get(room.id);
+    return Boolean(roomMapping?.externalRoomTypeId && ratePlan?.externalRatePlanId && room.priceFullday > 0);
+  }).length;
+  const ariMissingRooms = rooms.filter((room) => {
+    if (!room.isActive) return false;
+    const roomMapping = roomMappingsByRoomId.get(room.id);
+    const ratePlan = ratePlansByRoomId.get(room.id);
+    return !(roomMapping?.externalRoomTypeId && ratePlan?.externalRatePlanId && room.priceFullday > 0);
+  }).length;
+  const lastAriSyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
 
   return (
     <div className={styles.shell}>
@@ -1067,6 +1080,14 @@ export default function FamloProDashboardShell({
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>Shell only</span>
               </div>
               <div className={styles.cardBody}>
+                <ChannexAriSyncCard
+                  familyId={familyId}
+                  eligibleRooms={ariSyncEligibleRooms}
+                  missingRooms={ariMissingRooms}
+                  propertyCreated={canCreateRoomTypes}
+                  roomTypesCreated={canCreateRatePlans}
+                  lastSyncLog={lastAriSyncLog}
+                />
                 <div className={styles.placeholderGrid}>
                   <div className={styles.placeholderRow}>
                     <div className={styles.placeholderTitle}>Standard Rate Plan</div>
@@ -2405,6 +2426,164 @@ function ChannexRatePlanBatchCard({
           }}
         >
           {isCreating ? "Creating..." : "Create staging rate plans"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ChannexAriSyncCard({
+  familyId,
+  eligibleRooms,
+  missingRooms,
+  propertyCreated,
+  roomTypesCreated,
+  lastSyncLog,
+}: Readonly<{
+  familyId: string;
+  eligibleRooms: number;
+  missingRooms: number;
+  propertyCreated: boolean;
+  roomTypesCreated: boolean;
+  lastSyncLog: {
+    status: string;
+    message: string | null;
+    createdAt: string | null;
+  } | null;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isPushing, startPushing] = useTransition();
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    summary?: {
+      eligibleRooms: number;
+      availabilityChanges: number;
+      restrictionChanges: number;
+      dateRange?: { from: string; to: string };
+    };
+  } | null>(null);
+
+  const blockedMessage = !propertyCreated
+    ? "Create provider property first."
+    : !roomTypesCreated
+      ? "Create room types and rate plans first."
+      : eligibleRooms <= 0
+        ? "No eligible active mapped rooms are ready for staging sync."
+        : null;
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>30-day staging sync</div>
+          <div className={styles.cardCopy}>
+            Push a limited 30-day staging-only ARI batch to Channex using mapped active rooms. No schedules, production sync, bookings, or iCal writes are introduced here.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
+          {blockedMessage ? "Blocked" : "Ready"}
+        </span>
+      </div>
+
+      <div className={styles.placeholderGrid}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Eligible rooms</div>
+          <div className={styles.placeholderCopy}>{eligibleRooms}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Missing mappings</div>
+          <div className={styles.placeholderCopy}>{missingRooms}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Date range</div>
+          <div className={styles.placeholderCopy}>Today + 30 days</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last sync status</div>
+          <div className={styles.placeholderCopy}>
+            {lastSyncLog ? `${labelizeToken(lastSyncLog.status, "unknown")} · ${formatDateTime(lastSyncLog.createdAt)}` : "Not started"}
+          </div>
+        </div>
+      </div>
+
+      {lastSyncLog?.message ? (
+        <div className={styles.feedCopy}>{lastSyncLog.message}</div>
+      ) : null}
+
+      {blockedMessage ? (
+        <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{blockedMessage}</div>
+      ) : null}
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {feedback.message}
+          {feedback.summary ? (
+            <div className={styles.inlineBadgeRow}>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Eligible rooms: {feedback.summary.eligibleRooms}</span>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Availability changes: {feedback.summary.availabilityChanges}</span>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Restriction changes: {feedback.summary.restrictionChanges}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <button
+          type="button"
+          className={styles.primaryActionButton}
+          disabled={isPushing || Boolean(blockedMessage)}
+          onClick={() => {
+            startPushing(async () => {
+              setFeedback(null);
+
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/ari/push", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  message?: string;
+                  eligibleRooms?: number;
+                  availabilityChanges?: number;
+                  restrictionChanges?: number;
+                  dateRange?: { from: string; to: string };
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to push Channex staging ARI.",
+                  summary:
+                    typeof payload.eligibleRooms === "number" &&
+                    typeof payload.availabilityChanges === "number" &&
+                    typeof payload.restrictionChanges === "number"
+                      ? {
+                          eligibleRooms: payload.eligibleRooms,
+                          availabilityChanges: payload.availabilityChanges,
+                          restrictionChanges: payload.restrictionChanges,
+                          dateRange: payload.dateRange,
+                        }
+                      : undefined,
+                });
+                router.refresh();
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to push Channex staging ARI.",
+                });
+              }
+            });
+          }}
+        >
+          {isPushing ? "Pushing..." : "Push 30-day staging sync"}
         </button>
       </div>
     </section>

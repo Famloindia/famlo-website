@@ -86,6 +86,33 @@ export type ChannexCreateRatePlanResult = {
   rawValidation: Record<string, unknown> | null;
 };
 
+export type ChannexAvailabilityChange = {
+  propertyId: string;
+  roomTypeId: string;
+  dateFrom: string;
+  dateTo: string;
+  availability: number;
+};
+
+export type ChannexRestrictionChange = {
+  propertyId: string;
+  ratePlanId: string;
+  dateFrom: string;
+  dateTo: string;
+  rate: string;
+  stopSell: boolean;
+  minStay: number;
+};
+
+export type ChannexAriPushResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  warnings: Record<string, unknown> | null;
+};
+
 function asString(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -593,4 +620,131 @@ export async function createChannexRatePlan(
       rawValidation: null,
     };
   }
+}
+
+async function postChannexJson(
+  endpointPath: string,
+  body: Record<string, unknown>
+): Promise<ChannexAriPushResult> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpoint = `${resolveBaseUrl(environment)}${endpointPath}`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      warnings: null,
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+      body: JSON.stringify(body),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const errors =
+        parsed &&
+        typeof parsed.errors === "object" &&
+        parsed.errors
+          ? (parsed.errors as Record<string, unknown>)
+          : null;
+      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+
+      return {
+        ok: false,
+        environment,
+        endpoint: endpointPath,
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex ARI push failed: ${errorTitle}.`
+          : `Channex ARI push failed with HTTP ${response.status}.`,
+        warnings: errors,
+      };
+    }
+
+    const meta =
+      parsed &&
+      typeof parsed.meta === "object" &&
+      parsed.meta
+        ? (parsed.meta as Record<string, unknown>)
+        : null;
+    const warnings =
+      parsed &&
+      typeof parsed.warnings === "object" &&
+      parsed.warnings
+        ? (parsed.warnings as Record<string, unknown>)
+        : null;
+    const message =
+      meta && typeof meta.message === "string"
+        ? meta.message
+        : "Channex staging ARI push completed successfully.";
+
+    return {
+      ok: true,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: response.status,
+      message,
+      warnings,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      message: error instanceof Error ? `Channex ARI push failed: ${error.message}` : "Channex ARI push failed.",
+      warnings: null,
+    };
+  }
+}
+
+export async function pushChannexAvailability(
+  values: ChannexAvailabilityChange[]
+): Promise<ChannexAriPushResult> {
+  return postChannexJson("/api/v1/availability", {
+    values: values.map((value) => ({
+      property_id: value.propertyId,
+      room_type_id: value.roomTypeId,
+      date_from: value.dateFrom,
+      date_to: value.dateTo,
+      availability: value.availability,
+    })),
+  });
+}
+
+export async function pushChannexRestrictions(
+  values: ChannexRestrictionChange[]
+): Promise<ChannexAriPushResult> {
+  return postChannexJson("/api/v1/restrictions", {
+    values: values.map((value) => ({
+      property_id: value.propertyId,
+      rate_plan_id: value.ratePlanId,
+      date_from: value.dateFrom,
+      date_to: value.dateTo,
+      rate: value.rate,
+      stop_sell: value.stopSell,
+      min_stay: value.minStay,
+    })),
+  });
 }
