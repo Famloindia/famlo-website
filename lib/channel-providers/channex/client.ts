@@ -45,6 +45,28 @@ export type ChannexCreatePropertyResult = {
   rawValidation: Record<string, unknown> | null;
 };
 
+export type ChannexCreateRoomTypeInput = {
+  propertyId: string;
+  title: string;
+  countOfRooms: number;
+  occAdults: number;
+  occChildren: number;
+  occInfants: number;
+  defaultOccupancy: number;
+  roomKind?: "room" | "dorm";
+  description?: string | null;
+};
+
+export type ChannexCreateRoomTypeResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  externalRoomTypeId: string | null;
+  rawValidation: Record<string, unknown> | null;
+};
+
 function asString(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -308,6 +330,121 @@ export async function createChannexProperty(
       httpStatus: null,
       message: error instanceof Error ? `Channex property creation failed: ${error.message}` : "Channex property creation failed.",
       externalPropertyId: null,
+      rawValidation: null,
+    };
+  }
+}
+
+export async function createChannexRoomType(
+  input: ChannexCreateRoomTypeInput
+): Promise<ChannexCreateRoomTypeResult> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpoint = `${resolveBaseUrl(environment)}/api/v1/room_types`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/room_types",
+      httpStatus: null,
+      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      externalRoomTypeId: null,
+      rawValidation: null,
+    };
+  }
+
+  const payload = {
+    room_type: compactObject({
+      property_id: input.propertyId,
+      title: input.title,
+      count_of_rooms: input.countOfRooms,
+      occ_adults: input.occAdults,
+      occ_children: input.occChildren,
+      occ_infants: input.occInfants,
+      default_occupancy: input.defaultOccupancy,
+      room_kind: input.roomKind ?? "room",
+      content: trimOrNull(input.description)
+        ? {
+            description: trimOrNull(input.description),
+          }
+        : undefined,
+    }),
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+      body: JSON.stringify(payload),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const errors =
+        parsed &&
+        typeof parsed.errors === "object" &&
+        parsed.errors
+          ? (parsed.errors as Record<string, unknown>)
+          : null;
+      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+
+      return {
+        ok: false,
+        environment,
+        endpoint: "/api/v1/room_types",
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex room type creation failed: ${errorTitle}.`
+          : `Channex room type creation failed with HTTP ${response.status}.`,
+        externalRoomTypeId: null,
+        rawValidation: errors,
+      };
+    }
+
+    const data = parsed && typeof parsed.data === "object" && parsed.data ? (parsed.data as Record<string, unknown>) : null;
+    const externalRoomTypeId =
+      trimOrNull(typeof data?.id === "string" ? data.id : null) ??
+      trimOrNull(
+        data &&
+        typeof data.attributes === "object" &&
+        data.attributes &&
+        typeof (data.attributes as Record<string, unknown>).id === "string"
+          ? ((data.attributes as Record<string, unknown>).id as string)
+          : null
+      );
+
+    return {
+      ok: true,
+      environment,
+      endpoint: "/api/v1/room_types",
+      httpStatus: response.status,
+      message: externalRoomTypeId
+        ? `Channex staging room type created successfully with id ${externalRoomTypeId}.`
+        : "Channex staging room type created successfully.",
+      externalRoomTypeId,
+      rawValidation: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/room_types",
+      httpStatus: null,
+      message: error instanceof Error ? `Channex room type creation failed: ${error.message}` : "Channex room type creation failed.",
+      externalRoomTypeId: null,
       rawValidation: null,
     };
   }

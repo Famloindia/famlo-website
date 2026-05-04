@@ -612,6 +612,7 @@ export default function FamloProDashboardShell({
       statusLabel: ratePlan?.externalRatePlanId ? "Mapped" : labelizeToken(ratePlan?.syncStatus, "Not mapped"),
     };
   });
+  const canCreateRoomTypes = Boolean(primaryProperty?.externalPropertyId);
 
   return (
     <div className={styles.shell}>
@@ -1260,6 +1261,10 @@ export default function FamloProDashboardShell({
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>Not connected</span>
               </div>
               <div className={styles.cardBody}>
+                <ChannexRoomTypeBatchCard
+                  familyId={familyId}
+                  propertyCreated={canCreateRoomTypes}
+                />
                 <div className={styles.mappingTable}>
                   <div className={styles.mappingHeader}>Famlo Room</div>
                   <div className={styles.mappingHeader}>Provider Room Type</div>
@@ -2159,6 +2164,118 @@ function ChannexPropertyCard({
           }}
         >
           {alreadyCreated ? "Already created" : isCreating ? "Creating..." : "Create staging property"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ChannexRoomTypeBatchCard({
+  familyId,
+  propertyCreated,
+}: Readonly<{
+  familyId: string;
+  propertyCreated: boolean;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isCreating, startCreating] = useTransition();
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    roomResults?: Array<{
+      name: string;
+      status: string;
+      externalRoomTypeId: string | null;
+      missingFields: string[];
+    }>;
+  } | null>(null);
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>Channex staging room types</div>
+          <div className={styles.cardCopy}>
+            Create room types in staging from active Famlo stay units only. Incomplete active rooms are skipped and reported without blocking the whole batch.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${propertyCreated ? "" : styles.badgeMuted}`.trim()}>
+          {propertyCreated ? "Ready" : "Create property first"}
+        </span>
+      </div>
+
+      {!propertyCreated ? (
+        <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>
+          Create provider property first.
+        </div>
+      ) : null}
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {feedback.message}
+          {feedback.roomResults && feedback.roomResults.length > 0 ? (
+            <div className={styles.inlineBadgeRow}>
+              {feedback.roomResults.map((room) => (
+                <span key={`${room.name}:${room.status}`} className={`${styles.readinessPill} ${room.status === "created" || room.status === "already_mapped" ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                  {room.name}: {labelizeToken(room.status, room.status)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isCreating || !propertyCreated}
+          onClick={() => {
+            startCreating(async () => {
+              setFeedback(null);
+
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/rooms", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  status?: string;
+                  message?: string;
+                  results?: Array<{
+                    name: string;
+                    status: string;
+                    externalRoomTypeId: string | null;
+                    missingFields: string[];
+                  }>;
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : response.ok
+                        ? "Room-type batch completed."
+                        : "Unable to create Channex staging room types.",
+                  roomResults: Array.isArray(payload.results) ? payload.results : undefined,
+                });
+                router.refresh();
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to create Channex staging room types.",
+                });
+              }
+            });
+          }}
+        >
+          {isCreating ? "Creating..." : "Create staging room types"}
         </button>
       </div>
     </section>
