@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type { CSSProperties } from "react";
 
 import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardShell";
+import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
@@ -205,6 +206,7 @@ export default async function FamloProDashboardPage({
   const meta = parseHostListingMeta(asString(family?.admin_notes));
   const storedProSettings = await loadHostProSettings(supabase, familyId);
   const channelFoundation = await loadHostProChannelFoundation(supabase, familyId);
+  const channexConfig = getChannexConfigSummary();
   const proSettings = {
     ...storedProSettings,
     otaTitle: storedProSettings.otaTitle ?? propertyName,
@@ -424,6 +426,7 @@ export default async function FamloProDashboardPage({
       familyId={familyId}
       initialSettings={proSettings}
       channelFoundation={channelFoundation}
+      channexConfig={channexConfig}
     />
   );
 }
