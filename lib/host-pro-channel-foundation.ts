@@ -64,12 +64,37 @@ export type ChannelSyncLogRecord = {
   createdAt: string | null;
 };
 
+export type ChannelBookingRevisionRecord = {
+  id: string;
+  familyId: string;
+  providerCode: string;
+  externalPropertyId: string | null;
+  externalBookingId: string | null;
+  externalRevisionId: string | null;
+  externalRoomTypeId: string | null;
+  externalRatePlanId: string | null;
+  otaName: string | null;
+  status: string | null;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  guestName: string | null;
+  amount: number | null;
+  currency: string | null;
+  paymentCollect: string | null;
+  importStatus: string;
+  ackStatus: string;
+  rawPayload: JsonRecord;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 export type HostProChannelFoundation = {
   providers: ChannelProviderRecord[];
   properties: ChannelPropertyRecord[];
   roomMappings: ChannelRoomMappingRecord[];
   ratePlans: ChannelRatePlanRecord[];
   syncLogs: ChannelSyncLogRecord[];
+  bookingRevisions: ChannelBookingRevisionRecord[];
 };
 
 function asString(value: unknown): string | null {
@@ -107,10 +132,11 @@ export async function loadHostProChannelFoundation(
       roomMappings: [],
       ratePlans: [],
       syncLogs: [],
+      bookingRevisions: [],
     };
   }
 
-  const [providersResult, propertiesResult, roomMappingsResult, ratePlansResult, syncLogsResult] = await Promise.all([
+  const [providersResult, propertiesResult, roomMappingsResult, ratePlansResult, syncLogsResult, bookingRevisionsResult] = await Promise.all([
     supabase.from("channel_providers").select("id,code,name,status,metadata,created_at").order("name", { ascending: true }),
     supabase
       .from("channel_properties")
@@ -133,6 +159,12 @@ export async function loadHostProChannelFoundation(
       .eq("family_id", normalizedFamilyId)
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("channel_booking_revisions")
+      .select("id,family_id,provider_code,external_property_id,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,raw_payload,import_status,ack_status,created_at,updated_at")
+      .eq("family_id", normalizedFamilyId)
+      .order("updated_at", { ascending: false })
+      .limit(20),
   ]);
 
   const errors = [
@@ -141,6 +173,7 @@ export async function loadHostProChannelFoundation(
     roomMappingsResult.error,
     ratePlansResult.error,
     syncLogsResult.error,
+    bookingRevisionsResult.error,
   ].filter(Boolean);
 
   if (errors.length > 0) {
@@ -152,6 +185,7 @@ export async function loadHostProChannelFoundation(
         roomMappings: [],
         ratePlans: [],
         syncLogs: [],
+        bookingRevisions: [],
       };
     }
     throw firstError;
@@ -214,6 +248,29 @@ export async function loadHostProChannelFoundation(
       message: asString(row.message),
       payload: asObject(row.payload),
       createdAt: asString(row.created_at),
+    })),
+    bookingRevisions: (bookingRevisionsResult.data ?? []).map((row) => ({
+      id: asString(row.id) ?? "",
+      familyId: asString(row.family_id) ?? normalizedFamilyId,
+      providerCode: asString(row.provider_code) ?? "",
+      externalPropertyId: asString(row.external_property_id),
+      externalBookingId: asString(row.external_booking_id),
+      externalRevisionId: asString(row.external_revision_id),
+      externalRoomTypeId: asString(row.external_room_type_id),
+      externalRatePlanId: asString(row.external_rate_plan_id),
+      otaName: asString(row.ota_name),
+      status: asString(row.status),
+      arrivalDate: asString(row.arrival_date),
+      departureDate: asString(row.departure_date),
+      guestName: asString(row.guest_name),
+      amount: row.amount == null ? null : asNumber(row.amount, 0),
+      currency: asString(row.currency),
+      paymentCollect: asString(row.payment_collect),
+      importStatus: asString(row.import_status) ?? "preview",
+      ackStatus: asString(row.ack_status) ?? "not_acknowledged",
+      rawPayload: asObject(row.raw_payload),
+      createdAt: asString(row.created_at),
+      updatedAt: asString(row.updated_at),
     })),
   };
 }

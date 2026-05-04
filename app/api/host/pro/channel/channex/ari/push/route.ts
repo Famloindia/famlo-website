@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import {
   pushChannexAvailability,
   pushChannexRestrictions,
+  fetchChannexAvailabilitySnapshot,
+  fetchChannexRestrictionsSnapshot,
   getChannexConfigSummary,
   type ChannexAvailabilityChange,
   type ChannexRestrictionChange,
@@ -30,6 +32,13 @@ type RoomSummary = {
   missingFields: string[];
 };
 
+type VerificationSummary = {
+  verifiedAvailabilityCount: number;
+  verifiedRateCount: number;
+  availabilityMismatches: Array<{ roomTypeId: string; date: string; expected: number; actual: number | null }>;
+  rateMismatches: Array<{ ratePlanId: string; date: string; expected: string; actual: string | null }>;
+};
+
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -46,11 +55,20 @@ function formatPriceForChannex(value: number): string {
   return value.toFixed(2);
 }
 
-function getDateRange(): { from: string; to: string } {
-  const today = new Date();
-  const from = today.toISOString().slice(0, 10);
-  const toDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 29));
-  const to = toDate.toISOString().slice(0, 10);
+function getLocalDateString(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getDateRange(timeZone: string): { from: string; to: string } {
+  const now = new Date();
+  const from = getLocalDateString(now, timeZone);
+  const toDate = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+  const to = getLocalDateString(toDate, timeZone);
   return { from, to };
 }
 
@@ -126,6 +144,90 @@ async function logAriPush(input: {
   }
 }
 
+function normalizeWarningMessages(warnings: unknown[]): string[] {
+  return warnings.flatMap((warning) => {
+    if (typeof warning === "string" && warning.trim().length > 0) {
+      return [warning.trim()];
+    }
+    if (warning && typeof warning === "object" && !Array.isArray(warning)) {
+      return Object.entries(warning as Record<string, unknown>).flatMap(([key, value]) => {
+        if (typeof value === "string" && value.trim().length > 0) return [`${key}: ${value.trim()}`];
+        if (Array.isArray(value)) return value.map((entry) => `${key}: ${String(entry)}`);
+        return [`${key}: ${JSON.stringify(value)}`];
+      });
+    }
+    return [String(warning)];
+  });
+}
+
+function verifySnapshots(input: {
+  availabilitySnapshot: Record<string, Record<string, number>>;
+  restrictionsSnapshot: Record<string, Record<string, Record<string, unknown>>>;
+  availabilityValues: ChannexAvailabilityChange[];
+  restrictionValues: ChannexRestrictionChange[];
+}): VerificationSummary {
+  const availabilityMismatches: VerificationSummary["availabilityMismatches"] = [];
+  const rateMismatches: VerificationSummary["rateMismatches"] = [];
+  let verifiedAvailabilityCount = 0;
+  let verifiedRateCount = 0;
+
+  for (const value of input.availabilityValues) {
+    for (const date of enumerateDateRange(value.dateFrom, value.dateTo)) {
+      const actual = input.availabilitySnapshot[value.roomTypeId]?.[date];
+      if (actual === value.availability) {
+        verifiedAvailabilityCount += 1;
+      } else {
+        availabilityMismatches.push({
+          roomTypeId: value.roomTypeId,
+          date,
+          expected: value.availability,
+          actual: typeof actual === "number" ? actual : null,
+        });
+      }
+    }
+  }
+
+  for (const value of input.restrictionValues) {
+    for (const date of enumerateDateRange(value.dateFrom, value.dateTo)) {
+      const actualRestrictions = input.restrictionsSnapshot[value.ratePlanId]?.[date] ?? null;
+      const actualRate = actualRestrictions?.rate;
+      const actualMinStayThrough = actualRestrictions?.min_stay_through;
+      const normalizedActual =
+        typeof actualRate === "string"
+          ? actualRate
+          : typeof actualRate === "number"
+            ? actualRate.toFixed(2)
+            : null;
+      const normalizedMinStayThrough =
+        typeof actualMinStayThrough === "number"
+          ? actualMinStayThrough
+          : typeof actualMinStayThrough === "string" && actualMinStayThrough.trim().length > 0
+            ? Number(actualMinStayThrough)
+            : null;
+      if (normalizedActual === value.rate && normalizedMinStayThrough === value.minStayThrough) {
+        verifiedRateCount += 1;
+      } else {
+        rateMismatches.push({
+          ratePlanId: value.ratePlanId,
+          date,
+          expected: `${value.rate} / min_stay_through=${value.minStayThrough}`,
+          actual:
+            normalizedActual != null || normalizedMinStayThrough != null
+              ? `${normalizedActual ?? "null"} / min_stay_through=${normalizedMinStayThrough ?? "null"}`
+              : null,
+        });
+      }
+    }
+  }
+
+  return {
+    verifiedAvailabilityCount,
+    verifiedRateCount,
+    availabilityMismatches,
+    rateMismatches,
+  };
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const body = (await request.json()) as AriPushBody;
@@ -160,7 +262,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const { from, to } = getDateRange();
     const [settings, { data: channelProperty }, rooms, { data: roomMappings }, { data: ratePlans }] = await Promise.all([
       loadHostProSettings(supabase, familyId),
       supabase
@@ -184,6 +285,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         .eq("family_id", familyId)
         .eq("provider_code", "channex"),
     ]);
+    const { from, to } = getDateRange(settings.timezone || "Asia/Kolkata");
 
     const externalPropertyId = asString(channelProperty?.external_property_id);
     if (!externalPropertyId) {
@@ -339,7 +441,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           dateTo: segment.dateTo,
           rate: segment.rate,
           stopSell: segment.stopSell,
-          minStay: 1,
+          minStayThrough: 1,
         });
       }
     }
@@ -348,12 +450,50 @@ export async function POST(request: Request): Promise<NextResponse> {
       pushChannexAvailability(availabilityValues),
       pushChannexRestrictions(restrictionValues),
     ]);
-
-    const ok = availabilityResult.ok && restrictionsResult.ok;
+    const [availabilitySnapshot, restrictionsSnapshot] = await Promise.all([
+      fetchChannexAvailabilitySnapshot({
+        propertyId: externalPropertyId,
+        dateFrom: from,
+        dateTo: to,
+      }),
+      fetchChannexRestrictionsSnapshot({
+        propertyId: externalPropertyId,
+        dateFrom: from,
+        dateTo: to,
+      }),
+    ]);
+    const availabilityWarnings = normalizeWarningMessages(availabilityResult.warnings);
+    const restrictionsWarnings = normalizeWarningMessages(restrictionsResult.warnings);
+    const verification = availabilitySnapshot.ok && restrictionsSnapshot.ok
+      ? verifySnapshots({
+          availabilitySnapshot: availabilitySnapshot.data,
+          restrictionsSnapshot: restrictionsSnapshot.data,
+          availabilityValues,
+          restrictionValues,
+        })
+      : {
+          verifiedAvailabilityCount: 0,
+          verifiedRateCount: 0,
+          availabilityMismatches: [],
+          rateMismatches: [],
+        };
+    const verificationOk =
+      availabilitySnapshot.ok &&
+      restrictionsSnapshot.ok &&
+      verification.availabilityMismatches.length === 0 &&
+      verification.rateMismatches.length === 0;
+    const ok =
+      availabilityResult.ok &&
+      restrictionsResult.ok &&
+      availabilityWarnings.length === 0 &&
+      restrictionsWarnings.length === 0 &&
+      verificationOk;
     const missingRoomSummaries = roomSummaries.filter((room) => room.status === "missing_fields");
     const summaryMessage = ok
-      ? `30-day staging sync pushed for ${eligibleRooms.length} rooms from ${from} to ${to}.`
-      : `30-day staging sync failed. Availability: ${availabilityResult.message} Restrictions: ${restrictionsResult.message}`;
+      ? `30-day staging sync pushed and verified for ${eligibleRooms.length} rooms from ${from} to ${to}.`
+      : verificationOk
+        ? `30-day staging sync was accepted by Channex but returned warnings. Availability: ${availabilityResult.message} Restrictions: ${restrictionsResult.message}`
+        : `Pushed but not verified in Channex. Availability: ${availabilityResult.message} Restrictions: ${restrictionsResult.message}`;
 
     await logAriPush({
       supabase,
@@ -362,25 +502,60 @@ export async function POST(request: Request): Promise<NextResponse> {
       message: summaryMessage,
       payload: {
         date_range: { from, to },
+        property_id: externalPropertyId,
         room_count: eligibleRooms.length,
         rate_count: eligibleRooms.length,
-        availability_http_status: availabilityResult.httpStatus,
-        restrictions_http_status: restrictionsResult.httpStatus,
+        room_type_ids: eligibleRooms.map((room) => room.externalRoomTypeId),
+        rate_plan_ids: eligibleRooms.map((room) => room.externalRatePlanId),
+        availability_response: {
+          http_status: availabilityResult.httpStatus,
+          message: availabilityResult.message,
+          meta: availabilityResult.meta,
+          warnings: availabilityWarnings,
+        },
+        restrictions_response: {
+          http_status: restrictionsResult.httpStatus,
+          message: restrictionsResult.message,
+          meta: restrictionsResult.meta,
+          warnings: restrictionsWarnings,
+        },
+        verification_summary: {
+          availability_http_status: availabilitySnapshot.httpStatus,
+          restrictions_http_status: restrictionsSnapshot.httpStatus,
+          verified_availability_count: verification.verifiedAvailabilityCount,
+          verified_rate_count: verification.verifiedRateCount,
+          availability_mismatch_count: verification.availabilityMismatches.length,
+          rate_mismatch_count: verification.rateMismatches.length,
+        },
         skipped_rooms: missingRoomSummaries,
       },
     });
 
     return NextResponse.json({
       ok,
-      status: ok ? "completed" : "failed",
+      status: ok ? "completed" : verificationOk ? "warning" : "verification_failed",
       message: summaryMessage,
       dateRange: { from, to },
       eligibleRooms: eligibleRooms.length,
       availabilityChanges: availabilityValues.length,
       restrictionChanges: restrictionValues.length,
+      verifiedAvailabilityCount: verification.verifiedAvailabilityCount,
+      verifiedRateCount: verification.verifiedRateCount,
+      warnings: [...availabilityWarnings, ...restrictionsWarnings],
+      availabilityVerificationOk: availabilitySnapshot.ok,
+      restrictionsVerificationOk: restrictionsSnapshot.ok,
+      verificationFailed: !verificationOk,
+      verificationSummary: {
+        availabilityMismatchCount: verification.availabilityMismatches.length,
+        rateMismatchCount: verification.rateMismatches.length,
+        availabilityMismatches: verification.availabilityMismatches.slice(0, 10),
+        rateMismatches: verification.rateMismatches.slice(0, 10),
+      },
       rooms: roomSummaries,
       availabilityMessage: availabilityResult.message,
       restrictionsMessage: restrictionsResult.message,
+      availabilityWarnings,
+      restrictionsWarnings,
     }, { status: ok ? 200 : 502 });
   } catch (error) {
     console.error("[host.pro.channel.channex.ari.push] failed:", error);

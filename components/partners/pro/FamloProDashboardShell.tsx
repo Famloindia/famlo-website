@@ -630,7 +630,7 @@ export default function FamloProDashboardShell({
     return !(roomMapping?.externalRoomTypeId && ratePlan?.externalRatePlanId && room.priceFullday > 0);
   }).length;
   const lastAriSyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
-  const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
+  const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "store_booking_feed_preview") ?? null;
 
   return (
     <div className={styles.shell}>
@@ -1435,6 +1435,7 @@ export default function FamloProDashboardShell({
                   propertyCreated={canCreateRoomTypes}
                   externalPropertyId={primaryProperty?.externalPropertyId ?? null}
                   lastSyncLog={lastBookingFeedLog}
+                  storedRevisions={channelFoundation.bookingRevisions}
                 />
                 <div className={styles.filterRow}>
                   {BOOKING_FILTERS.map((filter) => (
@@ -1747,6 +1748,11 @@ export default function FamloProDashboardShell({
                 <ChannexConnectionCard
                   familyId={familyId}
                   config={channexConfig}
+                />
+                <ChannexStructureVerifyCard
+                  familyId={familyId}
+                  propertyCreated={canCreateRoomTypes}
+                  externalPropertyId={primaryProperty?.externalPropertyId ?? null}
                 />
                 <ChannexPropertyCard
                   familyId={familyId}
@@ -2223,6 +2229,172 @@ function ChannexPropertyCard({
   );
 }
 
+function ChannexStructureVerifyCard({
+  familyId,
+  propertyCreated,
+  externalPropertyId,
+}: Readonly<{
+  familyId: string;
+  propertyCreated: boolean;
+  externalPropertyId: string | null;
+}>): React.JSX.Element {
+  const [isVerifying, startVerifying] = useTransition();
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    propertyTitle?: string | null;
+    roomTypesFoundCount?: number;
+    ratePlansFoundCount?: number;
+    availabilityVisibleCount?: number;
+    rateVisibleCount?: number;
+    mappedRoomRows?: Array<{ famloRoomName: string; externalRoomTypeId: string | null; found: boolean }>;
+    mappedRateRows?: Array<{ famloRateTitle: string; externalRatePlanId: string | null; found: boolean }>;
+  } | null>(null);
+
+  const blockedMessage = !propertyCreated
+    ? "Create provider property first."
+    : !externalPropertyId
+      ? "Provider property is not mapped yet."
+      : null;
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>Verify Channex structure</div>
+          <div className={styles.cardCopy}>
+            Read-only API check for the mapped property, room types, and rate plans. If API shows room/rate but Channex UI is empty, check property selector, group, filters, or refresh.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
+          {blockedMessage ? "Blocked" : "Read-only"}
+        </span>
+      </div>
+
+      <div className={styles.placeholderGrid}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>External property ID</div>
+          <div className={styles.placeholderCopy}>{externalPropertyId ?? "Missing"}</div>
+        </div>
+      </div>
+
+      {blockedMessage ? <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{blockedMessage}</div> : null}
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {feedback.message}
+          <div className={styles.inlineBadgeRow}>
+            <span className={`${styles.readinessPill} ${feedback.ok ? styles.readinessPillOk : styles.readinessPillReview}`}>
+              Property: {feedback.propertyTitle ?? "Missing"}
+            </span>
+            <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Room types: {feedback.roomTypesFoundCount ?? 0}</span>
+            <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Rate plans: {feedback.ratePlansFoundCount ?? 0}</span>
+            <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Availability visible: {feedback.availabilityVisibleCount ?? 0}</span>
+            <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Rates visible: {feedback.rateVisibleCount ?? 0}</span>
+          </div>
+
+          {feedback.mappedRoomRows && feedback.mappedRoomRows.length > 0 ? (
+            <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+              <div className={styles.mappingHeader}>Famlo room</div>
+              <div className={styles.mappingHeader}>External room type ID</div>
+              <div className={styles.mappingHeader}>Visible in Channex API</div>
+              {feedback.mappedRoomRows.map((row, index) => (
+                <Fragment key={`${row.externalRoomTypeId ?? "room"}-${index}`}>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{row.famloRoomName}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{row.externalRoomTypeId ?? "Missing"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{row.found ? "Found" : "Missing"}</div>
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
+
+          {feedback.mappedRateRows && feedback.mappedRateRows.length > 0 ? (
+            <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+              <div className={styles.mappingHeader}>Famlo rate</div>
+              <div className={styles.mappingHeader}>External rate plan ID</div>
+              <div className={styles.mappingHeader}>Visible in Channex API</div>
+              {feedback.mappedRateRows.map((row, index) => (
+                <Fragment key={`${row.externalRatePlanId ?? "rate"}-${index}`}>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{row.famloRateTitle}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{row.externalRatePlanId ?? "Missing"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{row.found ? "Found" : "Missing"}</div>
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isVerifying || Boolean(blockedMessage)}
+          onClick={() => {
+            startVerifying(async () => {
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/structure/verify", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  message?: string;
+                  property?: { title?: string | null } | null;
+                  roomTypesFoundCount?: number;
+                  ratePlansFoundCount?: number;
+                  availabilityVisibleCount?: number;
+                  rateVisibleCount?: number;
+                  mappedRoomRows?: Array<{ famloRoomName: string; externalRoomTypeId: string | null; found: boolean }>;
+                  mappedRateRows?: Array<{ famloRateTitle: string; externalRatePlanId: string | null; found: boolean }>;
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to verify Channex structure.",
+                  propertyTitle: payload.property?.title ?? null,
+                  roomTypesFoundCount: typeof payload.roomTypesFoundCount === "number" ? payload.roomTypesFoundCount : 0,
+                  ratePlansFoundCount: typeof payload.ratePlansFoundCount === "number" ? payload.ratePlansFoundCount : 0,
+                  availabilityVisibleCount: typeof payload.availabilityVisibleCount === "number" ? payload.availabilityVisibleCount : 0,
+                  rateVisibleCount: typeof payload.rateVisibleCount === "number" ? payload.rateVisibleCount : 0,
+                  mappedRoomRows: Array.isArray(payload.mappedRoomRows) ? payload.mappedRoomRows : [],
+                  mappedRateRows: Array.isArray(payload.mappedRateRows) ? payload.mappedRateRows : [],
+                });
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to verify Channex structure.",
+                });
+              }
+            });
+          }}
+        >
+          {isVerifying ? "Verifying..." : "Verify Channex structure"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function ChannexRoomTypeBatchCard({
   familyId,
   propertyCreated,
@@ -2476,6 +2648,7 @@ function ChannexAriSyncCard({
 }>): React.JSX.Element {
   const router = useRouter();
   const [isPushing, startPushing] = useTransition();
+  const [isVerifying, startVerifying] = useTransition();
   const [feedback, setFeedback] = useState<{
     ok: boolean;
     message: string;
@@ -2483,8 +2656,14 @@ function ChannexAriSyncCard({
       eligibleRooms: number;
       availabilityChanges: number;
       restrictionChanges: number;
+      verifiedAvailabilityCount?: number;
+      verifiedRateCount?: number;
+      availabilityMatchedCount?: number;
+      rateMatchedCount?: number;
       dateRange?: { from: string; to: string };
     };
+    warnings?: string[];
+    verificationFailed?: boolean;
   } | null>(null);
 
   const blockedMessage = !propertyCreated
@@ -2546,6 +2725,33 @@ function ChannexAriSyncCard({
               <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Eligible rooms: {feedback.summary.eligibleRooms}</span>
               <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Availability changes: {feedback.summary.availabilityChanges}</span>
               <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Restriction changes: {feedback.summary.restrictionChanges}</span>
+              {typeof feedback.summary.verifiedAvailabilityCount === "number" ? (
+                <span className={`${styles.readinessPill} ${feedback.verificationFailed ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                  Verified availability: {feedback.summary.verifiedAvailabilityCount}
+                </span>
+              ) : null}
+              {typeof feedback.summary.verifiedRateCount === "number" ? (
+                <span className={`${styles.readinessPill} ${feedback.verificationFailed ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                  Verified rate: {feedback.summary.verifiedRateCount}
+                </span>
+              ) : null}
+              {typeof feedback.summary.availabilityMatchedCount === "number" ? (
+                <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
+                  Current availability rows: {feedback.summary.availabilityMatchedCount}
+                </span>
+              ) : null}
+              {typeof feedback.summary.rateMatchedCount === "number" ? (
+                <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
+                  Current rate rows: {feedback.summary.rateMatchedCount}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          {feedback.warnings && feedback.warnings.length > 0 ? (
+            <div style={{ marginTop: 10 }}>
+              {feedback.warnings.map((warning) => (
+                <div key={warning} className={styles.feedCopy}>- {warning}</div>
+              ))}
             </div>
           ) : null}
         </div>
@@ -2571,11 +2777,16 @@ function ChannexAriSyncCard({
 
                 const payload = (await response.json()) as {
                   ok?: boolean;
+                  status?: string;
                   message?: string;
                   eligibleRooms?: number;
                   availabilityChanges?: number;
                   restrictionChanges?: number;
+                  verifiedAvailabilityCount?: number;
+                  verifiedRateCount?: number;
                   dateRange?: { from: string; to: string };
+                  warnings?: string[];
+                  verificationFailed?: boolean;
                 };
 
                 setFeedback({
@@ -2592,9 +2803,15 @@ function ChannexAriSyncCard({
                           eligibleRooms: payload.eligibleRooms,
                           availabilityChanges: payload.availabilityChanges,
                           restrictionChanges: payload.restrictionChanges,
+                          verifiedAvailabilityCount:
+                            typeof payload.verifiedAvailabilityCount === "number" ? payload.verifiedAvailabilityCount : undefined,
+                          verifiedRateCount:
+                            typeof payload.verifiedRateCount === "number" ? payload.verifiedRateCount : undefined,
                           dateRange: payload.dateRange,
                         }
                       : undefined,
+                  warnings: Array.isArray(payload.warnings) ? payload.warnings : undefined,
+                  verificationFailed: Boolean(payload.verificationFailed || payload.status === "verification_failed"),
                 });
                 router.refresh();
               } catch (error) {
@@ -2608,6 +2825,58 @@ function ChannexAriSyncCard({
         >
           {isPushing ? "Pushing..." : "Push 30-day staging sync"}
         </button>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isVerifying || !propertyCreated}
+          onClick={() => {
+            startVerifying(async () => {
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/ari/verify", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  message?: string;
+                  availabilityMatchedCount?: number;
+                  rateMatchedCount?: number;
+                  dateRange?: { from: string; to: string };
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to verify current Channex inventory.",
+                  summary:
+                    typeof payload.availabilityMatchedCount === "number" && typeof payload.rateMatchedCount === "number"
+                      ? {
+                          eligibleRooms,
+                          availabilityChanges: 0,
+                          restrictionChanges: 0,
+                          availabilityMatchedCount: payload.availabilityMatchedCount,
+                          rateMatchedCount: payload.rateMatchedCount,
+                          dateRange: payload.dateRange,
+                        }
+                      : undefined,
+                });
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to verify current Channex inventory.",
+                });
+              }
+            });
+          }}
+        >
+          {isVerifying ? "Verifying..." : "Verify current Channex inventory"}
+        </button>
       </div>
     </section>
   );
@@ -2618,6 +2887,7 @@ function ChannexBookingFeedCard({
   propertyCreated,
   externalPropertyId,
   lastSyncLog,
+  storedRevisions,
 }: Readonly<{
   familyId: string;
   propertyCreated: boolean;
@@ -2627,6 +2897,23 @@ function ChannexBookingFeedCard({
     message: string | null;
     createdAt: string | null;
   } | null;
+  storedRevisions: Array<{
+    externalBookingId: string | null;
+    externalRevisionId: string | null;
+    status: string | null;
+    otaName: string | null;
+    arrivalDate: string | null;
+    departureDate: string | null;
+    guestName: string | null;
+    externalRoomTypeId: string | null;
+    externalRatePlanId: string | null;
+    amount: number | null;
+    currency: string | null;
+    paymentCollect: string | null;
+    importStatus: string;
+    ackStatus: string;
+    updatedAt: string | null;
+  }>;
 }>): React.JSX.Element {
   const router = useRouter();
   const [isFetching, startFetching] = useTransition();
@@ -2654,6 +2941,8 @@ function ChannexBookingFeedCard({
       paymentType: string | null;
       unmatchedRoom: boolean;
       insertedAt: string | null;
+      importStatus?: string | null;
+      ackStatus?: string | null;
     }>;
   } | null>(null);
 
@@ -2712,7 +3001,7 @@ function ChannexBookingFeedCard({
             </div>
           ) : null}
 
-          {feedback.revisions && feedback.revisions.length > 0 ? (
+          {(feedback.revisions && feedback.revisions.length > 0) || storedRevisions.length > 0 ? (
             <div className={styles.mappingTable} style={{ marginTop: 14 }}>
               <div className={styles.mappingHeader}>Booking</div>
               <div className={styles.mappingHeader}>Status</div>
@@ -2721,7 +3010,27 @@ function ChannexBookingFeedCard({
               <div className={styles.mappingHeader}>Guest</div>
               <div className={styles.mappingHeader}>Room / Rate</div>
               <div className={styles.mappingHeader}>Amount</div>
-              {feedback.revisions.map((revision, index) => (
+              {(feedback.revisions && feedback.revisions.length > 0
+                ? feedback.revisions
+                : storedRevisions.map((revision) => ({
+                    externalBookingId: revision.externalBookingId,
+                    revisionId: revision.externalRevisionId,
+                    status: revision.status,
+                    otaName: revision.otaName,
+                    arrivalDate: revision.arrivalDate,
+                    departureDate: revision.departureDate,
+                    guestName: revision.guestName,
+                    externalRoomTypeId: revision.externalRoomTypeId,
+                    externalRatePlanId: revision.externalRatePlanId,
+                    amount: revision.amount != null ? revision.amount.toFixed(2) : null,
+                    currency: revision.currency,
+                    paymentCollect: revision.paymentCollect,
+                    paymentType: null,
+                    unmatchedRoom: false,
+                    insertedAt: revision.updatedAt,
+                    importStatus: revision.importStatus,
+                    ackStatus: revision.ackStatus,
+                  }))).map((revision, index) => (
                 <Fragment key={revision.revisionId ?? revision.externalBookingId ?? revision.insertedAt ?? `revision-${index}`}>
                   <div className={styles.mappingCell}>
                     <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
@@ -2729,7 +3038,7 @@ function ChannexBookingFeedCard({
                   </div>
                   <div className={styles.mappingCell}>
                     <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
-                    <div className={styles.mappingSubcopy}>Read-only preview</div>
+                    <div className={styles.mappingSubcopy}>{revision.importStatus ?? "preview"} · {revision.ackStatus ?? "not_acknowledged"}</div>
                   </div>
                   <div className={styles.mappingCell}>
                     <div className={styles.mappingTitle}>{revision.otaName ?? "Unknown"}</div>
@@ -2754,7 +3063,7 @@ function ChannexBookingFeedCard({
                     <div className={styles.mappingTitle}>
                       {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
                     </div>
-                    <div className={styles.mappingSubcopy}>No Famlo import yet</div>
+                    <div className={styles.mappingSubcopy}>Preview only, not imported yet</div>
                   </div>
                 </Fragment>
               ))}
@@ -2803,6 +3112,8 @@ function ChannexBookingFeedCard({
                     paymentType: string | null;
                     unmatchedRoom: boolean;
                     insertedAt: string | null;
+                    importStatus?: string | null;
+                    ackStatus?: string | null;
                   }>;
                 };
 

@@ -141,7 +141,7 @@ export type ChannexRestrictionChange = {
   dateTo: string;
   rate: string;
   stopSell: boolean;
-  minStay: number;
+  minStayThrough: number;
 };
 
 export type ChannexAriPushResult = {
@@ -150,7 +150,62 @@ export type ChannexAriPushResult = {
   endpoint: string;
   httpStatus: number | null;
   message: string;
-  warnings: Record<string, unknown> | null;
+  meta: Record<string, unknown> | null;
+  warnings: unknown[];
+  rawValidation: Record<string, unknown> | null;
+  data: unknown;
+};
+
+export type ChannexAvailabilitySnapshotResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  data: Record<string, Record<string, number>>;
+  rawValidation: Record<string, unknown> | null;
+};
+
+export type ChannexRestrictionsSnapshotResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  data: Record<string, Record<string, Record<string, unknown>>>;
+  rawValidation: Record<string, unknown> | null;
+};
+
+export type ChannexPropertyStructureRecord = {
+  id: string;
+  title: string | null;
+  currency: string | null;
+  timezone: string | null;
+  groupTitles: string[];
+};
+
+export type ChannexRoomTypeStructureRecord = {
+  id: string;
+  title: string | null;
+  propertyId: string | null;
+  countOfRooms: number | null;
+};
+
+export type ChannexRatePlanStructureRecord = {
+  id: string;
+  title: string | null;
+  propertyId: string | null;
+  roomTypeId: string | null;
+};
+
+export type ChannexStructureResult<T> = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  data: T;
+  rawValidation: Record<string, unknown> | null;
 };
 
 type ChannexBookingFeedRoom = {
@@ -880,7 +935,10 @@ async function postChannexJson(
       endpoint: endpointPath,
       httpStatus: null,
       message: "Channex staging configuration is incomplete. Add the server-side API key first.",
-      warnings: null,
+      meta: null,
+      warnings: [],
+      rawValidation: null,
+      data: null,
     };
   }
 
@@ -920,7 +978,10 @@ async function postChannexJson(
         message: errorTitle
           ? `Channex ARI push failed: ${errorTitle}.`
           : `Channex ARI push failed with HTTP ${response.status}.`,
-        warnings: errors,
+        meta: null,
+        warnings: [],
+        rawValidation: errors,
+        data: null,
       };
     }
 
@@ -931,23 +992,24 @@ async function postChannexJson(
         ? (parsed.meta as Record<string, unknown>)
         : null;
     const warnings =
-      parsed &&
-      typeof parsed.warnings === "object" &&
-      parsed.warnings
-        ? (parsed.warnings as Record<string, unknown>)
-        : null;
+      meta && Array.isArray(meta.warnings)
+        ? meta.warnings
+        : [];
     const message =
       meta && typeof meta.message === "string"
         ? meta.message
         : "Channex staging ARI push completed successfully.";
 
     return {
-      ok: true,
+      ok: warnings.length === 0,
       environment,
       endpoint: endpointPath,
       httpStatus: response.status,
       message,
+      meta,
       warnings,
+      rawValidation: null,
+      data: parsed?.data ?? null,
     };
   } catch (error) {
     return {
@@ -956,7 +1018,104 @@ async function postChannexJson(
       endpoint: endpointPath,
       httpStatus: null,
       message: error instanceof Error ? `Channex ARI push failed: ${error.message}` : "Channex ARI push failed.",
-      warnings: null,
+      meta: null,
+      warnings: [],
+      rawValidation: null,
+      data: null,
+    };
+  }
+}
+
+async function getChannexObjectJson(endpointPath: string): Promise<{
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  data: Record<string, unknown>;
+  rawValidation: Record<string, unknown> | null;
+}> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpoint = `${resolveBaseUrl(environment)}${endpointPath}`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      data: {},
+      rawValidation: null,
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const errors =
+        parsed &&
+        typeof parsed.errors === "object" &&
+        parsed.errors
+          ? (parsed.errors as Record<string, unknown>)
+          : null;
+      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+
+      return {
+        ok: false,
+        environment,
+        endpoint: endpointPath,
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex read request failed: ${errorTitle}.`
+          : `Channex read request failed with HTTP ${response.status}.`,
+        data: {},
+        rawValidation: errors,
+      };
+    }
+
+    return {
+      ok: true,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: response.status,
+      message: "Channex staging read request completed successfully.",
+      data:
+        parsed &&
+        typeof parsed.data === "object" &&
+        parsed.data &&
+        !Array.isArray(parsed.data)
+          ? (parsed.data as Record<string, unknown>)
+          : {},
+      rawValidation: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      message: error instanceof Error ? `Channex read request failed: ${error.message}` : "Channex read request failed.",
+      data: {},
+      rawValidation: null,
     };
   }
 }
@@ -1074,9 +1233,209 @@ export async function pushChannexRestrictions(
       date_to: value.dateTo,
       rate: value.rate,
       stop_sell: value.stopSell,
-      min_stay: value.minStay,
+      min_stay_through: value.minStayThrough,
     })),
   });
+}
+
+export async function fetchChannexAvailabilitySnapshot(input: {
+  propertyId: string;
+  dateFrom: string;
+  dateTo: string;
+}): Promise<ChannexAvailabilitySnapshotResult> {
+  const params = new URLSearchParams();
+  params.set("filter[property_id]", input.propertyId);
+  params.set("filter[date][gte]", input.dateFrom);
+  params.set("filter[date][lte]", input.dateTo);
+  const result = await getChannexObjectJson(`/api/v1/availability?${params.toString()}`);
+
+  const normalized: Record<string, Record<string, number>> = {};
+  for (const [roomTypeId, value] of Object.entries(result.data)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const dates: Record<string, number> = {};
+    for (const [date, availability] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof availability === "number" && Number.isFinite(availability)) {
+        dates[date] = availability;
+      } else if (typeof availability === "string" && availability.trim().length > 0) {
+        const parsed = Number(availability);
+        if (Number.isFinite(parsed)) dates[date] = parsed;
+      }
+    }
+    normalized[roomTypeId] = dates;
+  }
+
+  return {
+    ...result,
+    data: normalized,
+  };
+}
+
+export async function fetchChannexRestrictionsSnapshot(input: {
+  propertyId: string;
+  dateFrom: string;
+  dateTo: string;
+}): Promise<ChannexRestrictionsSnapshotResult> {
+  const params = new URLSearchParams();
+  params.set("filter[property_id]", input.propertyId);
+  params.set("filter[date][gte]", input.dateFrom);
+  params.set("filter[date][lte]", input.dateTo);
+  params.set("filter[restrictions]", "rate,stop_sell,min_stay_through");
+  const result = await getChannexObjectJson(`/api/v1/restrictions?${params.toString()}`);
+
+  const normalized: Record<string, Record<string, Record<string, unknown>>> = {};
+  for (const [ratePlanId, value] of Object.entries(result.data)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const dates: Record<string, Record<string, unknown>> = {};
+    for (const [date, restrictions] of Object.entries(value as Record<string, unknown>)) {
+      if (restrictions && typeof restrictions === "object" && !Array.isArray(restrictions)) {
+        dates[date] = restrictions as Record<string, unknown>;
+      }
+    }
+    normalized[ratePlanId] = dates;
+  }
+
+  return {
+    ...result,
+    data: normalized,
+  };
+}
+
+export async function fetchChannexPropertyById(
+  propertyId: string
+): Promise<ChannexStructureResult<ChannexPropertyStructureRecord | null>> {
+  const result = await getChannexObjectJson(`/api/v1/properties/${propertyId}`);
+  const attributes =
+    result.data &&
+    typeof result.data.attributes === "object" &&
+    result.data.attributes &&
+    !Array.isArray(result.data.attributes)
+      ? (result.data.attributes as Record<string, unknown>)
+      : null;
+  const groups =
+    attributes &&
+    typeof attributes.groups === "object" &&
+    attributes.groups &&
+    !Array.isArray(attributes.groups) &&
+    Array.isArray((attributes.groups as Record<string, unknown>).data)
+      ? ((attributes.groups as Record<string, unknown>).data as unknown[])
+      : [];
+
+  return {
+    ...result,
+    data: result.ok
+      ? {
+          id: trimOrNull(typeof result.data.id === "string" ? result.data.id : null) ?? propertyId,
+          title: trimOrNull(typeof attributes?.title === "string" ? attributes.title : null),
+          currency: trimOrNull(typeof attributes?.currency === "string" ? attributes.currency : null),
+          timezone: trimOrNull(typeof attributes?.timezone === "string" ? attributes.timezone : null),
+          groupTitles: groups
+            .map((group) => {
+              const record = group && typeof group === "object" && !Array.isArray(group) ? (group as Record<string, unknown>) : null;
+              const attrs =
+                record &&
+                typeof record.attributes === "object" &&
+                record.attributes &&
+                !Array.isArray(record.attributes)
+                  ? (record.attributes as Record<string, unknown>)
+                  : null;
+              return trimOrNull(typeof attrs?.title === "string" ? attrs.title : null);
+            })
+            .filter((value): value is string => Boolean(value)),
+        }
+      : null,
+  };
+}
+
+export async function fetchChannexRoomTypesForProperty(
+  propertyId: string
+): Promise<ChannexStructureResult<ChannexRoomTypeStructureRecord[]>> {
+  const params = new URLSearchParams();
+  params.set("filter[property_id]", propertyId);
+  params.set("pagination[limit]", "100");
+  const result = await getChannexJson(`/api/v1/room_types?${params.toString()}`);
+
+  return {
+    ...result,
+    data: result.data
+      .map((item) => {
+        const record = item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : null;
+        const attributes =
+          record &&
+          typeof record.attributes === "object" &&
+          record.attributes &&
+          !Array.isArray(record.attributes)
+            ? (record.attributes as Record<string, unknown>)
+            : null;
+        const relationships =
+          record &&
+          typeof record.relationships === "object" &&
+          record.relationships &&
+          !Array.isArray(record.relationships)
+            ? (record.relationships as Record<string, unknown>)
+            : null;
+        const propertyRelationship =
+          relationships &&
+          typeof relationships.property === "object" &&
+          relationships.property &&
+          !Array.isArray(relationships.property)
+            ? (relationships.property as Record<string, unknown>)
+            : null;
+        const propertyData =
+          propertyRelationship &&
+          typeof propertyRelationship.data === "object" &&
+          propertyRelationship.data &&
+          !Array.isArray(propertyRelationship.data)
+            ? (propertyRelationship.data as Record<string, unknown>)
+            : null;
+
+        const id = trimOrNull(typeof record?.id === "string" ? record.id : null);
+        if (!id) return null;
+        return {
+          id,
+          title: trimOrNull(typeof attributes?.title === "string" ? attributes.title : null),
+          propertyId: trimOrNull(typeof propertyData?.id === "string" ? propertyData.id : null),
+          countOfRooms:
+            typeof attributes?.count_of_rooms === "number"
+              ? attributes.count_of_rooms
+              : typeof attributes?.count_of_rooms === "string" && attributes.count_of_rooms.trim().length > 0
+                ? Number(attributes.count_of_rooms)
+                : null,
+        };
+      })
+      .filter((item): item is ChannexRoomTypeStructureRecord => Boolean(item)),
+  };
+}
+
+export async function fetchChannexRatePlansForProperty(
+  propertyId: string
+): Promise<ChannexStructureResult<ChannexRatePlanStructureRecord[]>> {
+  const params = new URLSearchParams();
+  params.set("filter[property_id]", propertyId);
+  const result = await getChannexJson(`/api/v1/rate_plans/options?${params.toString()}`);
+
+  return {
+    ...result,
+    data: result.data
+      .map((item) => {
+        const record = item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : null;
+        const attributes =
+          record &&
+          typeof record.attributes === "object" &&
+          record.attributes &&
+          !Array.isArray(record.attributes)
+            ? (record.attributes as Record<string, unknown>)
+            : null;
+        const id = trimOrNull(typeof record?.id === "string" ? record.id : null);
+        if (!id) return null;
+        return {
+          id,
+          title: trimOrNull(typeof attributes?.title === "string" ? attributes.title : null),
+          propertyId: trimOrNull(typeof attributes?.property_id === "string" ? attributes.property_id : null),
+          roomTypeId: trimOrNull(typeof attributes?.room_type_id === "string" ? attributes.room_type_id : null),
+        };
+      })
+      .filter((item): item is ChannexRatePlanStructureRecord => Boolean(item)),
+  };
 }
 
 export async function fetchChannexBookingFeed(): Promise<ChannexBookingFeedResult> {
