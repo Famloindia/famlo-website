@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createChannexProperty, getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+import { createChannexProperty, fetchChannexGroups, getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { loadHostProSettings } from "@/lib/host-pro-settings";
@@ -52,6 +52,24 @@ function resolveCountryAlpha2(value: string | null): string | null {
   return lookup[normalized] ?? null;
 }
 
+function isValidTimezone(value: string | null): boolean {
+  if (!value) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isValidEmail(value: string | null): boolean {
+  return Boolean(value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
+}
+
+function isValidPhone(value: string | null): boolean {
+  return Boolean(value && /^[0-9+\-() ]{6,20}$/.test(value));
+}
+
 function mapChannexPropertyType(
   propertyModel: string | null,
   propertyType: string | null
@@ -61,7 +79,7 @@ function mapChannexPropertyType(
   if (propertyType === "farm_stay") return "farm_stay";
   if (propertyType === "villa") return "villa";
   if (propertyType === "apartment") return "apartment";
-  if (propertyType === "hotel_bnb") return "hotel";
+  if (propertyType === "hotel_bnb") return "guest_house";
   if (propertyModel === "hotel") return "hotel";
   if (propertyModel === "vacation_rental") return "apartment";
   return null;
@@ -87,6 +105,22 @@ function buildImportantInformation(input: {
 
 function addMissing(list: string[], value: string | null, label: string): void {
   if (!value) list.push(label);
+}
+
+function flattenValidationDetails(value: unknown, prefix = ""): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => flattenValidationDetails(entry, prefix ? `${prefix}[${index}]` : String(index)));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, entry]) =>
+      flattenValidationDetails(entry, prefix ? `${prefix}.${key}` : key)
+    );
+  }
+
+  const label = prefix || "validation";
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text ? [`${label}: ${text}`] : [];
 }
 
 async function logCreatePropertyEvent(input: {
@@ -199,6 +233,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const contactEmail = asString(settings.contactEmail);
     const contactPhone = asString(settings.contactPhone);
     const missingFields: string[] = [];
+    const invalidFields: string[] = [];
 
     addMissing(missingFields, title, "ota_title_or_property_name");
     addMissing(missingFields, asString(settings.propertyModel), "property_model");
@@ -215,8 +250,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       missingFields.push("contact_email_or_contact_phone");
     }
 
-    if (missingFields.length > 0) {
-      const message = `Complete these Famlo Pro fields before creating a Channex staging property: ${missingFields.join(", ")}.`;
+    if (timezone && !isValidTimezone(timezone)) invalidFields.push("timezone");
+    if (country && country.length !== 2) invalidFields.push("country");
+    if (currency && currency.length !== 3) invalidFields.push("currency");
+    if (contactEmail && !isValidEmail(contactEmail)) invalidFields.push("contact_email");
+    if (contactPhone && !isValidPhone(contactPhone)) invalidFields.push("contact_phone");
+
+    if (missingFields.length > 0 || invalidFields.length > 0) {
+      const message = [
+        missingFields.length > 0 ? `Complete these Famlo Pro fields before creating a Channex staging property: ${missingFields.join(", ")}.` : null,
+        invalidFields.length > 0 ? `Fix these invalid fields: ${invalidFields.join(", ")}.` : null,
+      ].filter(Boolean).join(" ");
       await logCreatePropertyEvent({
         supabase,
         familyId,
@@ -226,6 +270,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           environment: config.environment,
           stage: "pre_validation",
           missing_fields: missingFields,
+          invalid_fields: invalidFields,
         },
       });
 
@@ -235,10 +280,17 @@ export async function POST(request: Request): Promise<NextResponse> {
           status: "validation_failed",
           message,
           missingFields,
+          invalidFields,
         },
         { status: 422 }
       );
     }
+
+    const groupsResult = await fetchChannexGroups();
+    const selectedGroupId =
+      groupsResult.ok && groupsResult.groups.length === 1
+        ? groupsResult.groups[0]?.id ?? null
+        : null;
 
     const result = await createChannexProperty({
       title: title ?? "Famlo Property",
@@ -254,6 +306,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       latitude: settings.latitude != null ? String(settings.latitude) : null,
       timezone: timezone ?? "Asia/Kolkata",
       propertyType: propertyType ?? "apartment",
+      groupId: selectedGroupId,
       website: asString(settings.website),
       description: asString(settings.propertyDescription),
       importantInformation: buildImportantInformation({
@@ -266,6 +319,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
 
     if (!result.ok || !result.externalPropertyId) {
+      const validationDetails = flattenValidationDetails(result.errorDetails);
       if (existingChannelProperty?.id) {
         await supabase
           .from("channel_properties")
@@ -275,6 +329,7 @@ export async function POST(request: Request): Promise<NextResponse> {
               ...((existingChannelProperty.metadata as Record<string, unknown> | null) ?? {}),
               last_error: result.message,
               last_error_at: new Date().toISOString(),
+              last_validation_details: validationDetails,
             },
             updated_at: new Date().toISOString(),
           } as never)
@@ -290,7 +345,16 @@ export async function POST(request: Request): Promise<NextResponse> {
           environment: result.environment,
           endpoint: result.endpoint,
           http_status: result.httpStatus,
+          error_code: result.errorCode,
+          error_title: result.errorTitle,
           provider_validation: result.rawValidation,
+          provider_validation_details: result.errorDetails,
+          payload_summary: result.payloadSummary,
+          group_fetch: {
+            ok: groupsResult.ok,
+            count: groupsResult.groups.length,
+            selected_group_id: selectedGroupId,
+          },
         },
       });
 
@@ -299,6 +363,10 @@ export async function POST(request: Request): Promise<NextResponse> {
           ok: false,
           status: "failed",
           message: result.message,
+          validationDetails,
+          validationCode: result.errorCode,
+          validationTitle: result.errorTitle,
+          payloadSummary: result.payloadSummary,
         },
         { status: result.httpStatus === 422 ? 422 : 502 }
       );
@@ -344,6 +412,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         endpoint: result.endpoint,
         http_status: result.httpStatus,
         external_property_id: result.externalPropertyId,
+        payload_summary: result.payloadSummary,
+        group_fetch: {
+          ok: groupsResult.ok,
+          count: groupsResult.groups.length,
+          selected_group_id: selectedGroupId,
+        },
       },
     });
 
@@ -352,6 +426,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       status: "created",
       externalPropertyId: result.externalPropertyId,
       message: result.message,
+      payloadSummary: result.payloadSummary,
     });
   } catch (error) {
     console.error("[host.pro.channel.channex.property] failed:", error);

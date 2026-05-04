@@ -30,9 +30,30 @@ export type ChannexCreatePropertyInput = {
   latitude: string | null;
   timezone: string;
   propertyType: string;
+  groupId?: string | null;
   website: string | null;
   description: string | null;
   importantInformation: string | null;
+};
+
+export type ChannexPayloadSummary = {
+  title: string | null;
+  currency: string | null;
+  country: string | null;
+  state: string | null;
+  city: string | null;
+  address_present: boolean;
+  timezone: string | null;
+  property_type: string | null;
+  group_id_present: boolean;
+  email_present: boolean;
+  phone_present: boolean;
+  zip_code_present: boolean;
+  latitude_present: boolean;
+  longitude_present: boolean;
+  website_present: boolean;
+  description_present: boolean;
+  important_information_present: boolean;
 };
 
 export type ChannexCreatePropertyResult = {
@@ -42,6 +63,25 @@ export type ChannexCreatePropertyResult = {
   httpStatus: number | null;
   message: string;
   externalPropertyId: string | null;
+  rawValidation: Record<string, unknown> | null;
+  errorCode: string | null;
+  errorTitle: string | null;
+  errorDetails: Record<string, unknown> | null;
+  payloadSummary: ChannexPayloadSummary;
+};
+
+export type ChannexGroupRecord = {
+  id: string;
+  title: string;
+};
+
+export type ChannexGroupsResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  groups: ChannexGroupRecord[];
   rawValidation: Record<string, unknown> | null;
 };
 
@@ -111,6 +151,48 @@ export type ChannexAriPushResult = {
   httpStatus: number | null;
   message: string;
   warnings: Record<string, unknown> | null;
+};
+
+type ChannexBookingFeedRoom = {
+  checkin_date?: unknown;
+  checkout_date?: unknown;
+  rate_plan_id?: unknown;
+  room_type_id?: unknown;
+  amount?: unknown;
+};
+
+type ChannexBookingFeedCustomer = {
+  name?: unknown;
+  surname?: unknown;
+};
+
+type ChannexBookingFeedRevision = {
+  id?: unknown;
+  property_id?: unknown;
+  booking_id?: unknown;
+  unique_id?: unknown;
+  ota_reservation_code?: unknown;
+  ota_name?: unknown;
+  status?: unknown;
+  arrival_date?: unknown;
+  departure_date?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  payment_collect?: unknown;
+  payment_type?: unknown;
+  inserted_at?: unknown;
+  customer?: ChannexBookingFeedCustomer | null;
+  rooms?: ChannexBookingFeedRoom[] | null;
+};
+
+export type ChannexBookingFeedResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  revisions: ChannexBookingFeedRevision[];
+  rawValidation: Record<string, unknown> | null;
 };
 
 function asString(value: string | undefined): string | null {
@@ -258,6 +340,59 @@ function compactObject<T extends Record<string, unknown>>(value: T): T {
   ) as T;
 }
 
+function buildPropertyPayloadSummary(input: ChannexCreatePropertyInput): ChannexPayloadSummary {
+  return {
+    title: trimOrNull(input.title),
+    currency: trimOrNull(input.currency),
+    country: trimOrNull(input.country),
+    state: trimOrNull(input.state),
+    city: trimOrNull(input.city),
+    address_present: Boolean(trimOrNull(input.address)),
+    timezone: trimOrNull(input.timezone),
+    property_type: trimOrNull(input.propertyType),
+    group_id_present: Boolean(trimOrNull(input.groupId)),
+    email_present: Boolean(trimOrNull(input.email)),
+    phone_present: Boolean(trimOrNull(input.phone)),
+    zip_code_present: Boolean(trimOrNull(input.zipCode)),
+    latitude_present: Boolean(trimOrNull(input.latitude)),
+    longitude_present: Boolean(trimOrNull(input.longitude)),
+    website_present: Boolean(trimOrNull(input.website)),
+    description_present: Boolean(trimOrNull(input.description)),
+    important_information_present: Boolean(trimOrNull(input.importantInformation)),
+  };
+}
+
+function extractChannexErrors(parsed: Record<string, unknown> | null): {
+  rawValidation: Record<string, unknown> | null;
+  errorCode: string | null;
+  errorTitle: string | null;
+  errorDetails: Record<string, unknown> | null;
+} {
+  const rawValidation =
+    parsed &&
+    typeof parsed.errors === "object" &&
+    parsed.errors
+      ? (parsed.errors as Record<string, unknown>)
+      : null;
+
+  const errorCode = typeof rawValidation?.code === "string" ? rawValidation.code : null;
+  const errorTitle = typeof rawValidation?.title === "string" ? rawValidation.title : null;
+  const errorDetails =
+    rawValidation &&
+    typeof rawValidation.details === "object" &&
+    rawValidation.details &&
+    !Array.isArray(rawValidation.details)
+      ? (rawValidation.details as Record<string, unknown>)
+      : null;
+
+  return {
+    rawValidation,
+    errorCode,
+    errorTitle,
+    errorDetails,
+  };
+}
+
 export async function createChannexProperty(
   input: ChannexCreatePropertyInput
 ): Promise<ChannexCreatePropertyResult> {
@@ -265,6 +400,7 @@ export async function createChannexProperty(
   const summary = getChannexConfigSummary();
   const endpoint = `${resolveBaseUrl(environment)}/api/v1/properties`;
   const apiKey = loadApiKey(environment);
+  const payloadSummary = buildPropertyPayloadSummary(input);
 
   if (!summary.configured || !apiKey) {
     return {
@@ -275,6 +411,10 @@ export async function createChannexProperty(
       message: "Channex staging configuration is incomplete. Add the server-side API key first.",
       externalPropertyId: null,
       rawValidation: null,
+      errorCode: null,
+      errorTitle: null,
+      errorDetails: null,
+      payloadSummary,
     };
   }
 
@@ -293,6 +433,7 @@ export async function createChannexProperty(
       latitude: trimOrNull(input.latitude),
       timezone: input.timezone,
       property_type: input.propertyType,
+      group_id: trimOrNull(input.groupId),
       website: trimOrNull(input.website),
       content:
         trimOrNull(input.description) || trimOrNull(input.importantInformation)
@@ -324,13 +465,8 @@ export async function createChannexProperty(
     }
 
     if (!response.ok) {
-      const errors =
-        parsed &&
-        typeof parsed.errors === "object" &&
-        parsed.errors
-          ? (parsed.errors as Record<string, unknown>)
-          : null;
-      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+      const { rawValidation, errorCode, errorTitle, errorDetails } = extractChannexErrors(parsed);
+      const detailText = errorDetails ? ` Details: ${JSON.stringify(errorDetails)}.` : "";
 
       return {
         ok: false,
@@ -338,10 +474,14 @@ export async function createChannexProperty(
         endpoint: "/api/v1/properties",
         httpStatus: response.status,
         message: errorTitle
-          ? `Channex property creation failed: ${errorTitle}.`
+          ? `Channex property creation failed: ${errorTitle}.${detailText}`
           : `Channex property creation failed with HTTP ${response.status}.`,
         externalPropertyId: null,
-        rawValidation: errors,
+        rawValidation,
+        errorCode,
+        errorTitle,
+        errorDetails,
+        payloadSummary,
       };
     }
 
@@ -367,6 +507,10 @@ export async function createChannexProperty(
         : "Channex staging property created successfully.",
       externalPropertyId,
       rawValidation: null,
+      errorCode: null,
+      errorTitle: null,
+      errorDetails: null,
+      payloadSummary,
     };
   } catch (error) {
     return {
@@ -376,6 +520,104 @@ export async function createChannexProperty(
       httpStatus: null,
       message: error instanceof Error ? `Channex property creation failed: ${error.message}` : "Channex property creation failed.",
       externalPropertyId: null,
+      rawValidation: null,
+      errorCode: null,
+      errorTitle: null,
+      errorDetails: null,
+      payloadSummary,
+    };
+  }
+}
+
+export async function fetchChannexGroups(): Promise<ChannexGroupsResult> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpoint = `${resolveBaseUrl(environment)}/api/v1/groups`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/groups",
+      httpStatus: null,
+      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      groups: [],
+      rawValidation: null,
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const { rawValidation, errorTitle } = extractChannexErrors(parsed);
+      return {
+        ok: false,
+        environment,
+        endpoint: "/api/v1/groups",
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex groups fetch failed: ${errorTitle}.`
+          : `Channex groups fetch failed with HTTP ${response.status}.`,
+        groups: [],
+        rawValidation,
+      };
+    }
+
+    const groups = Array.isArray(parsed?.data)
+      ? parsed.data
+          .map((item) => {
+            const record = item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : null;
+            const attrs =
+              record &&
+              typeof record.attributes === "object" &&
+              record.attributes &&
+              !Array.isArray(record.attributes)
+                ? (record.attributes as Record<string, unknown>)
+                : null;
+            const id = trimOrNull(typeof record?.id === "string" ? record.id : null);
+            const title =
+              trimOrNull(typeof attrs?.title === "string" ? attrs.title : null) ??
+              trimOrNull(typeof record?.title === "string" ? record.title : null) ??
+              "Group";
+            return id ? { id, title } : null;
+          })
+          .filter((group): group is ChannexGroupRecord => Boolean(group))
+      : [];
+
+    return {
+      ok: true,
+      environment,
+      endpoint: "/api/v1/groups",
+      httpStatus: response.status,
+      message: `Channex staging groups fetch returned ${groups.length} group${groups.length === 1 ? "" : "s"}.`,
+      groups,
+      rawValidation: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/groups",
+      httpStatus: null,
+      message: error instanceof Error ? `Channex groups fetch failed: ${error.message}` : "Channex groups fetch failed.",
+      groups: [],
       rawValidation: null,
     };
   }
@@ -719,6 +961,94 @@ async function postChannexJson(
   }
 }
 
+async function getChannexJson(endpointPath: string): Promise<{
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  data: unknown[];
+  rawValidation: Record<string, unknown> | null;
+}> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpoint = `${resolveBaseUrl(environment)}${endpointPath}`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      data: [],
+      rawValidation: null,
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const errors =
+        parsed &&
+        typeof parsed.errors === "object" &&
+        parsed.errors
+          ? (parsed.errors as Record<string, unknown>)
+          : null;
+      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+
+      return {
+        ok: false,
+        environment,
+        endpoint: endpointPath,
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex read request failed: ${errorTitle}.`
+          : `Channex read request failed with HTTP ${response.status}.`,
+        data: [],
+        rawValidation: errors,
+      };
+    }
+
+    return {
+      ok: true,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: response.status,
+      message: "Channex staging read request completed successfully.",
+      data: parsed && Array.isArray(parsed.data) ? parsed.data : [],
+      rawValidation: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      message: error instanceof Error ? `Channex read request failed: ${error.message}` : "Channex read request failed.",
+      data: [],
+      rawValidation: null,
+    };
+  }
+}
+
 export async function pushChannexAvailability(
   values: ChannexAvailabilityChange[]
 ): Promise<ChannexAriPushResult> {
@@ -747,4 +1077,23 @@ export async function pushChannexRestrictions(
       min_stay: value.minStay,
     })),
   });
+}
+
+export async function fetchChannexBookingFeed(): Promise<ChannexBookingFeedResult> {
+  const result = await getChannexJson("/api/v1/booking_revisions/feed");
+
+  return {
+    ok: result.ok,
+    environment: result.environment,
+    endpoint: result.endpoint,
+    httpStatus: result.httpStatus,
+    message: result.ok
+      ? `Channex staging booking feed returned ${result.data.length} revision${result.data.length === 1 ? "" : "s"}.`
+      : result.message,
+    revisions: result.data.filter(
+      (item): item is ChannexBookingFeedRevision =>
+        Boolean(item) && typeof item === "object" && !Array.isArray(item)
+    ),
+    rawValidation: result.rawValidation,
+  };
 }

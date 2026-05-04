@@ -630,6 +630,7 @@ export default function FamloProDashboardShell({
     return !(roomMapping?.externalRoomTypeId && ratePlan?.externalRatePlanId && room.priceFullday > 0);
   }).length;
   const lastAriSyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
+  const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
 
   return (
     <div className={styles.shell}>
@@ -1429,6 +1430,12 @@ export default function FamloProDashboardShell({
                 </div>
               </div>
               <div className={styles.cardBody}>
+                <ChannexBookingFeedCard
+                  familyId={familyId}
+                  propertyCreated={canCreateRoomTypes}
+                  externalPropertyId={primaryProperty?.externalPropertyId ?? null}
+                  lastSyncLog={lastBookingFeedLog}
+                />
                 <div className={styles.filterRow}>
                   {BOOKING_FILTERS.map((filter) => (
                     <span key={filter} className={styles.filterChip}>{filter}</span>
@@ -2099,6 +2106,8 @@ function ChannexPropertyCard({
     message: string;
     statusLabel: string;
     missingFields?: string[];
+    invalidFields?: string[];
+    validationDetails?: string[];
   } | null>(null);
 
   const alreadyCreated = Boolean(externalPropertyId);
@@ -2137,6 +2146,16 @@ function ChannexPropertyCard({
         <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
           {feedback.message}
           {feedback.missingFields && feedback.missingFields.length > 0 ? ` Missing: ${feedback.missingFields.join(", ")}.` : ""}
+          {feedback.invalidFields && feedback.invalidFields.length > 0 ? ` Invalid: ${feedback.invalidFields.join(", ")}.` : ""}
+          {feedback.validationDetails && feedback.validationDetails.length > 0 ? (
+            <div style={{ marginTop: 10 }}>
+              {feedback.validationDetails.map((detail) => (
+                <div key={detail} className={styles.feedCopy}>
+                  - {detail}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -2164,6 +2183,8 @@ function ChannexPropertyCard({
                   message?: string;
                   externalPropertyId?: string | null;
                   missingFields?: string[];
+                  invalidFields?: string[];
+                  validationDetails?: string[];
                 };
 
                 setFeedback({
@@ -2181,6 +2202,8 @@ function ChannexPropertyCard({
                       ? payload.message
                       : "Unable to create Channex staging property.",
                   missingFields: Array.isArray(payload.missingFields) ? payload.missingFields : undefined,
+                  invalidFields: Array.isArray(payload.invalidFields) ? payload.invalidFields : undefined,
+                  validationDetails: Array.isArray(payload.validationDetails) ? payload.validationDetails : undefined,
                 });
                 router.refresh();
               } catch (error) {
@@ -2584,6 +2607,232 @@ function ChannexAriSyncCard({
           }}
         >
           {isPushing ? "Pushing..." : "Push 30-day staging sync"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ChannexBookingFeedCard({
+  familyId,
+  propertyCreated,
+  externalPropertyId,
+  lastSyncLog,
+}: Readonly<{
+  familyId: string;
+  propertyCreated: boolean;
+  externalPropertyId: string | null;
+  lastSyncLog: {
+    status: string;
+    message: string | null;
+    createdAt: string | null;
+  } | null;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isFetching, startFetching] = useTransition();
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    summary?: {
+      revisionsFound: number;
+      unmatchedRoomCount: number;
+      lastCheckedAt: string | null;
+    };
+    revisions?: Array<{
+      externalBookingId: string | null;
+      revisionId: string | null;
+      status: string | null;
+      otaName: string | null;
+      arrivalDate: string | null;
+      departureDate: string | null;
+      guestName: string | null;
+      externalRoomTypeId: string | null;
+      externalRatePlanId: string | null;
+      amount: string | null;
+      currency: string | null;
+      paymentCollect: string | null;
+      paymentType: string | null;
+      unmatchedRoom: boolean;
+      insertedAt: string | null;
+    }>;
+  } | null>(null);
+
+  const blockedMessage = !propertyCreated
+    ? "Create provider property first."
+    : !externalPropertyId
+      ? "Provider property is not mapped yet."
+      : null;
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>Channex booking feed</div>
+          <div className={styles.cardCopy}>
+            Read-only preview of unacknowledged Channex staging booking revisions. Nothing is imported into Famlo bookings yet, and no acknowledgement is sent in this phase.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
+          {blockedMessage ? "Blocked" : "Read-only"}
+        </span>
+      </div>
+
+      <div className={styles.placeholderGrid}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>External property ID</div>
+          <div className={styles.placeholderCopy}>{externalPropertyId ?? "Missing"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Acknowledgement</div>
+          <div className={styles.placeholderCopy}>Deferred intentionally</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last checked</div>
+          <div className={styles.placeholderCopy}>{lastSyncLog ? formatDateTime(lastSyncLog.createdAt) : "Not checked"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last status</div>
+          <div className={styles.placeholderCopy}>{lastSyncLog ? labelizeToken(lastSyncLog.status, "unknown") : "Not checked"}</div>
+        </div>
+      </div>
+
+      {lastSyncLog?.message ? <div className={styles.feedCopy}>{lastSyncLog.message}</div> : null}
+      {blockedMessage ? <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{blockedMessage}</div> : null}
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {feedback.message}
+          {feedback.summary ? (
+            <div className={styles.inlineBadgeRow}>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Revisions found: {feedback.summary.revisionsFound}</span>
+              <span className={`${styles.readinessPill} ${feedback.summary.unmatchedRoomCount > 0 ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                Unmatched rooms: {feedback.summary.unmatchedRoomCount}
+              </span>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Last checked: {formatDateTime(feedback.summary.lastCheckedAt)}</span>
+            </div>
+          ) : null}
+
+          {feedback.revisions && feedback.revisions.length > 0 ? (
+            <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+              <div className={styles.mappingHeader}>Booking</div>
+              <div className={styles.mappingHeader}>Status</div>
+              <div className={styles.mappingHeader}>Channel</div>
+              <div className={styles.mappingHeader}>Dates</div>
+              <div className={styles.mappingHeader}>Guest</div>
+              <div className={styles.mappingHeader}>Room / Rate</div>
+              <div className={styles.mappingHeader}>Amount</div>
+              {feedback.revisions.map((revision, index) => (
+                <Fragment key={revision.revisionId ?? revision.externalBookingId ?? revision.insertedAt ?? `revision-${index}`}>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
+                    <div className={styles.mappingSubcopy}>Revision {revision.revisionId ?? "Unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
+                    <div className={styles.mappingSubcopy}>Read-only preview</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.otaName ?? "Unknown"}</div>
+                    <div className={styles.mappingSubcopy}>{revision.paymentCollect ?? "collection unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"}</div>
+                    <div className={styles.mappingSubcopy}>Received {formatDateTime(revision.insertedAt)}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.guestName ?? "Guest hidden / unavailable"}</div>
+                    <div className={styles.mappingSubcopy}>{revision.paymentType ?? "payment type unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.externalRoomTypeId ?? "Room unmapped"}</div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.externalRatePlanId ?? "Rate unmapped"}
+                      {revision.unmatchedRoom ? " · review mapping" : ""}
+                    </div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>
+                      {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
+                    </div>
+                    <div className={styles.mappingSubcopy}>No Famlo import yet</div>
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <button
+          type="button"
+          className={styles.primaryActionButton}
+          disabled={isFetching || Boolean(blockedMessage)}
+          onClick={() => {
+            startFetching(async () => {
+              setFeedback(null);
+
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/bookings/feed", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  message?: string;
+                  revisionsFound?: number;
+                  unmatchedRoomCount?: number;
+                  lastCheckedAt?: string | null;
+                  revisions?: Array<{
+                    externalBookingId: string | null;
+                    revisionId: string | null;
+                    status: string | null;
+                    otaName: string | null;
+                    arrivalDate: string | null;
+                    departureDate: string | null;
+                    guestName: string | null;
+                    externalRoomTypeId: string | null;
+                    externalRatePlanId: string | null;
+                    amount: string | null;
+                    currency: string | null;
+                    paymentCollect: string | null;
+                    paymentType: string | null;
+                    unmatchedRoom: boolean;
+                    insertedAt: string | null;
+                  }>;
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to fetch the Channex staging booking feed.",
+                  summary:
+                    typeof payload.revisionsFound === "number" && typeof payload.unmatchedRoomCount === "number"
+                      ? {
+                          revisionsFound: payload.revisionsFound,
+                          unmatchedRoomCount: payload.unmatchedRoomCount,
+                          lastCheckedAt: typeof payload.lastCheckedAt === "string" ? payload.lastCheckedAt : null,
+                        }
+                      : undefined,
+                  revisions: Array.isArray(payload.revisions) ? payload.revisions : undefined,
+                });
+                router.refresh();
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to fetch the Channex staging booking feed.",
+                });
+              }
+            });
+          }}
+        >
+          {isFetching ? "Fetching..." : "Fetch staging booking feed"}
         </button>
       </div>
     </section>
