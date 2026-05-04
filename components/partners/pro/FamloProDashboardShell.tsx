@@ -40,6 +40,7 @@ import {
   type HostProSettings,
 } from "@/lib/host-pro-settings";
 import { type HostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
+import { type ChannexConfigSummary as ChannexSummary } from "@/lib/channel-providers/channex/client";
 import styles from "./pro-dashboard.module.css";
 
 type ProSectionId =
@@ -123,6 +124,7 @@ interface FamloProDashboardShellProps {
   basicRoomUrl: string;
   initialSettings: HostProSettings;
   channelFoundation: HostProChannelFoundation;
+  channexConfig: ChannexSummary;
 }
 
 type NavItem = {
@@ -468,6 +470,7 @@ export default function FamloProDashboardShell({
   basicRoomUrl,
   initialSettings,
   channelFoundation,
+  channexConfig,
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
 
@@ -1699,24 +1702,10 @@ export default function FamloProDashboardShell({
                   onOpenSetupGuide={() => setActiveSection("setup-guide")}
                 />
 
-                <div className={styles.placeholderGrid}>
-                  <div className={styles.placeholderRow}>
-                    <div className={styles.placeholderTitle}>Provider</div>
-                    <div className={styles.placeholderCopy}>Channex</div>
-                  </div>
-                  <div className={styles.placeholderRow}>
-                    <div className={styles.placeholderTitle}>Environment</div>
-                    <div className={styles.placeholderCopy}>Staging</div>
-                  </div>
-                  <div className={styles.placeholderRow}>
-                    <div className={styles.placeholderTitle}>API Status</div>
-                    <div className={styles.placeholderCopy}>Not connected</div>
-                  </div>
-                  <div className={styles.placeholderRow}>
-                    <div className={styles.placeholderTitle}>Full Sync</div>
-                    <div className={styles.placeholderCopy}>Not started</div>
-                  </div>
-                </div>
+                <ChannexConnectionCard
+                  familyId={familyId}
+                  config={channexConfig}
+                />
               </div>
             </section>
           )}
@@ -1942,6 +1931,115 @@ function ProSettingsForm({
         </div>
       ) : null}
     </>
+  );
+}
+
+function ChannexConnectionCard({
+  familyId,
+  config,
+}: Readonly<{
+  familyId: string;
+  config: ChannexSummary;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isChecking, startChecking] = useTransition();
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    statusLabel: string;
+  } | null>(null);
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>Channex staging configuration</div>
+          <div className={styles.cardCopy}>
+            Safe staging-only adapter check. No properties, rooms, rates, availability, or bookings are created here.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${config.configured ? "" : styles.badgeMuted}`.trim()}>
+          {config.configured ? "Configured" : "Config incomplete"}
+        </span>
+      </div>
+
+      <div className={styles.placeholderGrid}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Provider</div>
+          <div className={styles.placeholderCopy}>Channex</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Environment</div>
+          <div className={styles.placeholderCopy}>{labelizeToken(config.environment, "Staging")}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>API key</div>
+          <div className={styles.placeholderCopy}>{config.apiKeyConfigured ? "Configured" : "Missing"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Connection</div>
+          <div className={styles.placeholderCopy}>{feedback?.statusLabel ?? "Not checked"}</div>
+        </div>
+      </div>
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {feedback.message}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isChecking}
+          onClick={() => {
+            startChecking(async () => {
+              setFeedback(null);
+
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/check", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId }),
+                });
+
+                const payload = (await response.json()) as {
+                  configured?: boolean;
+                  ok?: boolean;
+                  message?: string;
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  statusLabel:
+                    response.ok && payload.ok
+                      ? "Connected"
+                      : payload.configured === false
+                        ? "Missing"
+                        : "Failed",
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to verify Channex staging connection.",
+                });
+                router.refresh();
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  statusLabel: "Failed",
+                  message: error instanceof Error ? error.message : "Unable to verify Channex staging connection.",
+                });
+              }
+            });
+          }}
+        >
+          {isChecking ? "Checking..." : "Check staging connection"}
+        </button>
+      </div>
+    </section>
   );
 }
 
