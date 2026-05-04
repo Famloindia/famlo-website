@@ -16,6 +16,35 @@ export type ChannexConnectionCheckResult = {
   httpStatus: number | null;
 };
 
+export type ChannexCreatePropertyInput = {
+  title: string;
+  currency: string;
+  email: string | null;
+  phone: string | null;
+  zipCode: string | null;
+  country: string;
+  state: string | null;
+  city: string;
+  address: string;
+  longitude: string | null;
+  latitude: string | null;
+  timezone: string;
+  propertyType: string;
+  website: string | null;
+  description: string | null;
+  importantInformation: string | null;
+};
+
+export type ChannexCreatePropertyResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  externalPropertyId: string | null;
+  rawValidation: Record<string, unknown> | null;
+};
+
 function asString(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -43,6 +72,13 @@ function loadApiKey(environment: ChannexEnvironment): string | null {
     return asString(process.env.CHANNEX_STAGING_API_KEY);
   }
   return null;
+}
+
+function buildHeaders(apiKey: string): HeadersInit {
+  return {
+    "Content-Type": "application/json",
+    "user-api-key": apiKey,
+  };
 }
 
 export function getChannexConfigSummary(): ChannexConfigSummary {
@@ -79,10 +115,7 @@ export async function checkChannexConnection(): Promise<ChannexConnectionCheckRe
     const response = await fetch(endpoint, {
       method: "GET",
       cache: "no-store",
-      headers: {
-        "Content-Type": "application/json",
-        "user-api-key": apiKey,
-      },
+      headers: buildHeaders(apiKey),
     });
 
     const text = await response.text();
@@ -143,6 +176,139 @@ export async function checkChannexConnection(): Promise<ChannexConnectionCheckRe
       message: error instanceof Error ? `Channex staging check failed: ${error.message}` : "Channex staging check failed.",
       endpoint: "/api/v1/groups",
       httpStatus: null,
+    };
+  }
+}
+
+function trimOrNull(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== null && entry !== undefined)
+  ) as T;
+}
+
+export async function createChannexProperty(
+  input: ChannexCreatePropertyInput
+): Promise<ChannexCreatePropertyResult> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpoint = `${resolveBaseUrl(environment)}/api/v1/properties`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/properties",
+      httpStatus: null,
+      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      externalPropertyId: null,
+      rawValidation: null,
+    };
+  }
+
+  const payload = {
+    property: compactObject({
+      title: input.title,
+      currency: input.currency,
+      email: trimOrNull(input.email),
+      phone: trimOrNull(input.phone),
+      zip_code: trimOrNull(input.zipCode),
+      country: input.country,
+      state: trimOrNull(input.state),
+      city: input.city,
+      address: input.address,
+      longitude: trimOrNull(input.longitude),
+      latitude: trimOrNull(input.latitude),
+      timezone: input.timezone,
+      property_type: input.propertyType,
+      website: trimOrNull(input.website),
+      content:
+        trimOrNull(input.description) || trimOrNull(input.importantInformation)
+          ? compactObject({
+              description: trimOrNull(input.description),
+              important_information: trimOrNull(input.importantInformation),
+            })
+          : undefined,
+    }),
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+      body: JSON.stringify(payload),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const errors =
+        parsed &&
+        typeof parsed.errors === "object" &&
+        parsed.errors
+          ? (parsed.errors as Record<string, unknown>)
+          : null;
+      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+
+      return {
+        ok: false,
+        environment,
+        endpoint: "/api/v1/properties",
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex property creation failed: ${errorTitle}.`
+          : `Channex property creation failed with HTTP ${response.status}.`,
+        externalPropertyId: null,
+        rawValidation: errors,
+      };
+    }
+
+    const data = parsed && typeof parsed.data === "object" && parsed.data ? (parsed.data as Record<string, unknown>) : null;
+    const externalPropertyId =
+      trimOrNull(typeof data?.id === "string" ? data.id : null) ??
+      trimOrNull(
+        data &&
+        typeof data.attributes === "object" &&
+        data.attributes &&
+        typeof (data.attributes as Record<string, unknown>).id === "string"
+          ? ((data.attributes as Record<string, unknown>).id as string)
+          : null
+      );
+
+    return {
+      ok: true,
+      environment,
+      endpoint: "/api/v1/properties",
+      httpStatus: response.status,
+      message: externalPropertyId
+        ? `Channex staging property created successfully with id ${externalPropertyId}.`
+        : "Channex staging property created successfully.",
+      externalPropertyId,
+      rawValidation: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/properties",
+      httpStatus: null,
+      message: error instanceof Error ? `Channex property creation failed: ${error.message}` : "Channex property creation failed.",
+      externalPropertyId: null,
+      rawValidation: null,
     };
   }
 }

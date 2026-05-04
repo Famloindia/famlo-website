@@ -1706,6 +1706,11 @@ export default function FamloProDashboardShell({
                   familyId={familyId}
                   config={channexConfig}
                 />
+                <ChannexPropertyCard
+                  familyId={familyId}
+                  propertyStatus={primaryProperty?.syncStatus ?? "not_created"}
+                  externalPropertyId={primaryProperty?.externalPropertyId ?? null}
+                />
               </div>
             </section>
           )}
@@ -2037,6 +2042,123 @@ function ChannexConnectionCard({
           }}
         >
           {isChecking ? "Checking..." : "Check staging connection"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ChannexPropertyCard({
+  familyId,
+  propertyStatus,
+  externalPropertyId,
+}: Readonly<{
+  familyId: string;
+  propertyStatus: string;
+  externalPropertyId: string | null;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isCreating, startCreating] = useTransition();
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    statusLabel: string;
+    missingFields?: string[];
+  } | null>(null);
+
+  const alreadyCreated = Boolean(externalPropertyId);
+  const derivedStatusLabel = alreadyCreated
+    ? "Created"
+    : propertyStatus === "failed"
+      ? "Failed"
+      : "Not created";
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>Provider property</div>
+          <div className={styles.cardCopy}>
+            Create the first Channex staging property from Famlo Pro settings and OTA content. No room types, rates, or sync jobs are created here.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${alreadyCreated ? "" : styles.badgeMuted}`.trim()}>
+          {feedback?.statusLabel ?? derivedStatusLabel}
+        </span>
+      </div>
+
+      <div className={styles.placeholderGrid}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Status</div>
+          <div className={styles.placeholderCopy}>{feedback?.statusLabel ?? derivedStatusLabel}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>External Property ID</div>
+          <div className={styles.placeholderCopy}>{externalPropertyId ?? "Not created"}</div>
+        </div>
+      </div>
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {feedback.message}
+          {feedback.missingFields && feedback.missingFields.length > 0 ? ` Missing: ${feedback.missingFields.join(", ")}.` : ""}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <button
+          type="button"
+          className={styles.primaryActionButton}
+          disabled={isCreating || alreadyCreated}
+          onClick={() => {
+            startCreating(async () => {
+              setFeedback(null);
+
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/property", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  status?: string;
+                  message?: string;
+                  externalPropertyId?: string | null;
+                  missingFields?: string[];
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  statusLabel:
+                    payload.status === "already_created"
+                      ? "Created"
+                      : payload.status === "created"
+                        ? "Created"
+                        : payload.status === "validation_failed"
+                          ? "Missing"
+                          : "Failed",
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to create Channex staging property.",
+                  missingFields: Array.isArray(payload.missingFields) ? payload.missingFields : undefined,
+                });
+                router.refresh();
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  statusLabel: "Failed",
+                  message: error instanceof Error ? error.message : "Unable to create Channex staging property.",
+                });
+              }
+            });
+          }}
+        >
+          {alreadyCreated ? "Already created" : isCreating ? "Creating..." : "Create staging property"}
         </button>
       </div>
     </section>
