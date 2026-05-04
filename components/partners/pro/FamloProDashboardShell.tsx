@@ -613,6 +613,10 @@ export default function FamloProDashboardShell({
     };
   });
   const canCreateRoomTypes = Boolean(primaryProperty?.externalPropertyId);
+  const canCreateRatePlans = canCreateRoomTypes && rooms.filter((room) => room.isActive).every((room) => {
+    const mapping = roomMappingsByRoomId.get(room.id);
+    return Boolean(mapping?.externalRoomTypeId);
+  });
 
   return (
     <div className={styles.shell}>
@@ -1300,6 +1304,11 @@ export default function FamloProDashboardShell({
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>Not connected</span>
               </div>
               <div className={styles.cardBody}>
+                <ChannexRatePlanBatchCard
+                  familyId={familyId}
+                  propertyCreated={canCreateRoomTypes}
+                  roomTypesCreated={canCreateRatePlans}
+                />
                 <div className={styles.mappingTable}>
                   <div className={styles.mappingHeader}>Famlo Rate</div>
                   <div className={styles.mappingHeader}>Provider Rate Plan</div>
@@ -2276,6 +2285,126 @@ function ChannexRoomTypeBatchCard({
           }}
         >
           {isCreating ? "Creating..." : "Create staging room types"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ChannexRatePlanBatchCard({
+  familyId,
+  propertyCreated,
+  roomTypesCreated,
+}: Readonly<{
+  familyId: string;
+  propertyCreated: boolean;
+  roomTypesCreated: boolean;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isCreating, startCreating] = useTransition();
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    rateResults?: Array<{
+      name: string;
+      status: string;
+      externalRatePlanId: string | null;
+      missingFields: string[];
+    }>;
+  } | null>(null);
+
+  const blockedMessage = !propertyCreated
+    ? "Create provider property first."
+    : !roomTypesCreated
+      ? "Create room types first."
+      : null;
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>Channex staging rate plans</div>
+          <div className={styles.cardCopy}>
+            Create one staging rate plan per mapped active Famlo room. This only establishes provider rate-plan mappings and does not push prices or restrictions.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
+          {blockedMessage ? blockedMessage.replace(".", "") : "Ready"}
+        </span>
+      </div>
+
+      {blockedMessage ? (
+        <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>
+          {blockedMessage}
+        </div>
+      ) : null}
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {feedback.message}
+          {feedback.rateResults && feedback.rateResults.length > 0 ? (
+            <div className={styles.inlineBadgeRow}>
+              {feedback.rateResults.map((rate) => (
+                <span key={`${rate.name}:${rate.status}`} className={`${styles.readinessPill} ${rate.status === "created" || rate.status === "already_mapped" ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                  {rate.name}: {labelizeToken(rate.status, rate.status)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isCreating || Boolean(blockedMessage)}
+          onClick={() => {
+            startCreating(async () => {
+              setFeedback(null);
+
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/rate-plans", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  status?: string;
+                  message?: string;
+                  results?: Array<{
+                    name: string;
+                    status: string;
+                    externalRatePlanId: string | null;
+                    missingFields: string[];
+                  }>;
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : response.ok
+                        ? "Rate-plan batch completed."
+                        : "Unable to create Channex staging rate plans.",
+                  rateResults: Array.isArray(payload.results) ? payload.results : undefined,
+                });
+                router.refresh();
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to create Channex staging rate plans.",
+                });
+              }
+            });
+          }}
+        >
+          {isCreating ? "Creating..." : "Create staging rate plans"}
         </button>
       </div>
     </section>

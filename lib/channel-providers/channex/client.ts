@@ -67,6 +67,25 @@ export type ChannexCreateRoomTypeResult = {
   rawValidation: Record<string, unknown> | null;
 };
 
+export type ChannexCreateRatePlanInput = {
+  title: string;
+  propertyId: string;
+  roomTypeId: string;
+  currency: string;
+  mealType: string;
+  occupancy: number;
+};
+
+export type ChannexCreateRatePlanResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  externalRatePlanId: string | null;
+  rawValidation: Record<string, unknown> | null;
+};
+
 function asString(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -445,6 +464,132 @@ export async function createChannexRoomType(
       httpStatus: null,
       message: error instanceof Error ? `Channex room type creation failed: ${error.message}` : "Channex room type creation failed.",
       externalRoomTypeId: null,
+      rawValidation: null,
+    };
+  }
+}
+
+export async function createChannexRatePlan(
+  input: ChannexCreateRatePlanInput
+): Promise<ChannexCreateRatePlanResult> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpoint = `${resolveBaseUrl(environment)}/api/v1/rate_plans`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/rate_plans",
+      httpStatus: null,
+      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      externalRatePlanId: null,
+      rawValidation: null,
+    };
+  }
+
+  const payload = {
+    rate_plan: {
+      title: input.title,
+      property_id: input.propertyId,
+      room_type_id: input.roomTypeId,
+      options: [
+        {
+          occupancy: input.occupancy,
+          is_primary: true,
+          rate: 0,
+        },
+      ],
+      currency: input.currency,
+      sell_mode: "per_room",
+      rate_mode: "manual",
+      meal_type: input.mealType,
+      inherit_rate: false,
+      inherit_closed_to_arrival: false,
+      inherit_closed_to_departure: false,
+      inherit_stop_sell: false,
+      inherit_min_stay_arrival: false,
+      inherit_min_stay_through: false,
+      inherit_max_stay: false,
+      inherit_max_sell: false,
+      inherit_max_availability: false,
+      inherit_availability_offset: false,
+    },
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+      body: JSON.stringify(payload),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const errors =
+        parsed &&
+        typeof parsed.errors === "object" &&
+        parsed.errors
+          ? (parsed.errors as Record<string, unknown>)
+          : null;
+      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+
+      return {
+        ok: false,
+        environment,
+        endpoint: "/api/v1/rate_plans",
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex rate plan creation failed: ${errorTitle}.`
+          : `Channex rate plan creation failed with HTTP ${response.status}.`,
+        externalRatePlanId: null,
+        rawValidation: errors,
+      };
+    }
+
+    const data = parsed && typeof parsed.data === "object" && parsed.data ? (parsed.data as Record<string, unknown>) : null;
+    const externalRatePlanId =
+      trimOrNull(typeof data?.id === "string" ? data.id : null) ??
+      trimOrNull(
+        data &&
+        typeof data.attributes === "object" &&
+        data.attributes &&
+        typeof (data.attributes as Record<string, unknown>).id === "string"
+          ? ((data.attributes as Record<string, unknown>).id as string)
+          : null
+      );
+
+    return {
+      ok: true,
+      environment,
+      endpoint: "/api/v1/rate_plans",
+      httpStatus: response.status,
+      message: externalRatePlanId
+        ? `Channex staging rate plan created successfully with id ${externalRatePlanId}.`
+        : "Channex staging rate plan created successfully.",
+      externalRatePlanId,
+      rawValidation: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/rate_plans",
+      httpStatus: null,
+      message: error instanceof Error ? `Channex rate plan creation failed: ${error.message}` : "Channex rate plan creation failed.",
+      externalRatePlanId: null,
       rawValidation: null,
     };
   }
