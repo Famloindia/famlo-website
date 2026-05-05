@@ -606,6 +606,17 @@ export default async function FamloProDashboardPage({
       asString(pricingSnapshot.channel_external_revision_id) ??
       matchedRevision?.externalRevisionId ??
       null;
+    const resolvedLinkedBookingId = isOtaBooking
+      ? matchedRevision?.linkedBookingId ?? bookingId ?? null
+      : bookingId ?? null;
+    const resolvedImportStatus =
+      !isOtaBooking
+        ? "not_applicable"
+        : matchedRevision?.importStatus === "failed"
+          ? "failed"
+          : resolvedLinkedBookingId || matchedRevision?.importStatus === "imported"
+            ? "imported"
+            : matchedRevision?.importStatus ?? "preview";
     const bookingDetail: CalendarBookingDetail = {
       bookingId: bookingId ?? "",
       roomName: roomNameById.get(stayUnitId) ?? "Room",
@@ -617,11 +628,11 @@ export default async function FamloProDashboardPage({
       amount: bookingAmount,
       currency: bookingCurrency,
       paymentStatus: asString(row.payment_status),
-      importStatus: isOtaBooking ? matchedRevision?.importStatus ?? "imported" : "not_applicable",
+      importStatus: resolvedImportStatus,
       ackStatus: isOtaBooking ? matchedRevision?.ackStatus ?? "not_acknowledged" : "not_applicable",
-      linkedBookingId: isOtaBooking ? matchedRevision?.linkedBookingId ?? bookingId ?? null : bookingId ?? null,
+      linkedBookingId: resolvedLinkedBookingId,
       externalRevisionId,
-      importedIntoFamlo: true,
+      importedIntoFamlo: !isOtaBooking || resolvedImportStatus === "imported",
       acknowledged: isOtaBooking ? matchedRevision?.ackStatus === "acknowledged" : false,
       acknowledgementNote:
         isOtaBooking && !externalRevisionId
