@@ -1063,6 +1063,26 @@
   color: rgba(15, 23, 42, 0.54);
 }
 
+.payloadSummaryList {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.payloadSummaryItem {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.conflictActionCopy {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #0f4ea9;
+  font-weight: 700;
+}
+
 .emptyTitle {
   font-size: 16px;
   font-weight: 900;

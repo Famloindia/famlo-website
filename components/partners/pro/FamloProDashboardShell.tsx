@@ -149,6 +149,20 @@ type DashboardMetric = {
   hint: string;
 };
 
+type SyncLogGroup = {
+  key: string;
+  title: string;
+  actions: string[];
+};
+
+type ConflictItem = {
+  key: string;
+  title: string;
+  summary: string;
+  recommendedAction: string;
+  severity: "warning" | "review";
+};
+
 interface FamloProDashboardShellProps {
   familyId: string;
   propertyName: string;
@@ -240,6 +254,16 @@ const CALENDAR_LEGEND = [
   { title: "Grey", copy: "Past date" },
 ];
 
+const SYNC_LOG_GROUPS: SyncLogGroup[] = [
+  { key: "property", title: "Property creation", actions: ["create_property", "connection_check", "verify_channex_structure"] },
+  { key: "room", title: "Room creation", actions: ["create_room_type"] },
+  { key: "rate", title: "Rate creation", actions: ["create_rate_plan"] },
+  { key: "ari", title: "ARI push", actions: ["push_ari_30_day"] },
+  { key: "booking-feed", title: "Booking feed / list", actions: ["fetch_booking_feed", "store_booking_feed_preview", "verify_booking_list"] },
+  { key: "booking-import", title: "Booking import", actions: ["import_booking_preview"] },
+  { key: "ack", title: "Acknowledgement", actions: ["acknowledge_booking_revision"] },
+];
+
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -258,6 +282,19 @@ function formatDateTime(value: string | null): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatRelativeAge(value: string | null, referenceNow: number): string {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not available";
+  const diffMs = referenceNow - date.getTime();
+  if (diffMs < 0) return "Just now";
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffHours < 1) return "Less than 1 hour ago";
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
 }
 
 function labelizeToken(value: string | null | undefined, fallback: string): string {
@@ -311,6 +348,30 @@ function formatCalendarDetailDateRange(startDate: string, endDate: string): stri
     year: "numeric",
   });
   return `${formatter.format(start)} → ${formatter.format(end)}`;
+}
+
+function summarizeSafePayload(payload: Record<string, unknown>): string[] {
+  const hiddenKeys = new Set(["token", "api_key", "authorization", "raw_payload", "secret"]);
+  const lines: string[] = [];
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (lines.length >= 4) break;
+    if (hiddenKeys.has(key)) continue;
+    if (typeof value === "string" && value.trim().length > 0) {
+      lines.push(`${labelizeToken(key, key)}: ${value}`);
+      continue;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      lines.push(`${labelizeToken(key, key)}: ${String(value)}`);
+      continue;
+    }
+    if (Array.isArray(value) && value.length > 0) {
+      lines.push(`${labelizeToken(key, key)}: ${value.length} item${value.length === 1 ? "" : "s"}`);
+      continue;
+    }
+  }
+
+  return lines;
 }
 
 function joinMissingLabels(items: Array<{ label: string; ready: boolean }>): string {
@@ -541,6 +602,7 @@ export default function FamloProDashboardShell({
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
+  const [timeAnchor] = useState(() => Date.now());
 
   const groupedNavItems = useMemo(
     () =>
@@ -699,6 +761,86 @@ export default function FamloProDashboardShell({
   }).length;
   const lastAriSyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
   const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
+  const groupedSyncLogs = SYNC_LOG_GROUPS.map((group) => ({
+    ...group,
+    logs: channelFoundation.syncLogs.filter((log) => group.actions.includes(log.action)),
+  })).filter((group) => group.logs.length > 0);
+  const importedNotAcknowledgedConflicts: ConflictItem[] = channelFoundation.bookingRevisions
+    .filter((revision) => revision.importStatus === "imported" && revision.ackStatus !== "acknowledged")
+    .map((revision) => ({
+      key: `booking-imported-${revision.id}`,
+      title: "Booking imported but not acknowledged",
+      summary: `${revision.externalBookingId ?? "Unknown booking"} is linked to Famlo${revision.linkedBookingId ? ` via ${revision.linkedBookingId}` : ""} but still awaits Channex acknowledgement.`,
+      recommendedAction: revision.externalRevisionId
+        ? "Review the imported booking in Famlo and acknowledge it from the Bookings workspace when operational checks are complete."
+        : "This booking came from Booking List preview only. Wait for Booking Revision Feed to surface a revision id before acknowledgement.",
+      severity: "warning",
+    }));
+  const bookingListPreviewConflicts: ConflictItem[] = channelFoundation.bookingRevisions
+    .filter((revision) => revision.source === "booking_list_api" && !revision.externalRevisionId && revision.ackStatus !== "acknowledged")
+    .map((revision) => ({
+      key: `booking-list-preview-${revision.id}`,
+      title: "Booking List preview cannot acknowledge yet",
+      summary: `${revision.externalBookingId ?? "Unknown booking"} has no Booking Revision Feed id, so Channex acknowledgement cannot be sent.`,
+      recommendedAction: "Fetch the Booking Revision Feed again later and wait for a revision id before acknowledging this booking.",
+      severity: "review",
+    }));
+  const unmappedRoomConflicts: ConflictItem[] = rooms
+    .filter((room) => room.isActive && !roomMappingsByRoomId.get(room.id)?.externalRoomTypeId)
+    .map((room) => ({
+      key: `unmapped-room-${room.id}`,
+      title: "Room mapping missing",
+      summary: `${room.name} does not have an external Channex room type id yet.`,
+      recommendedAction: "Complete room-type creation or mapping before relying on channel distribution for this room.",
+      severity: "review",
+    }));
+  const unmappedRateConflicts: ConflictItem[] = rooms
+    .filter((room) => room.isActive && !ratePlansByRoomId.get(room.id)?.externalRatePlanId)
+    .map((room) => ({
+      key: `unmapped-rate-${room.id}`,
+      title: "Rate mapping missing",
+      summary: `${standardRatePlanName} for ${room.name} does not have an external provider rate plan id yet.`,
+      recommendedAction: "Create or map the standard rate plan before expecting rate distribution for this room.",
+      severity: "review",
+    }));
+  const failedSyncConflicts: ConflictItem[] = channelFoundation.syncLogs
+    .filter((log) => log.status !== "success")
+    .map((log) => ({
+      key: `failed-log-${log.id}`,
+      title: "Failed or warning sync log",
+      summary: `${labelizeToken(log.action, "sync action")} returned ${labelizeToken(log.status, "unknown")}${log.message ? `: ${log.message}` : "."}`,
+      recommendedAction: "Review the sync log payload summary and rerun the relevant operational step only after the underlying issue is cleared.",
+      severity: "warning",
+    }));
+  const staleAriConflict: ConflictItem[] =
+    !lastAriSyncLog
+      ? [{
+          key: "stale-ari-missing",
+          title: "30-day ARI sync has not run",
+          summary: "No 30-day ARI sync log exists for this property yet.",
+          recommendedAction: "Run a staging ARI push once mappings are ready so Channex inventory and rates can be verified.",
+          severity: "review",
+        }]
+      : (() => {
+          const createdAt = lastAriSyncLog.createdAt ? new Date(lastAriSyncLog.createdAt) : null;
+          const isStale = !createdAt || Number.isNaN(createdAt.getTime()) || timeAnchor - createdAt.getTime() > 24 * 60 * 60 * 1000;
+          if (!isStale) return [];
+          return [{
+            key: "stale-ari-old",
+            title: "30-day ARI sync is stale",
+            summary: `The latest ARI push ran ${formatRelativeAge(lastAriSyncLog.createdAt, timeAnchor)}.`,
+            recommendedAction: "Verify current Channex inventory and rerun the 30-day staging sync if the latest rate and availability view is outdated.",
+            severity: "review" as const,
+          }];
+        })();
+  const conflictItems: ConflictItem[] = [
+    ...importedNotAcknowledgedConflicts,
+    ...bookingListPreviewConflicts,
+    ...unmappedRoomConflicts,
+    ...unmappedRateConflicts,
+    ...failedSyncConflicts,
+    ...staleAriConflict,
+  ];
 
   return (
     <div className={styles.shell}>
@@ -1606,7 +1748,7 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Sync Logs</h3>
                   <p className={styles.cardCopy}>
-                    Future ARI and webhook activity will appear here after provider connectivity is enabled.
+                    Read-only operational history for Channex and provider-neutral channel actions already recorded for this property.
                   </p>
                 </div>
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>
@@ -1614,28 +1756,59 @@ export default function FamloProDashboardShell({
                 </span>
               </div>
               <div className={styles.cardBody}>
-                {channelFoundation.syncLogs.length > 0 ? (
-                  <div className={styles.logList}>
-                    {channelFoundation.syncLogs.map((log) => (
-                      <article key={log.id} className={styles.logRow}>
-                        <div>
-                          <div className={styles.logTitle}>{labelizeToken(log.action, "Sync action")}</div>
-                          <div className={styles.logCopy}>{log.message ?? "No detail message stored."}</div>
+                {groupedSyncLogs.length > 0 ? (
+                  <div className={styles.stack}>
+                    {groupedSyncLogs.map((group) => (
+                      <section key={group.key} className={styles.cardInset}>
+                        <div className={styles.cardHeaderCompact}>
+                          <div>
+                            <div className={styles.listTitle}>{group.title}</div>
+                            <div className={styles.cardCopy}>
+                              {group.logs.length} log {group.logs.length === 1 ? "entry" : "entries"} in this operational group.
+                            </div>
+                          </div>
+                          <span className={styles.badge}>{group.logs.length}</span>
                         </div>
-                        <div className={styles.logMeta}>
-                          <span className={`${styles.badge} ${log.status === "success" ? "" : styles.badgeMuted}`.trim()}>
-                            {labelizeToken(log.status, "Unknown")}
-                          </span>
-                          <span className={styles.logTimestamp}>{formatDateTime(log.createdAt)}</span>
+                        <div className={styles.logList}>
+                          {group.logs.map((log) => {
+                            const payloadSummary = summarizeSafePayload(log.payload);
+                            return (
+                              <article key={log.id} className={styles.logRow}>
+                                <div>
+                                  <div className={styles.logTitle}>{labelizeToken(log.action, "Sync action")}</div>
+                                  <div className={styles.logCopy}>{log.message ?? "No detail message stored."}</div>
+                                  <div className={styles.inlineBadgeRow} style={{ marginTop: 10 }}>
+                                    <span className={styles.readinessPill}>{labelizeToken(log.providerCode, "provider")}</span>
+                                    <span className={`${styles.readinessPill} ${log.status === "success" ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                                      {labelizeToken(log.status, "Unknown")}
+                                    </span>
+                                  </div>
+                                  {payloadSummary.length > 0 ? (
+                                    <div className={styles.payloadSummaryList}>
+                                      {payloadSummary.map((line) => (
+                                        <div key={`${log.id}-${line}`} className={styles.payloadSummaryItem}>
+                                          {line}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className={styles.logMeta}>
+                                  <span className={styles.logTimestamp}>{formatDateTime(log.createdAt)}</span>
+                                  <span className={styles.logTimestamp}>{formatRelativeAge(log.createdAt, timeAnchor)}</span>
+                                </div>
+                              </article>
+                            );
+                          })}
                         </div>
-                      </article>
+                      </section>
                     ))}
                   </div>
                 ) : (
                   <div className={styles.emptyState}>
                     <div className={styles.emptyTitle}>No sync jobs yet</div>
                     <div className={styles.emptyCopy}>
-                      Channel sync is intentionally disabled. Availability, rate, restriction, and booking-import logs will populate here later.
+                      No provider actions have been recorded for this property yet. Once property creation, mapping, ARI push, or booking workflows run, their safe summaries will appear here.
                     </div>
                   </div>
                 )}
@@ -1649,18 +1822,39 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Conflicts</h3>
                   <p className={styles.cardCopy}>
-                    This queue will flag future inventory mismatches, mapping gaps, and booking-import exceptions.
+                    Read-only operational queue for booking acknowledgement gaps, mapping issues, failed syncs, and stale provider state.
                   </p>
                 </div>
-                <span className={`${styles.badge} ${styles.badgeMuted}`}>No conflicts</span>
+                <span className={`${styles.badge} ${conflictItems.length > 0 ? styles.badgeMuted : ""}`.trim()}>
+                  {conflictItems.length > 0 ? `${conflictItems.length} issues` : "No conflicts"}
+                </span>
               </div>
               <div className={styles.cardBody}>
-                <div className={styles.emptyState}>
-                  <div className={styles.emptyTitle}>Nothing to reconcile</div>
-                  <div className={styles.emptyCopy}>
-                    With {connectedPropertyCount} connected properties and no active provider API, there are no room, rate, or booking conflicts to resolve in this phase.
+                {conflictItems.length > 0 ? (
+                  <div className={styles.logList}>
+                    {conflictItems.map((item) => (
+                      <article key={item.key} className={styles.logRow}>
+                        <div>
+                          <div className={styles.logTitle}>{item.title}</div>
+                          <div className={styles.logCopy}>{item.summary}</div>
+                          <div className={styles.conflictActionCopy}>Recommended action: {item.recommendedAction}</div>
+                        </div>
+                        <div className={styles.logMeta}>
+                          <span className={`${styles.readinessPill} ${item.severity === "warning" ? styles.readinessPillMissing : styles.readinessPillReview}`}>
+                            {item.severity === "warning" ? "Action needed" : "Needs review"}
+                          </span>
+                        </div>
+                      </article>
+                    ))}
                   </div>
-                </div>
+                ) : (
+                  <div className={styles.emptyState}>
+                    <div className={styles.emptyTitle}>Nothing to reconcile</div>
+                    <div className={styles.emptyCopy}>
+                      With {connectedPropertyCount} connected properties and the current sync state, there are no room, rate, acknowledgement, or stale-sync issues to review right now.
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           )}
