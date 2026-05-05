@@ -383,7 +383,9 @@ function buildSectionDescriptor(
   section: ProSectionId,
   setupProgressPercent: number,
   missingSetupCount: number,
-  roomsCount: number
+  roomsCount: number,
+  syncLogCount: number,
+  conflictCount: number
 ): {
   eyebrow: string;
   title: string;
@@ -476,7 +478,7 @@ function buildSectionDescriptor(
       eyebrow: "Channel manager",
       title: "Sync Logs",
       copy: "Operational history for future ARI jobs, webhook runs, and booking acknowledgements.",
-      status: "No sync activity",
+      status: syncLogCount > 0 ? "History available" : "No sync activity",
     };
   }
 
@@ -485,7 +487,7 @@ function buildSectionDescriptor(
       eyebrow: "Channel manager",
       title: "Conflicts",
       copy: "Future review queue for inventory mismatches, booking import exceptions, and mapping gaps.",
-      status: "No conflicts",
+      status: conflictCount > 0 ? `${conflictCount} issue${conflictCount === 1 ? "" : "s"}` : "No conflicts",
     };
   }
 
@@ -619,12 +621,6 @@ export default function FamloProDashboardShell({
   const recommendedNextAction =
     missingSetupItems[0]?.hint ??
     "Core Pro setup signals look healthy. Provider mapping and sync steps can follow in a future phase.";
-  const sectionDescriptor = buildSectionDescriptor(
-    activeSection,
-    setupProgressPercent,
-    missingSetupItems.length,
-    rooms.length
-  );
   const standardRatePlanName = initialSettings.standardRatePlanName || "Standard Rate";
   const primaryProvider =
     channelFoundation.providers.find((provider) => provider.code === "channex") ??
@@ -841,6 +837,14 @@ export default function FamloProDashboardShell({
     ...failedSyncConflicts,
     ...staleAriConflict,
   ];
+  const sectionDescriptor = buildSectionDescriptor(
+    activeSection,
+    setupProgressPercent,
+    missingSetupItems.length,
+    rooms.length,
+    channelFoundation.syncLogs.length,
+    conflictItems.length
+  );
 
   return (
     <div className={styles.shell}>
