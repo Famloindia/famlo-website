@@ -81,8 +81,10 @@ export type ChannelBookingRevisionRecord = {
   amount: number | null;
   currency: string | null;
   paymentCollect: string | null;
+  source: string;
   importStatus: string;
   ackStatus: string;
+  linkedBookingId: string | null;
   rawPayload: JsonRecord;
   createdAt: string | null;
   updatedAt: string | null;
@@ -161,7 +163,7 @@ export async function loadHostProChannelFoundation(
       .limit(20),
     supabase
       .from("channel_booking_revisions")
-      .select("id,family_id,provider_code,external_property_id,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,raw_payload,import_status,ack_status,created_at,updated_at")
+      .select("id,family_id,provider_code,external_property_id,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,created_at,updated_at")
       .eq("family_id", normalizedFamilyId)
       .order("updated_at", { ascending: false })
       .limit(20),
@@ -266,8 +268,10 @@ export async function loadHostProChannelFoundation(
       amount: row.amount == null ? null : asNumber(row.amount, 0),
       currency: asString(row.currency),
       paymentCollect: asString(row.payment_collect),
+      source: asString(row.source) ?? "booking_revision_feed",
       importStatus: asString(row.import_status) ?? "preview",
       ackStatus: asString(row.ack_status) ?? "not_acknowledged",
+      linkedBookingId: asString(row.linked_booking_id),
       rawPayload: asObject(row.raw_payload),
       createdAt: asString(row.created_at),
       updatedAt: asString(row.updated_at),

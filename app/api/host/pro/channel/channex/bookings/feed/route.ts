@@ -29,6 +29,17 @@ type BookingFeedSummary = {
   ackStatus: string;
 };
 
+type UnmatchedRevisionPreview = {
+  externalBookingId: string | null;
+  revisionId: string | null;
+  otaName: string | null;
+  status: string | null;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  reason: "property_id_missing" | "property_id_mismatch" | "room_type_id_missing" | "unsupported_shape";
+  discoveredPropertyIds: string[];
+};
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -39,6 +50,22 @@ function asStringOrNull(value: unknown): string | null {
 
 function asObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function getAttributes(value: Record<string, unknown>): Record<string, unknown> | null {
+  return asObject(value.attributes);
+}
+
+function getRelationships(value: Record<string, unknown>): Record<string, unknown> | null {
+  return asObject(value.relationships);
+}
+
+function collectUniqueStrings(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value && value.trim().length > 0)).map((value) => value.trim()))];
 }
 
 function summarizeGuestName(customer: unknown): string | null {
@@ -60,39 +87,151 @@ function asNumericStringOrNull(value: unknown): string | null {
   return null;
 }
 
+function extractDiscoveredPropertyIds(revision: Record<string, unknown>): string[] {
+  const attributes = getAttributes(revision);
+  const relationships = getRelationships(revision);
+  const relationshipProperty = asObject(relationships?.property);
+  const relationshipPropertyData = asObject(relationshipProperty?.data);
+  const booking = asObject(attributes?.booking);
+  const bookingProperty = asObject(booking?.property);
+  const rooms = asArray(attributes?.rooms ?? revision.rooms);
+
+  const roomPropertyIds = rooms
+    .map((room) => asObject(room))
+    .map((room) => asStringOrNull(room?.property_id))
+    .filter(Boolean);
+
+  return collectUniqueStrings([
+    asStringOrNull(revision.property_id),
+    asStringOrNull(attributes?.property_id),
+    asStringOrNull(booking?.property_id),
+    asStringOrNull(bookingProperty?.id),
+    asStringOrNull(relationshipPropertyData?.id),
+    ...roomPropertyIds,
+  ]);
+}
+
+function extractFirstRoom(revision: Record<string, unknown>): Record<string, unknown> | null {
+  const attributes = getAttributes(revision);
+  const rooms = asArray(attributes?.rooms ?? revision.rooms);
+  const first = rooms.find((room) => room && typeof room === "object" && !Array.isArray(room));
+  return asObject(first);
+}
+
+function extractExternalBookingId(revision: Record<string, unknown>): string | null {
+  const attributes = getAttributes(revision);
+  return (
+    asStringOrNull(revision.unique_id) ??
+    asStringOrNull(attributes?.unique_id) ??
+    asStringOrNull(revision.booking_id) ??
+    asStringOrNull(attributes?.booking_id) ??
+    asStringOrNull(revision.ota_reservation_code) ??
+    asStringOrNull(attributes?.ota_reservation_code)
+  );
+}
+
+function extractRevisionId(revision: Record<string, unknown>): string | null {
+  return asStringOrNull(revision.id);
+}
+
+function extractStatus(revision: Record<string, unknown>): string | null {
+  const attributes = getAttributes(revision);
+  return asStringOrNull(revision.status) ?? asStringOrNull(attributes?.status);
+}
+
+function extractOtaName(revision: Record<string, unknown>): string | null {
+  const attributes = getAttributes(revision);
+  return asStringOrNull(revision.ota_name) ?? asStringOrNull(attributes?.ota_name);
+}
+
 function summarizeRevision(
   revision: Record<string, unknown>,
   mappedRoomTypeIds: Set<string>
 ): BookingFeedSummary {
-  const rooms = Array.isArray(revision.rooms) ? revision.rooms : [];
-  const firstRoom = rooms.find((room) => room && typeof room === "object" && !Array.isArray(room)) as
-    | Record<string, unknown>
-    | undefined;
-
+  const attributes = getAttributes(revision);
+  const firstRoom = extractFirstRoom(revision);
   const externalRoomTypeId = asStringOrNull(firstRoom?.room_type_id);
   const externalRatePlanId = asStringOrNull(firstRoom?.rate_plan_id);
 
   return {
-    externalBookingId:
-      asStringOrNull(revision.unique_id) ??
-      asStringOrNull(revision.booking_id) ??
-      asStringOrNull(revision.ota_reservation_code),
-    revisionId: asStringOrNull(revision.id),
-    status: asStringOrNull(revision.status),
-    otaName: asStringOrNull(revision.ota_name),
-    arrivalDate: asStringOrNull(revision.arrival_date) ?? asStringOrNull(firstRoom?.checkin_date),
-    departureDate: asStringOrNull(revision.departure_date) ?? asStringOrNull(firstRoom?.checkout_date),
-    guestName: summarizeGuestName(revision.customer),
+    externalBookingId: extractExternalBookingId(revision),
+    revisionId: extractRevisionId(revision),
+    status: extractStatus(revision),
+    otaName: extractOtaName(revision),
+    arrivalDate: asStringOrNull(revision.arrival_date) ?? asStringOrNull(attributes?.arrival_date) ?? asStringOrNull(firstRoom?.checkin_date),
+    departureDate: asStringOrNull(revision.departure_date) ?? asStringOrNull(attributes?.departure_date) ?? asStringOrNull(firstRoom?.checkout_date),
+    guestName: summarizeGuestName(revision.customer ?? attributes?.customer),
     externalRoomTypeId,
     externalRatePlanId,
-    amount: asStringOrNull(revision.amount) ?? asStringOrNull(firstRoom?.amount),
-    currency: asStringOrNull(revision.currency),
-    paymentCollect: asStringOrNull(revision.payment_collect),
-    paymentType: asStringOrNull(revision.payment_type),
+    amount: asStringOrNull(revision.amount) ?? asStringOrNull(attributes?.amount) ?? asStringOrNull(firstRoom?.amount),
+    currency: asStringOrNull(revision.currency) ?? asStringOrNull(attributes?.currency),
+    paymentCollect: asStringOrNull(revision.payment_collect) ?? asStringOrNull(attributes?.payment_collect),
+    paymentType: asStringOrNull(revision.payment_type) ?? asStringOrNull(attributes?.payment_type),
     unmatchedRoom: externalRoomTypeId ? !mappedRoomTypeIds.has(externalRoomTypeId) : true,
-    insertedAt: asStringOrNull(revision.inserted_at),
+    insertedAt: asStringOrNull(revision.inserted_at) ?? asStringOrNull(attributes?.inserted_at),
     importStatus: "preview",
     ackStatus: "not_acknowledged",
+  };
+}
+
+function classifyRevisionForPropertyMatch(
+  revision: Record<string, unknown>,
+  expectedPropertyId: string
+): {
+  matched: boolean;
+  reason: UnmatchedRevisionPreview["reason"] | null;
+  discoveredPropertyIds: string[];
+  hasRoomTypeId: boolean;
+} {
+  const discoveredPropertyIds = extractDiscoveredPropertyIds(revision);
+  const firstRoom = extractFirstRoom(revision);
+  const hasRoomTypeId = Boolean(asStringOrNull(firstRoom?.room_type_id));
+  const hasAnyUsefulShape =
+    Boolean(extractRevisionId(revision)) ||
+    Boolean(extractExternalBookingId(revision)) ||
+    discoveredPropertyIds.length > 0;
+
+  if (!hasAnyUsefulShape) {
+    return {
+      matched: false,
+      reason: "unsupported_shape",
+      discoveredPropertyIds,
+      hasRoomTypeId,
+    };
+  }
+
+  if (discoveredPropertyIds.length === 0) {
+    return {
+      matched: false,
+      reason: "property_id_missing",
+      discoveredPropertyIds,
+      hasRoomTypeId,
+    };
+  }
+
+  if (!discoveredPropertyIds.includes(expectedPropertyId)) {
+    return {
+      matched: false,
+      reason: "property_id_mismatch",
+      discoveredPropertyIds,
+      hasRoomTypeId,
+    };
+  }
+
+  if (!hasRoomTypeId) {
+    return {
+      matched: false,
+      reason: "room_type_id_missing",
+      discoveredPropertyIds,
+      hasRoomTypeId,
+    };
+  }
+
+  return {
+    matched: true,
+    reason: null,
+    discoveredPropertyIds,
+    hasRoomTypeId,
   };
 }
 
@@ -106,7 +245,7 @@ async function logFeedResult(input: {
   const { error } = await input.supabase.from("channel_sync_logs").insert({
     family_id: input.familyId,
     provider_code: "channex",
-    action: "store_booking_feed_preview",
+    action: "fetch_booking_feed",
     status: input.status,
     message: input.message,
     payload: input.payload,
@@ -191,9 +330,33 @@ export async function POST(request: Request): Promise<NextResponse> {
         .filter((value): value is string => Boolean(value))
     );
 
-    const matchedRevisions = result.revisions.filter(
-      (revision) => asStringOrNull(revision.property_id) === externalPropertyId
-    );
+    const totalFetched = result.revisions.length;
+    const matchedRevisions: Array<Record<string, unknown>> = [];
+    const unmatchedPreviews: UnmatchedRevisionPreview[] = [];
+    const discoveredPropertyIds = new Set<string>();
+
+    for (const revision of result.revisions as Array<Record<string, unknown>>) {
+      const classification = classifyRevisionForPropertyMatch(revision, externalPropertyId);
+      classification.discoveredPropertyIds.forEach((id) => discoveredPropertyIds.add(id));
+      const summary = summarizeRevision(revision, mappedRoomTypeIds);
+
+      if (classification.matched) {
+        matchedRevisions.push(revision);
+        continue;
+      }
+
+      unmatchedPreviews.push({
+        externalBookingId: summary.externalBookingId,
+        revisionId: summary.revisionId,
+        otaName: summary.otaName,
+        status: summary.status,
+        arrivalDate: summary.arrivalDate,
+        departureDate: summary.departureDate,
+        reason: classification.reason ?? "unsupported_shape",
+        discoveredPropertyIds: classification.discoveredPropertyIds,
+      });
+    }
+
     const normalizedRevisions = matchedRevisions.map((revision) => summarizeRevision(revision, mappedRoomTypeIds));
     if (normalizedRevisions.length > 0) {
       const upsertRows = matchedRevisions.map((revision, index) => {
@@ -261,10 +424,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       ackStatus: asStringOrNull(row.ack_status) ?? "not_acknowledged",
     }));
     const unmatchedRoomCount = normalizedRevisions.filter((revision) => revision.unmatchedRoom).length;
+    const unmatchedCount = unmatchedPreviews.length;
     const message = result.ok
-      ? normalizedRevisions.length > 0
-        ? `Fetched and stored ${normalizedRevisions.length} Channex staging booking revision${normalizedRevisions.length === 1 ? "" : "s"} for this property. Preview only; nothing was imported or acknowledged.`
-        : "No unacknowledged Channex staging booking revisions matched this property. Preview only; nothing was imported or acknowledged."
+      ? totalFetched === 0
+        ? "0 returned by Channex feed. Preview only; nothing was imported or acknowledged."
+        : normalizedRevisions.length > 0
+          ? `Fetched ${totalFetched} Channex staging booking revision${totalFetched === 1 ? "" : "s"}, matched ${normalizedRevisions.length} to this property, and stored matched previews only. Nothing was imported or acknowledged.`
+          : `Fetched ${totalFetched} Channex staging booking revision${totalFetched === 1 ? "" : "s"}, but 0 matched this property. Preview only; nothing was imported or acknowledged.`
       : result.message;
 
     await logFeedResult({
@@ -277,8 +443,21 @@ export async function POST(request: Request): Promise<NextResponse> {
         endpoint: result.endpoint,
         http_status: result.httpStatus,
         external_property_id: externalPropertyId,
+        total_fetched: totalFetched,
         matched_revision_count: normalizedRevisions.length,
+        unmatched_revision_count: unmatchedCount,
         revision_ids: normalizedRevisions.map((revision) => revision.revisionId).filter(Boolean),
+        latest_safe_booking_ids: result.revisions
+          .slice(0, 10)
+          .map((revision) => extractExternalBookingId(revision as Record<string, unknown>))
+          .filter(Boolean),
+        discovered_property_ids: [...discoveredPropertyIds],
+        unmatched_reasons: unmatchedPreviews.slice(0, 10).map((revision) => ({
+          revision_id: revision.revisionId,
+          external_booking_id: revision.externalBookingId,
+          reason: revision.reason,
+          discovered_property_ids: revision.discoveredPropertyIds,
+        })),
         unmatched_room_count: unmatchedRoomCount,
         checked_by: authorizedResource.isAdmin ? "admin" : "host",
       },
@@ -291,9 +470,17 @@ export async function POST(request: Request): Promise<NextResponse> {
         configured: config.configured,
         environment: result.environment,
         message,
+        totalFetched,
         revisionsFound: normalizedRevisions.length,
+        unmatchedCount,
         unmatchedRoomCount,
         externalPropertyId,
+        discoveredPropertyIds: [...discoveredPropertyIds],
+        unmatchedRevisions: unmatchedPreviews.slice(0, 20),
+        latestSafeBookingIds: result.revisions
+          .slice(0, 10)
+          .map((revision) => extractExternalBookingId(revision as Record<string, unknown>))
+          .filter(Boolean),
         lastCheckedAt: new Date().toISOString(),
         revisions: storedRevisions,
         requiresAcknowledgement: true,

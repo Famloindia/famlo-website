@@ -630,7 +630,7 @@ export default function FamloProDashboardShell({
     return !(roomMapping?.externalRoomTypeId && ratePlan?.externalRatePlanId && room.priceFullday > 0);
   }).length;
   const lastAriSyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
-  const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "store_booking_feed_preview") ?? null;
+  const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
 
   return (
     <div className={styles.shell}>
@@ -1437,6 +1437,12 @@ export default function FamloProDashboardShell({
                   lastSyncLog={lastBookingFeedLog}
                   storedRevisions={channelFoundation.bookingRevisions}
                 />
+                <ChannexBookingListVerifyCard
+                  familyId={familyId}
+                  propertyCreated={canCreateRoomTypes}
+                  externalPropertyId={primaryProperty?.externalPropertyId ?? null}
+                  storedRevisions={channelFoundation.bookingRevisions}
+                />
                 <div className={styles.filterRow}>
                   {BOOKING_FILTERS.map((filter) => (
                     <span key={filter} className={styles.filterChip}>{filter}</span>
@@ -2164,7 +2170,6 @@ function ChannexPropertyCard({
           ) : null}
         </div>
       ) : null}
-
       <div className={styles.inlineActionRow}>
         <button
           type="button"
@@ -2223,6 +2228,240 @@ function ChannexPropertyCard({
           }}
         >
           {alreadyCreated ? "Already created" : isCreating ? "Creating..." : "Create staging property"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ChannexBookingListVerifyCard({
+  familyId,
+  propertyCreated,
+  externalPropertyId,
+  storedRevisions,
+}: Readonly<{
+  familyId: string;
+  propertyCreated: boolean;
+  externalPropertyId: string | null;
+  storedRevisions: Array<{
+    externalBookingId: string | null;
+    source: string;
+    importStatus: string;
+    ackStatus: string;
+  }>;
+}>): React.JSX.Element | null {
+  const [isVerifyingList, startVerifyingList] = useTransition();
+  const [bookingUniqueIdInput, setBookingUniqueIdInput] = useState("ABB-TEST-FAMLO-001");
+  const [listFeedback, setListFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    totalFetched?: number;
+    propertyMatchedCount?: number;
+    foundCount?: number;
+    searchedUniqueId?: string | null;
+    bookings?: Array<{
+      bookingId: string | null;
+      uniqueId: string | null;
+      status: string | null;
+      propertyId: string | null;
+      arrivalDate: string | null;
+      departureDate: string | null;
+      roomTypeId: string | null;
+      ratePlanId: string | null;
+      amount: string | null;
+      currency: string | null;
+      otaName: string | null;
+    }>;
+  } | null>(null);
+
+  if (!externalPropertyId) {
+    return null;
+  }
+
+  const blockedMessage = !propertyCreated
+    ? "Create provider property first."
+    : !externalPropertyId
+      ? "Provider property is not mapped yet."
+      : null;
+
+  const previewMap = new Map(
+    storedRevisions
+      .filter((revision) => revision.source === "booking_list_api" && revision.externalBookingId)
+      .map((revision) => [
+        revision.externalBookingId as string,
+        {
+          importStatus: revision.importStatus,
+          ackStatus: revision.ackStatus,
+          source: revision.source,
+        },
+      ])
+  );
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>Verify Channex Booking List</div>
+          <div className={styles.cardCopy}>
+            Read-only Booking List API check for this mapped Channex property. This does not import into Famlo bookings and does not acknowledge Channex.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
+          {blockedMessage ? "Blocked" : "Read-only"}
+        </span>
+      </div>
+
+      <div className={styles.placeholderGrid}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>External property ID</div>
+          <div className={styles.placeholderCopy}>{externalPropertyId}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Default booking ID</div>
+          <div className={styles.placeholderCopy}>ABB-TEST-FAMLO-001</div>
+        </div>
+      </div>
+
+      {blockedMessage ? <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{blockedMessage}</div> : null}
+
+      {listFeedback ? (
+        <div className={`${styles.feedbackBox} ${listFeedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {listFeedback.message}
+          {typeof listFeedback.totalFetched === "number" ? (
+            <div className={styles.inlineBadgeRow}>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Total bookings returned: {listFeedback.totalFetched}</span>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Property matched: {listFeedback.propertyMatchedCount ?? 0}</span>
+              <span className={`${styles.readinessPill} ${(listFeedback.foundCount ?? 0) > 0 ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                Found: {listFeedback.foundCount ?? 0}
+              </span>
+            </div>
+          ) : null}
+
+          {listFeedback.bookings && listFeedback.bookings.length > 0 ? (
+            <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+              <div className={styles.mappingHeader}>Booking</div>
+              <div className={styles.mappingHeader}>Status</div>
+              <div className={styles.mappingHeader}>Property ID</div>
+              <div className={styles.mappingHeader}>Dates</div>
+              <div className={styles.mappingHeader}>Room / Rate</div>
+              <div className={styles.mappingHeader}>Amount</div>
+              {listFeedback.bookings.map((booking, index) => {
+                const preview = booking.uniqueId ? previewMap.get(booking.uniqueId) : null;
+                return (
+                  <Fragment key={`${booking.uniqueId ?? booking.bookingId ?? "booking"}-${index}`}>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>{booking.uniqueId ?? "Unknown booking"}</div>
+                      <div className={styles.mappingSubcopy}>Booking {booking.bookingId ?? "Unknown"}</div>
+                    </div>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>{labelizeToken(booking.status, "unknown")}</div>
+                      <div className={styles.mappingSubcopy}>
+                        {preview
+                          ? `${preview.importStatus} · ${preview.ackStatus} · ${labelizeToken(preview.source, "booking_list_api")}`
+                          : "Read-only list API"}
+                      </div>
+                    </div>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>{booking.propertyId ?? "Missing"}</div>
+                      <div className={styles.mappingSubcopy}>Mapped Channex property</div>
+                    </div>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>{booking.arrivalDate ?? "Unknown"} → {booking.departureDate ?? "Unknown"}</div>
+                    </div>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>{booking.roomTypeId ?? "Room missing"}</div>
+                      <div className={styles.mappingSubcopy}>{booking.ratePlanId ?? "Rate missing"}</div>
+                    </div>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>
+                        {booking.amount && booking.currency ? `${booking.amount} ${booking.currency}` : booking.amount ?? booking.currency ?? "Not available"}
+                      </div>
+                      <div className={styles.mappingSubcopy}>Read-only, not imported, not acknowledged</div>
+                    </div>
+                  </Fragment>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <input
+          type="text"
+          value={bookingUniqueIdInput}
+          onChange={(event) => setBookingUniqueIdInput(event.target.value)}
+          placeholder="Booking unique ID"
+          aria-label="Booking unique ID"
+          style={{
+            minWidth: 220,
+            borderRadius: 10,
+            border: "1px solid rgba(15,33,64,0.16)",
+            padding: "10px 12px",
+            fontSize: 14,
+            background: "#fff",
+            color: "#11233f",
+          }}
+        />
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isVerifyingList || Boolean(blockedMessage)}
+          onClick={() => {
+            startVerifyingList(async () => {
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/bookings/list", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId, uniqueId: bookingUniqueIdInput }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  message?: string;
+                  totalFetched?: number;
+                  propertyMatchedCount?: number;
+                  foundCount?: number;
+                  searchedUniqueId?: string | null;
+                  bookings?: Array<{
+                    bookingId: string | null;
+                    uniqueId: string | null;
+                    status: string | null;
+                    propertyId: string | null;
+                    arrivalDate: string | null;
+                    departureDate: string | null;
+                    roomTypeId: string | null;
+                    ratePlanId: string | null;
+                    amount: string | null;
+                    currency: string | null;
+                    otaName: string | null;
+                  }>;
+                };
+
+                setListFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to verify Channex booking list.",
+                  totalFetched: typeof payload.totalFetched === "number" ? payload.totalFetched : undefined,
+                  propertyMatchedCount: typeof payload.propertyMatchedCount === "number" ? payload.propertyMatchedCount : undefined,
+                  foundCount: typeof payload.foundCount === "number" ? payload.foundCount : undefined,
+                  searchedUniqueId: typeof payload.searchedUniqueId === "string" ? payload.searchedUniqueId : null,
+                  bookings: Array.isArray(payload.bookings) ? payload.bookings : undefined,
+                });
+              } catch (error) {
+                setListFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to verify Channex booking list.",
+                });
+              }
+            });
+          }}
+        >
+          {isVerifyingList ? "Verifying..." : "Verify booking list"}
         </button>
       </div>
     </section>
@@ -2898,6 +3137,7 @@ function ChannexBookingFeedCard({
     createdAt: string | null;
   } | null;
   storedRevisions: Array<{
+    id: string;
     externalBookingId: string | null;
     externalRevisionId: string | null;
     status: string | null;
@@ -2910,21 +3150,40 @@ function ChannexBookingFeedCard({
     amount: number | null;
     currency: string | null;
     paymentCollect: string | null;
+    source: string;
     importStatus: string;
     ackStatus: string;
+    linkedBookingId: string | null;
     updatedAt: string | null;
   }>;
 }>): React.JSX.Element {
   const router = useRouter();
   const [isFetching, startFetching] = useTransition();
+  const [isVerifyingList, startVerifyingList] = useTransition();
+  const [isImportingPreview, startImportingPreview] = useTransition();
+  const [importingPreviewId, setImportingPreviewId] = useState<string | null>(null);
+  const [bookingUniqueIdInput, setBookingUniqueIdInput] = useState("ABB-TEST-FAMLO-001");
   const [feedback, setFeedback] = useState<{
     ok: boolean;
     message: string;
     summary?: {
+      totalFetched: number;
       revisionsFound: number;
+      unmatchedCount: number;
       unmatchedRoomCount: number;
       lastCheckedAt: string | null;
     };
+    latestSafeBookingIds?: string[];
+    unmatchedRevisions?: Array<{
+      externalBookingId: string | null;
+      revisionId: string | null;
+      otaName: string | null;
+      status: string | null;
+      arrivalDate: string | null;
+      departureDate: string | null;
+      reason: "property_id_missing" | "property_id_mismatch" | "room_type_id_missing" | "unsupported_shape";
+      discoveredPropertyIds: string[];
+    }>;
     revisions?: Array<{
       externalBookingId: string | null;
       revisionId: string | null;
@@ -2941,8 +3200,30 @@ function ChannexBookingFeedCard({
       paymentType: string | null;
       unmatchedRoom: boolean;
       insertedAt: string | null;
+      source?: string | null;
       importStatus?: string | null;
       ackStatus?: string | null;
+    }>;
+  } | null>(null);
+  const [listFeedback, setListFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    totalFetched?: number;
+    propertyMatchedCount?: number;
+    foundCount?: number;
+    searchedUniqueId?: string | null;
+    bookings?: Array<{
+      bookingId: string | null;
+      uniqueId: string | null;
+      status: string | null;
+      propertyId: string | null;
+      arrivalDate: string | null;
+      departureDate: string | null;
+      roomTypeId: string | null;
+      ratePlanId: string | null;
+      amount: string | null;
+      currency: string | null;
+      otaName: string | null;
     }>;
   } | null>(null);
 
@@ -2951,6 +3232,28 @@ function ChannexBookingFeedCard({
     : !externalPropertyId
       ? "Provider property is not mapped yet."
       : null;
+  const displayedStoredRevisions = storedRevisions.map((revision) => ({
+    id: revision.id,
+    externalBookingId: revision.externalBookingId,
+    revisionId: revision.externalRevisionId,
+    status: revision.status,
+    otaName: revision.otaName,
+    arrivalDate: revision.arrivalDate,
+    departureDate: revision.departureDate,
+    guestName: revision.guestName,
+    externalRoomTypeId: revision.externalRoomTypeId,
+    externalRatePlanId: revision.externalRatePlanId,
+    amount: revision.amount != null ? revision.amount.toFixed(2) : null,
+    currency: revision.currency,
+    paymentCollect: revision.paymentCollect,
+    paymentType: null,
+    unmatchedRoom: false,
+    insertedAt: revision.updatedAt,
+    source: revision.source,
+    importStatus: revision.importStatus,
+    ackStatus: revision.ackStatus,
+    linkedBookingId: revision.linkedBookingId,
+  }));
 
   return (
     <section className={styles.cardInset}>
@@ -2985,6 +3288,10 @@ function ChannexBookingFeedCard({
         </div>
       </div>
 
+      <div className={styles.feedCopy}>
+        Feed returned 0 can still mean the booking exists in Booking List API. Verify the booking list below without importing or acknowledging anything.
+      </div>
+
       {lastSyncLog?.message ? <div className={styles.feedCopy}>{lastSyncLog.message}</div> : null}
       {blockedMessage ? <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{blockedMessage}</div> : null}
 
@@ -2993,7 +3300,11 @@ function ChannexBookingFeedCard({
           {feedback.message}
           {feedback.summary ? (
             <div className={styles.inlineBadgeRow}>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Total returned: {feedback.summary.totalFetched}</span>
               <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Revisions found: {feedback.summary.revisionsFound}</span>
+              <span className={`${styles.readinessPill} ${feedback.summary.unmatchedCount > 0 ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                Unmatched: {feedback.summary.unmatchedCount}
+              </span>
               <span className={`${styles.readinessPill} ${feedback.summary.unmatchedRoomCount > 0 ? styles.readinessPillReview : styles.readinessPillOk}`}>
                 Unmatched rooms: {feedback.summary.unmatchedRoomCount}
               </span>
@@ -3001,7 +3312,47 @@ function ChannexBookingFeedCard({
             </div>
           ) : null}
 
-          {(feedback.revisions && feedback.revisions.length > 0) || storedRevisions.length > 0 ? (
+          {feedback.latestSafeBookingIds && feedback.latestSafeBookingIds.length > 0 ? (
+            <div style={{ marginTop: 10 }}>
+              <div className={styles.feedCopy}>Latest booking IDs: {feedback.latestSafeBookingIds.join(", ")}</div>
+            </div>
+          ) : null}
+
+          {feedback.unmatchedRevisions && feedback.unmatchedRevisions.length > 0 ? (
+            <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+              <div className={styles.mappingHeader}>Unmatched booking</div>
+              <div className={styles.mappingHeader}>Status</div>
+              <div className={styles.mappingHeader}>Dates</div>
+              <div className={styles.mappingHeader}>Reason</div>
+              <div className={styles.mappingHeader}>Discovered property IDs</div>
+              {feedback.unmatchedRevisions.map((revision, index) => (
+                <Fragment key={`${revision.revisionId ?? revision.externalBookingId ?? "unmatched"}-${index}`}>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
+                    <div className={styles.mappingSubcopy}>Revision {revision.revisionId ?? "Unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
+                    <div className={styles.mappingSubcopy}>{revision.otaName ?? "Unknown OTA"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"}</div>
+                    <div className={styles.mappingSubcopy}>Unmatched preview only</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.reason}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>
+                      {revision.discoveredPropertyIds.length > 0 ? revision.discoveredPropertyIds.join(", ") : "None found"}
+                    </div>
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
+
+          {displayedStoredRevisions.length > 0 || (feedback.revisions && feedback.revisions.length > 0) ? (
             <div className={styles.mappingTable} style={{ marginTop: 14 }}>
               <div className={styles.mappingHeader}>Booking</div>
               <div className={styles.mappingHeader}>Status</div>
@@ -3010,27 +3361,7 @@ function ChannexBookingFeedCard({
               <div className={styles.mappingHeader}>Guest</div>
               <div className={styles.mappingHeader}>Room / Rate</div>
               <div className={styles.mappingHeader}>Amount</div>
-              {(feedback.revisions && feedback.revisions.length > 0
-                ? feedback.revisions
-                : storedRevisions.map((revision) => ({
-                    externalBookingId: revision.externalBookingId,
-                    revisionId: revision.externalRevisionId,
-                    status: revision.status,
-                    otaName: revision.otaName,
-                    arrivalDate: revision.arrivalDate,
-                    departureDate: revision.departureDate,
-                    guestName: revision.guestName,
-                    externalRoomTypeId: revision.externalRoomTypeId,
-                    externalRatePlanId: revision.externalRatePlanId,
-                    amount: revision.amount != null ? revision.amount.toFixed(2) : null,
-                    currency: revision.currency,
-                    paymentCollect: revision.paymentCollect,
-                    paymentType: null,
-                    unmatchedRoom: false,
-                    insertedAt: revision.updatedAt,
-                    importStatus: revision.importStatus,
-                    ackStatus: revision.ackStatus,
-                  }))).map((revision, index) => (
+              {(displayedStoredRevisions.length > 0 ? displayedStoredRevisions : feedback.revisions ?? []).map((revision, index) => (
                 <Fragment key={revision.revisionId ?? revision.externalBookingId ?? revision.insertedAt ?? `revision-${index}`}>
                   <div className={styles.mappingCell}>
                     <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
@@ -3038,7 +3369,9 @@ function ChannexBookingFeedCard({
                   </div>
                   <div className={styles.mappingCell}>
                     <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
-                    <div className={styles.mappingSubcopy}>{revision.importStatus ?? "preview"} · {revision.ackStatus ?? "not_acknowledged"}</div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.importStatus ?? "preview"} · {revision.ackStatus ?? "not_acknowledged"} · {labelizeToken((revision as { source?: string | null }).source, "unknown_source")}
+                    </div>
                   </div>
                   <div className={styles.mappingCell}>
                     <div className={styles.mappingTitle}>{revision.otaName ?? "Unknown"}</div>
@@ -3063,7 +3396,75 @@ function ChannexBookingFeedCard({
                     <div className={styles.mappingTitle}>
                       {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
                     </div>
-                    <div className={styles.mappingSubcopy}>Preview only, not imported yet</div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.importStatus === "imported"
+                        ? `Imported into Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · Not acknowledged yet`
+                        : "Preview only, not imported yet"}
+                    </div>
+                    {"id" in revision && revision.id ? (
+                      <div className={styles.inlineActionRow} style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.secondaryActionButton}
+                          disabled={
+                            isImportingPreview ||
+                            Boolean(blockedMessage) ||
+                            revision.importStatus === "imported" ||
+                            !revision.externalRoomTypeId
+                          }
+                          onClick={() => {
+                            startImportingPreview(async () => {
+                              setImportingPreviewId(revision.id ?? null);
+                              try {
+                                const response = await fetch("/api/host/pro/channel/channex/bookings/import-preview", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    familyId,
+                                    channelBookingRevisionId: revision.id,
+                                  }),
+                                });
+
+                                const payload = (await response.json()) as {
+                                  ok?: boolean;
+                                  message?: string;
+                                  error?: string;
+                                  bookingId?: string | null;
+                                };
+
+                                if (!response.ok || !payload.ok) {
+                                  throw new Error(payload.error ?? payload.message ?? "Unable to import this preview booking.");
+                                }
+
+                                setFeedback({
+                                  ok: true,
+                                  message:
+                                    typeof payload.message === "string" && payload.message.trim().length > 0
+                                      ? payload.message
+                                      : "Imported the preview booking into Famlo without acknowledging Channex.",
+                                });
+                                router.refresh();
+                              } catch (error) {
+                                setFeedback({
+                                  ok: false,
+                                  message: error instanceof Error ? error.message : "Unable to import this preview booking.",
+                                });
+                              } finally {
+                                setImportingPreviewId(null);
+                              }
+                            });
+                          }}
+                        >
+                          {isImportingPreview && importingPreviewId === revision.id
+                            ? "Importing..."
+                            : revision.importStatus === "imported"
+                              ? "Imported into Famlo"
+                              : "Import to Famlo"}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </Fragment>
               ))}
@@ -3093,9 +3494,22 @@ function ChannexBookingFeedCard({
                 const payload = (await response.json()) as {
                   ok?: boolean;
                   message?: string;
+                  totalFetched?: number;
                   revisionsFound?: number;
+                  unmatchedCount?: number;
                   unmatchedRoomCount?: number;
                   lastCheckedAt?: string | null;
+                  latestSafeBookingIds?: string[];
+                  unmatchedRevisions?: Array<{
+                    externalBookingId: string | null;
+                    revisionId: string | null;
+                    otaName: string | null;
+                    status: string | null;
+                    arrivalDate: string | null;
+                    departureDate: string | null;
+                    reason: "property_id_missing" | "property_id_mismatch" | "room_type_id_missing" | "unsupported_shape";
+                    discoveredPropertyIds: string[];
+                  }>;
                   revisions?: Array<{
                     externalBookingId: string | null;
                     revisionId: string | null;
@@ -3124,13 +3538,20 @@ function ChannexBookingFeedCard({
                       ? payload.message
                       : "Unable to fetch the Channex staging booking feed.",
                   summary:
-                    typeof payload.revisionsFound === "number" && typeof payload.unmatchedRoomCount === "number"
+                    typeof payload.totalFetched === "number" &&
+                    typeof payload.revisionsFound === "number" &&
+                    typeof payload.unmatchedCount === "number" &&
+                    typeof payload.unmatchedRoomCount === "number"
                       ? {
+                          totalFetched: payload.totalFetched,
                           revisionsFound: payload.revisionsFound,
+                          unmatchedCount: payload.unmatchedCount,
                           unmatchedRoomCount: payload.unmatchedRoomCount,
                           lastCheckedAt: typeof payload.lastCheckedAt === "string" ? payload.lastCheckedAt : null,
                         }
                       : undefined,
+                  latestSafeBookingIds: Array.isArray(payload.latestSafeBookingIds) ? payload.latestSafeBookingIds : undefined,
+                  unmatchedRevisions: Array.isArray(payload.unmatchedRevisions) ? payload.unmatchedRevisions : undefined,
                   revisions: Array.isArray(payload.revisions) ? payload.revisions : undefined,
                 });
                 router.refresh();

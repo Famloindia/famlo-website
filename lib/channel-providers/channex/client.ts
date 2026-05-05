@@ -250,6 +250,43 @@ export type ChannexBookingFeedResult = {
   rawValidation: Record<string, unknown> | null;
 };
 
+type ChannexBookingListRoom = {
+  checkin_date?: unknown;
+  checkout_date?: unknown;
+  rate_plan_id?: unknown;
+  room_type_id?: unknown;
+  amount?: unknown;
+};
+
+type ChannexBookingListRecord = {
+  id?: unknown;
+  property_id?: unknown;
+  booking_id?: unknown;
+  unique_id?: unknown;
+  ota_reservation_code?: unknown;
+  ota_name?: unknown;
+  status?: unknown;
+  arrival_date?: unknown;
+  departure_date?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  payment_collect?: unknown;
+  inserted_at?: unknown;
+  rooms?: ChannexBookingListRoom[] | null;
+  attributes?: unknown;
+  relationships?: unknown;
+};
+
+export type ChannexBookingListResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  bookings: ChannexBookingListRecord[];
+  rawValidation: Record<string, unknown> | null;
+};
+
 function asString(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -1451,6 +1488,25 @@ export async function fetchChannexBookingFeed(): Promise<ChannexBookingFeedResul
       : result.message,
     revisions: result.data.filter(
       (item): item is ChannexBookingFeedRevision =>
+        Boolean(item) && typeof item === "object" && !Array.isArray(item)
+    ),
+    rawValidation: result.rawValidation,
+  };
+}
+
+export async function fetchChannexBookingList(): Promise<ChannexBookingListResult> {
+  const result = await getChannexJson("/api/v1/bookings?pagination[limit]=50");
+
+  return {
+    ok: result.ok,
+    environment: result.environment,
+    endpoint: result.endpoint,
+    httpStatus: result.httpStatus,
+    message: result.ok
+      ? `Channex staging booking list returned ${result.data.length} booking${result.data.length === 1 ? "" : "s"}.`
+      : result.message,
+    bookings: result.data.filter(
+      (item): item is ChannexBookingListRecord =>
         Boolean(item) && typeof item === "object" && !Array.isArray(item)
     ),
     rawValidation: result.rawValidation,
