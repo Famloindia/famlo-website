@@ -844,6 +844,14 @@
   overflow: hidden;
 }
 
+.drawerDetailTable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
 .rateTable {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(180px, 1fr) repeat(6, minmax(140px, 1fr));
@@ -1142,6 +1150,7 @@
 }
 
 .calendarCell {
+  appearance: none;
   border-right: 1px solid rgba(15, 23, 42, 0.08);
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   min-height: 62px;
@@ -1152,6 +1161,8 @@
   text-align: center;
   font-size: 12px;
   font-weight: 800;
+  border-top: 0;
+  border-left: 0;
 }
 
 .calendarRateCell {
@@ -1189,6 +1200,76 @@
 .calendarCellPast {
   background: #eef2f7;
   color: #7b879a;
+}
+
+.calendarCellInteractive {
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.calendarCellInteractive:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 2px rgba(17, 35, 63, 0.08);
+}
+
+.calendarCellInteractive:disabled {
+  cursor: default;
+  box-shadow: none;
+}
+
+.calendarDrawerOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 40;
+  padding: 20px;
+}
+
+.calendarDrawer {
+  width: min(460px, 100%);
+  height: 100%;
+  background: white;
+  border-radius: 24px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 22px;
+  overflow-y: auto;
+}
+
+.calendarDrawerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.drawerCloseButton {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #f8fbff;
+  color: #11233f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.drawerCloseIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.drawerSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .roleGrid {
@@ -1238,6 +1319,7 @@
   .mappingPreviewGrid,
   .contentReadinessGrid,
   .placeholderGrid,
+  .drawerSummaryGrid,
   .feedGrid,
   .listGrid,
   .settingsGrid {

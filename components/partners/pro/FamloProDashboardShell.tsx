@@ -91,6 +91,7 @@ type CalendarCell = {
   date: string;
   status: "available" | "famlo" | "ota" | "manual_block" | "pending" | "past";
   label: string;
+  bookingDetail: CalendarBookingDetail | null;
 };
 
 type CalendarRow = {
@@ -100,6 +101,26 @@ type CalendarRow = {
   rate: number;
   availabilityCells: CalendarCell[];
   rateCells: string[];
+};
+
+type CalendarBookingDetail = {
+  bookingId: string;
+  roomName: string;
+  startDate: string;
+  endDate: string;
+  sourceLabel: string;
+  externalBookingId: string | null;
+  guestDisplayName: string;
+  amount: string | null;
+  currency: string | null;
+  paymentStatus: string | null;
+  importStatus: string | null;
+  ackStatus: string | null;
+  linkedBookingId: string | null;
+  externalRevisionId: string | null;
+  importedIntoFamlo: boolean;
+  acknowledged: boolean;
+  acknowledgementNote: string | null;
 };
 
 type SetupItem = {
@@ -279,6 +300,17 @@ function calendarCellClass(status: CalendarCell["status"]): string {
   if (status === "pending") return styles.calendarCellPending;
   if (status === "past") return styles.calendarCellPast;
   return styles.calendarCellAvailable;
+}
+
+function formatCalendarDetailDateRange(startDate: string, endDate: string): string {
+  const start = new Date(`${startDate}T12:00:00+05:30`);
+  const end = new Date(`${endDate}T12:00:00+05:30`);
+  const formatter = new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  return `${formatter.format(start)} → ${formatter.format(end)}`;
 }
 
 function joinMissingLabels(items: Array<{ label: string; ready: boolean }>): string {
@@ -508,6 +540,7 @@ export default function FamloProDashboardShell({
   calendarRows,
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
+  const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
 
   const groupedNavItems = useMemo(
     () =>
@@ -1205,13 +1238,20 @@ export default function FamloProDashboardShell({
                             <div className={styles.calendarMetricLabel}>Availability</div>
                           </div>
                           {row.availabilityCells.map((cell) => (
-                            <div
+                            <button
+                              type="button"
                               key={`${row.roomId}-${cell.date}-availability`}
-                              className={`${styles.calendarCell} ${calendarCellClass(cell.status)}`}
+                              className={`${styles.calendarCell} ${calendarCellClass(cell.status)} ${cell.bookingDetail ? styles.calendarCellInteractive : ""}`}
                               title={cell.label}
+                              onClick={() => {
+                                if (cell.bookingDetail) {
+                                  setSelectedCalendarBooking(cell.bookingDetail);
+                                }
+                              }}
+                              disabled={!cell.bookingDetail}
                             >
                               {cell.status === "available" ? "1" : cell.status === "past" ? "—" : "0"}
-                            </div>
+                            </button>
                           ))}
 
                           <div className={`${styles.calendarRoomCell} ${styles.calendarRateLabel}`}>
@@ -1229,6 +1269,132 @@ export default function FamloProDashboardShell({
                         </Fragment>
                       ))}
                     </div>
+                    {selectedCalendarBooking ? (
+                      <div className={styles.calendarDrawerOverlay} onClick={() => setSelectedCalendarBooking(null)}>
+                        <aside
+                          className={styles.calendarDrawer}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label="Booking details"
+                        >
+                          <div className={styles.calendarDrawerHeader}>
+                            <div>
+                              <div className={styles.listTitle}>Booking details</div>
+                              <div className={styles.cardCopy}>
+                                Read-only operational view for the selected Pro calendar booking cell.
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className={styles.drawerCloseButton}
+                              onClick={() => setSelectedCalendarBooking(null)}
+                              aria-label="Close booking details"
+                            >
+                              <X className={styles.drawerCloseIcon} />
+                            </button>
+                          </div>
+
+                          <div className={styles.drawerSummaryGrid}>
+                            <div className={styles.placeholderRow}>
+                              <div className={styles.placeholderTitle}>Booking source</div>
+                              <div className={styles.placeholderValue}>{selectedCalendarBooking.sourceLabel}</div>
+                            </div>
+                            <div className={styles.placeholderRow}>
+                              <div className={styles.placeholderTitle}>Room name</div>
+                              <div className={styles.placeholderValue}>{selectedCalendarBooking.roomName}</div>
+                            </div>
+                            <div className={styles.placeholderRow}>
+                              <div className={styles.placeholderTitle}>Dates</div>
+                              <div className={styles.placeholderValue}>
+                                {formatCalendarDetailDateRange(
+                                  selectedCalendarBooking.startDate,
+                                  selectedCalendarBooking.endDate
+                                )}
+                              </div>
+                            </div>
+                            <div className={styles.placeholderRow}>
+                              <div className={styles.placeholderTitle}>Guest</div>
+                              <div className={styles.placeholderValue}>{selectedCalendarBooking.guestDisplayName}</div>
+                            </div>
+                            <div className={styles.placeholderRow}>
+                              <div className={styles.placeholderTitle}>Amount / currency</div>
+                              <div className={styles.placeholderValue}>
+                                {selectedCalendarBooking.amount ?? "Not available"}
+                                {selectedCalendarBooking.currency ? ` · ${selectedCalendarBooking.currency}` : ""}
+                              </div>
+                            </div>
+                            <div className={styles.placeholderRow}>
+                              <div className={styles.placeholderTitle}>Payment status</div>
+                              <div className={styles.placeholderValue}>
+                                {labelizeToken(selectedCalendarBooking.paymentStatus, "unknown")}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className={styles.drawerDetailTable}>
+                            <div className={styles.mappingHeader}>Field</div>
+                            <div className={styles.mappingHeader}>Value</div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Famlo booking ID</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>
+                                {selectedCalendarBooking.linkedBookingId ?? selectedCalendarBooking.bookingId ?? "Not linked"}
+                              </div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>External booking ID</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{selectedCalendarBooking.externalBookingId ?? "Not available"}</div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Import status</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>
+                                {selectedCalendarBooking.sourceLabel === "Channex / OTA"
+                                  ? labelizeToken(selectedCalendarBooking.importStatus, "unknown")
+                                  : "Not applicable"}
+                              </div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Ack status</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>
+                                {selectedCalendarBooking.sourceLabel === "Channex / OTA"
+                                  ? labelizeToken(selectedCalendarBooking.ackStatus, "unknown")
+                                  : "Not applicable"}
+                              </div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Imported into Famlo</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{selectedCalendarBooking.importedIntoFamlo ? "Yes" : "No"}</div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Acknowledged</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{selectedCalendarBooking.acknowledged ? "Yes" : "No"}</div>
+                            </div>
+                          </div>
+
+                          {selectedCalendarBooking.acknowledgementNote ? (
+                            <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>
+                              {selectedCalendarBooking.acknowledgementNote}
+                            </div>
+                          ) : null}
+                        </aside>
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className={styles.emptyState}>
