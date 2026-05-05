@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { loadHostProAccess } from "@/lib/host-pro-access";
@@ -37,11 +36,6 @@ function isMissingColumnError(error: unknown, columnName: string): boolean {
     (message.includes(columnName) && (message.includes("schema cache") || message.includes("does not exist"))) ||
     (columnName === "stay_unit_id" && message === "")
   );
-}
-
-function deterministicGuestUserId(seed: string): string {
-  const digest = createHash("sha256").update(seed).digest("hex").slice(0, 32);
-  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
 }
 
 async function logImportResult(input: {
@@ -111,6 +105,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     const externalRatePlanId = asStringOrNull(revisionRow.external_rate_plan_id);
     const currency = asStringOrNull(revisionRow.currency);
     const amountNumber = asNumberOrNull(revisionRow.amount);
+    const rawPayload =
+      revisionRow.raw_payload && typeof revisionRow.raw_payload === "object" && !Array.isArray(revisionRow.raw_payload)
+        ? (revisionRow.raw_payload as Record<string, unknown>)
+        : {};
 
     if (!["preview", "failed"].includes(importStatus)) {
       return NextResponse.json({ error: `This preview is already ${importStatus}.` }, { status: 409 });
@@ -232,26 +230,66 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const guestUserId = deterministicGuestUserId(`channex:${familyId}:${externalBookingId}`);
     const now = new Date().toISOString();
-    const guestName = asStringOrNull(revisionRow.guest_name) ?? "OTA guest";
+    const guestName = asStringOrNull(revisionRow.guest_name) ?? "OTA Guest";
     const amountRounded = Math.round(amountNumber);
+    const { data: familyRow, error: familyLookupError } = await supabase
+      .from("families")
+      .select("user_id")
+      .eq("id", familyId)
+      .maybeSingle();
 
-    const { error: guestUpsertError } = await supabase.from("users").upsert(
-      {
-        id: guestUserId,
-        name: guestName,
-        role: "guest",
-        email: null,
-        phone: null,
-        onboarding_completed: false,
-        auth_provider: "channex_preview",
-        updated_at: now,
-      } as never,
-      { onConflict: "id" }
-    );
+    if (familyLookupError) throw familyLookupError;
 
-    if (guestUpsertError) throw guestUpsertError;
+    const { data: hostRow, error: hostLookupError } = await supabase
+      .from("hosts")
+      .select("user_id")
+      .eq("id", hostId)
+      .maybeSingle();
+
+    if (hostLookupError) throw hostLookupError;
+
+    const technicalUserId = asStringOrNull(familyRow?.user_id) ?? asStringOrNull(hostRow?.user_id);
+    if (!technicalUserId) {
+      await logImportResult({
+        supabase,
+        familyId,
+        status: "failed",
+        message: "Could not resolve a technical owner user for OTA preview import.",
+        payload: {
+          failed_stage: "technical_user_lookup",
+          host_id: hostId,
+          stay_unit_id: stayUnitId,
+          external_booking_id: externalBookingId,
+          family_user_id_present: Boolean(asStringOrNull(familyRow?.user_id)),
+          host_user_id_present: Boolean(asStringOrNull(hostRow?.user_id)),
+        },
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Could not resolve a technical owner user for this OTA import.",
+          failed_stage: "technical_user_lookup",
+          details: {
+            family_user_available: Boolean(asStringOrNull(familyRow?.user_id)),
+            host_user_available: Boolean(asStringOrNull(hostRow?.user_id)),
+          },
+          status: "technical_user_missing",
+        },
+        { status: 409 }
+      );
+    }
+
+    const guestEmail =
+      asStringOrNull(rawPayload.email) ??
+      asStringOrNull(rawPayload.guest_email) ??
+      asStringOrNull(rawPayload.customer_email);
+    const guestPhone =
+      asStringOrNull(rawPayload.phone) ??
+      asStringOrNull(rawPayload.guest_phone) ??
+      asStringOrNull(rawPayload.customer_phone);
+    const guestHidden = !guestName && !guestEmail && !guestPhone;
 
     const pricingSnapshot = {
       stay_unit_id: stayUnitId,
@@ -261,6 +299,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       currency,
       channel_provider: "channex",
       channel_source_type: "ota",
+      channel_source: asStringOrNull(revisionRow.source) ?? "booking_list_api",
       channel_import_source: asStringOrNull(revisionRow.source) ?? "booking_list_api",
       channel_external_booking_id: externalBookingId,
       channel_external_revision_id: asStringOrNull(revisionRow.external_revision_id),
@@ -271,10 +310,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       ota_name: asStringOrNull(revisionRow.ota_name),
       imported_from_channex_preview: true,
       guest_name: guestName,
+      channel_guest_name: guestName,
+      channel_guest_email: guestEmail,
+      channel_guest_phone: guestPhone,
+      channel_guest_hidden: guestHidden,
+      channel_guest_display_name: guestName || "OTA Guest",
+      channel_user_id_mode: "technical_owner_placeholder",
+      technical_owner_user_id: technicalUserId,
     };
 
     const bookingPayload: Record<string, unknown> = {
-      user_id: guestUserId,
+      user_id: technicalUserId,
       booking_type: "host_stay",
       recipient_type: "host",
       recipient_id: hostId,
@@ -342,6 +388,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         host_id: hostId,
         amount: amountNumber.toFixed(2),
         currency,
+        technical_owner_user_id: technicalUserId,
       },
     });
 
