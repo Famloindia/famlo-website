@@ -287,6 +287,15 @@ export type ChannexBookingListResult = {
   rawValidation: Record<string, unknown> | null;
 };
 
+export type ChannexAcknowledgeBookingRevisionResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  rawValidation: Record<string, unknown> | null;
+};
+
 function asString(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -1511,4 +1520,97 @@ export async function fetchChannexBookingList(): Promise<ChannexBookingListResul
     ),
     rawValidation: result.rawValidation,
   };
+}
+
+export async function acknowledgeChannexBookingRevision(
+  revisionId: string
+): Promise<ChannexAcknowledgeBookingRevisionResult> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpointPath = `/api/v1/booking_revisions/${encodeURIComponent(revisionId)}/ack`;
+  const endpoint = `${resolveBaseUrl(environment)}${endpointPath}`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      rawValidation: null,
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const errors =
+        parsed &&
+        typeof parsed.errors === "object" &&
+        parsed.errors
+          ? (parsed.errors as Record<string, unknown>)
+          : null;
+      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+
+      return {
+        ok: false,
+        environment,
+        endpoint: endpointPath,
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex booking acknowledgement failed: ${errorTitle}.`
+          : `Channex booking acknowledgement failed with HTTP ${response.status}.`,
+        rawValidation: errors,
+      };
+    }
+
+    const meta =
+      parsed &&
+      typeof parsed.meta === "object" &&
+      parsed.meta
+        ? (parsed.meta as Record<string, unknown>)
+        : null;
+    const message =
+      meta && typeof meta.message === "string"
+        ? meta.message
+        : "Channex booking revision acknowledged successfully.";
+
+    return {
+      ok: true,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: response.status,
+      message,
+      rawValidation: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      message:
+        error instanceof Error
+          ? `Channex booking acknowledgement failed: ${error.message}`
+          : "Channex booking acknowledgement failed.",
+      rawValidation: null,
+    };
+  }
 }

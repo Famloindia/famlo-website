@@ -3159,10 +3159,10 @@ function ChannexBookingFeedCard({
 }>): React.JSX.Element {
   const router = useRouter();
   const [isFetching, startFetching] = useTransition();
-  const [isVerifyingList, startVerifyingList] = useTransition();
   const [isImportingPreview, startImportingPreview] = useTransition();
+  const [isAcknowledgingPreview, startAcknowledgingPreview] = useTransition();
   const [importingPreviewId, setImportingPreviewId] = useState<string | null>(null);
-  const [bookingUniqueIdInput, setBookingUniqueIdInput] = useState("ABB-TEST-FAMLO-001");
+  const [acknowledgingPreviewId, setAcknowledgingPreviewId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     ok: boolean;
     message: string;
@@ -3205,28 +3205,6 @@ function ChannexBookingFeedCard({
       ackStatus?: string | null;
     }>;
   } | null>(null);
-  const [listFeedback, setListFeedback] = useState<{
-    ok: boolean;
-    message: string;
-    totalFetched?: number;
-    propertyMatchedCount?: number;
-    foundCount?: number;
-    searchedUniqueId?: string | null;
-    bookings?: Array<{
-      bookingId: string | null;
-      uniqueId: string | null;
-      status: string | null;
-      propertyId: string | null;
-      arrivalDate: string | null;
-      departureDate: string | null;
-      roomTypeId: string | null;
-      ratePlanId: string | null;
-      amount: string | null;
-      currency: string | null;
-      otaName: string | null;
-    }>;
-  } | null>(null);
-
   const blockedMessage = !propertyCreated
     ? "Create provider property first."
     : !externalPropertyId
@@ -3398,7 +3376,7 @@ function ChannexBookingFeedCard({
                     </div>
                     <div className={styles.mappingSubcopy}>
                       {revision.importStatus === "imported"
-                        ? `Imported into Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · Not acknowledged yet`
+                        ? `Imported into Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
                         : "Preview only, not imported yet"}
                     </div>
                     {"id" in revision && revision.id ? (
@@ -3463,6 +3441,74 @@ function ChannexBookingFeedCard({
                               ? "Imported into Famlo"
                               : "Import to Famlo"}
                         </button>
+                        {revision.importStatus === "imported" ? (
+                          revision.ackStatus === "acknowledged" ? (
+                            <button
+                              type="button"
+                              className={styles.secondaryActionButton}
+                              disabled
+                            >
+                              Acknowledged
+                            </button>
+                          ) : revision.revisionId ? (
+                            <button
+                              type="button"
+                              className={styles.secondaryActionButton}
+                              disabled={isAcknowledgingPreview || Boolean(blockedMessage)}
+                              onClick={() => {
+                                startAcknowledgingPreview(async () => {
+                                  setAcknowledgingPreviewId(revision.id ?? null);
+                                  try {
+                                    const response = await fetch("/api/host/pro/channel/channex/bookings/acknowledge", {
+                                      method: "POST",
+                                      headers: {
+                                        "Content-Type": "application/json",
+                                      },
+                                      body: JSON.stringify({
+                                        channelBookingRevisionId: revision.id,
+                                      }),
+                                    });
+
+                                    const payload = (await response.json()) as {
+                                      ok?: boolean;
+                                      message?: string;
+                                      error?: string;
+                                      status?: string;
+                                    };
+
+                                    if (!response.ok || !payload.ok) {
+                                      throw new Error(payload.error ?? payload.message ?? "Unable to acknowledge this Channex booking revision.");
+                                    }
+
+                                    setFeedback({
+                                      ok: true,
+                                      message:
+                                        typeof payload.message === "string" && payload.message.trim().length > 0
+                                          ? payload.message
+                                          : "Acknowledged this imported Channex booking revision.",
+                                    });
+                                    router.refresh();
+                                  } catch (error) {
+                                    setFeedback({
+                                      ok: false,
+                                      message: error instanceof Error ? error.message : "Unable to acknowledge this Channex booking revision.",
+                                    });
+                                  } finally {
+                                    setAcknowledgingPreviewId(null);
+                                  }
+                                });
+                              }}
+                            >
+                              {isAcknowledgingPreview && acknowledgingPreviewId === revision.id
+                                ? "Acknowledging..."
+                                : "Acknowledge Channex"}
+                            </button>
+                          ) : (
+                            <div className={styles.mappingSubcopy}>
+                              Cannot acknowledge Booking List preview; requires feed revision id
+                            </div>
+                          )
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
