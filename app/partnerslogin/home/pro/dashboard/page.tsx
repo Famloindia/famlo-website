@@ -5,6 +5,8 @@ import type { CSSProperties } from "react";
 import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardShell";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
+import { loadCanonicalCalendar } from "@/lib/calendar";
+import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
 import { loadHostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
@@ -113,6 +115,44 @@ function isCurrentMonth(dateLike: string | null, now: Date): boolean {
   const date = new Date(dateLike);
   if (Number.isNaN(date.getTime())) return false;
   return date.getUTCFullYear() === now.getUTCFullYear() && date.getUTCMonth() === now.getUTCMonth();
+}
+
+type CalendarCellStatus = "available" | "famlo" | "ota" | "manual_block" | "pending" | "past";
+
+type CalendarColumn = {
+  date: string;
+  dayLabel: string;
+  dateLabel: string;
+  isPast: boolean;
+};
+
+type CalendarCell = {
+  date: string;
+  status: CalendarCellStatus;
+  label: string;
+};
+
+type CalendarRow = {
+  roomId: string;
+  roomName: string;
+  unitType: string;
+  rate: number;
+  availabilityCells: CalendarCell[];
+  rateCells: string[];
+};
+
+function formatCalendarDayLabel(date: string): string {
+  const value = new Date(`${date}T12:00:00+05:30`);
+  return new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(value);
+}
+
+function formatCalendarDateLabel(date: string): string {
+  const value = new Date(`${date}T12:00:00+05:30`);
+  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(value);
+}
+
+function enumerateIndiaDates(from: string, days: number): string[] {
+  return Array.from({ length: days }, (_, index) => addIndiaDays(from, index));
 }
 
 export default async function FamloProDashboardPage({
@@ -403,6 +443,138 @@ export default async function FamloProDashboardPage({
     },
   ];
 
+  const calendarFrom = getTodayInIndia();
+  const calendarDates = enumerateIndiaDates(calendarFrom, 30);
+  const calendarTo = calendarDates[calendarDates.length - 1] ?? calendarFrom;
+  const calendarColumns: CalendarColumn[] = calendarDates.map((date) => ({
+    date,
+    dayLabel: formatCalendarDayLabel(date),
+    dateLabel: formatCalendarDateLabel(date),
+    isPast: date < calendarFrom,
+  }));
+
+  let bookingRowsForCalendar: Array<Record<string, unknown>> = [];
+  if (host?.id) {
+    const selectWithStayUnit =
+      "id,status,payment_status,total_price,start_date,end_date,stay_unit_id,pricing_snapshot";
+    const selectFallback =
+      "id,status,payment_status,total_price,start_date,end_date,pricing_snapshot";
+
+    let bookingCalendarResult = await supabase
+      .from("bookings_v2")
+      .select(selectWithStayUnit)
+      .eq("host_id", host.id)
+      .lte("start_date", calendarTo)
+      .gte("end_date", calendarFrom);
+
+    if (
+      bookingCalendarResult.error &&
+      String(bookingCalendarResult.error.message ?? "").includes("stay_unit_id")
+    ) {
+      bookingCalendarResult = await supabase
+        .from("bookings_v2")
+        .select(selectFallback)
+        .eq("host_id", host.id)
+        .lte("start_date", calendarTo)
+        .gte("end_date", calendarFrom);
+    }
+
+    if (!bookingCalendarResult.error) {
+      bookingRowsForCalendar = (bookingCalendarResult.data ?? []) as Array<Record<string, unknown>>;
+    }
+  }
+
+  const hostCalendarEvents =
+    host?.id
+      ? await loadCanonicalCalendar(supabase, {
+          ownerType: "host",
+          ownerId: host.id,
+          from: calendarFrom,
+          to: calendarTo,
+        })
+      : [];
+
+  const manualBlockDates = new Set(
+    hostCalendarEvents
+      .filter((event) => event.sourceType === "manual_block" && event.isBlocking)
+      .flatMap((event) => {
+        const dates: string[] = [];
+        let cursor = event.startDate;
+        while (cursor <= event.endDate) {
+          dates.push(cursor);
+          cursor = addIndiaDays(cursor, 1);
+        }
+        return dates;
+      })
+  );
+
+  const bookingStatusByRoomDate = new Map<string, CalendarCellStatus>();
+  for (const row of bookingRowsForCalendar) {
+    const pricingSnapshot =
+      row.pricing_snapshot && typeof row.pricing_snapshot === "object" && !Array.isArray(row.pricing_snapshot)
+        ? (row.pricing_snapshot as Record<string, unknown>)
+        : {};
+    const stayUnitId = asString(row.stay_unit_id) ?? asString(pricingSnapshot.stay_unit_id);
+    const startDate = asString(row.start_date);
+    const endDate = asString(row.end_date) ?? startDate;
+    const status = String(row.status ?? "").trim().toLowerCase();
+    const channelProvider = asString(pricingSnapshot.channel_provider);
+
+    if (!stayUnitId || !startDate || !endDate) continue;
+    if (status === "cancelled" || status === "cancelled_by_user" || status === "cancelled_by_partner" || status === "rejected") {
+      continue;
+    }
+
+    let cellStatus: CalendarCellStatus = "famlo";
+    if (status === "pending" || status === "pending_host_approval" || status === "awaiting_payment") {
+      cellStatus = "pending";
+    } else if (channelProvider === "channex") {
+      cellStatus = "ota";
+    }
+
+    let cursor = startDate;
+    while (cursor <= endDate && cursor <= calendarTo) {
+      if (cursor >= calendarFrom) {
+        bookingStatusByRoomDate.set(`${stayUnitId}:${cursor}`, cellStatus);
+      }
+      cursor = addIndiaDays(cursor, 1);
+    }
+  }
+
+  const calendarRows: CalendarRow[] = rooms.map((room) => ({
+    roomId: room.id,
+    roomName: room.name,
+    unitType: room.unitType,
+    rate: room.priceFullday,
+    availabilityCells: calendarColumns.map((column) => {
+      const bookingStatus = bookingStatusByRoomDate.get(`${room.id}:${column.date}`);
+      const status: CalendarCellStatus =
+        column.isPast
+          ? "past"
+          : bookingStatus ?? (manualBlockDates.has(column.date) ? "manual_block" : "available");
+
+      return {
+        date: column.date,
+        status,
+        label:
+          status === "famlo"
+            ? "Famlo booking"
+            : status === "ota"
+              ? "OTA booking"
+              : status === "manual_block"
+                ? "Manual block"
+                : status === "pending"
+                  ? "Pending approval"
+                  : status === "past"
+                    ? "Past date"
+                    : "Available",
+      };
+    }),
+    rateCells: calendarColumns.map((column) =>
+      column.isPast ? "Past" : room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing"
+    ),
+  }));
+
   return (
     <FamloProDashboardShell
       propertyName={propertyName}
@@ -427,6 +599,8 @@ export default async function FamloProDashboardPage({
       initialSettings={proSettings}
       channelFoundation={channelFoundation}
       channexConfig={channexConfig}
+      calendarColumns={calendarColumns}
+      calendarRows={calendarRows}
     />
   );
 }

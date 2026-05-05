@@ -80,6 +80,28 @@ type RoomSummary = {
   photosCount: number;
 };
 
+type CalendarColumn = {
+  date: string;
+  dayLabel: string;
+  dateLabel: string;
+  isPast: boolean;
+};
+
+type CalendarCell = {
+  date: string;
+  status: "available" | "famlo" | "ota" | "manual_block" | "pending" | "past";
+  label: string;
+};
+
+type CalendarRow = {
+  roomId: string;
+  roomName: string;
+  unitType: string;
+  rate: number;
+  availabilityCells: CalendarCell[];
+  rateCells: string[];
+};
+
 type SetupItem = {
   key: string;
   title: string;
@@ -125,6 +147,8 @@ interface FamloProDashboardShellProps {
   initialSettings: HostProSettings;
   channelFoundation: HostProChannelFoundation;
   channexConfig: ChannexSummary;
+  calendarColumns: CalendarColumn[];
+  calendarRows: CalendarRow[];
 }
 
 type NavItem = {
@@ -246,6 +270,15 @@ function contentStatusClass(complete: number, total: number): string {
   if (complete === 0) return styles.readinessPillMissing;
   if (complete === total) return styles.readinessPillOk;
   return styles.readinessPillReview;
+}
+
+function calendarCellClass(status: CalendarCell["status"]): string {
+  if (status === "famlo") return styles.calendarCellFamlo;
+  if (status === "ota") return styles.calendarCellOta;
+  if (status === "manual_block") return styles.calendarCellManual;
+  if (status === "pending") return styles.calendarCellPending;
+  if (status === "past") return styles.calendarCellPast;
+  return styles.calendarCellAvailable;
 }
 
 function joinMissingLabels(items: Array<{ label: string; ready: boolean }>): string {
@@ -471,6 +504,8 @@ export default function FamloProDashboardShell({
   initialSettings,
   channelFoundation,
   channexConfig,
+  calendarColumns,
+  calendarRows,
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
 
@@ -1139,7 +1174,7 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Calendar</h3>
                   <p className={styles.cardCopy}>
-                    Visual shell only. Existing Famlo calendar logic and iCal behavior remain untouched in this phase.
+                    Professional read-only channel-manager view for the next 30 days. Existing Famlo calendar logic and iCal behavior remain untouched in this phase.
                   </p>
                 </div>
               </div>
@@ -1151,13 +1186,58 @@ export default function FamloProDashboardShell({
                     </span>
                   ))}
                 </div>
-                <div className={styles.emptyState}>
-                  <div className={styles.emptyTitle}>Calendar shell ready for future Pro overlays</div>
-                  <div className={styles.emptyCopy}>
-                    Future Pro inventory views can layer Famlo bookings, OTA bookings, manual blocks, and approval
-                    states here without replacing the existing calendar system.
+                {calendarRows.length > 0 ? (
+                  <div className={styles.calendarBoard}>
+                    <div className={styles.calendarGrid}>
+                      <div className={`${styles.calendarHeaderCell} ${styles.calendarRoomHeader}`}>Room / Unit</div>
+                      {calendarColumns.map((column) => (
+                        <div key={column.date} className={styles.calendarHeaderCell}>
+                          <div className={styles.calendarHeaderDay}>{column.dayLabel}</div>
+                          <div className={styles.calendarHeaderDate}>{column.dateLabel}</div>
+                        </div>
+                      ))}
+
+                      {calendarRows.map((row) => (
+                        <Fragment key={row.roomId}>
+                          <div className={styles.calendarRoomCell}>
+                            <div className={styles.calendarRoomName}>{row.roomName}</div>
+                            <div className={styles.calendarRoomType}>{row.unitType}</div>
+                            <div className={styles.calendarMetricLabel}>Availability</div>
+                          </div>
+                          {row.availabilityCells.map((cell) => (
+                            <div
+                              key={`${row.roomId}-${cell.date}-availability`}
+                              className={`${styles.calendarCell} ${calendarCellClass(cell.status)}`}
+                              title={cell.label}
+                            >
+                              {cell.status === "available" ? "1" : cell.status === "past" ? "—" : "0"}
+                            </div>
+                          ))}
+
+                          <div className={`${styles.calendarRoomCell} ${styles.calendarRateLabel}`}>
+                            <div className={styles.calendarMetricLabel}>Rate</div>
+                            <div className={styles.calendarRoomType}>Read-only base price</div>
+                          </div>
+                          {row.rateCells.map((value, index) => (
+                            <div
+                              key={`${row.roomId}-${calendarColumns[index]?.date ?? index}-rate`}
+                              className={`${styles.calendarCell} ${calendarColumns[index]?.isPast ? styles.calendarCellPast : styles.calendarRateCell}`}
+                            >
+                              {value}
+                            </div>
+                          ))}
+                        </Fragment>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className={styles.emptyState}>
+                    <div className={styles.emptyTitle}>No room inventory available for Pro calendar</div>
+                    <div className={styles.emptyCopy}>
+                      The read-only Pro calendar needs existing stay units to render rows. Once rooms are available, Famlo and imported OTA bookings will appear here without changing the current calendar system.
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           )}

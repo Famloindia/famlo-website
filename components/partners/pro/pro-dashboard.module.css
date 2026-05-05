@@ -1067,6 +1067,130 @@
   color: rgba(15, 23, 42, 0.62);
 }
 
+.calendarBoard {
+  overflow-x: auto;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: #fbfdff;
+}
+
+.calendarGrid {
+  display: grid;
+  grid-template-columns: 220px repeat(30, minmax(76px, 1fr));
+  min-width: 2520px;
+}
+
+.calendarHeaderCell {
+  background: #eef4ff;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.calendarRoomHeader {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 900;
+  color: #11233f;
+}
+
+.calendarHeaderDay {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(17, 35, 63, 0.68);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.calendarHeaderDate {
+  font-size: 13px;
+  font-weight: 800;
+  color: #11233f;
+}
+
+.calendarRoomCell {
+  background: white;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 12px 14px;
+  display: grid;
+  gap: 4px;
+}
+
+.calendarRateLabel {
+  background: #f8fbff;
+}
+
+.calendarRoomName {
+  font-size: 14px;
+  font-weight: 900;
+  color: #11233f;
+}
+
+.calendarRoomType {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.calendarMetricLabel {
+  font-size: 11px;
+  font-weight: 800;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.calendarCell {
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  min-height: 62px;
+  padding: 8px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.calendarRateCell {
+  background: white;
+  color: #11233f;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.calendarCellAvailable {
+  background: #f8fcff;
+  color: #165dcc;
+}
+
+.calendarCellFamlo {
+  background: #dcebff;
+  color: #0f4ea9;
+}
+
+.calendarCellOta {
+  background: #efe3ff;
+  color: #6c3bb8;
+}
+
+.calendarCellManual {
+  background: #ffe1e1;
+  color: #b42318;
+}
+
+.calendarCellPending {
+  background: #fff1c8;
+  color: #9a6700;
+}
+
+.calendarCellPast {
+  background: #eef2f7;
+  color: #7b879a;
+}
+
 .roleGrid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
