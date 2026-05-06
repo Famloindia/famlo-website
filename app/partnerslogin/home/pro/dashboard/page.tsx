@@ -640,8 +640,13 @@ export default async function FamloProDashboardPage({
           : null,
     };
 
+    const renderedEndDate =
+      isOtaBooking && endDate > startDate
+        ? addIndiaDays(endDate, -1)
+        : endDate;
+
     let cursor = startDate;
-    while (cursor <= endDate && cursor <= calendarTo) {
+    while (cursor <= renderedEndDate && cursor <= calendarTo) {
       if (cursor >= calendarFrom) {
         bookingStatusByRoomDate.set(`${stayUnitId}:${cursor}`, cellStatus);
         bookingDetailByRoomDate.set(`${stayUnitId}:${cursor}`, bookingDetail);
