@@ -260,7 +260,7 @@ const SYNC_LOG_GROUPS: SyncLogGroup[] = [
   { key: "rate", title: "Rate creation", actions: ["create_rate_plan"] },
   { key: "ari", title: "ARI push", actions: ["push_ari_30_day"] },
   { key: "booking-feed", title: "Booking feed / list", actions: ["fetch_booking_feed", "store_booking_feed_preview", "verify_booking_list"] },
-  { key: "booking-import", title: "Booking import", actions: ["import_booking_preview"] },
+  { key: "booking-import", title: "Booking import", actions: ["import_booking_preview", "apply_booking_modification"] },
   { key: "ack", title: "Acknowledgement", actions: ["acknowledge_booking_revision"] },
 ];
 
@@ -3604,8 +3604,10 @@ function ChannexBookingFeedCard({
   const router = useRouter();
   const [isFetching, startFetching] = useTransition();
   const [isImportingPreview, startImportingPreview] = useTransition();
+  const [isApplyingModification, startApplyingModification] = useTransition();
   const [isAcknowledgingPreview, startAcknowledgingPreview] = useTransition();
   const [importingPreviewId, setImportingPreviewId] = useState<string | null>(null);
+  const [applyingModificationId, setApplyingModificationId] = useState<string | null>(null);
   const [acknowledgingPreviewId, setAcknowledgingPreviewId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     ok: boolean;
@@ -3647,6 +3649,7 @@ function ChannexBookingFeedCard({
       source?: string | null;
       importStatus?: string | null;
       ackStatus?: string | null;
+      linkedBookingId?: string | null;
     }>;
   } | null>(null);
   const blockedMessage = !propertyCreated
@@ -3683,7 +3686,7 @@ function ChannexBookingFeedCard({
         <div>
           <div className={styles.listTitle}>Channex booking feed</div>
           <div className={styles.cardCopy}>
-            Read-only preview of unacknowledged Channex staging booking revisions. Nothing is imported into Famlo bookings yet, and no acknowledgement is sent in this phase.
+            Preview of unacknowledged Channex staging booking revisions. Operators can import new previews or manually apply pending modifications, but acknowledgement is still deferred in this phase.
           </div>
         </div>
         <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
@@ -3819,9 +3822,13 @@ function ChannexBookingFeedCard({
                       {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
                     </div>
                     <div className={styles.mappingSubcopy}>
-                      {revision.importStatus === "imported"
+                      {revision.importStatus === "modified_applied"
+                        ? `Modification applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · Not acknowledged yet`
+                        : revision.importStatus === "imported"
                         ? `Imported into Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
-                        : "Preview only, not imported yet"}
+                        : revision.importStatus === "modified_pending_review"
+                          ? `Modification preview pending review${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""}`
+                          : "Preview only, not imported yet"}
                     </div>
                     {"id" in revision && revision.id ? (
                       <div className={styles.inlineActionRow} style={{ marginTop: 8 }}>
@@ -3830,13 +3837,16 @@ function ChannexBookingFeedCard({
                           className={styles.secondaryActionButton}
                           disabled={
                             isImportingPreview ||
+                            isApplyingModification ||
                             Boolean(blockedMessage) ||
                             revision.importStatus === "imported" ||
+                            revision.importStatus === "modified_pending_review" ||
+                            revision.importStatus === "modified_applied" ||
                             !revision.externalRoomTypeId
                           }
                           onClick={() => {
                             startImportingPreview(async () => {
-                              setImportingPreviewId(revision.id ?? null);
+                                setImportingPreviewId(typeof revision.id === "string" ? revision.id : null);
                               try {
                                 const response = await fetch("/api/host/pro/channel/channex/bookings/import-preview", {
                                   method: "POST",
@@ -3885,7 +3895,61 @@ function ChannexBookingFeedCard({
                               ? "Imported into Famlo"
                               : "Import to Famlo"}
                         </button>
-                        {revision.importStatus === "imported" ? (
+                        {revision.importStatus === "modified_pending_review" ? (
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            disabled={isApplyingModification || Boolean(blockedMessage)}
+                            onClick={() => {
+                              startApplyingModification(async () => {
+                                setApplyingModificationId(typeof revision.id === "string" ? revision.id : null);
+                                try {
+                                  const response = await fetch("/api/host/pro/channel/channex/bookings/apply-modification", {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      channelBookingRevisionId: revision.id,
+                                    }),
+                                  });
+
+                                  const payload = (await response.json()) as {
+                                    ok?: boolean;
+                                    message?: string;
+                                    error?: string;
+                                    status?: string;
+                                  };
+
+                                  if (!response.ok || !payload.ok) {
+                                    throw new Error(payload.error ?? payload.message ?? "Unable to apply this Channex booking modification.");
+                                  }
+
+                                  setFeedback({
+                                    ok: true,
+                                    message:
+                                      typeof payload.message === "string" && payload.message.trim().length > 0
+                                        ? payload.message
+                                        : "Modification applied to Famlo. Not acknowledged yet.",
+                                  });
+                                  router.refresh();
+                                } catch (error) {
+                                  setFeedback({
+                                    ok: false,
+                                    message: error instanceof Error ? error.message : "Unable to apply this Channex booking modification.",
+                                  });
+                                } finally {
+                                  setApplyingModificationId(null);
+                                }
+                              });
+                            }}
+                          >
+                            {isApplyingModification && applyingModificationId === revision.id
+                              ? "Applying..."
+                              : "Apply modification"}
+                          </button>
+                        ) : null}
+                        {revision.importStatus === "imported" || revision.importStatus === "modified_applied" ? (
                           revision.ackStatus === "acknowledged" ? (
                             <button
                               type="button"
@@ -3901,7 +3965,7 @@ function ChannexBookingFeedCard({
                               disabled={isAcknowledgingPreview || Boolean(blockedMessage)}
                               onClick={() => {
                                 startAcknowledgingPreview(async () => {
-                                  setAcknowledgingPreviewId(revision.id ?? null);
+                                  setAcknowledgingPreviewId(typeof revision.id === "string" ? revision.id : null);
                                   try {
                                     const response = await fetch("/api/host/pro/channel/channex/bookings/acknowledge", {
                                       method: "POST",
