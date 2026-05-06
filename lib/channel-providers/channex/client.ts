@@ -263,6 +263,7 @@ type ChannexBookingListRecord = {
   id?: unknown;
   property_id?: unknown;
   booking_id?: unknown;
+  revision_id?: unknown;
   unique_id?: unknown;
   ota_reservation_code?: unknown;
   ota_name?: unknown;
@@ -285,6 +286,36 @@ export type ChannexBookingListResult = {
   httpStatus: number | null;
   message: string;
   bookings: ChannexBookingListRecord[];
+  rawValidation: Record<string, unknown> | null;
+};
+
+type ChannexBookingRevisionListRecord = {
+  id?: unknown;
+  property_id?: unknown;
+  booking_id?: unknown;
+  channel_id?: unknown;
+  unique_id?: unknown;
+  ota_reservation_code?: unknown;
+  ota_name?: unknown;
+  status?: unknown;
+  arrival_date?: unknown;
+  departure_date?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  payment_collect?: unknown;
+  payment_type?: unknown;
+  inserted_at?: unknown;
+  attributes?: unknown;
+  relationships?: unknown;
+};
+
+export type ChannexBookingRevisionListResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  revisions: ChannexBookingRevisionListRecord[];
   rawValidation: Record<string, unknown> | null;
 };
 
@@ -1546,6 +1577,34 @@ export async function fetchChannexBookingList(): Promise<ChannexBookingListResul
       : result.message,
     bookings: result.data.filter(
       (item): item is ChannexBookingListRecord =>
+        Boolean(item) && typeof item === "object" && !Array.isArray(item)
+    ),
+    rawValidation: result.rawValidation,
+  };
+}
+
+export async function fetchChannexBookingRevisions(input?: {
+  propertyId?: string | null;
+  uniqueId?: string | null;
+  limit?: number;
+}): Promise<ChannexBookingRevisionListResult> {
+  const params = new URLSearchParams();
+  params.set("pagination[limit]", String(Math.max(1, Math.min(input?.limit ?? 20, 100))));
+  if (input?.propertyId) params.set("filter[property_id]", input.propertyId);
+  if (input?.uniqueId) params.set("filter[unique_id]", input.uniqueId);
+  const endpointPath = `/api/v1/booking_revisions?${params.toString()}`;
+  const result = await getChannexJson(endpointPath);
+
+  return {
+    ok: result.ok,
+    environment: result.environment,
+    endpoint: result.endpoint,
+    httpStatus: result.httpStatus,
+    message: result.ok
+      ? `Channex booking revisions list returned ${result.data.length} revision${result.data.length === 1 ? "" : "s"}.`
+      : result.message,
+    revisions: result.data.filter(
+      (item): item is ChannexBookingRevisionListRecord =>
         Boolean(item) && typeof item === "object" && !Array.isArray(item)
     ),
     rawValidation: result.rawValidation,

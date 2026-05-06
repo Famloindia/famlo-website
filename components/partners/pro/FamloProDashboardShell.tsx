@@ -121,6 +121,10 @@ type CalendarBookingDetail = {
   ackStatus: string | null;
   linkedBookingId: string | null;
   externalRevisionId: string | null;
+  bookingListRevisionId: string | null;
+  feedStatus: "found" | "empty" | "not_applicable";
+  isCrsOnly: boolean;
+  ackEligible: boolean;
   importedIntoFamlo: boolean;
   acknowledged: boolean;
   acknowledgementNote: string | null;
@@ -186,6 +190,18 @@ type AriHealthSnapshot = {
     createdAt: string | null;
     message: string | null;
   } | null;
+};
+
+type GoLiveChecklistStatus = "ready" | "needs_action" | "blocked";
+
+type GoLiveChecklistItem = {
+  key: string;
+  title: string;
+  status: GoLiveChecklistStatus;
+  statusLabel: string;
+  explanation: string;
+  recommendedAction: string;
+  targetSection: ProSectionId;
 };
 
 interface FamloProDashboardShellProps {
@@ -284,7 +300,7 @@ const SYNC_LOG_GROUPS: SyncLogGroup[] = [
   { key: "room", title: "Room creation", actions: ["create_room_type"] },
   { key: "rate", title: "Rate creation", actions: ["create_rate_plan"] },
   { key: "ari", title: "ARI push", actions: ["push_ari_30_day", "push_ari_365_day"] },
-  { key: "booking-feed", title: "Booking feed / list", actions: ["fetch_booking_feed", "store_booking_feed_preview", "verify_booking_list"] },
+  { key: "booking-feed", title: "Booking feed / list", actions: ["fetch_booking_feed", "store_booking_feed_preview", "verify_booking_list", "verify_booking_revision_visibility"] },
   { key: "booking-import", title: "Booking import", actions: ["import_booking_preview", "apply_booking_modification"] },
   { key: "ack", title: "Acknowledgement", actions: ["acknowledge_booking_revision"] },
 ];
@@ -334,8 +350,28 @@ function labelizeToken(value: string | null | undefined, fallback: string): stri
   return value.replaceAll("_", " ");
 }
 
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 function toneBadgeClass(tone: FeedItem["tone"]): string {
   return tone === "success" ? styles.badge : tone === "warning" ? `${styles.badge} ${styles.badgeMuted}` : styles.badge;
+}
+
+function checklistStatusClass(status: GoLiveChecklistStatus): string {
+  if (status === "ready") return `${styles.readinessPill} ${styles.readinessPillOk}`;
+  if (status === "blocked") return `${styles.readinessPill} ${styles.readinessPillMissing}`;
+  return `${styles.readinessPill} ${styles.readinessPillReview}`;
+}
+
+function checklistStatusLabel(status: GoLiveChecklistStatus): string {
+  if (status === "ready") return "Ready";
+  if (status === "blocked") return "Blocked";
+  return "Needs action";
 }
 
 function roomReadinessChecklist(room: RoomSummary): Array<{ label: string; complete: boolean }> {
@@ -955,6 +991,227 @@ export default function FamloProDashboardShell({
     ...failedSyncConflicts,
     ...ariHealthConflicts,
   ];
+  const activeRooms = rooms.filter((room) => room.isActive);
+  const allActiveRoomsMapped = activeRooms.length > 0 && activeRooms.every((room) => Boolean(roomMappingsByRoomId.get(room.id)?.externalRoomTypeId));
+  const allActiveRoomsHaveRatePlans = activeRooms.length > 0 && activeRooms.every((room) => Boolean(ratePlansByRoomId.get(room.id)?.externalRatePlanId));
+  const bookingImportTested = channelFoundation.bookingRevisions.some((revision) =>
+    Boolean(revision.linkedBookingId) ||
+    revision.importStatus === "imported" ||
+    revision.importStatus === "modified_applied"
+  );
+  const criticalConflictCount = conflictItems.filter((item) => item.severity === "warning").length;
+  const acknowledgementGuardHealthy = channelFoundation.bookingRevisions.every((revision) => {
+    if (revision.ackStatus !== "acknowledged") return true;
+    return Boolean(revision.externalRevisionId);
+  });
+  const latestAriSyncFailed = lastAriSyncLog?.status === "failed";
+  const latestAriSyncWarned = lastAriSyncLog?.status === "warning";
+  const hasRecent365DaySuccess = Boolean(
+    ariHealth.lastSuccessful365DaySync && !isStaleByHours(ariHealth.lastSuccessful365DaySync.createdAt, timeAnchor, 24)
+  );
+  const goLiveChecklist: GoLiveChecklistItem[] = [
+    {
+      key: "famlo-plus-active",
+      title: "Famlo+ active",
+      status: famloPlusStatus === "active" || famloPlusStatus === "grace" ? "ready" : "blocked",
+      statusLabel: checklistStatusLabel(famloPlusStatus === "active" || famloPlusStatus === "grace" ? "ready" : "blocked"),
+      explanation:
+        famloPlusStatus === "active" || famloPlusStatus === "grace"
+          ? `Famlo Pro access is currently ${labelizeToken(famloPlusStatus, famloPlusStatus)} for this property.`
+          : `Famlo Pro access is ${labelizeToken(famloPlusStatus, "inactive")}, so live channel launch should stay blocked.`,
+      recommendedAction:
+        famloPlusStatus === "active" || famloPlusStatus === "grace"
+          ? "Keep the current Famlo+ entitlement active through pilot launch."
+          : "Renew or activate Famlo+ before planning live channel connection.",
+      targetSection: "dashboard",
+    },
+    {
+      key: "channex-environment-configured",
+      title: "Channex environment configured",
+      status: channexConfig.configured ? "ready" : "blocked",
+      statusLabel: checklistStatusLabel(channexConfig.configured ? "ready" : "blocked"),
+      explanation: channexConfig.configured
+        ? `${formatChannexEnvironmentLabel(channexConfig.environment)} is configured with a server-side base URL and API key.`
+        : `${formatChannexEnvironmentLabel(channexConfig.environment)} is missing required server configuration.`,
+      recommendedAction: channexConfig.configured
+        ? "Use the current environment intentionally and avoid switching modes casually."
+        : "Add the correct Channex base URL and API key before testing further.",
+      targetSection: "settings",
+    },
+    {
+      key: "production-mutation-guard",
+      title: "Production mutation guard status shown",
+      status:
+        channexConfig.environment === "production"
+          ? (channexConfig.productionMutationsAllowed ? "ready" : "needs_action")
+          : "ready",
+      statusLabel: checklistStatusLabel(
+        channexConfig.environment === "production"
+          ? (channexConfig.productionMutationsAllowed ? "ready" : "needs_action")
+          : "ready"
+      ),
+      explanation:
+        channexConfig.environment === "production"
+          ? channexConfig.productionMutationsAllowed
+            ? "Production mode is explicitly allowed for mutations through the safety flag."
+            : "Production mode is selected, but write mutations are still blocked by the safety flag."
+          : "Staging mode is selected, so production mutations remain safely blocked by default.",
+      recommendedAction:
+        channexConfig.environment === "production" && !channexConfig.productionMutationsAllowed
+          ? "Leave the guard in place until you are ready for pilot, then set the explicit production allow flag."
+          : "Keep this guard visible during launch checks so operators know which environment is active.",
+      targetSection: "settings",
+    },
+    {
+      key: "provider-property-created",
+      title: "Provider property created",
+      status: primaryProperty?.externalPropertyId ? "ready" : "blocked",
+      statusLabel: checklistStatusLabel(primaryProperty?.externalPropertyId ? "ready" : "blocked"),
+      explanation: primaryProperty?.externalPropertyId
+        ? `Channex property mapping exists with external property id ${primaryProperty.externalPropertyId}.`
+        : "No Channex property mapping exists yet for this Famlo property.",
+      recommendedAction: primaryProperty?.externalPropertyId
+        ? "Keep this mapping stable and avoid recreating the provider property unnecessarily."
+        : "Create the provider property before attempting room, rate, or ARI workflows.",
+      targetSection: "connected-channels",
+    },
+    {
+      key: "all-active-rooms-mapped",
+      title: "All active rooms mapped",
+      status: activeRooms.length === 0 ? "blocked" : allActiveRoomsMapped ? "ready" : "needs_action",
+      statusLabel: checklistStatusLabel(activeRooms.length === 0 ? "blocked" : allActiveRoomsMapped ? "ready" : "needs_action"),
+      explanation:
+        activeRooms.length === 0
+          ? "No active rooms are available for channel launch."
+          : allActiveRoomsMapped
+            ? `All ${activeRooms.length} active room${activeRooms.length === 1 ? "" : "s"} have Channex room type mappings.`
+            : `${activeRooms.filter((room) => !roomMappingsByRoomId.get(room.id)?.externalRoomTypeId).length} active room${activeRooms.filter((room) => !roomMappingsByRoomId.get(room.id)?.externalRoomTypeId).length === 1 ? " is" : "s are"} still missing room mappings.`,
+      recommendedAction:
+        activeRooms.length === 0
+          ? "Activate and review room inventory before planning channel launch."
+          : allActiveRoomsMapped
+            ? "Re-check mappings only when room inventory changes."
+            : "Finish room mapping for every active room before going live.",
+      targetSection: "room-mapping",
+    },
+    {
+      key: "all-active-rooms-have-rate-plans",
+      title: "All active rooms have rate plans",
+      status: activeRooms.length === 0 ? "blocked" : allActiveRoomsHaveRatePlans ? "ready" : "needs_action",
+      statusLabel: checklistStatusLabel(activeRooms.length === 0 ? "blocked" : allActiveRoomsHaveRatePlans ? "ready" : "needs_action"),
+      explanation:
+        activeRooms.length === 0
+          ? "There are no active rooms to price for channel launch."
+          : allActiveRoomsHaveRatePlans
+            ? `All ${activeRooms.length} active room${activeRooms.length === 1 ? "" : "s"} have mapped provider rate plans.`
+            : `${activeRooms.filter((room) => !ratePlansByRoomId.get(room.id)?.externalRatePlanId).length} active room${activeRooms.filter((room) => !ratePlansByRoomId.get(room.id)?.externalRatePlanId).length === 1 ? " is" : "s are"} still missing rate plans.`,
+      recommendedAction:
+        activeRooms.length === 0
+          ? "Add active rooms before attempting rate distribution."
+          : allActiveRoomsHaveRatePlans
+            ? "Keep rate-plan mapping stable and review only when pricing structure changes."
+            : "Create or map a provider rate plan for every active room.",
+      targetSection: "rate-mapping",
+    },
+    {
+      key: "ari-365-fresh",
+      title: "365-day ARI sync successful within 24h",
+      status: hasRecent365DaySuccess ? "ready" : latestAriSyncFailed ? "blocked" : "needs_action",
+      statusLabel: checklistStatusLabel(hasRecent365DaySuccess ? "ready" : latestAriSyncFailed ? "blocked" : "needs_action"),
+      explanation: hasRecent365DaySuccess
+        ? `A verified 365-day ARI sync completed ${formatRelativeAge(ariHealth.lastSuccessful365DaySync?.createdAt ?? null, timeAnchor)}.`
+        : ariHealth.lastSuccessful365DaySync
+          ? `The last successful 365-day ARI sync is stale at ${formatRelativeAge(ariHealth.lastSuccessful365DaySync.createdAt, timeAnchor)}.`
+          : "No successful 365-day ARI sync has been recorded yet.",
+      recommendedAction: hasRecent365DaySuccess
+        ? "Keep the 365-day sync fresh before any live channel launch decision."
+        : "Run a fresh 365-day sync and verify read-back before connecting live channels.",
+      targetSection: "rates-restrictions",
+    },
+    {
+      key: "no-failed-latest-ari",
+      title: "No failed latest ARI sync",
+      status: latestAriSyncFailed ? "blocked" : latestAriSyncWarned ? "needs_action" : lastAriSyncLog ? "ready" : "needs_action",
+      statusLabel: checklistStatusLabel(latestAriSyncFailed ? "blocked" : latestAriSyncWarned ? "needs_action" : lastAriSyncLog ? "ready" : "needs_action"),
+      explanation: latestAriSyncFailed
+        ? `The latest ARI sync ended in failed status${lastAriSyncLog?.message ? `: ${lastAriSyncLog.message}` : "."}`
+        : latestAriSyncWarned
+          ? `The latest ARI sync ended with warnings${lastAriSyncLog?.message ? `: ${lastAriSyncLog.message}` : "."}`
+          : lastAriSyncLog
+            ? `The latest ARI sync completed successfully on ${formatDateTime(lastAriSyncLog.createdAt)}.`
+            : "No ARI sync log exists yet for this property.",
+      recommendedAction: latestAriSyncFailed || latestAriSyncWarned
+        ? "Review the latest ARI log summary and rerun the relevant sync only after the issue is clear."
+        : "Keep using sync logs as the operator health source before launch.",
+      targetSection: "sync-logs",
+    },
+    {
+      key: "booking-preview-tested",
+      title: "Booking preview/import tested",
+      status: bookingImportTested ? "ready" : "needs_action",
+      statusLabel: checklistStatusLabel(bookingImportTested ? "ready" : "needs_action"),
+      explanation: bookingImportTested
+        ? "At least one Channex booking preview has been linked or imported into Famlo for staging validation."
+        : "No linked or imported Channex booking preview is visible yet in the current read-only data.",
+      recommendedAction: bookingImportTested
+        ? "Keep using preview/import as the safe staging validation path."
+        : "Run a booking preview and import test before planning live channel connection.",
+      targetSection: "bookings",
+    },
+    {
+      key: "no-critical-conflicts",
+      title: "No critical conflicts",
+      status: criticalConflictCount === 0 ? "ready" : "needs_action",
+      statusLabel: checklistStatusLabel(criticalConflictCount === 0 ? "ready" : "needs_action"),
+      explanation: criticalConflictCount === 0
+        ? "No warning-level conflicts are currently open in the Pro conflict queue."
+        : `${criticalConflictCount} warning-level conflict${criticalConflictCount === 1 ? " remains" : "s remain"} open in the conflict queue.`,
+      recommendedAction: criticalConflictCount === 0
+        ? "Keep the conflict queue clean before any pilot launch."
+        : "Resolve warning-level conflicts before declaring this property ready for live connection.",
+      targetSection: "conflicts",
+    },
+    {
+      key: "acknowledgement-gated",
+      title: "Acknowledgement not enabled unless feed revision id exists",
+      status: acknowledgementGuardHealthy ? "ready" : "blocked",
+      statusLabel: checklistStatusLabel(acknowledgementGuardHealthy ? "ready" : "blocked"),
+      explanation: acknowledgementGuardHealthy
+        ? channelFoundation.bookingRevisions.some((revision) => revision.source === "booking_list_api" && !revision.externalRevisionId)
+          ? "Booking List previews without feed revision ids are still present, but acknowledgement remains correctly blocked for them."
+          : "No invalid acknowledgement state was found in the current booking revision data."
+        : "At least one acknowledged booking revision is missing a feed revision id, which should not happen.",
+      recommendedAction: acknowledgementGuardHealthy
+        ? "Keep acknowledgement manual and feed-id-aware until the live workflow is fully proven."
+        : "Audit booking revision history before any live acknowledgement workflow is enabled.",
+      targetSection: "bookings",
+    },
+  ];
+  const blockedChecklistCount = goLiveChecklist.filter((item) => item.status === "blocked").length;
+  const needsActionChecklistCount = goLiveChecklist.filter((item) => item.status === "needs_action").length;
+  const goLiveSummary = blockedChecklistCount > 0
+    ? {
+        label: "Not ready",
+        toneClass: styles.readinessPillMissing,
+        explanation: "Critical launch blockers still exist, so this property should not connect live channels yet.",
+      }
+    : channexConfig.environment === "production" && channexConfig.productionMutationsAllowed && needsActionChecklistCount === 0
+      ? {
+          label: "Ready for pilot",
+          toneClass: styles.readinessPillOk,
+          explanation: "Core setup, mapping, booking proof, and ARI health signals are aligned for a controlled live pilot.",
+        }
+      : needsActionChecklistCount === 0
+        ? {
+            label: "Ready for staging test",
+            toneClass: styles.readinessPillOk,
+            explanation: "This property looks healthy for staging proof, but production launch controls are not fully open yet.",
+          }
+        : {
+            label: "Not ready",
+            toneClass: styles.readinessPillReview,
+            explanation: "Core blockers are cleared, but there are still launch actions left before a safe pilot decision.",
+          };
   const sectionDescriptor = buildSectionDescriptor(
     activeSection,
     setupProgressPercent,
@@ -1067,23 +1324,28 @@ export default function FamloProDashboardShell({
                   </div>
 
                   <div className={styles.heroPanel}>
-                    <div className={styles.heroPanelTitle}>Current Pro Readiness</div>
+                    <div className={styles.heroPanelTitle}>Go-live readiness</div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
+                      <span className={styles.readinessPill}>{goLiveChecklist.filter((item) => item.status === "ready").length}/{goLiveChecklist.length} ready</span>
+                    </div>
+                    <div className={styles.feedCopy}>{goLiveSummary.explanation}</div>
                     <div className={styles.heroPanelList}>
                       <div className={styles.heroPanelItem}>
-                        <span>Provider environment</span>
-                        <strong>Not connected</strong>
+                        <span>Environment</span>
+                        <strong>{formatChannexEnvironmentLabel(channexConfig.environment)}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Inventory foundation</span>
-                        <strong>{rooms.length > 0 ? `${rooms.length} room units found` : "Needs review"}</strong>
+                        <span>365-day sync</span>
+                        <strong>{ariHealth.lastSuccessful365DaySync ? ariHealth.statusLabel : "Never synced"}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Channel sync</span>
-                        <strong>Coming soon</strong>
+                        <span>Critical conflicts</span>
+                        <strong>{criticalConflictCount === 0 ? "None open" : `${criticalConflictCount} open`}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Mapping readiness</span>
-                        <strong>{setupProgressPercent >= 50 ? "Preparing" : "Blocked by setup"}</strong>
+                        <span>Booking proof</span>
+                        <strong>{bookingImportTested ? "Tested" : "Needs test"}</strong>
                       </div>
                     </div>
                   </div>
@@ -1131,26 +1393,48 @@ export default function FamloProDashboardShell({
                 <article className={styles.card}>
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardTitle}>Sync Health</h3>
+                      <h3 className={styles.cardTitle}>Go-live readiness</h3>
                       <p className={styles.cardCopy}>
-                        Future ARI sync monitoring appears here once providers are connected.
+                        Read-only launch summary built from current Pro setup, mapping, booking, and sync signals.
                       </p>
                     </div>
-                    <span className={`${styles.badge} ${styles.badgeMuted}`}>Not connected</span>
+                    <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
                   </div>
                   <div className={styles.cardBody}>
                     <div className={styles.stack}>
                       <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Provider status</div>
-                        <div className={styles.feedCopy}>Channex appears first in the roadmap, but no provider sync is active yet.</div>
+                        <div className={styles.feedTitle}>Environment + guardrails</div>
+                        <div className={styles.feedCopy}>
+                          {formatChannexEnvironmentLabel(channexConfig.environment)} is selected and
+                          {" "}
+                          {channexConfig.environment === "production" && !channexConfig.productionMutationsAllowed
+                            ? "production writes are still blocked by the safety flag."
+                            : "the current mutation guardrails are aligned with this mode."}
+                        </div>
                       </div>
                       <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Booking import status</div>
-                        <div className={styles.feedCopy}>OTA booking import and acknowledgement remain intentionally disabled in this phase.</div>
+                        <div className={styles.feedTitle}>Fresh 365-day sync</div>
+                        <div className={styles.feedCopy}>
+                          {hasRecent365DaySuccess
+                            ? `A recent 365-day ARI sync is available from ${formatDateTime(ariHealth.lastSuccessful365DaySync?.createdAt ?? null)}.`
+                            : "A fresh 365-day ARI sync is still required before live connection."}
+                        </div>
                       </div>
                       <div className={styles.feedItem}>
                         <div className={styles.feedTitle}>Conflict queue</div>
-                        <div className={styles.feedCopy}>No connected channels means there are no channel conflicts to reconcile.</div>
+                        <div className={styles.feedCopy}>
+                          {criticalConflictCount === 0
+                            ? "No warning-level conflicts are currently blocking launch."
+                            : `${criticalConflictCount} warning-level conflicts still need review before any pilot decision.`}
+                        </div>
+                      </div>
+                      <div className={styles.inlineActionRow}>
+                        <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("setup-guide")}>
+                          Open readiness checklist
+                        </button>
+                        <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("conflicts")}>
+                          Review conflicts
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1250,6 +1534,11 @@ export default function FamloProDashboardShell({
                     <div className={styles.summaryValue}>{missingSetupItems.length}</div>
                     <div className={styles.summaryCopy}>Signals still blocked by missing Pro settings or future integrations</div>
                   </div>
+                  <div className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>Go-live verdict</div>
+                    <div className={styles.summaryValue}>{goLiveSummary.label}</div>
+                    <div className={styles.summaryCopy}>{goLiveSummary.explanation}</div>
+                  </div>
                 </div>
 
                 <div className={styles.recommendationCard}>
@@ -1259,6 +1548,39 @@ export default function FamloProDashboardShell({
                     <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("settings")}>
                       Open Pro Settings
                     </button>
+                  </div>
+                </div>
+
+                <div className={styles.listCard}>
+                  <div className={styles.cardHeaderCompact}>
+                    <div>
+                      <div className={styles.listTitle}>Go-live readiness checklist</div>
+                      <div className={styles.cardCopy}>
+                        Live connection summary for Famlo+, mapping, ARI, booking proof, and safety guardrails.
+                      </div>
+                    </div>
+                    <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
+                  </div>
+                  <div className={styles.logList}>
+                    {goLiveChecklist.map((item) => (
+                      <article key={item.key} className={styles.logRow}>
+                        <div>
+                          <div className={styles.logTitle}>{item.title}</div>
+                          <div className={styles.logCopy}>{item.explanation}</div>
+                          <div className={styles.conflictActionCopy}>Recommended action: {item.recommendedAction}</div>
+                        </div>
+                        <div className={styles.logMeta}>
+                          <span className={checklistStatusClass(item.status)}>{item.statusLabel}</span>
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            onClick={() => setActiveSection(item.targetSection)}
+                          >
+                            Open section
+                          </button>
+                        </div>
+                      </article>
+                    ))}
                   </div>
                 </div>
 
@@ -1650,6 +1972,51 @@ export default function FamloProDashboardShell({
                             <div className={styles.mappingCell}>
                               <div className={styles.mappingTitle}>{selectedCalendarBooking.acknowledged ? "Yes" : "No"}</div>
                             </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Feed revision ID</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{selectedCalendarBooking.externalRevisionId ?? "Not available"}</div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Booking List revision ID</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{selectedCalendarBooking.bookingListRevisionId ?? "Not available"}</div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Feed status</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>
+                                {selectedCalendarBooking.feedStatus === "not_applicable"
+                                  ? "Not applicable"
+                                  : labelizeToken(selectedCalendarBooking.feedStatus, "unknown")}
+                              </div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>CRS-only / manual indicator</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{selectedCalendarBooking.isCrsOnly ? "Yes" : "No"}</div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Ack eligibility</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>
+                                {selectedCalendarBooking.sourceLabel === "Channex / OTA"
+                                  ? selectedCalendarBooking.ackEligible
+                                    ? "Eligible"
+                                    : "Blocked until real feed revision"
+                                  : "Not applicable"}
+                              </div>
+                            </div>
                           </div>
 
                           {selectedCalendarBooking.acknowledgementNote ? (
@@ -2004,6 +2371,13 @@ export default function FamloProDashboardShell({
                   familyId={familyId}
                   propertyCreated={canCreateRoomTypes}
                   externalPropertyId={primaryProperty?.externalPropertyId ?? null}
+                  storedRevisions={channelFoundation.bookingRevisions}
+                />
+                <ChannexBookingRevisionVisibilityCard
+                  familyId={familyId}
+                  propertyCreated={canCreateRoomTypes}
+                  externalPropertyId={primaryProperty?.externalPropertyId ?? null}
+                  lastFeedLog={lastBookingFeedLog}
                   storedRevisions={channelFoundation.bookingRevisions}
                 />
                 <div className={styles.filterRow}>
@@ -2819,6 +3193,7 @@ function ChannexBookingListVerifyCard({
     source: string;
     importStatus: string;
     ackStatus: string;
+    rawPayload?: Record<string, unknown> | null;
   }>;
 }>): React.JSX.Element | null {
   const [isVerifyingList, startVerifyingList] = useTransition();
@@ -2833,6 +3208,7 @@ function ChannexBookingListVerifyCard({
     bookings?: Array<{
       bookingId: string | null;
       uniqueId: string | null;
+      bookingListRevisionId: string | null;
       status: string | null;
       propertyId: string | null;
       arrivalDate: string | null;
@@ -2842,6 +3218,10 @@ function ChannexBookingListVerifyCard({
       amount: string | null;
       currency: string | null;
       otaName: string | null;
+      channelId: string | null;
+      hasUnackedRevisions: boolean;
+      acknowledgeStatus: string | null;
+      isCrsRevision: boolean;
     }>;
   } | null>(null);
 
@@ -2864,6 +3244,8 @@ function ChannexBookingListVerifyCard({
           importStatus: revision.importStatus,
           ackStatus: revision.ackStatus,
           source: revision.source,
+          bookingListRevisionId: asStringOrNull(revision.rawPayload?.booking_list_revision_id),
+          feedRevisionId: asStringOrNull(revision.rawPayload?.external_revision_id),
         },
       ])
   );
@@ -2912,6 +3294,7 @@ function ChannexBookingListVerifyCard({
             <div className={styles.mappingTable} style={{ marginTop: 14 }}>
               <div className={styles.mappingHeader}>Booking</div>
               <div className={styles.mappingHeader}>Status</div>
+              <div className={styles.mappingHeader}>Revision visibility</div>
               <div className={styles.mappingHeader}>Property ID</div>
               <div className={styles.mappingHeader}>Dates</div>
               <div className={styles.mappingHeader}>Room / Rate</div>
@@ -2930,6 +3313,18 @@ function ChannexBookingListVerifyCard({
                         {preview
                           ? `${preview.importStatus} · ${preview.ackStatus} · ${labelizeToken(preview.source, "booking_list_api")}`
                           : "Read-only list API"}
+                      </div>
+                    </div>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>
+                        List rev {booking.bookingListRevisionId ?? "Missing"}
+                      </div>
+                      <div className={styles.mappingSubcopy}>
+                        {booking.isCrsRevision || !booking.channelId
+                          ? "CRS-only / manual candidate"
+                          : "Channel-linked candidate"}
+                        {booking.hasUnackedRevisions ? " · unacked revisions present" : ""}
+                        {booking.acknowledgeStatus ? ` · ${booking.acknowledgeStatus}` : ""}
                       </div>
                     </div>
                     <div className={styles.mappingCell}>
@@ -2999,6 +3394,7 @@ function ChannexBookingListVerifyCard({
                   bookings?: Array<{
                     bookingId: string | null;
                     uniqueId: string | null;
+                    bookingListRevisionId: string | null;
                     status: string | null;
                     propertyId: string | null;
                     arrivalDate: string | null;
@@ -3008,6 +3404,10 @@ function ChannexBookingListVerifyCard({
                     amount: string | null;
                     currency: string | null;
                     otaName: string | null;
+                    channelId: string | null;
+                    hasUnackedRevisions: boolean;
+                    acknowledgeStatus: string | null;
+                    isCrsRevision: boolean;
                   }>;
                 };
 
@@ -3033,6 +3433,262 @@ function ChannexBookingListVerifyCard({
           }}
         >
           {isVerifyingList ? "Verifying..." : "Verify booking list"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ChannexBookingRevisionVisibilityCard({
+  familyId,
+  propertyCreated,
+  externalPropertyId,
+  lastFeedLog,
+  storedRevisions,
+}: Readonly<{
+  familyId: string;
+  propertyCreated: boolean;
+  externalPropertyId: string | null;
+  lastFeedLog: {
+    status: string;
+    message: string | null;
+    createdAt: string | null;
+  } | null;
+  storedRevisions: Array<{
+    externalBookingId: string | null;
+    externalRevisionId: string | null;
+    source: string;
+    importStatus: string;
+    ackStatus: string;
+    rawPayload: Record<string, unknown>;
+  }>;
+}>): React.JSX.Element | null {
+  const [isChecking, startChecking] = useTransition();
+  const [bookingUniqueIdInput, setBookingUniqueIdInput] = useState("ABB-TEST-FAMLO-001");
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    message: string;
+    feedStatus?: string;
+    feedMatchCount?: number;
+    revisionsFound?: number;
+    revisions?: Array<{
+      revisionId: string | null;
+      externalBookingId: string | null;
+      bookingId: string | null;
+      propertyId: string | null;
+      status: string | null;
+      otaName: string | null;
+      arrivalDate: string | null;
+      departureDate: string | null;
+      externalRoomTypeId: string | null;
+      externalRatePlanId: string | null;
+      amount: string | null;
+      currency: string | null;
+      paymentCollect: string | null;
+      paymentType: string | null;
+      channelId: string | null;
+      isCrsRevision: boolean;
+      acknowledgeStatus: string | null;
+      insertedAt: string | null;
+    }>;
+  } | null>(null);
+
+  if (!externalPropertyId) return null;
+
+  const blockedMessage = !propertyCreated
+    ? "Create provider property first."
+    : !externalPropertyId
+      ? "Provider property is not mapped yet."
+      : null;
+
+  const storedPreview = storedRevisions.find((revision) => revision.externalBookingId === bookingUniqueIdInput) ?? null;
+  const storedBookingListRevisionId = asStringOrNull(storedPreview?.rawPayload?.booking_list_revision_id);
+  const storedIsCrsOnly =
+    storedPreview?.rawPayload?.is_crs_revision === true ||
+    storedPreview?.rawPayload?.booking_list_is_crs_revision === true ||
+    (storedPreview?.rawPayload && Object.prototype.hasOwnProperty.call(storedPreview.rawPayload, "channel_id") && !asStringOrNull(storedPreview.rawPayload.channel_id)) ||
+    (storedPreview?.rawPayload && Object.prototype.hasOwnProperty.call(storedPreview.rawPayload, "booking_list_channel_id") && !asStringOrNull(storedPreview.rawPayload.booking_list_channel_id));
+
+  return (
+    <section className={styles.cardInset}>
+      <div className={styles.cardHeaderCompact}>
+        <div>
+          <div className={styles.listTitle}>Booking revision visibility</div>
+          <div className={styles.cardCopy}>
+            Read-only comparison of Booking List revision id, Booking Revisions history, and Booking Revision Feed status for one booking.
+          </div>
+        </div>
+        <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
+          {blockedMessage ? "Blocked" : "Diagnostics"}
+        </span>
+      </div>
+
+      <div className={styles.placeholderGrid}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Stored feed revision ID</div>
+          <div className={styles.placeholderCopy}>{storedPreview?.externalRevisionId ?? "Missing"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Stored Booking List revision ID</div>
+          <div className={styles.placeholderCopy}>{storedBookingListRevisionId ?? "Missing"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Stored ack eligibility</div>
+          <div className={styles.placeholderCopy}>{storedPreview?.externalRevisionId ? "Eligible via feed revision" : "Blocked until real feed revision"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Stored CRS/manual indicator</div>
+          <div className={styles.placeholderCopy}>{storedIsCrsOnly ? "Yes" : "No / unknown"}</div>
+        </div>
+      </div>
+
+      {lastFeedLog?.message ? <div className={styles.feedCopy}>{lastFeedLog.message}</div> : null}
+      {blockedMessage ? <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{blockedMessage}</div> : null}
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
+          {feedback.message}
+          {typeof feedback.revisionsFound === "number" ? (
+            <div className={styles.inlineBadgeRow}>
+              <span className={`${styles.readinessPill} ${feedback.feedStatus === "found" ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                Feed: {labelizeToken(feedback.feedStatus, "unknown")}
+              </span>
+              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>History rows: {feedback.revisionsFound}</span>
+              <span className={`${styles.readinessPill} ${feedback.feedMatchCount ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                Feed matches: {feedback.feedMatchCount ?? 0}
+              </span>
+            </div>
+          ) : null}
+
+          {feedback.revisions && feedback.revisions.length > 0 ? (
+            <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+              <div className={styles.mappingHeader}>Revision</div>
+              <div className={styles.mappingHeader}>Status</div>
+              <div className={styles.mappingHeader}>Feed / CRS</div>
+              <div className={styles.mappingHeader}>Dates</div>
+              <div className={styles.mappingHeader}>Room / Rate</div>
+              <div className={styles.mappingHeader}>Amount</div>
+              {feedback.revisions.map((revision, index) => (
+                <Fragment key={`${revision.revisionId ?? revision.bookingId ?? "visibility"}-${index}`}>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
+                    <div className={styles.mappingSubcopy}>Revision {revision.revisionId ?? "Unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
+                    <div className={styles.mappingSubcopy}>{revision.acknowledgeStatus ?? "ack status unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.channelId ?? "channel_id = null"}</div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.isCrsRevision ? "CRS-only / manual" : "Channel-linked"}
+                      {feedback.feedStatus === "found" ? " · feed found" : " · feed empty"}
+                    </div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"}</div>
+                    <div className={styles.mappingSubcopy}>Received {formatDateTime(revision.insertedAt)}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.externalRoomTypeId ?? "Room missing"}</div>
+                    <div className={styles.mappingSubcopy}>{revision.externalRatePlanId ?? "Rate missing"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>
+                      {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
+                    </div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.revisionId ? "History row only" : "No revision id"}
+                    </div>
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={styles.inlineActionRow}>
+        <input
+          type="text"
+          value={bookingUniqueIdInput}
+          onChange={(event) => setBookingUniqueIdInput(event.target.value)}
+          placeholder="Booking unique ID"
+          aria-label="Booking revision unique ID"
+          style={{
+            minWidth: 220,
+            borderRadius: 10,
+            border: "1px solid rgba(15,33,64,0.16)",
+            padding: "10px 12px",
+            fontSize: 14,
+            background: "#fff",
+            color: "#11233f",
+          }}
+        />
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isChecking || Boolean(blockedMessage)}
+          onClick={() => {
+            startChecking(async () => {
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/bookings/revisions", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId, uniqueId: bookingUniqueIdInput }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  message?: string;
+                  feedStatus?: string;
+                  feedMatchCount?: number;
+                  revisionsFound?: number;
+                  revisions?: Array<{
+                    revisionId: string | null;
+                    externalBookingId: string | null;
+                    bookingId: string | null;
+                    propertyId: string | null;
+                    status: string | null;
+                    otaName: string | null;
+                    arrivalDate: string | null;
+                    departureDate: string | null;
+                    externalRoomTypeId: string | null;
+                    externalRatePlanId: string | null;
+                    amount: string | null;
+                    currency: string | null;
+                    paymentCollect: string | null;
+                    paymentType: string | null;
+                    channelId: string | null;
+                    isCrsRevision: boolean;
+                    acknowledgeStatus: string | null;
+                    insertedAt: string | null;
+                  }>;
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to inspect booking revision visibility.",
+                  feedStatus: typeof payload.feedStatus === "string" ? payload.feedStatus : undefined,
+                  feedMatchCount: typeof payload.feedMatchCount === "number" ? payload.feedMatchCount : undefined,
+                  revisionsFound: typeof payload.revisionsFound === "number" ? payload.revisionsFound : undefined,
+                  revisions: Array.isArray(payload.revisions) ? payload.revisions : undefined,
+                });
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to inspect booking revision visibility.",
+                });
+              }
+            });
+          }}
+        >
+          {isChecking ? "Checking..." : "Inspect revision visibility"}
         </button>
       </div>
     </section>
@@ -3977,6 +4633,7 @@ function ChannexBookingFeedCard({
     ackStatus: string;
     linkedBookingId: string | null;
     updatedAt: string | null;
+    rawPayload: Record<string, unknown>;
   }>;
 }>): React.JSX.Element {
   const router = useRouter();
@@ -4027,8 +4684,11 @@ function ChannexBookingFeedCard({
       source?: string | null;
       importStatus?: string | null;
       ackStatus?: string | null;
-      linkedBookingId?: string | null;
-    }>;
+    linkedBookingId?: string | null;
+    bookingListRevisionId?: string | null;
+    isCrsOnly?: boolean;
+    ackEligible?: boolean;
+  }>;
   } | null>(null);
   const blockedMessage = !propertyCreated
     ? "Create provider property first."
@@ -4056,6 +4716,13 @@ function ChannexBookingFeedCard({
     importStatus: revision.importStatus,
     ackStatus: revision.ackStatus,
     linkedBookingId: revision.linkedBookingId,
+    bookingListRevisionId: asStringOrNull(revision.rawPayload?.booking_list_revision_id),
+    isCrsOnly:
+      revision.rawPayload?.is_crs_revision === true ||
+      revision.rawPayload?.booking_list_is_crs_revision === true ||
+      (Object.prototype.hasOwnProperty.call(revision.rawPayload, "channel_id") && !asStringOrNull(revision.rawPayload?.channel_id)) ||
+      (Object.prototype.hasOwnProperty.call(revision.rawPayload, "booking_list_channel_id") && !asStringOrNull(revision.rawPayload?.booking_list_channel_id)),
+    ackEligible: Boolean(revision.externalRevisionId),
   }));
 
   return (
@@ -4159,6 +4826,7 @@ function ChannexBookingFeedCard({
             <div className={styles.mappingTable} style={{ marginTop: 14 }}>
               <div className={styles.mappingHeader}>Booking</div>
               <div className={styles.mappingHeader}>Status</div>
+              <div className={styles.mappingHeader}>Visibility</div>
               <div className={styles.mappingHeader}>Channel</div>
               <div className={styles.mappingHeader}>Dates</div>
               <div className={styles.mappingHeader}>Guest</div>
@@ -4170,16 +4838,25 @@ function ChannexBookingFeedCard({
                     <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
                     <div className={styles.mappingSubcopy}>Revision {revision.revisionId ?? "Unknown"}</div>
                   </div>
-                  <div className={styles.mappingCell}>
-                    <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
-                    <div className={styles.mappingSubcopy}>
-                      {revision.importStatus ?? "preview"} · {revision.ackStatus ?? "not_acknowledged"} · {labelizeToken((revision as { source?: string | null }).source, "unknown_source")}
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
+                      <div className={styles.mappingSubcopy}>
+                        {revision.importStatus ?? "preview"} · {revision.ackStatus ?? "not_acknowledged"} · {labelizeToken((revision as { source?: string | null }).source, "unknown_source")}
+                      </div>
                     </div>
-                  </div>
-                  <div className={styles.mappingCell}>
-                    <div className={styles.mappingTitle}>{revision.otaName ?? "Unknown"}</div>
-                    <div className={styles.mappingSubcopy}>{revision.paymentCollect ?? "collection unknown"}</div>
-                  </div>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>
+                        Feed {revision.revisionId ?? "missing"} · List {revision.bookingListRevisionId ?? "missing"}
+                      </div>
+                      <div className={styles.mappingSubcopy}>
+                        {revision.isCrsOnly ? "CRS-only / manual" : "Channel-linked"}
+                        {revision.ackEligible ? " · ack eligible" : " · ack blocked"}
+                      </div>
+                    </div>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>{revision.otaName ?? "Unknown"}</div>
+                      <div className={styles.mappingSubcopy}>{revision.paymentCollect ?? "collection unknown"}</div>
+                    </div>
                   <div className={styles.mappingCell}>
                     <div className={styles.mappingTitle}>{revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"}</div>
                     <div className={styles.mappingSubcopy}>Received {formatDateTime(revision.insertedAt)}</div>

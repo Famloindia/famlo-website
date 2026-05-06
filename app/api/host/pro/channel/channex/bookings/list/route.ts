@@ -13,6 +13,7 @@ type ListBody = {
 type BookingListSummary = {
   bookingId: string | null;
   uniqueId: string | null;
+  bookingListRevisionId: string | null;
   status: string | null;
   propertyId: string | null;
   arrivalDate: string | null;
@@ -22,6 +23,10 @@ type BookingListSummary = {
   amount: string | null;
   currency: string | null;
   otaName: string | null;
+  channelId: string | null;
+  hasUnackedRevisions: boolean;
+  acknowledgeStatus: string | null;
+  isCrsRevision: boolean;
   source: "booking_list_api";
 };
 
@@ -81,6 +86,7 @@ function summarizeBooking(booking: Record<string, unknown>): BookingListSummary 
       asStringOrNull(attributes?.unique_id) ??
       asStringOrNull(booking.ota_reservation_code) ??
       asStringOrNull(attributes?.ota_reservation_code),
+    bookingListRevisionId: asStringOrNull(booking.revision_id) ?? asStringOrNull(attributes?.revision_id),
     status: asStringOrNull(booking.status) ?? asStringOrNull(attributes?.status),
     propertyId: propertyIds[0] ?? null,
     arrivalDate: asStringOrNull(booking.arrival_date) ?? asStringOrNull(attributes?.arrival_date) ?? asStringOrNull(firstRoom?.checkin_date),
@@ -90,6 +96,10 @@ function summarizeBooking(booking: Record<string, unknown>): BookingListSummary 
     amount: asStringOrNull(booking.amount) ?? asStringOrNull(attributes?.amount) ?? asStringOrNull(firstRoom?.amount),
     currency: asStringOrNull(booking.currency) ?? asStringOrNull(attributes?.currency),
     otaName: asStringOrNull(booking.ota_name) ?? asStringOrNull(attributes?.ota_name),
+    channelId: asStringOrNull(attributes?.channel_id) ?? asStringOrNull(booking.channel_id),
+    hasUnackedRevisions: Boolean(attributes?.has_unacked_revisions),
+    acknowledgeStatus: asStringOrNull(attributes?.acknowledge_status),
+    isCrsRevision: Boolean(attributes?.is_crs_revision),
     source: "booking_list_api",
   };
 }
@@ -189,6 +199,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         raw_payload: {
           booking_id: booking.bookingId,
           unique_id: booking.uniqueId,
+          booking_list_revision_id: booking.bookingListRevisionId,
           property_id: booking.propertyId,
           arrival_date: booking.arrivalDate,
           departure_date: booking.departureDate,
@@ -198,6 +209,10 @@ export async function POST(request: Request): Promise<NextResponse> {
           currency: booking.currency,
           ota_name: booking.otaName,
           status: booking.status,
+          channel_id: booking.channelId,
+          has_unacked_revisions: booking.hasUnackedRevisions,
+          acknowledge_status: booking.acknowledgeStatus,
+          is_crs_revision: booking.isCrsRevision,
         },
         import_status: "preview",
         ack_status: "not_acknowledged",

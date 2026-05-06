@@ -152,6 +152,10 @@ type CalendarBookingDetail = {
   ackStatus: string | null;
   linkedBookingId: string | null;
   externalRevisionId: string | null;
+  bookingListRevisionId: string | null;
+  feedStatus: "found" | "empty" | "not_applicable";
+  isCrsOnly: boolean;
+  ackEligible: boolean;
   importedIntoFamlo: boolean;
   acknowledged: boolean;
   acknowledgementNote: string | null;
@@ -606,6 +610,21 @@ export default async function FamloProDashboardPage({
       asString(pricingSnapshot.channel_external_revision_id) ??
       matchedRevision?.externalRevisionId ??
       null;
+    const rawPayload =
+      matchedRevision?.rawPayload && typeof matchedRevision.rawPayload === "object" && !Array.isArray(matchedRevision.rawPayload)
+        ? (matchedRevision.rawPayload as Record<string, unknown>)
+        : {};
+    const bookingListRevisionId =
+      asString(pricingSnapshot.channel_booking_list_revision_id) ??
+      asString(rawPayload.booking_list_revision_id) ??
+      null;
+    const isCrsOnly =
+      isOtaBooking &&
+      (rawPayload.is_crs_revision === true ||
+        rawPayload.booking_list_is_crs_revision === true ||
+        (Object.prototype.hasOwnProperty.call(rawPayload, "channel_id") && !asString(rawPayload.channel_id)) ||
+        (Object.prototype.hasOwnProperty.call(rawPayload, "booking_list_channel_id") && !asString(rawPayload.booking_list_channel_id)));
+    const ackEligible = isOtaBooking && Boolean(externalRevisionId);
     const resolvedLinkedBookingId = isOtaBooking
       ? matchedRevision?.linkedBookingId ?? bookingId ?? null
       : bookingId ?? null;
@@ -632,11 +651,17 @@ export default async function FamloProDashboardPage({
       ackStatus: isOtaBooking ? matchedRevision?.ackStatus ?? "not_acknowledged" : "not_applicable",
       linkedBookingId: resolvedLinkedBookingId,
       externalRevisionId,
+      bookingListRevisionId,
+      feedStatus: !isOtaBooking ? "not_applicable" : externalRevisionId ? "found" : "empty",
+      isCrsOnly,
+      ackEligible,
       importedIntoFamlo: !isOtaBooking || resolvedImportStatus === "imported",
       acknowledged: isOtaBooking ? matchedRevision?.ackStatus === "acknowledged" : false,
       acknowledgementNote:
         isOtaBooking && !externalRevisionId
-          ? "Cannot acknowledge Booking List preview; requires Booking Revision Feed id."
+          ? bookingListRevisionId
+            ? "Booking List exposed a revision id, but acknowledgement stays blocked until a real Booking Revision Feed id is stored."
+            : "Cannot acknowledge Booking List preview; requires Booking Revision Feed id."
           : null,
     };
 
