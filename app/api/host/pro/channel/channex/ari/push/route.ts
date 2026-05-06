@@ -15,7 +15,6 @@ import { loadHostProAccess } from "@/lib/host-pro-access";
 import {
   loadHostProSettings,
   PRO_DEFAULT_CURRENCY,
-  PRO_DEFAULT_MEAL_PLAN,
 } from "@/lib/host-pro-settings";
 import { enumerateDateRange } from "@/lib/platform-utils";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
@@ -23,6 +22,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type AriPushBody = {
   familyId?: string;
+  windowDays?: number;
 };
 
 type RoomSummary = {
@@ -35,9 +35,22 @@ type RoomSummary = {
 type VerificationSummary = {
   verifiedAvailabilityCount: number;
   verifiedRateCount: number;
+  verifiedMinStayThroughCount: number;
   availabilityMismatches: Array<{ roomTypeId: string; date: string; expected: number; actual: number | null }>;
   rateMismatches: Array<{ ratePlanId: string; date: string; expected: string; actual: string | null }>;
 };
+
+type PushRangeSummary = {
+  roomName: string;
+  roomTypeId: string;
+  ratePlanId: string;
+  availabilityRanges: Array<{ dateFrom: string; dateTo: string; availability: number }>;
+  rateRanges: Array<{ dateFrom: string; dateTo: string; rate: string; stopSell: boolean; minStayThrough: number }>;
+};
+
+const DEFAULT_WINDOW_DAYS = 30;
+const LONG_WINDOW_DAYS = 365;
+const MAX_SEGMENTS_PER_REQUEST = 120;
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -64,10 +77,11 @@ function getLocalDateString(date: Date, timeZone: string): string {
   }).format(date);
 }
 
-function getDateRange(timeZone: string): { from: string; to: string } {
+function getDateRange(timeZone: string, windowDays: number): { from: string; to: string } {
   const now = new Date();
   const from = getLocalDateString(now, timeZone);
-  const toDate = new Date(now.getTime() + 29 * 24 * 60 * 60 * 1000);
+  const safeWindowDays = Math.max(1, Math.floor(windowDays));
+  const toDate = new Date(now.getTime() + (safeWindowDays - 1) * 24 * 60 * 60 * 1000);
   const to = getLocalDateString(toDate, timeZone);
   return { from, to };
 }
@@ -123,14 +137,15 @@ function buildSegments(
 async function logAriPush(input: {
   supabase: ReturnType<typeof createAdminSupabaseClient>;
   familyId: string;
-  status: "success" | "failed";
+  action: "push_ari_30_day" | "push_ari_365_day";
+  status: "success" | "warning" | "failed";
   message: string;
   payload: Record<string, unknown>;
 }): Promise<void> {
   const { error } = await input.supabase.from("channel_sync_logs").insert({
     family_id: input.familyId,
     provider_code: "channex",
-    action: "push_ari_30_day",
+    action: input.action,
     status: input.status,
     message: input.message,
     payload: input.payload,
@@ -160,6 +175,42 @@ function normalizeWarningMessages(warnings: unknown[]): string[] {
   });
 }
 
+function chunkArray<T>(values: T[], size: number): T[][] {
+  if (values.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function aggregatePushResults(input: Array<{
+  ok: boolean;
+  httpStatus: number | null;
+  message: string;
+  meta: Record<string, unknown> | null;
+  warnings: unknown[];
+}>): {
+  ok: boolean;
+  httpStatus: number | null;
+  message: string;
+  warnings: string[];
+  meta: Record<string, unknown>;
+} {
+  return {
+    ok: input.every((item) => item.ok),
+    httpStatus: input.find((item) => !item.ok)?.httpStatus ?? input[0]?.httpStatus ?? null,
+    message: input.map((item) => item.message).filter(Boolean).join(" | "),
+    warnings: input.flatMap((item) => normalizeWarningMessages(item.warnings)),
+    meta: {
+      chunk_count: input.length,
+      http_statuses: input.map((item) => item.httpStatus),
+      messages: input.map((item) => item.message),
+      metas: input.map((item) => item.meta),
+    },
+  };
+}
+
 function verifySnapshots(input: {
   availabilitySnapshot: Record<string, Record<string, number>>;
   restrictionsSnapshot: Record<string, Record<string, Record<string, unknown>>>;
@@ -170,6 +221,7 @@ function verifySnapshots(input: {
   const rateMismatches: VerificationSummary["rateMismatches"] = [];
   let verifiedAvailabilityCount = 0;
   let verifiedRateCount = 0;
+  let verifiedMinStayThroughCount = 0;
 
   for (const value of input.availabilityValues) {
     for (const date of enumerateDateRange(value.dateFrom, value.dateTo)) {
@@ -206,6 +258,7 @@ function verifySnapshots(input: {
             : null;
       if (normalizedActual === value.rate && normalizedMinStayThrough === value.minStayThrough) {
         verifiedRateCount += 1;
+        verifiedMinStayThroughCount += 1;
       } else {
         rateMismatches.push({
           ratePlanId: value.ratePlanId,
@@ -223,6 +276,7 @@ function verifySnapshots(input: {
   return {
     verifiedAvailabilityCount,
     verifiedRateCount,
+    verifiedMinStayThroughCount,
     availabilityMismatches,
     rateMismatches,
   };
@@ -232,6 +286,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     const body = (await request.json()) as AriPushBody;
     const familyId = asString(body.familyId) ?? "";
+    const requestedWindowDays = typeof body.windowDays === "number" ? Math.floor(body.windowDays) : DEFAULT_WINDOW_DAYS;
+    const windowDays = requestedWindowDays === LONG_WINDOW_DAYS ? LONG_WINDOW_DAYS : DEFAULT_WINDOW_DAYS;
+    const logAction = windowDays === LONG_WINDOW_DAYS ? "push_ari_365_day" : "push_ari_30_day";
 
     if (!familyId) {
       return NextResponse.json({ error: "familyId is required." }, { status: 400 });
@@ -285,7 +342,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         .eq("family_id", familyId)
         .eq("provider_code", "channex"),
     ]);
-    const { from, to } = getDateRange(settings.timezone || "Asia/Kolkata");
+    const { from, to } = getDateRange(settings.timezone || "Asia/Kolkata", windowDays);
 
     const externalPropertyId = asString(channelProperty?.external_property_id);
     if (!externalPropertyId) {
@@ -362,14 +419,16 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     if (eligibleRooms.length === 0) {
       const missingRoomSummaries = roomSummaries.filter((room) => room.status === "missing_fields");
-      const message = "No eligible active mapped rooms were ready for 30-day staging sync.";
+      const message = `No eligible active mapped rooms were ready for ${windowDays}-day staging sync.`;
       await logAriPush({
         supabase,
         familyId,
+        action: logAction,
         status: "failed",
         message,
         payload: {
           date_range: { from, to },
+          window_days: windowDays,
           room_count: 0,
           rate_count: 0,
           skipped_rooms: missingRoomSummaries,
@@ -403,6 +462,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const availabilityValues: ChannexAvailabilityChange[] = [];
     const restrictionValues: ChannexRestrictionChange[] = [];
+    const pushedRangeSummaries: PushRangeSummary[] = [];
 
     for (const item of roomCalendars) {
       const blockedDates = new Set<string>();
@@ -426,6 +486,23 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
 
       const segments = buildSegments(dates, availabilityByDate, rateByDate, stopSellByDate);
+      pushedRangeSummaries.push({
+        roomName: item.room.roomName,
+        roomTypeId: item.room.externalRoomTypeId,
+        ratePlanId: item.room.externalRatePlanId,
+        availabilityRanges: segments.map((segment) => ({
+          dateFrom: segment.dateFrom,
+          dateTo: segment.dateTo,
+          availability: segment.availability,
+        })),
+        rateRanges: segments.map((segment) => ({
+          dateFrom: segment.dateFrom,
+          dateTo: segment.dateTo,
+          rate: segment.rate,
+          stopSell: segment.stopSell,
+          minStayThrough: 1,
+        })),
+      });
       for (const segment of segments) {
         availabilityValues.push({
           propertyId: externalPropertyId,
@@ -446,10 +523,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
-    const [availabilityResult, restrictionsResult] = await Promise.all([
-      pushChannexAvailability(availabilityValues),
-      pushChannexRestrictions(restrictionValues),
+    const [availabilityChunkResults, restrictionsChunkResults] = await Promise.all([
+      Promise.all(chunkArray(availabilityValues, MAX_SEGMENTS_PER_REQUEST).map((chunk) => pushChannexAvailability(chunk))),
+      Promise.all(chunkArray(restrictionValues, MAX_SEGMENTS_PER_REQUEST).map((chunk) => pushChannexRestrictions(chunk))),
     ]);
+    const availabilityResult = aggregatePushResults(availabilityChunkResults);
+    const restrictionsResult = aggregatePushResults(restrictionsChunkResults);
     const [availabilitySnapshot, restrictionsSnapshot] = await Promise.all([
       fetchChannexAvailabilitySnapshot({
         propertyId: externalPropertyId,
@@ -462,8 +541,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         dateTo: to,
       }),
     ]);
-    const availabilityWarnings = normalizeWarningMessages(availabilityResult.warnings);
-    const restrictionsWarnings = normalizeWarningMessages(restrictionsResult.warnings);
+    const availabilityWarnings = availabilityResult.warnings;
+    const restrictionsWarnings = restrictionsResult.warnings;
     const verification = availabilitySnapshot.ok && restrictionsSnapshot.ok
       ? verifySnapshots({
           availabilitySnapshot: availabilitySnapshot.data,
@@ -474,6 +553,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       : {
           verifiedAvailabilityCount: 0,
           verifiedRateCount: 0,
+          verifiedMinStayThroughCount: 0,
           availabilityMismatches: [],
           rateMismatches: [],
         };
@@ -490,18 +570,21 @@ export async function POST(request: Request): Promise<NextResponse> {
       verificationOk;
     const missingRoomSummaries = roomSummaries.filter((room) => room.status === "missing_fields");
     const summaryMessage = ok
-      ? `30-day staging sync pushed and verified for ${eligibleRooms.length} rooms from ${from} to ${to}.`
+      ? `${windowDays}-day staging sync pushed and verified for ${eligibleRooms.length} rooms from ${from} to ${to}.`
       : verificationOk
-        ? `30-day staging sync was accepted by Channex but returned warnings. Availability: ${availabilityResult.message} Restrictions: ${restrictionsResult.message}`
+        ? `${windowDays}-day staging sync was accepted by Channex but returned warnings. Availability: ${availabilityResult.message} Restrictions: ${restrictionsResult.message}`
         : `Pushed but not verified in Channex. Availability: ${availabilityResult.message} Restrictions: ${restrictionsResult.message}`;
+    const logStatus: "success" | "warning" | "failed" = ok ? "success" : verificationOk ? "warning" : "failed";
 
     await logAriPush({
       supabase,
       familyId,
-      status: ok ? "success" : "failed",
+      action: logAction,
+      status: logStatus,
       message: summaryMessage,
       payload: {
         date_range: { from, to },
+        window_days: windowDays,
         property_id: externalPropertyId,
         room_count: eligibleRooms.length,
         rate_count: eligibleRooms.length,
@@ -512,21 +595,31 @@ export async function POST(request: Request): Promise<NextResponse> {
           message: availabilityResult.message,
           meta: availabilityResult.meta,
           warnings: availabilityWarnings,
+          chunk_count: availabilityChunkResults.length,
         },
         restrictions_response: {
           http_status: restrictionsResult.httpStatus,
           message: restrictionsResult.message,
           meta: restrictionsResult.meta,
           warnings: restrictionsWarnings,
+          chunk_count: restrictionsChunkResults.length,
         },
         verification_summary: {
           availability_http_status: availabilitySnapshot.httpStatus,
           restrictions_http_status: restrictionsSnapshot.httpStatus,
           verified_availability_count: verification.verifiedAvailabilityCount,
           verified_rate_count: verification.verifiedRateCount,
+          verified_min_stay_through_count: verification.verifiedMinStayThroughCount,
           availability_mismatch_count: verification.availabilityMismatches.length,
           rate_mismatch_count: verification.rateMismatches.length,
         },
+        pushed_range_summary: pushedRangeSummaries.map((summary) => ({
+          room_name: summary.roomName,
+          room_type_id: summary.roomTypeId,
+          rate_plan_id: summary.ratePlanId,
+          availability_range_count: summary.availabilityRanges.length,
+          rate_range_count: summary.rateRanges.length,
+        })),
         skipped_rooms: missingRoomSummaries,
       },
     });
@@ -536,15 +629,21 @@ export async function POST(request: Request): Promise<NextResponse> {
       status: ok ? "completed" : verificationOk ? "warning" : "verification_failed",
       message: summaryMessage,
       dateRange: { from, to },
+      windowDays,
       eligibleRooms: eligibleRooms.length,
       availabilityChanges: availabilityValues.length,
       restrictionChanges: restrictionValues.length,
       verifiedAvailabilityCount: verification.verifiedAvailabilityCount,
       verifiedRateCount: verification.verifiedRateCount,
+      verifiedMinStayThroughCount: verification.verifiedMinStayThroughCount,
       warnings: [...availabilityWarnings, ...restrictionsWarnings],
       availabilityVerificationOk: availabilitySnapshot.ok,
       restrictionsVerificationOk: restrictionsSnapshot.ok,
       verificationFailed: !verificationOk,
+      chunkSummary: {
+        availabilityChunkCount: availabilityChunkResults.length,
+        restrictionChunkCount: restrictionsChunkResults.length,
+      },
       verificationSummary: {
         availabilityMismatchCount: verification.availabilityMismatches.length,
         rateMismatchCount: verification.rateMismatches.length,
@@ -552,6 +651,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         rateMismatches: verification.rateMismatches.slice(0, 10),
       },
       rooms: roomSummaries,
+      pushedRanges: pushedRangeSummaries,
       availabilityMessage: availabilityResult.message,
       restrictionsMessage: restrictionsResult.message,
       availabilityWarnings,

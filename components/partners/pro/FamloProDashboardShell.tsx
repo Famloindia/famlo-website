@@ -258,7 +258,7 @@ const SYNC_LOG_GROUPS: SyncLogGroup[] = [
   { key: "property", title: "Property creation", actions: ["create_property", "connection_check", "verify_channex_structure"] },
   { key: "room", title: "Room creation", actions: ["create_room_type"] },
   { key: "rate", title: "Rate creation", actions: ["create_rate_plan"] },
-  { key: "ari", title: "ARI push", actions: ["push_ari_30_day"] },
+  { key: "ari", title: "ARI push", actions: ["push_ari_30_day", "push_ari_365_day"] },
   { key: "booking-feed", title: "Booking feed / list", actions: ["fetch_booking_feed", "store_booking_feed_preview", "verify_booking_list"] },
   { key: "booking-import", title: "Booking import", actions: ["import_booking_preview", "apply_booking_modification"] },
   { key: "ack", title: "Acknowledgement", actions: ["acknowledge_booking_revision"] },
@@ -755,7 +755,9 @@ export default function FamloProDashboardShell({
     const ratePlan = ratePlansByRoomId.get(room.id);
     return !(roomMapping?.externalRoomTypeId && ratePlan?.externalRatePlanId && room.priceFullday > 0);
   }).length;
-  const lastAriSyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
+  const lastAri30SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
+  const lastAri365SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_365_day") ?? null;
+  const lastAriSyncLog = lastAri365SyncLog ?? lastAri30SyncLog;
   const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
   const groupedSyncLogs = SYNC_LOG_GROUPS.map((group) => ({
     ...group,
@@ -1289,10 +1291,10 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Rates & Restrictions</h3>
                   <p className={styles.cardCopy}>
-                    UI shell only. No pricing push, provider mapping, or rate sync is active.
+                    Manual staging ARI push is available here. Automated sync, scheduling, and production rollout are still intentionally disabled.
                   </p>
                 </div>
-                <span className={`${styles.badge} ${styles.badgeMuted}`}>Shell only</span>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>Manual only</span>
               </div>
               <div className={styles.cardBody}>
                 <ChannexAriSyncCard
@@ -1311,8 +1313,8 @@ export default function FamloProDashboardShell({
                   </div>
                   <div className={styles.placeholderRow}>
                     <div className={styles.placeholderTitle}>Provider Sync</div>
-                    <div className={styles.placeholderValue}>Not connected</div>
-                    <div className={styles.placeholderCopy}>No pricing push or provider rate sync is active in this phase.</div>
+                    <div className={styles.placeholderValue}>Manual staging</div>
+                    <div className={styles.placeholderCopy}>30-day and 365-day pushes are operator-triggered only. No cron or automatic sync is enabled yet.</div>
                   </div>
                 </div>
                 <div className={styles.rateTable}>
@@ -3324,6 +3326,7 @@ function ChannexAriSyncCard({
   propertyCreated: boolean;
   roomTypesCreated: boolean;
   lastSyncLog: {
+    action?: string;
     status: string;
     message: string | null;
     createdAt: string | null;
@@ -3331,20 +3334,39 @@ function ChannexAriSyncCard({
 }>): React.JSX.Element {
   const router = useRouter();
   const [isPushing, startPushing] = useTransition();
+  const [isPushing365, startPushing365] = useTransition();
   const [isVerifying, startVerifying] = useTransition();
   const [feedback, setFeedback] = useState<{
     ok: boolean;
     message: string;
     summary?: {
+      mode?: "push_30" | "push_365" | "verify";
+      windowDays?: number;
       eligibleRooms: number;
       availabilityChanges: number;
       restrictionChanges: number;
       verifiedAvailabilityCount?: number;
       verifiedRateCount?: number;
+      verifiedMinStayThroughCount?: number;
       availabilityMatchedCount?: number;
       rateMatchedCount?: number;
+      availabilityChunkCount?: number;
+      restrictionChunkCount?: number;
       dateRange?: { from: string; to: string };
     };
+    rooms?: Array<{
+      stayUnitId: string;
+      name: string;
+      status: "eligible" | "missing_fields";
+      missingFields: string[];
+    }>;
+    pushedRanges?: Array<{
+      roomName: string;
+      roomTypeId: string;
+      ratePlanId: string;
+      availabilityRanges: Array<{ dateFrom: string; dateTo: string; availability: number }>;
+      rateRanges: Array<{ dateFrom: string; dateTo: string; rate: string; stopSell: boolean; minStayThrough: number }>;
+    }>;
     warnings?: string[];
     verificationFailed?: boolean;
   } | null>(null);
@@ -3361,9 +3383,9 @@ function ChannexAriSyncCard({
     <section className={styles.cardInset}>
       <div className={styles.cardHeaderCompact}>
         <div>
-          <div className={styles.listTitle}>30-day staging sync</div>
+          <div className={styles.listTitle}>Manual staging ARI sync</div>
           <div className={styles.cardCopy}>
-            Push a limited 30-day staging-only ARI batch to Channex using mapped active rooms. No schedules, production sync, bookings, or iCal writes are introduced here.
+            Reuse the current ARI push flow for manual staging sync only. Keep 30-day and 365-day pushes operator-triggered until automation is added later.
           </div>
         </div>
         <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
@@ -3382,12 +3404,12 @@ function ChannexAriSyncCard({
         </div>
         <div className={styles.placeholderRow}>
           <div className={styles.placeholderTitle}>Date range</div>
-          <div className={styles.placeholderCopy}>Today + 30 days</div>
+          <div className={styles.placeholderCopy}>30-day and 365-day manual push</div>
         </div>
         <div className={styles.placeholderRow}>
           <div className={styles.placeholderTitle}>Last sync status</div>
           <div className={styles.placeholderCopy}>
-            {lastSyncLog ? `${labelizeToken(lastSyncLog.status, "unknown")} · ${formatDateTime(lastSyncLog.createdAt)}` : "Not started"}
+            {lastSyncLog ? `${labelizeToken(lastSyncLog.action, "unknown")} · ${labelizeToken(lastSyncLog.status, "unknown")} · ${formatDateTime(lastSyncLog.createdAt)}` : "Not started"}
           </div>
         </div>
       </div>
@@ -3406,6 +3428,9 @@ function ChannexAriSyncCard({
           {feedback.summary ? (
             <div className={styles.inlineBadgeRow}>
               <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Eligible rooms: {feedback.summary.eligibleRooms}</span>
+              {typeof feedback.summary.windowDays === "number" ? (
+                <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Date window: {feedback.summary.windowDays} days</span>
+              ) : null}
               <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Availability changes: {feedback.summary.availabilityChanges}</span>
               <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Restriction changes: {feedback.summary.restrictionChanges}</span>
               {typeof feedback.summary.verifiedAvailabilityCount === "number" ? (
@@ -3418,6 +3443,21 @@ function ChannexAriSyncCard({
                   Verified rate: {feedback.summary.verifiedRateCount}
                 </span>
               ) : null}
+              {typeof feedback.summary.verifiedMinStayThroughCount === "number" ? (
+                <span className={`${styles.readinessPill} ${feedback.verificationFailed ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                  Verified min stay: {feedback.summary.verifiedMinStayThroughCount}
+                </span>
+              ) : null}
+              {typeof feedback.summary.availabilityChunkCount === "number" ? (
+                <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
+                  Availability chunks: {feedback.summary.availabilityChunkCount}
+                </span>
+              ) : null}
+              {typeof feedback.summary.restrictionChunkCount === "number" ? (
+                <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
+                  Restriction chunks: {feedback.summary.restrictionChunkCount}
+                </span>
+              ) : null}
               {typeof feedback.summary.availabilityMatchedCount === "number" ? (
                 <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
                   Current availability rows: {feedback.summary.availabilityMatchedCount}
@@ -3428,6 +3468,58 @@ function ChannexAriSyncCard({
                   Current rate rows: {feedback.summary.rateMatchedCount}
                 </span>
               ) : null}
+            </div>
+          ) : null}
+          {feedback.summary?.dateRange ? (
+            <div className={styles.feedCopy} style={{ marginTop: 10 }}>
+              Date range: {feedback.summary.dateRange.from} → {feedback.summary.dateRange.to}
+            </div>
+          ) : null}
+          {feedback.rooms && feedback.rooms.length > 0 ? (
+            <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+              <div className={styles.mappingHeader}>Room</div>
+              <div className={styles.mappingHeader}>Status</div>
+              <div className={styles.mappingHeader}>Missing fields</div>
+              {feedback.rooms.map((room) => (
+                <Fragment key={room.stayUnitId}>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{room.name}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{labelizeToken(room.status, "unknown")}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingSubcopy}>{room.missingFields.length > 0 ? room.missingFields.join(", ") : "None"}</div>
+                  </div>
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
+          {feedback.pushedRanges && feedback.pushedRanges.length > 0 ? (
+            <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+              <div className={styles.mappingHeader}>Room</div>
+              <div className={styles.mappingHeader}>Availability ranges</div>
+              <div className={styles.mappingHeader}>Rate ranges</div>
+              {feedback.pushedRanges.map((summary) => (
+                <Fragment key={`${summary.roomTypeId}-${summary.ratePlanId}`}>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{summary.roomName}</div>
+                    <div className={styles.mappingSubcopy}>{summary.roomTypeId}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingSubcopy}>
+                      {summary.availabilityRanges.slice(0, 6).map((range) => `${range.dateFrom} → ${range.dateTo}: ${range.availability}`).join(" | ")}
+                      {summary.availabilityRanges.length > 6 ? ` | +${summary.availabilityRanges.length - 6} more` : ""}
+                    </div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingSubcopy}>
+                      {summary.rateRanges.slice(0, 6).map((range) => `${range.dateFrom} → ${range.dateTo}: ${range.rate}, stop_sell=${range.stopSell ? 1 : 0}, min=${range.minStayThrough}`).join(" | ")}
+                      {summary.rateRanges.length > 6 ? ` | +${summary.rateRanges.length - 6} more` : ""}
+                    </div>
+                  </div>
+                </Fragment>
+              ))}
             </div>
           ) : null}
           {feedback.warnings && feedback.warnings.length > 0 ? (
@@ -3444,7 +3536,7 @@ function ChannexAriSyncCard({
         <button
           type="button"
           className={styles.primaryActionButton}
-          disabled={isPushing || Boolean(blockedMessage)}
+          disabled={isPushing || isPushing365 || Boolean(blockedMessage)}
           onClick={() => {
             startPushing(async () => {
               setFeedback(null);
@@ -3467,7 +3559,23 @@ function ChannexAriSyncCard({
                   restrictionChanges?: number;
                   verifiedAvailabilityCount?: number;
                   verifiedRateCount?: number;
+                  verifiedMinStayThroughCount?: number;
+                  windowDays?: number;
+                  chunkSummary?: { availabilityChunkCount?: number; restrictionChunkCount?: number };
                   dateRange?: { from: string; to: string };
+                  rooms?: Array<{
+                    stayUnitId: string;
+                    name: string;
+                    status: "eligible" | "missing_fields";
+                    missingFields: string[];
+                  }>;
+                  pushedRanges?: Array<{
+                    roomName: string;
+                    roomTypeId: string;
+                    ratePlanId: string;
+                    availabilityRanges: Array<{ dateFrom: string; dateTo: string; availability: number }>;
+                    rateRanges: Array<{ dateFrom: string; dateTo: string; rate: string; stopSell: boolean; minStayThrough: number }>;
+                  }>;
                   warnings?: string[];
                   verificationFailed?: boolean;
                 };
@@ -3483,6 +3591,8 @@ function ChannexAriSyncCard({
                     typeof payload.availabilityChanges === "number" &&
                     typeof payload.restrictionChanges === "number"
                       ? {
+                          mode: "push_30",
+                          windowDays: typeof payload.windowDays === "number" ? payload.windowDays : 30,
                           eligibleRooms: payload.eligibleRooms,
                           availabilityChanges: payload.availabilityChanges,
                           restrictionChanges: payload.restrictionChanges,
@@ -3490,9 +3600,17 @@ function ChannexAriSyncCard({
                             typeof payload.verifiedAvailabilityCount === "number" ? payload.verifiedAvailabilityCount : undefined,
                           verifiedRateCount:
                             typeof payload.verifiedRateCount === "number" ? payload.verifiedRateCount : undefined,
+                          verifiedMinStayThroughCount:
+                            typeof payload.verifiedMinStayThroughCount === "number" ? payload.verifiedMinStayThroughCount : undefined,
+                          availabilityChunkCount:
+                            typeof payload.chunkSummary?.availabilityChunkCount === "number" ? payload.chunkSummary.availabilityChunkCount : undefined,
+                          restrictionChunkCount:
+                            typeof payload.chunkSummary?.restrictionChunkCount === "number" ? payload.chunkSummary.restrictionChunkCount : undefined,
                           dateRange: payload.dateRange,
                         }
                       : undefined,
+                  rooms: Array.isArray(payload.rooms) ? payload.rooms : undefined,
+                  pushedRanges: Array.isArray(payload.pushedRanges) ? payload.pushedRanges : undefined,
                   warnings: Array.isArray(payload.warnings) ? payload.warnings : undefined,
                   verificationFailed: Boolean(payload.verificationFailed || payload.status === "verification_failed"),
                 });
@@ -3507,6 +3625,99 @@ function ChannexAriSyncCard({
           }}
         >
           {isPushing ? "Pushing..." : "Push 30-day staging sync"}
+        </button>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isPushing || isPushing365 || Boolean(blockedMessage)}
+          onClick={() => {
+            startPushing365(async () => {
+              setFeedback(null);
+
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/ari/push", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId, windowDays: 365 }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  status?: string;
+                  message?: string;
+                  eligibleRooms?: number;
+                  availabilityChanges?: number;
+                  restrictionChanges?: number;
+                  verifiedAvailabilityCount?: number;
+                  verifiedRateCount?: number;
+                  verifiedMinStayThroughCount?: number;
+                  windowDays?: number;
+                  chunkSummary?: { availabilityChunkCount?: number; restrictionChunkCount?: number };
+                  dateRange?: { from: string; to: string };
+                  rooms?: Array<{
+                    stayUnitId: string;
+                    name: string;
+                    status: "eligible" | "missing_fields";
+                    missingFields: string[];
+                  }>;
+                  pushedRanges?: Array<{
+                    roomName: string;
+                    roomTypeId: string;
+                    ratePlanId: string;
+                    availabilityRanges: Array<{ dateFrom: string; dateTo: string; availability: number }>;
+                    rateRanges: Array<{ dateFrom: string; dateTo: string; rate: string; stopSell: boolean; minStayThrough: number }>;
+                  }>;
+                  warnings?: string[];
+                  verificationFailed?: boolean;
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to push Channex 365-day staging ARI.",
+                  summary:
+                    typeof payload.eligibleRooms === "number" &&
+                    typeof payload.availabilityChanges === "number" &&
+                    typeof payload.restrictionChanges === "number"
+                      ? {
+                          mode: "push_365",
+                          windowDays: typeof payload.windowDays === "number" ? payload.windowDays : 365,
+                          eligibleRooms: payload.eligibleRooms,
+                          availabilityChanges: payload.availabilityChanges,
+                          restrictionChanges: payload.restrictionChanges,
+                          verifiedAvailabilityCount:
+                            typeof payload.verifiedAvailabilityCount === "number" ? payload.verifiedAvailabilityCount : undefined,
+                          verifiedRateCount:
+                            typeof payload.verifiedRateCount === "number" ? payload.verifiedRateCount : undefined,
+                          verifiedMinStayThroughCount:
+                            typeof payload.verifiedMinStayThroughCount === "number" ? payload.verifiedMinStayThroughCount : undefined,
+                          availabilityChunkCount:
+                            typeof payload.chunkSummary?.availabilityChunkCount === "number" ? payload.chunkSummary.availabilityChunkCount : undefined,
+                          restrictionChunkCount:
+                            typeof payload.chunkSummary?.restrictionChunkCount === "number" ? payload.chunkSummary.restrictionChunkCount : undefined,
+                          dateRange: payload.dateRange,
+                        }
+                      : undefined,
+                  rooms: Array.isArray(payload.rooms) ? payload.rooms : undefined,
+                  pushedRanges: Array.isArray(payload.pushedRanges) ? payload.pushedRanges : undefined,
+                  warnings: Array.isArray(payload.warnings) ? payload.warnings : undefined,
+                  verificationFailed: Boolean(payload.verificationFailed || payload.status === "verification_failed"),
+                });
+                router.refresh();
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to push Channex 365-day staging ARI.",
+                });
+              }
+            });
+          }}
+        >
+          {isPushing365 ? "Pushing..." : "Push 365-day staging sync"}
         </button>
         <button
           type="button"
@@ -3540,6 +3751,7 @@ function ChannexAriSyncCard({
                   summary:
                     typeof payload.availabilityMatchedCount === "number" && typeof payload.rateMatchedCount === "number"
                       ? {
+                          mode: "verify",
                           eligibleRooms,
                           availabilityChanges: 0,
                           restrictionChanges: 0,
