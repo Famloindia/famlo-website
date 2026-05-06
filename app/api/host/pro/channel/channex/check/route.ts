@@ -69,12 +69,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
   } catch (error) {
     console.error("[host.pro.channel.channex.check] failed:", error);
+    const config = getChannexConfigSummary();
     return NextResponse.json(
       {
         configured: false,
         ok: false,
-        environment: "staging",
-        message: error instanceof Error ? error.message : "Failed to check Channex staging connection.",
+        environment: config.environment,
+        message: error instanceof Error ? error.message : "Failed to check Channex connection.",
       },
       { status: 500 }
     );

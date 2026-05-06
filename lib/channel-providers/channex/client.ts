@@ -1,9 +1,10 @@
-type ChannexEnvironment = "staging";
+export type ChannexEnvironment = "staging" | "production";
 
 export type ChannexConfigSummary = {
   environment: ChannexEnvironment;
   apiKeyConfigured: boolean;
   baseUrlConfigured: boolean;
+  productionMutationsAllowed: boolean;
   configured: boolean;
 };
 
@@ -301,28 +302,54 @@ function asString(value: string | undefined): string | null {
 }
 
 function loadEnvironment(): ChannexEnvironment {
-  const raw = String(process.env.CHANNEX_ENV ?? "staging").trim().toLowerCase();
-  return raw === "staging" ? "staging" : "staging";
+  const raw = String(process.env.CHANNEX_ENVIRONMENT ?? process.env.CHANNEX_ENV ?? "staging").trim().toLowerCase();
+  return raw === "production" ? "production" : "staging";
 }
 
 function resolveBaseUrl(environment: ChannexEnvironment): string {
-  const explicit = asString(process.env.CHANNEX_STAGING_BASE_URL);
+  if (environment === "staging") {
+    const explicit = asString(process.env.CHANNEX_STAGING_BASE_URL);
+    if (explicit) {
+      return explicit.replace(/\/+$/, "");
+    }
+    return "https://staging.channex.io";
+  }
+
+  const explicit = asString(process.env.CHANNEX_PRODUCTION_BASE_URL);
   if (explicit) {
     return explicit.replace(/\/+$/, "");
   }
 
-  if (environment === "staging") {
-    return "https://staging.channex.io";
-  }
-
-  return "https://staging.channex.io";
+  return "https://app.channex.io";
 }
 
 function loadApiKey(environment: ChannexEnvironment): string | null {
   if (environment === "staging") {
     return asString(process.env.CHANNEX_STAGING_API_KEY);
   }
-  return null;
+  return asString(process.env.CHANNEX_PRODUCTION_API_KEY);
+}
+
+export function formatChannexEnvironmentLabel(environment: ChannexEnvironment): string {
+  return environment === "production" ? "Channex production" : "Channex staging";
+}
+
+export function isChannexProductionMutationAllowed(): boolean {
+  return String(process.env.FAMLO_CHANNEX_ALLOW_PRODUCTION_MUTATIONS ?? "").trim().toLowerCase() === "true";
+}
+
+export function getChannexMutationGuardSummary(): {
+  environment: ChannexEnvironment;
+  productionMutationsAllowed: boolean;
+  blockedProductionMutation: boolean;
+} {
+  const environment = loadEnvironment();
+  const productionMutationsAllowed = isChannexProductionMutationAllowed();
+  return {
+    environment,
+    productionMutationsAllowed,
+    blockedProductionMutation: environment === "production" && !productionMutationsAllowed,
+  };
 }
 
 function buildHeaders(apiKey: string): HeadersInit {
@@ -336,11 +363,13 @@ export function getChannexConfigSummary(): ChannexConfigSummary {
   const environment = loadEnvironment();
   const apiKeyConfigured = Boolean(loadApiKey(environment));
   const baseUrlConfigured = Boolean(resolveBaseUrl(environment));
+  const productionMutationsAllowed = isChannexProductionMutationAllowed();
 
   return {
     environment,
     apiKeyConfigured,
     baseUrlConfigured,
+    productionMutationsAllowed,
     configured: apiKeyConfigured && baseUrlConfigured,
   };
 }
@@ -348,6 +377,7 @@ export function getChannexConfigSummary(): ChannexConfigSummary {
 export async function checkChannexConnection(): Promise<ChannexConnectionCheckResult> {
   const environment = loadEnvironment();
   const summary = getChannexConfigSummary();
+  const environmentLabel = formatChannexEnvironmentLabel(environment);
   const endpoint = `${resolveBaseUrl(environment)}/api/v1/groups`;
   const apiKey = loadApiKey(environment);
 
@@ -356,7 +386,7 @@ export async function checkChannexConnection(): Promise<ChannexConnectionCheckRe
       configured: false,
       ok: false,
       environment,
-      message: "Channex staging configuration is incomplete. Add the server-side API key first.",
+      message: `${environmentLabel} configuration is incomplete. Add the server-side API key first.`,
       endpoint: "/api/v1/groups",
       httpStatus: null,
     };
@@ -395,8 +425,8 @@ export async function checkChannexConnection(): Promise<ChannexConnectionCheckRe
         ok: false,
         environment,
         message: errorTitle
-          ? `Channex staging check failed: ${errorTitle}.`
-          : `Channex staging check failed with HTTP ${response.status}.`,
+          ? `${environmentLabel} check failed: ${errorTitle}.`
+          : `${environmentLabel} check failed with HTTP ${response.status}.`,
         endpoint: "/api/v1/groups",
         httpStatus: response.status,
       };
@@ -414,8 +444,8 @@ export async function checkChannexConnection(): Promise<ChannexConnectionCheckRe
       environment,
       message:
         groupsCount != null
-          ? `Connected to Channex staging. Groups endpoint responded with ${groupsCount} group records.`
-          : "Connected to Channex staging. Groups endpoint responded successfully.",
+          ? `Connected to ${environmentLabel.toLowerCase()}. Groups endpoint responded with ${groupsCount} group records.`
+          : `Connected to ${environmentLabel.toLowerCase()}. Groups endpoint responded successfully.`,
       endpoint: "/api/v1/groups",
       httpStatus: response.status,
     };
@@ -424,7 +454,7 @@ export async function checkChannexConnection(): Promise<ChannexConnectionCheckRe
       configured: true,
       ok: false,
       environment,
-      message: error instanceof Error ? `Channex staging check failed: ${error.message}` : "Channex staging check failed.",
+      message: error instanceof Error ? `${environmentLabel} check failed: ${error.message}` : `${environmentLabel} check failed.`,
       endpoint: "/api/v1/groups",
       httpStatus: null,
     };

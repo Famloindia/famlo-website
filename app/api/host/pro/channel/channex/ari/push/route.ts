@@ -9,6 +9,7 @@ import {
   type ChannexAvailabilityChange,
   type ChannexRestrictionChange,
 } from "@/lib/channel-providers/channex/client";
+import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
 import { loadCanonicalCalendar } from "@/lib/calendar";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
@@ -306,6 +307,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
     }
 
+    const blockedMutation = await ensureChannexMutationAllowed({
+      supabase,
+      familyId,
+      action: logAction,
+      route: "/api/host/pro/channel/channex/ari/push",
+    });
+    if (blockedMutation) return blockedMutation;
+
     const config = getChannexConfigSummary();
     if (!config.configured) {
       return NextResponse.json(
@@ -427,6 +436,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         status: "failed",
         message,
         payload: {
+          environment: config.environment,
           date_range: { from, to },
           window_days: windowDays,
           room_count: 0,
@@ -583,6 +593,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       status: logStatus,
       message: summaryMessage,
       payload: {
+        environment: config.environment,
         date_range: { from, to },
         window_days: windowDays,
         property_id: externalPropertyId,

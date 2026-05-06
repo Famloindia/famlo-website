@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createChannexRatePlan, getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import {
   PRO_DEFAULT_CURRENCY,
@@ -113,6 +114,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!access.allowed) {
       return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
     }
+
+    const blockedMutation = await ensureChannexMutationAllowed({
+      supabase,
+      familyId,
+      action: "create_rate_plan",
+      route: "/api/host/pro/channel/channex/rate-plans",
+    });
+    if (blockedMutation) return blockedMutation;
 
     const config = getChannexConfigSummary();
     if (!config.configured) {
@@ -248,6 +257,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           status: "failed",
           message,
           payload: {
+            environment: config.environment,
             room_id: room.id,
             external_room_type_id: externalRoomTypeId,
             missing_fields: missingFields,
@@ -298,6 +308,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           status: "failed",
           message: result.message,
           payload: {
+            environment: result.environment,
             room_id: room.id,
             external_room_type_id: externalRoomTypeId,
             http_status: result.httpStatus,
@@ -351,6 +362,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         status: "success",
         message: result.message,
         payload: {
+          environment: result.environment,
           room_id: room.id,
           external_room_type_id: externalRoomTypeId,
           external_rate_plan_id: result.externalRatePlanId,

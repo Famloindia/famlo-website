@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { acknowledgeChannexBookingRevision } from "@/lib/channel-providers/channex/client";
+import { acknowledgeChannexBookingRevision, getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -78,6 +79,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
     }
 
+    const blockedMutation = await ensureChannexMutationAllowed({
+      supabase,
+      familyId,
+      action: "acknowledge_booking_revision",
+      route: "/api/host/pro/channel/channex/bookings/acknowledge",
+    });
+    if (blockedMutation) return blockedMutation;
+
+    const config = getChannexConfigSummary();
     const importStatus = asStringOrNull(revisionRow.import_status) ?? "preview";
     const ackStatus = asStringOrNull(revisionRow.ack_status) ?? "not_acknowledged";
     const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
@@ -143,6 +153,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         status: "failed",
         message: result.message,
         payload: {
+          environment: result.environment,
           channel_booking_revision_id: channelBookingRevisionId,
           external_booking_id: externalBookingId,
           external_revision_id: externalRevisionId,
@@ -188,6 +199,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       status: "success",
       message: "Acknowledged imported Channex booking revision after successful Famlo import.",
       payload: {
+        environment: result.environment,
         channel_booking_revision_id: channelBookingRevisionId,
         external_booking_id: externalBookingId,
         external_revision_id: externalRevisionId,
@@ -195,6 +207,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         endpoint: result.endpoint,
         http_status: result.httpStatus,
         acknowledged_at: acknowledgedAt,
+        config_environment: config.environment,
       },
     });
 

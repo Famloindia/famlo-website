@@ -40,7 +40,10 @@ import {
   type HostProSettings,
 } from "@/lib/host-pro-settings";
 import { type HostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
-import { type ChannexConfigSummary as ChannexSummary } from "@/lib/channel-providers/channex/client";
+import {
+  formatChannexEnvironmentLabel,
+  type ChannexConfigSummary as ChannexSummary,
+} from "@/lib/channel-providers/channex/client";
 import styles from "./pro-dashboard.module.css";
 
 type ProSectionId =
@@ -2572,9 +2575,9 @@ function ChannexConnectionCard({
     <section className={styles.cardInset}>
       <div className={styles.cardHeaderCompact}>
         <div>
-          <div className={styles.listTitle}>Channex staging configuration</div>
+          <div className={styles.listTitle}>Channex configuration</div>
           <div className={styles.cardCopy}>
-            Safe staging-only adapter check. No properties, rooms, rates, availability, or bookings are created here.
+            Safe adapter check for the current Channex environment. No properties, rooms, rates, availability, or bookings are created here.
           </div>
         </div>
         <span className={`${styles.badge} ${config.configured ? "" : styles.badgeMuted}`.trim()}>
@@ -2589,7 +2592,7 @@ function ChannexConnectionCard({
         </div>
         <div className={styles.placeholderRow}>
           <div className={styles.placeholderTitle}>Environment</div>
-          <div className={styles.placeholderCopy}>{labelizeToken(config.environment, "Staging")}</div>
+          <div className={styles.placeholderCopy}>{formatChannexEnvironmentLabel(config.environment)}</div>
         </div>
         <div className={styles.placeholderRow}>
           <div className={styles.placeholderTitle}>API key</div>
@@ -2604,6 +2607,11 @@ function ChannexConnectionCard({
       {feedback ? (
         <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`}>
           {feedback.message}
+        </div>
+      ) : null}
+      {config.environment === "production" && !config.productionMutationsAllowed ? (
+        <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>
+          Production mutations are blocked until <code>FAMLO_CHANNEX_ALLOW_PRODUCTION_MUTATIONS=true</code>.
         </div>
       ) : null}
 
@@ -2642,20 +2650,23 @@ function ChannexConnectionCard({
                   message:
                     typeof payload.message === "string" && payload.message.trim().length > 0
                       ? payload.message
-                      : "Unable to verify Channex staging connection.",
+                      : `Unable to verify ${formatChannexEnvironmentLabel(config.environment).toLowerCase()} connection.`,
                 });
                 router.refresh();
               } catch (error) {
                 setFeedback({
                   ok: false,
                   statusLabel: "Failed",
-                  message: error instanceof Error ? error.message : "Unable to verify Channex staging connection.",
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : `Unable to verify ${formatChannexEnvironmentLabel(config.environment).toLowerCase()} connection.`,
                 });
               }
             });
           }}
         >
-          {isChecking ? "Checking..." : "Check staging connection"}
+          {isChecking ? "Checking..." : "Check connection"}
         </button>
       </div>
     </section>

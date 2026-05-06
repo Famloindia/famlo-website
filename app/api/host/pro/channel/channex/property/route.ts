@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createChannexProperty, fetchChannexGroups, getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { loadHostProSettings } from "@/lib/host-pro-settings";
@@ -167,6 +168,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!access.allowed) {
       return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
     }
+
+    const blockedMutation = await ensureChannexMutationAllowed({
+      supabase,
+      familyId,
+      action: "create_property",
+      route: "/api/host/pro/channel/channex/property",
+    });
+    if (blockedMutation) return blockedMutation;
 
     const config = getChannexConfigSummary();
     if (!config.configured) {
