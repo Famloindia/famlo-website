@@ -163,6 +163,28 @@ type ConflictItem = {
   severity: "warning" | "review";
 };
 
+type AriHealthStatus = "healthy" | "warning" | "failed" | "never_synced";
+
+type AriHealthSnapshot = {
+  status: AriHealthStatus;
+  statusLabel: string;
+  recommendation: string | null;
+  lastSuccessful30DaySync: {
+    createdAt: string | null;
+    message: string | null;
+  } | null;
+  lastSuccessful365DaySync: {
+    createdAt: string | null;
+    message: string | null;
+  } | null;
+  lastProblemSync: {
+    action: string;
+    status: string;
+    createdAt: string | null;
+    message: string | null;
+  } | null;
+};
+
 interface FamloProDashboardShellProps {
   familyId: string;
   propertyName: string;
@@ -297,6 +319,13 @@ function formatRelativeAge(value: string | null, referenceNow: number): string {
   return `${diffDays}d ago`;
 }
 
+function isStaleByHours(value: string | null, referenceNow: number, hours: number): boolean {
+  if (!value) return true;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return true;
+  return referenceNow - date.getTime() > hours * 60 * 60 * 1000;
+}
+
 function labelizeToken(value: string | null | undefined, fallback: string): string {
   if (!value) return fallback;
   return value.replaceAll("_", " ");
@@ -372,6 +401,81 @@ function summarizeSafePayload(payload: Record<string, unknown>): string[] {
   }
 
   return lines;
+}
+
+function computeAriHealthSnapshot(
+  syncLogs: HostProChannelFoundation["syncLogs"],
+  referenceNow: number
+): AriHealthSnapshot {
+  const ariLogs = syncLogs.filter((log) => log.action === "push_ari_30_day" || log.action === "push_ari_365_day");
+  const lastSuccessful30DaySync =
+    ariLogs.find((log) => log.action === "push_ari_30_day" && log.status === "success")
+      ? {
+          createdAt: ariLogs.find((log) => log.action === "push_ari_30_day" && log.status === "success")?.createdAt ?? null,
+          message: ariLogs.find((log) => log.action === "push_ari_30_day" && log.status === "success")?.message ?? null,
+        }
+      : null;
+  const lastSuccessful365DaySync =
+    ariLogs.find((log) => log.action === "push_ari_365_day" && log.status === "success")
+      ? {
+          createdAt: ariLogs.find((log) => log.action === "push_ari_365_day" && log.status === "success")?.createdAt ?? null,
+          message: ariLogs.find((log) => log.action === "push_ari_365_day" && log.status === "success")?.message ?? null,
+        }
+      : null;
+  const lastProblemSync =
+    ariLogs.find((log) => log.status === "failed" || log.status === "warning")
+      ? {
+          action: ariLogs.find((log) => log.status === "failed" || log.status === "warning")?.action ?? "push_ari_30_day",
+          status: ariLogs.find((log) => log.status === "failed" || log.status === "warning")?.status ?? "warning",
+          createdAt: ariLogs.find((log) => log.status === "failed" || log.status === "warning")?.createdAt ?? null,
+          message: ariLogs.find((log) => log.status === "failed" || log.status === "warning")?.message ?? null,
+        }
+      : null;
+
+  if (!lastSuccessful30DaySync && !lastSuccessful365DaySync && !lastProblemSync) {
+    return {
+      status: "never_synced",
+      statusLabel: "Never synced",
+      recommendation: "Run 365-day sync before connecting live channels.",
+      lastSuccessful30DaySync: null,
+      lastSuccessful365DaySync: null,
+      lastProblemSync: null,
+    };
+  }
+
+  if (lastProblemSync && (!lastSuccessful365DaySync || (lastProblemSync.createdAt ?? "") >= (lastSuccessful365DaySync.createdAt ?? ""))) {
+    return {
+      status: lastProblemSync.status === "failed" ? "failed" : "warning",
+      statusLabel: lastProblemSync.status === "failed" ? "Failed" : "Warning",
+      recommendation:
+        !lastSuccessful365DaySync || isStaleByHours(lastSuccessful365DaySync.createdAt, referenceNow, 24)
+          ? "Run 365-day sync before connecting live channels."
+          : "Review the latest sync warning before connecting live channels.",
+      lastSuccessful30DaySync,
+      lastSuccessful365DaySync,
+      lastProblemSync,
+    };
+  }
+
+  if (!lastSuccessful365DaySync || isStaleByHours(lastSuccessful365DaySync.createdAt, referenceNow, 24)) {
+    return {
+      status: "warning",
+      statusLabel: "Warning",
+      recommendation: "Run 365-day sync before connecting live channels.",
+      lastSuccessful30DaySync,
+      lastSuccessful365DaySync,
+      lastProblemSync,
+    };
+  }
+
+  return {
+    status: "healthy",
+    statusLabel: "Healthy",
+    recommendation: null,
+    lastSuccessful30DaySync,
+    lastSuccessful365DaySync,
+    lastProblemSync,
+  };
 }
 
 function joinMissingLabels(items: Array<{ label: string; ready: boolean }>): string {
@@ -758,6 +862,7 @@ export default function FamloProDashboardShell({
   const lastAri30SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
   const lastAri365SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_365_day") ?? null;
   const lastAriSyncLog = lastAri365SyncLog ?? lastAri30SyncLog;
+  const ariHealth = computeAriHealthSnapshot(channelFoundation.syncLogs, timeAnchor);
   const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
   const groupedSyncLogs = SYNC_LOG_GROUPS.map((group) => ({
     ...group,
@@ -810,34 +915,42 @@ export default function FamloProDashboardShell({
       recommendedAction: "Review the sync log payload summary and rerun the relevant operational step only after the underlying issue is cleared.",
       severity: "warning",
     }));
-  const staleAriConflict: ConflictItem[] =
-    !lastAriSyncLog
+  const ariHealthConflicts: ConflictItem[] = [
+    ...(ariHealth.lastSuccessful365DaySync
+      ? []
+      : [{
+          key: "ari-365-never-run",
+          title: "365-day sync has never run",
+          summary: "No successful 365-day ARI sync has been recorded for this property yet.",
+          recommendedAction: "Run 365-day sync before connecting live channels.",
+          severity: "review" as const,
+        }]),
+    ...(ariHealth.lastProblemSync
       ? [{
-          key: "stale-ari-missing",
-          title: "30-day ARI sync has not run",
-          summary: "No 30-day ARI sync log exists for this property yet.",
-          recommendedAction: "Run a staging ARI push once mappings are ready so Channex inventory and rates can be verified.",
-          severity: "review",
+          key: `ari-problem-${ariHealth.lastProblemSync.action}-${ariHealth.lastProblemSync.createdAt ?? "unknown"}`,
+          title: "365-day sync failed or warned",
+          summary: `${labelizeToken(ariHealth.lastProblemSync.action, "ARI sync")} returned ${labelizeToken(ariHealth.lastProblemSync.status, "unknown")}${ariHealth.lastProblemSync.message ? `: ${ariHealth.lastProblemSync.message}` : "."}`,
+          recommendedAction: "Review the last ARI sync summary and rerun the 365-day sync when the issue is cleared.",
+          severity: "warning" as const,
         }]
-      : (() => {
-          const createdAt = lastAriSyncLog.createdAt ? new Date(lastAriSyncLog.createdAt) : null;
-          const isStale = !createdAt || Number.isNaN(createdAt.getTime()) || timeAnchor - createdAt.getTime() > 24 * 60 * 60 * 1000;
-          if (!isStale) return [];
-          return [{
-            key: "stale-ari-old",
-            title: "30-day ARI sync is stale",
-            summary: `The latest ARI push ran ${formatRelativeAge(lastAriSyncLog.createdAt, timeAnchor)}.`,
-            recommendedAction: "Verify current Channex inventory and rerun the 30-day staging sync if the latest rate and availability view is outdated.",
-            severity: "review" as const,
-          }];
-        })();
+      : []),
+    ...(ariHealth.lastSuccessful365DaySync && isStaleByHours(ariHealth.lastSuccessful365DaySync.createdAt, timeAnchor, 24)
+      ? [{
+          key: "ari-365-stale",
+          title: "365-day sync is stale",
+          summary: `The latest successful 365-day sync ran ${formatRelativeAge(ariHealth.lastSuccessful365DaySync.createdAt, timeAnchor)}.`,
+          recommendedAction: "Run 365-day sync before connecting live channels.",
+          severity: "review" as const,
+        }]
+      : []),
+  ];
   const conflictItems: ConflictItem[] = [
     ...importedNotAcknowledgedConflicts,
     ...bookingListPreviewConflicts,
     ...unmappedRoomConflicts,
     ...unmappedRateConflicts,
     ...failedSyncConflicts,
-    ...staleAriConflict,
+    ...ariHealthConflicts,
   ];
   const sectionDescriptor = buildSectionDescriptor(
     activeSection,
@@ -1304,6 +1417,7 @@ export default function FamloProDashboardShell({
                   propertyCreated={canCreateRoomTypes}
                   roomTypesCreated={canCreateRatePlans}
                   lastSyncLog={lastAriSyncLog}
+                  ariHealth={ariHealth}
                 />
                 <div className={styles.placeholderGrid}>
                   <div className={styles.placeholderRow}>
@@ -3319,6 +3433,7 @@ function ChannexAriSyncCard({
   propertyCreated,
   roomTypesCreated,
   lastSyncLog,
+  ariHealth,
 }: Readonly<{
   familyId: string;
   eligibleRooms: number;
@@ -3331,6 +3446,7 @@ function ChannexAriSyncCard({
     message: string | null;
     createdAt: string | null;
   } | null;
+  ariHealth: AriHealthSnapshot;
 }>): React.JSX.Element {
   const router = useRouter();
   const [isPushing, startPushing] = useTransition();
@@ -3412,10 +3528,49 @@ function ChannexAriSyncCard({
             {lastSyncLog ? `${labelizeToken(lastSyncLog.action, "unknown")} · ${labelizeToken(lastSyncLog.status, "unknown")} · ${formatDateTime(lastSyncLog.createdAt)}` : "Not started"}
           </div>
         </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Sync health</div>
+          <div className={styles.placeholderCopy}>{ariHealth.statusLabel}</div>
+        </div>
       </div>
 
       {lastSyncLog?.message ? (
         <div className={styles.feedCopy}>{lastSyncLog.message}</div>
+      ) : null}
+
+      <div className={styles.placeholderGrid} style={{ marginTop: 12 }}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last successful 30-day sync</div>
+          <div className={styles.placeholderCopy}>
+            {ariHealth.lastSuccessful30DaySync?.createdAt ? formatDateTime(ariHealth.lastSuccessful30DaySync.createdAt) : "Never"}
+          </div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last successful 365-day sync</div>
+          <div className={styles.placeholderCopy}>
+            {ariHealth.lastSuccessful365DaySync?.createdAt ? formatDateTime(ariHealth.lastSuccessful365DaySync.createdAt) : "Never"}
+          </div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last failed / warning sync</div>
+          <div className={styles.placeholderCopy}>
+            {ariHealth.lastProblemSync?.createdAt
+              ? `${labelizeToken(ariHealth.lastProblemSync.action, "ARI sync")} · ${formatDateTime(ariHealth.lastProblemSync.createdAt)}`
+              : "None"}
+          </div>
+        </div>
+      </div>
+
+      {ariHealth.recommendation ? (
+        <div className={`${styles.feedbackBox} ${styles.feedbackError}`} style={{ marginTop: 12 }}>
+          {ariHealth.recommendation}
+        </div>
+      ) : null}
+
+      {ariHealth.lastProblemSync?.message ? (
+        <div className={styles.feedCopy} style={{ marginTop: 8 }}>
+          Latest sync issue: {ariHealth.lastProblemSync.message}
+        </div>
       ) : null}
 
       {blockedMessage ? (
