@@ -18,10 +18,35 @@ import { createAdminSupabaseClient } from "@/lib/supabase";
 interface FamloProDashboardPageProps {
   searchParams?: Promise<{
     family?: string;
+    section?: string;
   }>;
 }
 
 export const dynamic = "force-dynamic";
+
+const PRO_SECTION_IDS = new Set([
+  "dashboard",
+  "setup-guide",
+  "rooms-units",
+  "rates-restrictions",
+  "inventory-calendar",
+  "availability-rules",
+  "check-times",
+  "connected-channels",
+  "room-mapping",
+  "rate-mapping",
+  "sync-logs",
+  "conflicts",
+  "bookings",
+  "messages-reviews",
+  "revenue",
+  "reports",
+  "property",
+  "ota-content",
+  "team-groups",
+  "settings",
+  "support",
+] as const);
 
 function buildBasicFamloPlusUrl(familyId: string): string {
   const base = "/partnerslogin/home/dashboard?tab=famlo-plus";
@@ -72,6 +97,13 @@ async function canCurrentHostAccessFamily(
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function resolveInitialSection(value: string | undefined): string {
+  if (value && PRO_SECTION_IDS.has(value as (typeof PRO_SECTION_IDS extends Set<infer T> ? T : never))) {
+    return value;
+  }
+  return "dashboard";
 }
 
 function asNumber(value: unknown): number {
@@ -197,6 +229,7 @@ export default async function FamloProDashboardPage({
   const params = await searchParams;
   const cookieStore = await cookies();
   const familyId = params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "";
+  const initialSection = resolveInitialSection(params?.section);
   const basicDashboardUrl = buildBasicFamloPlusUrl(familyId);
   const basicRoomUrl = buildBasicRoomUrl(familyId);
 
@@ -727,7 +760,7 @@ export default async function FamloProDashboardPage({
           : `Active until ${formatTimestampLabel(access.current_period_end)}`
       }
       accessReason={formatAccessReason(access.reason)}
-      initialSection="dashboard"
+      initialSection={initialSection}
       rooms={rooms}
       metrics={metrics}
       setupItems={setupItems}

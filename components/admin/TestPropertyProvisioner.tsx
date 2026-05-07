@@ -28,6 +28,19 @@ type ProvisionedProperty = {
   basicDashboardUrl: string;
 };
 
+const PRO_SECTION_LINKS = [
+  { label: "Settings", section: "settings" },
+  { label: "Connected Channels", section: "connected-channels" },
+  { label: "Room Mapping", section: "room-mapping" },
+  { label: "Rate Mapping", section: "rate-mapping" },
+  { label: "Rates & Restrictions", section: "rates-restrictions" },
+  { label: "Setup Guide", section: "setup-guide" },
+] as const;
+
+function buildSectionUrl(baseUrl: string, section: string): string {
+  return `${baseUrl}&section=${encodeURIComponent(section)}`;
+}
+
 interface TestPropertyProvisionerProps {
   rows: SourceFamilyRow[];
 }
@@ -396,6 +409,15 @@ export default function TestPropertyProvisioner({
               <div>Room: {result.roomName}</div>
               <div>Open Pro: <a href={result.proDashboardUrl} style={linkStyle}>{result.proDashboardUrl}</a></div>
               <div>Basic route: <a href={result.basicDashboardUrl} style={linkStyle}>{result.basicDashboardUrl}</a></div>
+              <div style={{ marginTop: "4px", fontWeight: 900, color: "#dcfce7" }}>Open exact Pro sections</div>
+              {PRO_SECTION_LINKS.map((item) => (
+                <div key={item.section}>
+                  {item.label}:{" "}
+                  <a href={buildSectionUrl(result.proDashboardUrl, item.section)} style={linkStyle}>
+                    {buildSectionUrl(result.proDashboardUrl, item.section)}
+                  </a>
+                </div>
+              ))}
             </div>
           ) : null}
         </section>

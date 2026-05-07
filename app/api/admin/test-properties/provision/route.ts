@@ -53,7 +53,7 @@ async function insertSingleRowWithSchemaFallback(
       .single();
 
     if (!error && data) {
-      return data as JsonRecord;
+      return data as unknown as JsonRecord;
     }
 
     const missingColumn = extractMissingColumnFromSchemaError(error);

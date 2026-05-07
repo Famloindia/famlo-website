@@ -886,6 +886,26 @@ export default function FamloProDashboardShell({
     const mapping = roomMappingsByRoomId.get(room.id);
     return Boolean(mapping?.externalRoomTypeId);
   });
+  const firstMappedRoom = roomMappingRows.find((row) => Boolean(row.mapping?.externalRoomTypeId)) ?? null;
+  const firstMappedRatePlan = rateMappingRows.find((row) => Boolean(row.ratePlan?.externalRatePlanId)) ?? null;
+  const bookingComManualChecklist = [
+    {
+      label: "Channex property id",
+      value: primaryProperty?.externalPropertyId ?? "Missing",
+    },
+    {
+      label: "Booking.com staging/test channel",
+      value: "Connect manually in Channex dashboard",
+    },
+    {
+      label: "Room type id",
+      value: firstMappedRoom?.mapping?.externalRoomTypeId ?? "Missing",
+    },
+    {
+      label: "Rate plan id",
+      value: firstMappedRatePlan?.ratePlan?.externalRatePlanId ?? "Missing",
+    },
+  ];
   const ariSyncEligibleRooms = rooms.filter((room) => {
     if (!room.isActive) return false;
     const roomMapping = roomMappingsByRoomId.get(room.id);
@@ -2099,10 +2119,12 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Connected Channels</h3>
                   <p className={styles.cardCopy}>
-                    Provider-neutral shell. Channex appears first in the roadmap, but architecture stays open for future providers.
+                    Provider-neutral shell. Use this panel as the safe handoff checklist before you connect the Booking.com staging channel inside Channex.
                   </p>
                 </div>
-                <span className={`${styles.badge} ${styles.badgeMuted}`}>Not connected</span>
+                <span className={`${styles.badge} ${primaryProperty?.externalPropertyId ? "" : styles.badgeMuted}`.trim()}>
+                  {primaryProperty?.externalPropertyId ? "Property ready" : "Not connected"}
+                </span>
               </div>
               <div className={styles.cardBody}>
                 <div className={styles.providerCard}>
@@ -2113,13 +2135,14 @@ export default function FamloProDashboardShell({
                         First planned provider inside a provider-neutral Famlo foundation.
                       </div>
                     </div>
-                    <span className={`${styles.badge} ${styles.badgeMuted}`}>
-                      {labelizeToken(primaryProperty?.syncStatus ?? "not_connected", "Not connected")}
+                    <span className={`${styles.badge} ${primaryProperty?.externalPropertyId ? "" : styles.badgeMuted}`.trim()}>
+                      {labelizeToken(primaryProperty?.syncStatus ?? "not_connected", primaryProperty?.externalPropertyId ? "Created" : "Not connected")}
                     </span>
                   </div>
                   <div className={styles.providerMetaRow}>
-                    <span className={styles.filterChip}>Environment: Staging planned</span>
+                    <span className={styles.filterChip}>Environment: {formatChannexEnvironmentLabel(channexConfig.environment)}</span>
                     <span className={styles.filterChip}>Foundation: {providerFoundationReady ? "Ready" : "Missing"}</span>
+                    <span className={styles.filterChip}>Property id: {primaryProperty?.externalPropertyId ?? "Missing"}</span>
                     <span className={styles.filterChip}>Last sync: {formatDateTime(primaryProperty?.lastSyncedAt ?? null)}</span>
                   </div>
                   <div className={styles.providerActionRow}>
@@ -2130,6 +2153,40 @@ export default function FamloProDashboardShell({
                     >
                       Prepare mapping
                     </button>
+                  </div>
+                </div>
+                <div className={styles.mappingTable}>
+                  <div className={styles.mappingHeader}>Booking.com staging checklist</div>
+                  <div className={styles.mappingHeader}>Value</div>
+                  <div className={styles.mappingHeader}>Status</div>
+                  {bookingComManualChecklist.map((item) => {
+                    const ready = item.value !== "Missing";
+                    return (
+                      <Fragment key={item.label}>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{item.label}</div>
+                        </div>
+                        <div className={styles.mappingCellMuted}>{item.value}</div>
+                        <div className={styles.mappingCell}>
+                          <span className={`${styles.badge} ${ready ? "" : styles.badgeMuted}`.trim()}>
+                            {ready ? "Ready" : "Needs action"}
+                          </span>
+                        </div>
+                      </Fragment>
+                    );
+                  })}
+                </div>
+                <div className={styles.placeholderGrid}>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Manual Channex steps</div>
+                    <div className={styles.placeholderValue}>Booking.com staging/test channel</div>
+                    <div className={styles.placeholderCopy}>
+                      In Channex dashboard, connect the Booking.com test channel for this GBP property, map room type
+                      <strong> {firstMappedRoom?.mapping?.externalRoomTypeId ?? " MISSING "}</strong>
+                      and rate plan
+                      <strong> {firstMappedRatePlan?.ratePlan?.externalRatePlanId ?? " MISSING "}</strong>,
+                      then activate the channel before Phase 11E feed polling.
+                    </div>
                   </div>
                 </div>
                 <div className={styles.channelGrid}>
