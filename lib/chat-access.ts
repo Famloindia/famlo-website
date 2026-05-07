@@ -171,6 +171,8 @@ async function fetchHostRecord(
       .from("hosts")
       .select("id,user_id,legacy_family_id")
       .eq("user_id", hostUserId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
     if (data) return data as HostRecord;
   }
@@ -189,7 +191,13 @@ async function fetchFamilyRecord(
   }
 
   if (hostUserId) {
-    const { data } = await supabase.from("families").select("id,user_id").eq("user_id", hostUserId).maybeSingle();
+    const { data } = await supabase
+      .from("families")
+      .select("id,user_id")
+      .eq("user_id", hostUserId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     if (data) return data as FamilyRecord;
   }
 

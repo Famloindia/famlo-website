@@ -41,6 +41,7 @@ export type AuditActionType =
   | "kill_switch_on"
   | "kill_switch_off"
   | "famlo_plus_manual_activate"
+  | "test_property_provision"
   | "page_view"
   | "login"
   | "logout";

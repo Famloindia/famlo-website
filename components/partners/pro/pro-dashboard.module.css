@@ -571,7 +571,7 @@
 }
 
 .summaryGrid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .summaryCard,
@@ -598,6 +598,7 @@
   font-weight: 900;
   letter-spacing: -0.04em;
   color: #0f172a;
+  line-height: 1.05;
 }
 
 .summaryCopy {

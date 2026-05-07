@@ -35,6 +35,7 @@ import RevenueHeatmap from "@/components/admin/RevenueHeatmap";
 import ShadowMode from "@/components/admin/ShadowMode";
 import SupportManager from "@/components/admin/SupportManager";
 import PlatformOpsDashboard from "@/components/admin/PlatformOpsDashboard";
+import TestPropertyProvisioner from "@/components/admin/TestPropertyProvisioner";
 import TestimonialsDesk from "@/components/admin/TestimonialsDesk";
 import ManualPayoutDesk from "@/components/admin/ManualPayoutDesk";
 import AuditTrail from "@/components/teams/AuditTrail";
@@ -221,6 +222,45 @@ export default async function AdminPage({ searchParams }: Readonly<AdminPageProp
     });
 
     content = <FamloPlusDesk rows={famloPlusRows} />;
+
+  } else if (activeTab === "test-properties") {
+    const { data: families } = await supabase
+      .from("families")
+      .select("id,name,host_id,city,state,user_id,email")
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    const familyIds = (families ?? []).map((family) => family.id).filter(Boolean);
+    const { data: subscriptions } = familyIds.length > 0
+      ? await supabase
+          .from("host_pro_subscriptions")
+          .select("id,family_id,status,created_at")
+          .in("family_id", familyIds)
+          .order("created_at", { ascending: false })
+      : { data: [] };
+
+    const latestSubscriptionByFamilyId = new Map<string, Record<string, unknown>>();
+    for (const row of (subscriptions ?? []) as Record<string, unknown>[]) {
+      const familyId = typeof row.family_id === "string" ? row.family_id : null;
+      if (!familyId || latestSubscriptionByFamilyId.has(familyId)) continue;
+      latestSubscriptionByFamilyId.set(familyId, row);
+    }
+
+    const rows = (families ?? []).map((family) => {
+      const subscription = latestSubscriptionByFamilyId.get(family.id);
+      return {
+        familyId: family.id,
+        familyName: family.name || "Famlo Home",
+        hostCode: family.host_id ?? null,
+        city: family.city ?? null,
+        state: family.state ?? null,
+        famloPlusStatus: typeof subscription?.status === "string" ? subscription.status : "inactive",
+        ownerUserId: family.user_id ?? null,
+        email: family.email ?? null,
+      };
+    });
+
+    content = <TestPropertyProvisioner rows={rows} />;
 
   } else if (activeTab === "vetting") {
     const { data: familyApps } = await supabase
