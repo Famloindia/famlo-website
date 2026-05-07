@@ -196,6 +196,13 @@ type AriHealthSnapshot = {
   status: AriHealthStatus;
   statusLabel: string;
   recommendation: string | null;
+  lastAriSyncAt: string | null;
+  lastSuccessfulAriSyncAt: string | null;
+  lastAriSyncError: string | null;
+  consecutiveAriFailures: number;
+  syncedDateRange: { from: string; to: string; windowDays: number } | null;
+  channelAttached: boolean;
+  channelActive: boolean;
   lastSuccessful30DaySync: {
     createdAt: string | null;
     message: string | null;
@@ -210,6 +217,29 @@ type AriHealthSnapshot = {
     createdAt: string | null;
     message: string | null;
   } | null;
+};
+
+type ChannelAriHealthSnapshot = {
+  lastAriSyncAt: string | null;
+  lastSuccessfulAriSyncAt: string | null;
+  lastAriSyncError: string | null;
+  lastAriSyncErrorAt: string | null;
+  consecutiveAriFailures: number;
+  syncedDateRange: { from: string; to: string; windowDays: number } | null;
+  verifiedAvailabilityCount: number;
+  verifiedRateCount: number;
+  verifiedMinStayThroughCount: number;
+  availabilityMismatchCount: number;
+  rateMismatchCount: number;
+  lastAriSyncAction: string | null;
+  lastAriSyncStatus: "synced" | "sync_failed" | "sync_overdue" | "channel_disconnected" | "not_started";
+  lastAriSyncMessage: string | null;
+  channelAttached: boolean;
+  channelActive: boolean;
+  accChannelsCount: number | null;
+  activeChannelId: string | null;
+  activeChannelTitle: string | null;
+  hotelId: string | null;
 };
 
 type ChannelFeedHealthSnapshot = {
@@ -506,7 +536,8 @@ function summarizeSafePayload(payload: Record<string, unknown>): string[] {
 
 function computeAriHealthSnapshot(
   syncLogs: HostProChannelFoundation["syncLogs"],
-  referenceNow: number
+  referenceNow: number,
+  metadataHealth: ChannelAriHealthSnapshot | null
 ): AriHealthSnapshot {
   const ariLogs = syncLogs.filter((log) => log.action === "push_ari_30_day" || log.action === "push_ari_365_day");
   const lastSuccessful30DaySync =
@@ -533,11 +564,93 @@ function computeAriHealthSnapshot(
         }
       : null;
 
+  if (metadataHealth?.lastAriSyncStatus === "channel_disconnected") {
+    return {
+      status: "failed",
+      statusLabel: "Channel disconnected",
+      recommendation: "Reconnect or reactivate the Channex channel before relying on daily ARI sync.",
+      lastAriSyncAt: metadataHealth.lastAriSyncAt,
+      lastSuccessfulAriSyncAt: metadataHealth.lastSuccessfulAriSyncAt,
+      lastAriSyncError: metadataHealth.lastAriSyncError,
+      consecutiveAriFailures: metadataHealth.consecutiveAriFailures,
+      syncedDateRange: metadataHealth.syncedDateRange,
+      channelAttached: metadataHealth.channelAttached,
+      channelActive: metadataHealth.channelActive,
+      lastSuccessful30DaySync,
+      lastSuccessful365DaySync,
+      lastProblemSync,
+    };
+  }
+
+  if (
+    metadataHealth?.lastSuccessfulAriSyncAt &&
+    isStaleByHours(metadataHealth.lastSuccessfulAriSyncAt, referenceNow, 26)
+  ) {
+    return {
+      status: "warning",
+      statusLabel: "Sync overdue",
+      recommendation: "Run Sync now or let the daily ARI cron catch up before relying on channel inventory.",
+      lastAriSyncAt: metadataHealth.lastAriSyncAt,
+      lastSuccessfulAriSyncAt: metadataHealth.lastSuccessfulAriSyncAt,
+      lastAriSyncError: metadataHealth.lastAriSyncError,
+      consecutiveAriFailures: metadataHealth.consecutiveAriFailures,
+      syncedDateRange: metadataHealth.syncedDateRange,
+      channelAttached: metadataHealth.channelAttached,
+      channelActive: metadataHealth.channelActive,
+      lastSuccessful30DaySync,
+      lastSuccessful365DaySync,
+      lastProblemSync,
+    };
+  }
+
+  if (metadataHealth?.lastAriSyncStatus === "sync_failed") {
+    return {
+      status: "failed",
+      statusLabel: "Sync failed",
+      recommendation: metadataHealth.lastAriSyncError ?? "Review the last ARI sync failure and rerun after the issue is cleared.",
+      lastAriSyncAt: metadataHealth.lastAriSyncAt,
+      lastSuccessfulAriSyncAt: metadataHealth.lastSuccessfulAriSyncAt,
+      lastAriSyncError: metadataHealth.lastAriSyncError,
+      consecutiveAriFailures: metadataHealth.consecutiveAriFailures,
+      syncedDateRange: metadataHealth.syncedDateRange,
+      channelAttached: metadataHealth.channelAttached,
+      channelActive: metadataHealth.channelActive,
+      lastSuccessful30DaySync,
+      lastSuccessful365DaySync,
+      lastProblemSync,
+    };
+  }
+
+  if (metadataHealth?.lastAriSyncStatus === "synced") {
+    return {
+      status: "healthy",
+      statusLabel: "Synced",
+      recommendation: null,
+      lastAriSyncAt: metadataHealth.lastAriSyncAt,
+      lastSuccessfulAriSyncAt: metadataHealth.lastSuccessfulAriSyncAt,
+      lastAriSyncError: metadataHealth.lastAriSyncError,
+      consecutiveAriFailures: metadataHealth.consecutiveAriFailures,
+      syncedDateRange: metadataHealth.syncedDateRange,
+      channelAttached: metadataHealth.channelAttached,
+      channelActive: metadataHealth.channelActive,
+      lastSuccessful30DaySync,
+      lastSuccessful365DaySync,
+      lastProblemSync,
+    };
+  }
+
   if (!lastSuccessful30DaySync && !lastSuccessful365DaySync && !lastProblemSync) {
     return {
       status: "never_synced",
       statusLabel: "Never synced",
       recommendation: "Run 365-day sync before connecting live channels.",
+      lastAriSyncAt: metadataHealth?.lastAriSyncAt ?? null,
+      lastSuccessfulAriSyncAt: metadataHealth?.lastSuccessfulAriSyncAt ?? null,
+      lastAriSyncError: metadataHealth?.lastAriSyncError ?? null,
+      consecutiveAriFailures: metadataHealth?.consecutiveAriFailures ?? 0,
+      syncedDateRange: metadataHealth?.syncedDateRange ?? null,
+      channelAttached: metadataHealth?.channelAttached ?? false,
+      channelActive: metadataHealth?.channelActive ?? false,
       lastSuccessful30DaySync: null,
       lastSuccessful365DaySync: null,
       lastProblemSync: null,
@@ -552,6 +665,13 @@ function computeAriHealthSnapshot(
         !lastSuccessful365DaySync || isStaleByHours(lastSuccessful365DaySync.createdAt, referenceNow, 24)
           ? "Run 365-day sync before connecting live channels."
           : "Review the latest sync warning before connecting live channels.",
+      lastAriSyncAt: metadataHealth?.lastAriSyncAt ?? null,
+      lastSuccessfulAriSyncAt: metadataHealth?.lastSuccessfulAriSyncAt ?? null,
+      lastAriSyncError: metadataHealth?.lastAriSyncError ?? null,
+      consecutiveAriFailures: metadataHealth?.consecutiveAriFailures ?? 0,
+      syncedDateRange: metadataHealth?.syncedDateRange ?? null,
+      channelAttached: metadataHealth?.channelAttached ?? false,
+      channelActive: metadataHealth?.channelActive ?? false,
       lastSuccessful30DaySync,
       lastSuccessful365DaySync,
       lastProblemSync,
@@ -563,6 +683,13 @@ function computeAriHealthSnapshot(
       status: "warning",
       statusLabel: "Warning",
       recommendation: "Run 365-day sync before connecting live channels.",
+      lastAriSyncAt: metadataHealth?.lastAriSyncAt ?? null,
+      lastSuccessfulAriSyncAt: metadataHealth?.lastSuccessfulAriSyncAt ?? null,
+      lastAriSyncError: metadataHealth?.lastAriSyncError ?? null,
+      consecutiveAriFailures: metadataHealth?.consecutiveAriFailures ?? 0,
+      syncedDateRange: metadataHealth?.syncedDateRange ?? null,
+      channelAttached: metadataHealth?.channelAttached ?? false,
+      channelActive: metadataHealth?.channelActive ?? false,
       lastSuccessful30DaySync,
       lastSuccessful365DaySync,
       lastProblemSync,
@@ -573,6 +700,13 @@ function computeAriHealthSnapshot(
     status: "healthy",
     statusLabel: "Healthy",
     recommendation: null,
+    lastAriSyncAt: metadataHealth?.lastAriSyncAt ?? null,
+    lastSuccessfulAriSyncAt: metadataHealth?.lastSuccessfulAriSyncAt ?? null,
+    lastAriSyncError: metadataHealth?.lastAriSyncError ?? null,
+    consecutiveAriFailures: metadataHealth?.consecutiveAriFailures ?? 0,
+    syncedDateRange: metadataHealth?.syncedDateRange ?? null,
+    channelAttached: metadataHealth?.channelAttached ?? false,
+    channelActive: metadataHealth?.channelActive ?? false,
     lastSuccessful30DaySync,
     lastSuccessful365DaySync,
     lastProblemSync,
@@ -627,6 +761,47 @@ function readChannelFeedHealth(metadata: Record<string, unknown> | null): Channe
         ? (asStringOrNull(health.lastAutoApplyState) as ChannelFeedHealthSnapshot["lastAutoApplyState"])
         : "synced",
     lastAutoApplyMessage: asStringOrNull(health.lastAutoApplyMessage),
+  };
+}
+
+function readChannelAriHealth(metadata: Record<string, unknown> | null): ChannelAriHealthSnapshot | null {
+  const health = asObject(metadata?.channexAriHealth);
+  if (!health) return null;
+  const syncedDateRange = asObject(health.syncedDateRange);
+  return {
+    lastAriSyncAt: asStringOrNull(health.lastAriSyncAt),
+    lastSuccessfulAriSyncAt: asStringOrNull(health.lastSuccessfulAriSyncAt),
+    lastAriSyncError: asStringOrNull(health.lastAriSyncError),
+    lastAriSyncErrorAt: asStringOrNull(health.lastAriSyncErrorAt),
+    consecutiveAriFailures: asNumberOrNull(health.consecutiveAriFailures) ?? 0,
+    syncedDateRange:
+      syncedDateRange && asStringOrNull(syncedDateRange.from) && asStringOrNull(syncedDateRange.to)
+        ? {
+            from: asStringOrNull(syncedDateRange.from) ?? "",
+            to: asStringOrNull(syncedDateRange.to) ?? "",
+            windowDays: asNumberOrNull(syncedDateRange.windowDays) ?? 365,
+          }
+        : null,
+    verifiedAvailabilityCount: asNumberOrNull(health.verifiedAvailabilityCount) ?? 0,
+    verifiedRateCount: asNumberOrNull(health.verifiedRateCount) ?? 0,
+    verifiedMinStayThroughCount: asNumberOrNull(health.verifiedMinStayThroughCount) ?? 0,
+    availabilityMismatchCount: asNumberOrNull(health.availabilityMismatchCount) ?? 0,
+    rateMismatchCount: asNumberOrNull(health.rateMismatchCount) ?? 0,
+    lastAriSyncAction: asStringOrNull(health.lastAriSyncAction),
+    lastAriSyncStatus:
+      asStringOrNull(health.lastAriSyncStatus) === "sync_failed" ||
+      asStringOrNull(health.lastAriSyncStatus) === "sync_overdue" ||
+      asStringOrNull(health.lastAriSyncStatus) === "channel_disconnected" ||
+      asStringOrNull(health.lastAriSyncStatus) === "synced"
+        ? (asStringOrNull(health.lastAriSyncStatus) as ChannelAriHealthSnapshot["lastAriSyncStatus"])
+        : "not_started",
+    lastAriSyncMessage: asStringOrNull(health.lastAriSyncMessage),
+    channelAttached: health.channelAttached === true,
+    channelActive: health.channelActive === true,
+    accChannelsCount: asNumberOrNull(health.accChannelsCount),
+    activeChannelId: asStringOrNull(health.activeChannelId),
+    activeChannelTitle: asStringOrNull(health.activeChannelTitle),
+    hotelId: asStringOrNull(health.hotelId),
   };
 }
 
@@ -998,6 +1173,7 @@ export default function FamloProDashboardShell({
     return Boolean(mapping?.externalRoomTypeId);
   });
   const channelFeedHealth = readChannelFeedHealth(primaryProperty?.metadata ?? null);
+  const channelAriHealth = readChannelAriHealth(primaryProperty?.metadata ?? null);
   const autoApplyStateLabel =
     channelFeedHealth?.lastAutoApplyState === "failed_import"
       ? "Failed import"
@@ -1069,7 +1245,8 @@ export default function FamloProDashboardShell({
   const lastAri30SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
   const lastAri365SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_365_day") ?? null;
   const lastAriSyncLog = lastAri365SyncLog ?? lastAri30SyncLog;
-  const ariHealth = computeAriHealthSnapshot(channelFoundation.syncLogs, timeAnchor);
+  const ariHealth = computeAriHealthSnapshot(channelFoundation.syncLogs, timeAnchor, channelAriHealth);
+  channelHealthSummaryBadges.push(`ARI: ${ariHealth.statusLabel}`);
   const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
   const groupedSyncLogs = SYNC_LOG_GROUPS.map((group) => ({
     ...group,
@@ -1218,6 +1395,15 @@ export default function FamloProDashboardShell({
           title: "Automatic booking sync needs intervention",
           summary: `${channelFeedHealth?.failedAutoApplyCount ?? 0} automatic import/apply step${(channelFeedHealth?.failedAutoApplyCount ?? 0) === 1 ? "" : "s"} failed.`,
           recommendedAction: "Inspect the latest auto-process sync log and fix the affected booking revision before acknowledging it.",
+          severity: "warning" as const,
+        }]
+      : []),
+    ...(ariHealth.statusLabel === "Channel disconnected"
+      ? [{
+          key: "ari-channel-disconnected",
+          title: "Daily ARI sync is blocked by channel state",
+          summary: "The latest ARI health snapshot says the Channex channel is detached or inactive.",
+          recommendedAction: "Reconnect the Channex channel before relying on daily inventory sync.",
           severity: "warning" as const,
         }]
       : []),
@@ -2428,6 +2614,15 @@ export default function FamloProDashboardShell({
                     <span className={`${styles.readinessPill} ${channelHealthNeedsAttention ? styles.readinessPillReview : styles.readinessPillOk}`}>
                       Auto-apply state: {autoApplyStateLabel}
                     </span>
+                    <span className={`${styles.readinessPill} ${
+                      ariHealth.statusLabel === "Synced"
+                        ? styles.readinessPillOk
+                        : ariHealth.statusLabel === "Channel disconnected" || ariHealth.statusLabel === "Sync failed"
+                          ? styles.readinessPillMissing
+                          : styles.readinessPillReview
+                    }`}>
+                      Daily ARI: {ariHealth.statusLabel}
+                    </span>
                   </div>
                   <div className={styles.placeholderGrid} style={{ marginTop: 14 }}>
                     <div className={styles.placeholderRow}>
@@ -2469,6 +2664,35 @@ export default function FamloProDashboardShell({
                       </div>
                       <div className={styles.placeholderCopy}>
                         Failed auto-apply: {channelFeedHealth?.failedAutoApplyCount ?? 0} · acknowledged automatically: {channelFeedHealth?.acknowledgedCount ?? 0}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Daily ARI sync</div>
+                      <div className={styles.placeholderValue}>{ariHealth.statusLabel}</div>
+                      <div className={styles.placeholderCopy}>
+                        Last sync: {formatDateTime(ariHealth.lastAriSyncAt)} · Last success: {formatDateTime(ariHealth.lastSuccessfulAriSyncAt)}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>ARI range + verification</div>
+                      <div className={styles.placeholderValue}>
+                        {ariHealth.syncedDateRange
+                          ? `${ariHealth.syncedDateRange.from} → ${ariHealth.syncedDateRange.to}`
+                          : "Not synced yet"}
+                      </div>
+                      <div className={styles.placeholderCopy}>
+                        {channelAriHealth
+                          ? `${channelAriHealth.verifiedAvailabilityCount} availability · ${channelAriHealth.verifiedRateCount} rates · ${channelAriHealth.verifiedMinStayThroughCount} min-stay checks`
+                          : "No daily ARI verification summary yet."}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>ARI last error</div>
+                      <div className={styles.placeholderValue}>{ariHealth.lastAriSyncError ? "Present" : "None"}</div>
+                      <div className={styles.placeholderCopy}>
+                        {ariHealth.lastAriSyncError
+                          ? `${ariHealth.lastAriSyncError} · failures in a row ${ariHealth.consecutiveAriFailures}`
+                          : "No daily ARI sync error recorded."}
                       </div>
                     </div>
                   </div>
@@ -2749,6 +2973,7 @@ export default function FamloProDashboardShell({
                   externalPropertyId={primaryProperty?.externalPropertyId ?? null}
                   lastSyncLog={lastBookingFeedLog}
                   storedRevisions={channelFoundation.bookingRevisions}
+                  proBookings={proBookings}
                 />
                 <ChannexBookingListVerifyCard
                   familyId={familyId}
@@ -4602,7 +4827,7 @@ function ChannexAriSyncCard({
         <div>
           <div className={styles.listTitle}>Manual staging ARI sync</div>
           <div className={styles.cardCopy}>
-            Reuse the current ARI push flow for manual staging sync only. Keep 30-day and 365-day pushes operator-triggered until automation is added later.
+            Manual Sync now reuses the same verified 365-day ARI flow. Daily cron can keep active Channex channels fresh, while manual runs stay available for operator checks.
           </div>
         </div>
         <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
@@ -4632,6 +4857,20 @@ function ChannexAriSyncCard({
         <div className={styles.placeholderRow}>
           <div className={styles.placeholderTitle}>Sync health</div>
           <div className={styles.placeholderCopy}>{ariHealth.statusLabel}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last daily sync</div>
+          <div className={styles.placeholderCopy}>
+            {ariHealth.lastAriSyncAt ? formatDateTime(ariHealth.lastAriSyncAt) : "Not started"}
+          </div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Synced range</div>
+          <div className={styles.placeholderCopy}>
+            {ariHealth.syncedDateRange
+              ? `${ariHealth.syncedDateRange.from} → ${ariHealth.syncedDateRange.to}`
+              : "Not available"}
+          </div>
         </div>
       </div>
 
@@ -4671,6 +4910,12 @@ function ChannexAriSyncCard({
       {ariHealth.lastProblemSync?.message ? (
         <div className={styles.feedCopy} style={{ marginTop: 8 }}>
           Latest sync issue: {ariHealth.lastProblemSync.message}
+        </div>
+      ) : null}
+
+      {ariHealth.lastAriSyncError ? (
+        <div className={styles.feedCopy} style={{ marginTop: 8 }}>
+          Daily sync error: {ariHealth.lastAriSyncError}
         </div>
       ) : null}
 
@@ -4978,6 +5223,99 @@ function ChannexAriSyncCard({
         <button
           type="button"
           className={styles.secondaryActionButton}
+          disabled={isPushing || isPushing365 || Boolean(blockedMessage)}
+          onClick={() => {
+            startPushing365(async () => {
+              setFeedback(null);
+
+              try {
+                const response = await fetch("/api/host/pro/channel/channex/ari/push", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ familyId, windowDays: 365 }),
+                });
+
+                const payload = (await response.json()) as {
+                  ok?: boolean;
+                  status?: string;
+                  message?: string;
+                  eligibleRooms?: number;
+                  availabilityChanges?: number;
+                  restrictionChanges?: number;
+                  verifiedAvailabilityCount?: number;
+                  verifiedRateCount?: number;
+                  verifiedMinStayThroughCount?: number;
+                  windowDays?: number;
+                  chunkSummary?: { availabilityChunkCount?: number; restrictionChunkCount?: number };
+                  dateRange?: { from: string; to: string };
+                  rooms?: Array<{
+                    stayUnitId: string;
+                    name: string;
+                    status: "eligible" | "missing_fields";
+                    missingFields: string[];
+                  }>;
+                  pushedRanges?: Array<{
+                    roomName: string;
+                    roomTypeId: string;
+                    ratePlanId: string;
+                    availabilityRanges: Array<{ dateFrom: string; dateTo: string; availability: number }>;
+                    rateRanges: Array<{ dateFrom: string; dateTo: string; rate: string; stopSell: boolean; minStayThrough: number }>;
+                  }>;
+                  warnings?: string[];
+                  verificationFailed?: boolean;
+                };
+
+                setFeedback({
+                  ok: Boolean(response.ok && payload.ok),
+                  message:
+                    typeof payload.message === "string" && payload.message.trim().length > 0
+                      ? payload.message
+                      : "Unable to sync Channex 365-day ARI now.",
+                  summary:
+                    typeof payload.eligibleRooms === "number" &&
+                    typeof payload.availabilityChanges === "number" &&
+                    typeof payload.restrictionChanges === "number"
+                      ? {
+                          mode: "push_365",
+                          windowDays: typeof payload.windowDays === "number" ? payload.windowDays : 365,
+                          eligibleRooms: payload.eligibleRooms,
+                          availabilityChanges: payload.availabilityChanges,
+                          restrictionChanges: payload.restrictionChanges,
+                          verifiedAvailabilityCount:
+                            typeof payload.verifiedAvailabilityCount === "number" ? payload.verifiedAvailabilityCount : undefined,
+                          verifiedRateCount:
+                            typeof payload.verifiedRateCount === "number" ? payload.verifiedRateCount : undefined,
+                          verifiedMinStayThroughCount:
+                            typeof payload.verifiedMinStayThroughCount === "number" ? payload.verifiedMinStayThroughCount : undefined,
+                          availabilityChunkCount:
+                            typeof payload.chunkSummary?.availabilityChunkCount === "number" ? payload.chunkSummary.availabilityChunkCount : undefined,
+                          restrictionChunkCount:
+                            typeof payload.chunkSummary?.restrictionChunkCount === "number" ? payload.chunkSummary.restrictionChunkCount : undefined,
+                          dateRange: payload.dateRange,
+                        }
+                      : undefined,
+                  rooms: Array.isArray(payload.rooms) ? payload.rooms : undefined,
+                  pushedRanges: Array.isArray(payload.pushedRanges) ? payload.pushedRanges : undefined,
+                  warnings: Array.isArray(payload.warnings) ? payload.warnings : undefined,
+                  verificationFailed: Boolean(payload.verificationFailed || payload.status === "verification_failed"),
+                });
+                router.refresh();
+              } catch (error) {
+                setFeedback({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "Unable to sync Channex 365-day ARI now.",
+                });
+              }
+            });
+          }}
+        >
+          {isPushing365 ? "Syncing..." : "Sync now"}
+        </button>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
           disabled={isVerifying || !propertyCreated}
           onClick={() => {
             startVerifying(async () => {
@@ -5039,6 +5377,7 @@ function ChannexBookingFeedCard({
   externalPropertyId,
   lastSyncLog,
   storedRevisions,
+  proBookings,
 }: Readonly<{
   familyId: string;
   propertyCreated: boolean;
@@ -5069,6 +5408,7 @@ function ChannexBookingFeedCard({
     updatedAt: string | null;
     rawPayload: Record<string, unknown>;
   }>;
+  proBookings: ProBookingSummary[];
 }>): React.JSX.Element {
   const router = useRouter();
   const [isFetching, startFetching] = useTransition();
@@ -5120,17 +5460,19 @@ function ChannexBookingFeedCard({
       source?: string | null;
       importStatus?: string | null;
       ackStatus?: string | null;
-    linkedBookingId?: string | null;
-    bookingListRevisionId?: string | null;
-    isCrsOnly?: boolean;
-    ackEligible?: boolean;
-  }>;
+      linkedBookingId?: string | null;
+      bookingListRevisionId?: string | null;
+      isCrsOnly?: boolean;
+      ackEligible?: boolean;
+      currentBooking?: ProBookingSummary | null;
+    }>;
   } | null>(null);
   const blockedMessage = !propertyCreated
     ? "Create provider property first."
     : !externalPropertyId
       ? "Provider property is not mapped yet."
       : null;
+  const proBookingsById = new Map(proBookings.map((booking) => [booking.bookingId, booking]));
   const displayedStoredRevisions = storedRevisions.map((revision) => ({
     id: revision.id,
     externalBookingId: revision.externalBookingId,
@@ -5159,6 +5501,7 @@ function ChannexBookingFeedCard({
       (Object.prototype.hasOwnProperty.call(revision.rawPayload, "channel_id") && !asStringOrNull(revision.rawPayload?.channel_id)) ||
       (Object.prototype.hasOwnProperty.call(revision.rawPayload, "booking_list_channel_id") && !asStringOrNull(revision.rawPayload?.booking_list_channel_id)),
     ackEligible: Boolean(revision.externalRevisionId),
+    currentBooking: revision.linkedBookingId ? proBookingsById.get(revision.linkedBookingId) ?? null : null,
   }));
 
   return (
@@ -5167,7 +5510,7 @@ function ChannexBookingFeedCard({
         <div>
           <div className={styles.listTitle}>Channex booking feed</div>
           <div className={styles.cardCopy}>
-            Preview of unacknowledged Channex staging booking revisions. Operators can import new previews or manually apply pending modifications, but acknowledgement is still deferred in this phase.
+            Preview of Channex staging booking revisions. New bookings and cancellations can sync automatically, while modification revisions stay operator-reviewed before acknowledgement.
           </div>
         </div>
         <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
@@ -5182,7 +5525,7 @@ function ChannexBookingFeedCard({
         </div>
         <div className={styles.placeholderRow}>
           <div className={styles.placeholderTitle}>Acknowledgement</div>
-          <div className={styles.placeholderCopy}>Deferred intentionally</div>
+          <div className={styles.placeholderCopy}>Only after successful import/apply</div>
         </div>
         <div className={styles.placeholderRow}>
           <div className={styles.placeholderTitle}>Last checked</div>
@@ -5308,13 +5651,13 @@ function ChannexBookingFeedCard({
                       {revision.unmatchedRoom ? " · review mapping" : ""}
                     </div>
                   </div>
-                  <div className={styles.mappingCell}>
-                    <div className={styles.mappingTitle}>
-                      {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
-                    </div>
-                    <div className={styles.mappingSubcopy}>
+                    <div className={styles.mappingCell}>
+                      <div className={styles.mappingTitle}>
+                        {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
+                      </div>
+                      <div className={styles.mappingSubcopy}>
                       {revision.importStatus === "modified_applied"
-                        ? `Modification applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · Not acknowledged yet`
+                        ? `Modification applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
                         : revision.importStatus === "cancelled_applied"
                         ? `Cancellation applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
                         : revision.importStatus === "imported"
@@ -5323,6 +5666,21 @@ function ChannexBookingFeedCard({
                           ? `Modification preview pending review${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""}`
                           : "Preview only, not imported yet"}
                     </div>
+                    {revision.importStatus === "modified_pending_review" ? (
+                      <div className={styles.mappingSubcopy} style={{ marginTop: 6 }}>
+                        Current Famlo: {revision.currentBooking?.startDate ?? "Unknown"} → {revision.currentBooking?.endDate ?? "Unknown"} · {revision.currentBooking?.amount ?? "Amount unknown"}
+                      </div>
+                    ) : null}
+                    {revision.importStatus === "modified_pending_review" ? (
+                      <div className={styles.mappingSubcopy}>
+                        Incoming channel: {revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"} · {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : "Amount unknown"}
+                      </div>
+                    ) : null}
+                    {revision.importStatus === "modified_pending_review" ? (
+                      <div className={styles.mappingSubcopy}>
+                        Warning: Will update the existing Famlo booking and acknowledge after success.
+                      </div>
+                    ) : null}
                     {"id" in revision && revision.id ? (
                       <div className={styles.inlineActionRow} style={{ marginTop: 8 }}>
                         <button
@@ -5442,6 +5800,20 @@ function ChannexBookingFeedCard({
                             {isApplyingModification && applyingModificationId === revision.id
                               ? "Applying..."
                               : "Apply modification"}
+                          </button>
+                        ) : null}
+                        {revision.importStatus === "modified_pending_review" ? (
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            onClick={() => {
+                              setFeedback({
+                                ok: true,
+                                message: "Left this Channex modification for later manual review. No Famlo booking change and no acknowledgement were sent.",
+                              });
+                            }}
+                          >
+                            Leave for later
                           </button>
                         ) : null}
                         {revision.status === "cancelled" &&
