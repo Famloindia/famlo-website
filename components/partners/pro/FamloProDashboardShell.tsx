@@ -4821,9 +4821,11 @@ function ChannexBookingFeedCard({
   const [isFetching, startFetching] = useTransition();
   const [isImportingPreview, startImportingPreview] = useTransition();
   const [isApplyingModification, startApplyingModification] = useTransition();
+  const [isApplyingCancellation, startApplyingCancellation] = useTransition();
   const [isAcknowledgingPreview, startAcknowledgingPreview] = useTransition();
   const [importingPreviewId, setImportingPreviewId] = useState<string | null>(null);
   const [applyingModificationId, setApplyingModificationId] = useState<string | null>(null);
+  const [applyingCancellationId, setApplyingCancellationId] = useState<string | null>(null);
   const [acknowledgingPreviewId, setAcknowledgingPreviewId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     ok: boolean;
@@ -5060,6 +5062,8 @@ function ChannexBookingFeedCard({
                     <div className={styles.mappingSubcopy}>
                       {revision.importStatus === "modified_applied"
                         ? `Modification applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · Not acknowledged yet`
+                        : revision.importStatus === "cancelled_applied"
+                        ? `Cancellation applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
                         : revision.importStatus === "imported"
                         ? `Imported into Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
                         : revision.importStatus === "modified_pending_review"
@@ -5074,10 +5078,12 @@ function ChannexBookingFeedCard({
                           disabled={
                             isImportingPreview ||
                             isApplyingModification ||
+                            isApplyingCancellation ||
                             Boolean(blockedMessage) ||
                             revision.importStatus === "imported" ||
                             revision.importStatus === "modified_pending_review" ||
                             revision.importStatus === "modified_applied" ||
+                            revision.importStatus === "cancelled_applied" ||
                             !revision.externalRoomTypeId
                           }
                           onClick={() => {
@@ -5185,7 +5191,63 @@ function ChannexBookingFeedCard({
                               : "Apply modification"}
                           </button>
                         ) : null}
-                        {revision.importStatus === "imported" || revision.importStatus === "modified_applied" ? (
+                        {revision.status === "cancelled" &&
+                        revision.importStatus !== "cancelled_applied" &&
+                        revision.linkedBookingId ? (
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            disabled={isApplyingCancellation || Boolean(blockedMessage)}
+                            onClick={() => {
+                              startApplyingCancellation(async () => {
+                                setApplyingCancellationId(typeof revision.id === "string" ? revision.id : null);
+                                try {
+                                  const response = await fetch("/api/host/pro/channel/channex/bookings/apply-cancellation", {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      channelBookingRevisionId: revision.id,
+                                    }),
+                                  });
+
+                                  const payload = (await response.json()) as {
+                                    ok?: boolean;
+                                    message?: string;
+                                    error?: string;
+                                    status?: string;
+                                  };
+
+                                  if (!response.ok || !payload.ok) {
+                                    throw new Error(payload.error ?? payload.message ?? "Unable to apply this Channex booking cancellation.");
+                                  }
+
+                                  setFeedback({
+                                    ok: true,
+                                    message:
+                                      typeof payload.message === "string" && payload.message.trim().length > 0
+                                        ? payload.message
+                                        : "Cancellation applied to Famlo. Not acknowledged yet.",
+                                  });
+                                  router.refresh();
+                                } catch (error) {
+                                  setFeedback({
+                                    ok: false,
+                                    message: error instanceof Error ? error.message : "Unable to apply this Channex booking cancellation.",
+                                  });
+                                } finally {
+                                  setApplyingCancellationId(null);
+                                }
+                              });
+                            }}
+                          >
+                            {isApplyingCancellation && applyingCancellationId === revision.id
+                              ? "Applying..."
+                              : "Apply cancellation"}
+                          </button>
+                        ) : null}
+                        {revision.importStatus === "imported" || revision.importStatus === "modified_applied" || revision.importStatus === "cancelled_applied" ? (
                           revision.ackStatus === "acknowledged" ? (
                             <button
                               type="button"

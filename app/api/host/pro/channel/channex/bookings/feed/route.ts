@@ -343,16 +343,43 @@ async function storeMatchedFeedRevisions(input: {
     return { insertedCount: 0, updatedCount: 0, storedCount: 0 };
   }
 
-  const { data: existingRows, error: existingRowsError } = await input.supabase
-    .from("channel_booking_revisions")
-    .select("id,external_revision_id,import_status,ack_status,linked_booking_id,raw_payload,source")
-    .eq("family_id", input.familyId)
-    .eq("provider_code", "channex")
-    .in("external_revision_id", revisionIds);
+  const externalBookingIds = [...new Set(
+    [...dedupedRows.values()]
+      .map((row) => asStringOrNull(row.external_booking_id))
+      .filter((value): value is string => Boolean(value))
+  )];
 
-  if (existingRowsError) {
-    throw existingRowsError;
+  const [existingByRevisionResult, existingByBookingResult] = await Promise.all([
+    revisionIds.length > 0
+      ? input.supabase
+          .from("channel_booking_revisions")
+          .select("id,external_booking_id,external_revision_id,import_status,ack_status,linked_booking_id,raw_payload,source")
+          .eq("family_id", input.familyId)
+          .eq("provider_code", "channex")
+          .eq("source", "booking_revision_feed")
+          .in("external_revision_id", revisionIds)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    externalBookingIds.length > 0
+      ? input.supabase
+          .from("channel_booking_revisions")
+          .select("id,external_booking_id,external_revision_id,import_status,ack_status,linked_booking_id,raw_payload,source")
+          .eq("family_id", input.familyId)
+          .eq("provider_code", "channex")
+          .eq("source", "booking_revision_feed")
+          .in("external_booking_id", externalBookingIds)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+  ]);
+
+  if (existingByRevisionResult.error) {
+    throw existingByRevisionResult.error;
   }
+  if (existingByBookingResult.error) {
+    throw existingByBookingResult.error;
+  }
+  const existingRows = [
+    ...((existingByRevisionResult.data ?? []) as Array<Record<string, unknown>>),
+    ...((existingByBookingResult.data ?? []) as Array<Record<string, unknown>>),
+  ];
 
   const existingByRevisionId = new Map(
     ((existingRows ?? []) as Array<Record<string, unknown>>)
@@ -362,12 +389,22 @@ async function storeMatchedFeedRevisions(input: {
       })
       .filter((entry): entry is [string, Record<string, unknown>] => Boolean(entry))
   );
+  const existingByBookingId = new Map(
+    ((existingRows ?? []) as Array<Record<string, unknown>>)
+      .map((row) => {
+        const bookingId = asStringOrNull(row.external_booking_id);
+        return bookingId ? [bookingId, row] : null;
+      })
+      .filter((entry): entry is [string, Record<string, unknown>] => Boolean(entry))
+  );
 
   let insertedCount = 0;
   let updatedCount = 0;
 
   for (const [revisionId, preparedRow] of dedupedRows.entries()) {
-    const existingRow = existingByRevisionId.get(revisionId);
+    const existingRow =
+      existingByRevisionId.get(revisionId) ??
+      (preparedRow.external_booking_id ? existingByBookingId.get(preparedRow.external_booking_id) : undefined);
 
     if (!existingRow?.id) {
       const { error } = await input.supabase.from("channel_booking_revisions").insert(preparedRow as never);
