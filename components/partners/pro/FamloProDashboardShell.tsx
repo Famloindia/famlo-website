@@ -212,6 +212,23 @@ type AriHealthSnapshot = {
   } | null;
 };
 
+type ChannelFeedHealthSnapshot = {
+  lastPollAt: string | null;
+  lastSuccessfulPollAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  channelAttached: boolean;
+  channelActive: boolean;
+  accChannelsCount: number | null;
+  activeChannelId: string | null;
+  activeChannelTitle: string | null;
+  hotelId: string | null;
+  unackedRevisionsCount: number;
+  failedImportCount: number;
+  pendingApplyCount: number;
+  consecutiveFailures: number;
+};
+
 type GoLiveChecklistStatus = "ready" | "needs_action" | "blocked";
 
 type GoLiveChecklistItem = {
@@ -336,7 +353,7 @@ const SYNC_LOG_GROUPS: SyncLogGroup[] = [
   { key: "room", title: "Room creation", actions: ["create_room_type"] },
   { key: "rate", title: "Rate creation", actions: ["create_rate_plan"] },
   { key: "ari", title: "ARI push", actions: ["push_ari_30_day", "push_ari_365_day"] },
-  { key: "booking-feed", title: "Booking feed / list", actions: ["fetch_booking_feed", "store_booking_feed_preview", "verify_booking_list", "verify_booking_revision_visibility"] },
+  { key: "booking-feed", title: "Booking feed / list", actions: ["fetch_booking_feed", "poll_booking_feed_cron", "store_booking_feed_preview", "verify_booking_list", "verify_booking_revision_visibility"] },
   { key: "booking-import", title: "Booking import", actions: ["import_booking_preview", "apply_booking_modification"] },
   { key: "ack", title: "Acknowledgement", actions: ["acknowledge_booking_revision"] },
 ];
@@ -556,6 +573,37 @@ function computeAriHealthSnapshot(
 function joinMissingLabels(items: Array<{ label: string; ready: boolean }>): string {
   const missing = items.filter((item) => !item.ready).map((item) => item.label);
   return missing.length > 0 ? missing.join(", ") : "Nothing missing";
+}
+
+function asNumberOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function readChannelFeedHealth(metadata: Record<string, unknown> | null): ChannelFeedHealthSnapshot | null {
+  const health = asObject(metadata?.channexFeedHealth);
+  if (!health) return null;
+
+  return {
+    lastPollAt: asStringOrNull(health.lastPollAt),
+    lastSuccessfulPollAt: asStringOrNull(health.lastSuccessfulPollAt),
+    lastError: asStringOrNull(health.lastError),
+    lastErrorAt: asStringOrNull(health.lastErrorAt),
+    channelAttached: health.channelAttached === true,
+    channelActive: health.channelActive === true,
+    accChannelsCount: asNumberOrNull(health.accChannelsCount),
+    activeChannelId: asStringOrNull(health.activeChannelId),
+    activeChannelTitle: asStringOrNull(health.activeChannelTitle),
+    hotelId: asStringOrNull(health.hotelId),
+    unackedRevisionsCount: asNumberOrNull(health.unackedRevisionsCount) ?? 0,
+    failedImportCount: asNumberOrNull(health.failedImportCount) ?? 0,
+    pendingApplyCount: asNumberOrNull(health.pendingApplyCount) ?? 0,
+    consecutiveFailures: asNumberOrNull(health.consecutiveFailures) ?? 0,
+  };
 }
 
 function buildSectionDescriptor(
@@ -925,6 +973,24 @@ export default function FamloProDashboardShell({
     const mapping = roomMappingsByRoomId.get(room.id);
     return Boolean(mapping?.externalRoomTypeId);
   });
+  const channelFeedHealth = readChannelFeedHealth(primaryProperty?.metadata ?? null);
+  const channelHealthNeedsAttention = Boolean(
+    channelFeedHealth &&
+      (!channelFeedHealth.channelAttached ||
+        !channelFeedHealth.channelActive ||
+        channelFeedHealth.unackedRevisionsCount > 0 ||
+        channelFeedHealth.failedImportCount > 0 ||
+        channelFeedHealth.pendingApplyCount > 0 ||
+        Boolean(channelFeedHealth.lastError))
+  );
+  const channelHealthSummaryBadges = [
+    `Attached: ${channelFeedHealth?.channelAttached ? "Yes" : "No"}`,
+    `Active: ${channelFeedHealth?.channelActive ? "Yes" : "No"}`,
+    `Last poll: ${formatDateTime(channelFeedHealth?.lastPollAt ?? null)}`,
+    `Last success: ${formatDateTime(channelFeedHealth?.lastSuccessfulPollAt ?? null)}`,
+    `Unacked revisions: ${channelFeedHealth?.unackedRevisionsCount ?? 0}`,
+    `Failed imports: ${channelFeedHealth?.failedImportCount ?? 0}`,
+  ];
   const firstMappedRoom = roomMappingRows.find((row) => Boolean(row.mapping?.externalRoomTypeId)) ?? null;
   const firstMappedRatePlan = rateMappingRows.find((row) => Boolean(row.ratePlan?.externalRatePlanId)) ?? null;
   const bookingComManualChecklist = [
@@ -943,6 +1009,12 @@ export default function FamloProDashboardShell({
     {
       label: "Rate plan id",
       value: firstMappedRatePlan?.ratePlan?.externalRatePlanId ?? "Missing",
+    },
+    {
+      label: "Feed poll health",
+      value: channelFeedHealth?.lastSuccessfulPollAt
+        ? `Last success ${formatDateTime(channelFeedHealth.lastSuccessfulPollAt)}`
+        : "No successful poll yet",
     },
   ];
   const ariSyncEligibleRooms = rooms.filter((room) => {
@@ -1049,6 +1121,51 @@ export default function FamloProDashboardShell({
     ...unmappedRateConflicts,
     ...failedSyncConflicts,
     ...ariHealthConflicts,
+    ...(channelFeedHealth && !channelFeedHealth.channelAttached
+      ? [{
+          key: "channel-detached",
+          title: "Channel detached or missing",
+          summary: "Channex feed health says the property currently has no attached channel.",
+          recommendedAction: "Check the Channex channel attachment before relying on automatic booking feed polling.",
+          severity: "warning" as const,
+        }]
+      : []),
+    ...(channelFeedHealth?.lastError
+      ? [{
+          key: "channel-feed-last-error",
+          title: "Feed poll failed",
+          summary: channelFeedHealth.lastError,
+          recommendedAction: "Review the latest cron poll log and clear the Channex feed issue before trusting unattended sync.",
+          severity: "warning" as const,
+        }]
+      : []),
+    ...((channelFeedHealth?.unackedRevisionsCount ?? 0) > 0
+      ? [{
+          key: "channel-feed-unacked",
+          title: "Unacknowledged revisions exist",
+          summary: `${channelFeedHealth?.unackedRevisionsCount ?? 0} Channex revision${(channelFeedHealth?.unackedRevisionsCount ?? 0) === 1 ? "" : "s"} still need acknowledgement.`,
+          recommendedAction: "Open Bookings and complete review or acknowledgement for pending revisions.",
+          severity: "warning" as const,
+        }]
+      : []),
+    ...((channelFeedHealth?.failedImportCount ?? 0) > 0
+      ? [{
+          key: "channel-feed-failed-import",
+          title: "Feed import needs operator review",
+          summary: `${channelFeedHealth?.failedImportCount ?? 0} feed revision${(channelFeedHealth?.failedImportCount ?? 0) === 1 ? "" : "s"} failed automatic storage/import handling.`,
+          recommendedAction: "Review the preview rows and rerun the appropriate booking action from Famlo Pro.",
+          severity: "warning" as const,
+        }]
+      : []),
+    ...((channelFeedHealth?.pendingApplyCount ?? 0) > 0
+      ? [{
+          key: "channel-feed-pending-apply",
+          title: "New or cancelled revision is pending apply",
+          summary: `${channelFeedHealth?.pendingApplyCount ?? 0} feed revision${(channelFeedHealth?.pendingApplyCount ?? 0) === 1 ? "" : "s"} are stored but still need import/apply action.`,
+          recommendedAction: "Open Bookings and finish the pending import or cancellation apply steps.",
+          severity: "review" as const,
+        }]
+      : []),
   ];
   const activeRooms = rooms.filter((room) => room.isActive);
   const allActiveRoomsMapped = activeRooms.length > 0 && activeRooms.every((room) => Boolean(roomMappingsByRoomId.get(room.id)?.externalRoomTypeId));
@@ -2218,6 +2335,11 @@ export default function FamloProDashboardShell({
                     <span className={styles.filterChip}>Property id: {primaryProperty?.externalPropertyId ?? "Missing"}</span>
                     <span className={styles.filterChip}>Last sync: {formatDateTime(primaryProperty?.lastSyncedAt ?? null)}</span>
                   </div>
+                  <div className={styles.providerMetaRow}>
+                    {channelHealthSummaryBadges.map((badge) => (
+                      <span key={badge} className={styles.filterChip}>{badge}</span>
+                    ))}
+                  </div>
                   <div className={styles.providerActionRow}>
                     <button
                       type="button"
@@ -2226,6 +2348,53 @@ export default function FamloProDashboardShell({
                     >
                       Prepare mapping
                     </button>
+                  </div>
+                </div>
+                <div className={`${styles.feedbackBox} ${channelHealthNeedsAttention ? styles.feedbackError : styles.feedbackSuccess}`}>
+                  {channelHealthNeedsAttention
+                    ? "Needs attention: Channex channel health shows a detached channel, poll error, pending apply work, or unacknowledged revisions."
+                    : "Channel health looks stable: attached, active, and recently polled without pending feed work."}
+                  <div className={styles.inlineBadgeRow}>
+                    <span className={`${styles.readinessPill} ${(channelFeedHealth?.channelAttached ?? false) ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                      Attached: {(channelFeedHealth?.channelAttached ?? false) ? "Yes" : "No"}
+                    </span>
+                    <span className={`${styles.readinessPill} ${(channelFeedHealth?.channelActive ?? false) ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                      Active: {(channelFeedHealth?.channelActive ?? false) ? "Yes" : "No"}
+                    </span>
+                    <span className={`${styles.readinessPill} ${(channelFeedHealth?.unackedRevisionsCount ?? 0) === 0 ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                      Unacked: {channelFeedHealth?.unackedRevisionsCount ?? 0}
+                    </span>
+                    <span className={`${styles.readinessPill} ${(channelFeedHealth?.failedImportCount ?? 0) === 0 ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                      Failed imports: {channelFeedHealth?.failedImportCount ?? 0}
+                    </span>
+                    <span className={`${styles.readinessPill} ${(channelFeedHealth?.pendingApplyCount ?? 0) === 0 ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                      Pending apply: {channelFeedHealth?.pendingApplyCount ?? 0}
+                    </span>
+                  </div>
+                  <div className={styles.placeholderGrid} style={{ marginTop: 14 }}>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Last feed poll</div>
+                      <div className={styles.placeholderValue}>{formatDateTime(channelFeedHealth?.lastPollAt ?? null)}</div>
+                      <div className={styles.placeholderCopy}>
+                        Last successful poll: {formatDateTime(channelFeedHealth?.lastSuccessfulPollAt ?? null)}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Active channel</div>
+                      <div className={styles.placeholderValue}>{channelFeedHealth?.activeChannelTitle ?? "Not visible"}</div>
+                      <div className={styles.placeholderCopy}>
+                        Channel id {channelFeedHealth?.activeChannelId ?? "Missing"} · hotel {channelFeedHealth?.hotelId ?? "Missing"} · attached count {channelFeedHealth?.accChannelsCount ?? 0}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Last error</div>
+                      <div className={styles.placeholderValue}>{channelFeedHealth?.lastError ? "Present" : "None"}</div>
+                      <div className={styles.placeholderCopy}>
+                        {channelFeedHealth?.lastError
+                          ? `${channelFeedHealth.lastError} (${formatDateTime(channelFeedHealth.lastErrorAt ?? null)})`
+                          : "No recent polling error recorded."}
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div className={styles.mappingTable}>
@@ -2258,7 +2427,7 @@ export default function FamloProDashboardShell({
                       <strong> {firstMappedRoom?.mapping?.externalRoomTypeId ?? " MISSING "}</strong>
                       and rate plan
                       <strong> {firstMappedRatePlan?.ratePlan?.externalRatePlanId ?? " MISSING "}</strong>,
-                      then activate the channel before Phase 11E feed polling.
+                      then activate the channel before feed polling. Automatic cron polling now reads preview revisions, but pending imports/cancellations still stay visible for operator review.
                     </div>
                   </div>
                 </div>
@@ -2270,11 +2439,19 @@ export default function FamloProDashboardShell({
                           <div className={styles.channelTitle}>{channel}</div>
                           <div className={styles.channelCopy}>Provider connection placeholder</div>
                         </div>
-                        <span className={`${styles.badge} ${styles.badgeMuted}`}>Not connected</span>
+                        <span className={`${styles.badge} ${channel === "Booking.com" && (channelFeedHealth?.channelAttached ?? false) ? "" : styles.badgeMuted}`.trim()}>
+                          {channel === "Booking.com"
+                            ? ((channelFeedHealth?.channelAttached ?? false) ? ((channelFeedHealth?.channelActive ?? false) ? "Active" : "Attached") : "Not connected")
+                            : "Not connected"}
+                        </span>
                       </div>
                       <div className={styles.channelMeta}>
-                        <span className={styles.filterChip}>Environment: Staging</span>
-                        <span className={styles.filterChip}>Full sync: Not started</span>
+                        <span className={styles.filterChip}>Environment: {formatChannexEnvironmentLabel(channexConfig.environment)}</span>
+                        <span className={styles.filterChip}>
+                          {channel === "Booking.com"
+                            ? `Last poll: ${formatDateTime(channelFeedHealth?.lastPollAt ?? null)}`
+                            : "Full sync: Not started"}
+                        </span>
                       </div>
                     </article>
                   ))}

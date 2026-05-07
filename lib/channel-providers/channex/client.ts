@@ -183,6 +183,8 @@ export type ChannexPropertyStructureRecord = {
   currency: string | null;
   timezone: string | null;
   groupTitles: string[];
+  isActive: boolean | null;
+  accChannelsCount: number | null;
 };
 
 export type ChannexRoomTypeStructureRecord = {
@@ -207,6 +209,14 @@ export type ChannexStructureResult<T> = {
   message: string;
   data: T;
   rawValidation: Record<string, unknown> | null;
+};
+
+export type ChannexChannelStructureRecord = {
+  id: string;
+  title: string | null;
+  hotelId: string | null;
+  isActive: boolean;
+  propertyIds: string[];
 };
 
 type ChannexBookingFeedRoom = {
@@ -1430,11 +1440,23 @@ export async function fetchChannexPropertyById(
   return {
     ...result,
     data: result.ok
-      ? {
+        ? {
           id: trimOrNull(typeof result.data.id === "string" ? result.data.id : null) ?? propertyId,
           title: trimOrNull(typeof attributes?.title === "string" ? attributes.title : null),
           currency: trimOrNull(typeof attributes?.currency === "string" ? attributes.currency : null),
           timezone: trimOrNull(typeof attributes?.timezone === "string" ? attributes.timezone : null),
+          isActive:
+            typeof attributes?.is_active === "boolean"
+              ? attributes.is_active
+              : typeof attributes?.is_active === "string"
+                ? attributes.is_active === "true"
+                : null,
+          accChannelsCount:
+            typeof attributes?.acc_channels_count === "number"
+              ? attributes.acc_channels_count
+              : typeof attributes?.acc_channels_count === "string" && attributes.acc_channels_count.trim().length > 0
+                ? Number(attributes.acc_channels_count)
+                : null,
           groupTitles: groups
             .map((group) => {
               const record = group && typeof group === "object" && !Array.isArray(group) ? (group as Record<string, unknown>) : null;
@@ -1450,6 +1472,73 @@ export async function fetchChannexPropertyById(
             .filter((value): value is string => Boolean(value)),
         }
       : null,
+  };
+}
+
+export async function fetchChannexChannelsForProperty(
+  propertyId: string
+): Promise<ChannexStructureResult<ChannexChannelStructureRecord[]>> {
+  const params = new URLSearchParams();
+  params.set("filter[property_id]", propertyId);
+  params.set("pagination[limit]", "100");
+  const result = await getChannexJson(`/api/v1/channels?${params.toString()}`);
+
+  return {
+    ...result,
+    data: result.data
+      .map((item) => {
+        const record = item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : null;
+        const attributes =
+          record &&
+          typeof record.attributes === "object" &&
+          record.attributes &&
+          !Array.isArray(record.attributes)
+            ? (record.attributes as Record<string, unknown>)
+            : null;
+        const relationships =
+          record &&
+          typeof record.relationships === "object" &&
+          record.relationships &&
+          !Array.isArray(record.relationships)
+            ? (record.relationships as Record<string, unknown>)
+            : null;
+        const propertiesRelationship =
+          relationships &&
+          typeof relationships.properties === "object" &&
+          relationships.properties &&
+          !Array.isArray(relationships.properties)
+            ? (relationships.properties as Record<string, unknown>)
+            : null;
+        const propertyData = Array.isArray(propertiesRelationship?.data) ? propertiesRelationship.data : [];
+        const id = trimOrNull(typeof record?.id === "string" ? record.id : null);
+        if (!id) return null;
+        return {
+          id,
+          title: trimOrNull(typeof attributes?.title === "string" ? attributes.title : null),
+          hotelId:
+            typeof attributes?.hotel_id === "string"
+              ? trimOrNull(attributes.hotel_id)
+              : typeof attributes?.hotel_id === "number" && Number.isFinite(attributes.hotel_id)
+                ? String(attributes.hotel_id)
+                : null,
+          isActive:
+            typeof attributes?.is_active === "boolean"
+              ? attributes.is_active
+              : typeof attributes?.is_active === "string"
+                ? attributes.is_active === "true"
+                : false,
+          propertyIds: propertyData
+            .map((property) => {
+              const propertyRecord =
+                property && typeof property === "object" && !Array.isArray(property)
+                  ? (property as Record<string, unknown>)
+                  : null;
+              return trimOrNull(typeof propertyRecord?.id === "string" ? propertyRecord.id : null);
+            })
+            .filter((value): value is string => Boolean(value)),
+        };
+      })
+      .filter((item): item is ChannexChannelStructureRecord => Boolean(item)),
   };
 }
 
