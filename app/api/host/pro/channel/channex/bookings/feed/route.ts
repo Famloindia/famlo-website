@@ -259,6 +259,158 @@ async function logFeedResult(input: {
   }
 }
 
+type PreparedFeedRow = {
+  family_id: string;
+  provider_code: "channex";
+  external_property_id: string;
+  external_booking_id: string | null;
+  external_revision_id: string;
+  external_room_type_id: string | null;
+  external_rate_plan_id: string | null;
+  ota_name: string | null;
+  status: string | null;
+  arrival_date: string | null;
+  departure_date: string | null;
+  guest_name: string | null;
+  amount: string | null;
+  currency: string | null;
+  payment_collect: string | null;
+  raw_payload: Record<string, unknown>;
+  import_status: string;
+  ack_status: string;
+  updated_at: string;
+  source: string;
+};
+
+function mergeRevisionPayload(
+  existingPayload: unknown,
+  latestRevision: Record<string, unknown>,
+  observedAt: string
+): Record<string, unknown> {
+  const existingRecord = asObject(existingPayload) ?? {};
+  return {
+    ...existingRecord,
+    ...latestRevision,
+    last_feed_seen_at: observedAt,
+  };
+}
+
+async function storeMatchedFeedRevisions(input: {
+  supabase: ReturnType<typeof createAdminSupabaseClient>;
+  familyId: string;
+  externalPropertyId: string;
+  matchedRevisions: Array<Record<string, unknown>>;
+  normalizedRevisions: BookingFeedSummary[];
+}): Promise<{
+  insertedCount: number;
+  updatedCount: number;
+  storedCount: number;
+}> {
+  const observedAt = new Date().toISOString();
+  const dedupedRows = new Map<string, PreparedFeedRow>();
+
+  input.matchedRevisions.forEach((revision, index) => {
+    const summary = input.normalizedRevisions[index];
+    const revisionId = summary.revisionId;
+    if (!revisionId) return;
+
+    dedupedRows.set(revisionId, {
+      family_id: input.familyId,
+      provider_code: "channex",
+      external_property_id: input.externalPropertyId,
+      external_booking_id: summary.externalBookingId,
+      external_revision_id: revisionId,
+      external_room_type_id: summary.externalRoomTypeId,
+      external_rate_plan_id: summary.externalRatePlanId,
+      ota_name: summary.otaName,
+      status: summary.status,
+      arrival_date: summary.arrivalDate,
+      departure_date: summary.departureDate,
+      guest_name: summary.guestName,
+      amount: asNumericStringOrNull(summary.amount),
+      currency: summary.currency,
+      payment_collect: summary.paymentCollect,
+      raw_payload: mergeRevisionPayload(null, revision, observedAt),
+      import_status: "preview",
+      ack_status: "not_acknowledged",
+      updated_at: observedAt,
+      source: "booking_revision_feed",
+    });
+  });
+
+  const revisionIds = [...dedupedRows.keys()];
+  if (revisionIds.length === 0) {
+    return { insertedCount: 0, updatedCount: 0, storedCount: 0 };
+  }
+
+  const { data: existingRows, error: existingRowsError } = await input.supabase
+    .from("channel_booking_revisions")
+    .select("id,external_revision_id,import_status,ack_status,linked_booking_id,raw_payload,source")
+    .eq("family_id", input.familyId)
+    .eq("provider_code", "channex")
+    .in("external_revision_id", revisionIds);
+
+  if (existingRowsError) {
+    throw existingRowsError;
+  }
+
+  const existingByRevisionId = new Map(
+    ((existingRows ?? []) as Array<Record<string, unknown>>)
+      .map((row) => {
+        const revisionId = asStringOrNull(row.external_revision_id);
+        return revisionId ? [revisionId, row] : null;
+      })
+      .filter((entry): entry is [string, Record<string, unknown>] => Boolean(entry))
+  );
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+
+  for (const [revisionId, preparedRow] of dedupedRows.entries()) {
+    const existingRow = existingByRevisionId.get(revisionId);
+
+    if (!existingRow?.id) {
+      const { error } = await input.supabase.from("channel_booking_revisions").insert(preparedRow as never);
+      if (error) throw error;
+      insertedCount += 1;
+      continue;
+    }
+
+    const { error } = await input.supabase
+      .from("channel_booking_revisions")
+      .update({
+        external_property_id: preparedRow.external_property_id,
+        external_booking_id: preparedRow.external_booking_id,
+        external_room_type_id: preparedRow.external_room_type_id,
+        external_rate_plan_id: preparedRow.external_rate_plan_id,
+        ota_name: preparedRow.ota_name,
+        status: preparedRow.status,
+        arrival_date: preparedRow.arrival_date,
+        departure_date: preparedRow.departure_date,
+        guest_name: preparedRow.guest_name,
+        amount: preparedRow.amount,
+        currency: preparedRow.currency,
+        payment_collect: preparedRow.payment_collect,
+        raw_payload: mergeRevisionPayload(existingRow.raw_payload, preparedRow.raw_payload, observedAt),
+        source: asStringOrNull(existingRow.source) ?? preparedRow.source,
+        import_status: asStringOrNull(existingRow.import_status) ?? preparedRow.import_status,
+        ack_status: asStringOrNull(existingRow.ack_status) ?? preparedRow.ack_status,
+        linked_booking_id: asStringOrNull(existingRow.linked_booking_id),
+        updated_at: observedAt,
+      } as never)
+      .eq("id", existingRow.id);
+
+    if (error) throw error;
+    updatedCount += 1;
+  }
+
+  return {
+    insertedCount,
+    updatedCount,
+    storedCount: revisionIds.length,
+  };
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const body = (await request.json()) as FeedBody;
@@ -358,43 +510,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const normalizedRevisions = matchedRevisions.map((revision) => summarizeRevision(revision, mappedRoomTypeIds));
-    if (normalizedRevisions.length > 0) {
-      const upsertRows = matchedRevisions.map((revision, index) => {
-        const summary = normalizedRevisions[index];
-        return {
-          family_id: familyId,
-          provider_code: "channex",
-          external_property_id: externalPropertyId,
-          external_booking_id: summary.externalBookingId,
-          external_revision_id: summary.revisionId,
-          external_room_type_id: summary.externalRoomTypeId,
-          external_rate_plan_id: summary.externalRatePlanId,
-          ota_name: summary.otaName,
-          status: summary.status,
-          arrival_date: summary.arrivalDate,
-          departure_date: summary.departureDate,
-          guest_name: summary.guestName,
-          amount: asNumericStringOrNull(summary.amount),
-          currency: summary.currency,
-          payment_collect: summary.paymentCollect,
-          raw_payload: revision,
-          import_status: "preview",
-          ack_status: "not_acknowledged",
-          updated_at: new Date().toISOString(),
-        };
-      });
-
-      const { error: upsertError } = await supabase
-        .from("channel_booking_revisions")
-        .upsert(upsertRows as never, { onConflict: "provider_code,external_revision_id" });
-
-      if (upsertError) {
-        const message = String(upsertError.message ?? "");
-        if (!/relation|does not exist|schema cache/i.test(message)) {
-          throw upsertError;
-        }
-      }
-    }
+    const storageResult =
+      normalizedRevisions.length > 0
+        ? await storeMatchedFeedRevisions({
+            supabase,
+            familyId,
+            externalPropertyId,
+            matchedRevisions,
+            normalizedRevisions,
+          })
+        : { insertedCount: 0, updatedCount: 0, storedCount: 0 };
 
     const { data: storedRevisionRows } = await supabase
       .from("channel_booking_revisions")
@@ -447,6 +572,9 @@ export async function POST(request: Request): Promise<NextResponse> {
         matched_revision_count: normalizedRevisions.length,
         unmatched_revision_count: unmatchedCount,
         revision_ids: normalizedRevisions.map((revision) => revision.revisionId).filter(Boolean),
+        stored_revision_count: storageResult.storedCount,
+        inserted_revision_count: storageResult.insertedCount,
+        updated_revision_count: storageResult.updatedCount,
         latest_safe_booking_ids: result.revisions
           .slice(0, 10)
           .map((revision) => extractExternalBookingId(revision as Record<string, unknown>))
@@ -472,6 +600,9 @@ export async function POST(request: Request): Promise<NextResponse> {
         message,
         totalFetched,
         revisionsFound: normalizedRevisions.length,
+        storedCount: storageResult.storedCount,
+        insertedCount: storageResult.insertedCount,
+        updatedCount: storageResult.updatedCount,
         unmatchedCount,
         unmatchedRoomCount,
         externalPropertyId,

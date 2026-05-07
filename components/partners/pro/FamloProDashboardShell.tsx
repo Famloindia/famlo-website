@@ -106,6 +106,26 @@ type CalendarRow = {
   rateCells: string[];
 };
 
+type ProBookingSummary = {
+  bookingId: string;
+  roomId: string | null;
+  roomName: string;
+  startDate: string;
+  endDate: string;
+  createdAt: string | null;
+  guestDisplayName: string;
+  status: string;
+  paymentStatus: string | null;
+  amount: string | null;
+  sourceLabel: string;
+  externalBookingId: string | null;
+  externalRevisionId: string | null;
+  importStatus: string | null;
+  ackStatus: string | null;
+  linkedBookingId: string | null;
+  isOta: boolean;
+};
+
 type CalendarBookingDetail = {
   bookingId: string;
   roomName: string;
@@ -223,8 +243,24 @@ interface FamloProDashboardShellProps {
   initialSettings: HostProSettings;
   channelFoundation: HostProChannelFoundation;
   channexConfig: ChannexSummary;
+  proBookings: ProBookingSummary[];
   calendarColumns: CalendarColumn[];
   calendarRows: CalendarRow[];
+  calendarWindow: {
+    startDate: string;
+    endDate: string;
+    isCustomRange: boolean;
+    verificationUrl: string | null;
+    verificationTargetLabel: string | null;
+  };
+  calendarVerification: {
+    targetDate: string;
+    checkoutDate: string;
+    roomName: string;
+    sourceLabel: string;
+    targetDateBlocked: boolean;
+    checkoutDateBlocked: boolean;
+  } | null;
 }
 
 type NavItem = {
@@ -742,8 +778,11 @@ export default function FamloProDashboardShell({
   initialSettings,
   channelFoundation,
   channexConfig,
+  proBookings,
   calendarColumns,
   calendarRows,
+  calendarWindow,
+  calendarVerification,
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
@@ -1819,6 +1858,40 @@ export default function FamloProDashboardShell({
                 </div>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.placeholderGrid}>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Calendar window</div>
+                    <div className={styles.placeholderValue}>
+                      {calendarWindow.startDate} → {calendarWindow.endDate}
+                    </div>
+                    <div className={styles.placeholderCopy}>
+                      {calendarWindow.isCustomRange
+                        ? "Custom verification window is active for this Pro calendar view."
+                        : "Default rolling 30-day Pro calendar window."}
+                    </div>
+                  </div>
+                  {calendarWindow.verificationUrl ? (
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Booking.com verification</div>
+                      <div className={styles.placeholderValue}>{calendarWindow.verificationTargetLabel ?? "Ready"}</div>
+                      <div className={styles.placeholderCopy}>
+                        Open the June verification window to inspect the real Booking.com test stay without changing booking logic.
+                      </div>
+                      <div className={styles.inlineActionRow}>
+                        <Link href={calendarWindow.verificationUrl} className={styles.secondaryActionLink}>
+                          Open June verification window
+                        </Link>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                {calendarVerification ? (
+                  <div className={`${styles.feedbackBox} ${calendarVerification.targetDateBlocked && !calendarVerification.checkoutDateBlocked ? styles.feedbackSuccess : styles.feedbackError}`}>
+                    {calendarVerification.sourceLabel} for {calendarVerification.roomName}:{" "}
+                    {calendarVerification.targetDate} {calendarVerification.targetDateBlocked ? "is blocked" : "is not blocked"} and{" "}
+                    {calendarVerification.checkoutDate} {calendarVerification.checkoutDateBlocked ? "is blocked" : "stays available"}.
+                  </div>
+                ) : null}
                 <div className={styles.filterRow}>
                   {CALENDAR_LEGEND.map((item) => (
                     <span key={item.title} className={styles.filterChip}>
@@ -2442,13 +2515,64 @@ export default function FamloProDashboardShell({
                     <span key={filter} className={styles.filterChip}>{filter}</span>
                   ))}
                 </div>
-                <div className={styles.emptyState}>
-                  <div className={styles.emptyTitle}>No provider bookings connected yet</div>
-                  <div className={styles.emptyCopy}>
-                    Future OTA imports, modifications, cancellations, and unmapped reservations will surface here once
-                    providers are connected. Famlo direct bookings continue to live in existing booking flows today.
+                {proBookings.length > 0 ? (
+                  <div className={styles.mappingTable}>
+                    <div className={styles.mappingHeader}>Booking</div>
+                    <div className={styles.mappingHeader}>Source</div>
+                    <div className={styles.mappingHeader}>Dates</div>
+                    <div className={styles.mappingHeader}>Guest / Room</div>
+                    <div className={styles.mappingHeader}>Import / Ack</div>
+                    <div className={styles.mappingHeader}>Amount / payment</div>
+                    {proBookings.map((booking) => (
+                      <Fragment key={booking.bookingId}>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.externalBookingId ?? booking.bookingId}</div>
+                          <div className={styles.mappingSubcopy}>
+                            {labelizeToken(booking.status, "unknown")} · {booking.linkedBookingId ?? booking.bookingId}
+                          </div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.sourceLabel}</div>
+                          <div className={styles.mappingSubcopy}>
+                            {booking.isOta ? `Feed ${booking.externalRevisionId ?? "missing"}` : "Famlo direct"}
+                          </div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.startDate} → {booking.endDate}</div>
+                          <div className={styles.mappingSubcopy}>Created {formatDateTime(booking.createdAt)}</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
+                          <div className={styles.mappingSubcopy}>{booking.roomName}</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>
+                            {booking.isOta
+                              ? `${labelizeToken(booking.importStatus, "preview")} · ${labelizeToken(booking.ackStatus, "not_acknowledged")}`
+                              : "Direct booking"}
+                          </div>
+                          <div className={styles.mappingSubcopy}>
+                            {booking.isOta ? "Scoped to this property" : "Existing Famlo flow"}
+                          </div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
+                          <div className={styles.mappingSubcopy}>
+                            Payment {labelizeToken(booking.paymentStatus, "unknown")}
+                          </div>
+                        </div>
+                      </Fragment>
+                    ))}
                   </div>
-                </div>
+                ) : (
+                  <div className={styles.emptyState}>
+                    <div className={styles.emptyTitle}>No provider bookings connected yet</div>
+                    <div className={styles.emptyCopy}>
+                      Future OTA imports, modifications, cancellations, and unmapped reservations will surface here once
+                      providers are connected. Famlo direct bookings continue to live in existing booking flows today.
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           )}

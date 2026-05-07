@@ -61,24 +61,29 @@ async function loadFamilyRows(
 ): Promise<Array<Record<string, unknown>>> {
   if (familyIds.length === 0) return [];
 
-  let result = await supabase
+  const initialResult = await supabase
     .from("families")
     .select("id,name,property_name,city,state,village")
     .in("id", familyIds);
 
-  if (result.error && isMissingColumnError(result.error, "property_name")) {
-    result = await supabase
+  if (initialResult.error && isMissingColumnError(initialResult.error, "property_name")) {
+    const fallbackResult = await supabase
       .from("families")
       .select("id,name,city,state,village")
       .in("id", familyIds);
+    if (fallbackResult.error) {
+      console.warn("[host.dashboard-bookings] family enrichment skipped", fallbackResult.error);
+      return [];
+    }
+    return (fallbackResult.data ?? []) as Array<Record<string, unknown>>;
   }
 
-  if (result.error) {
-    console.warn("[host.dashboard-bookings] family enrichment skipped", result.error);
+  if (initialResult.error) {
+    console.warn("[host.dashboard-bookings] family enrichment skipped", initialResult.error);
     return [];
   }
 
-  return (result.data ?? []) as Array<Record<string, unknown>>;
+  return (initialResult.data ?? []) as Array<Record<string, unknown>>;
 }
 
 async function loadStayUnitRows(
@@ -87,24 +92,29 @@ async function loadStayUnitRows(
 ): Promise<Array<Record<string, unknown>>> {
   if (stayUnitIds.length === 0) return [];
 
-  let result = await supabase
+  const initialResult = await supabase
     .from("stay_units_v2")
     .select("id,name,unit_key,host_id")
     .in("id", stayUnitIds);
 
-  if (result.error && isMissingColumnError(result.error, "unit_key")) {
-    result = await supabase
+  if (initialResult.error && isMissingColumnError(initialResult.error, "unit_key")) {
+    const fallbackResult = await supabase
       .from("stay_units_v2")
       .select("id,name,host_id")
       .in("id", stayUnitIds);
+    if (fallbackResult.error) {
+      console.warn("[host.dashboard-bookings] stay unit enrichment skipped", fallbackResult.error);
+      return [];
+    }
+    return (fallbackResult.data ?? []) as Array<Record<string, unknown>>;
   }
 
-  if (result.error) {
-    console.warn("[host.dashboard-bookings] stay unit enrichment skipped", result.error);
+  if (initialResult.error) {
+    console.warn("[host.dashboard-bookings] stay unit enrichment skipped", initialResult.error);
     return [];
   }
 
-  return (result.data ?? []) as Array<Record<string, unknown>>;
+  return (initialResult.data ?? []) as Array<Record<string, unknown>>;
 }
 
 export async function GET(request: Request): Promise<NextResponse> {

@@ -19,10 +19,34 @@ interface FamloProDashboardPageProps {
   searchParams?: Promise<{
     family?: string;
     section?: string;
+    calendarStart?: string;
   }>;
 }
 
 export const dynamic = "force-dynamic";
+
+type ProSectionId =
+  | "dashboard"
+  | "setup-guide"
+  | "rooms-units"
+  | "rates-restrictions"
+  | "inventory-calendar"
+  | "availability-rules"
+  | "check-times"
+  | "connected-channels"
+  | "room-mapping"
+  | "rate-mapping"
+  | "sync-logs"
+  | "conflicts"
+  | "bookings"
+  | "messages-reviews"
+  | "revenue"
+  | "reports"
+  | "property"
+  | "ota-content"
+  | "team-groups"
+  | "settings"
+  | "support";
 
 const PRO_SECTION_IDS = new Set([
   "dashboard",
@@ -46,7 +70,7 @@ const PRO_SECTION_IDS = new Set([
   "team-groups",
   "settings",
   "support",
-] as const);
+] as const satisfies readonly ProSectionId[]);
 
 function buildBasicFamloPlusUrl(familyId: string): string {
   const base = "/partnerslogin/home/dashboard?tab=famlo-plus";
@@ -99,9 +123,9 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function resolveInitialSection(value: string | undefined): string {
-  if (value && PRO_SECTION_IDS.has(value as (typeof PRO_SECTION_IDS extends Set<infer T> ? T : never))) {
-    return value;
+function resolveInitialSection(value: string | undefined): ProSectionId {
+  if (value && PRO_SECTION_IDS.has(value as ProSectionId)) {
+    return value as ProSectionId;
   }
   return "dashboard";
 }
@@ -209,6 +233,43 @@ type CalendarRow = {
   rateCells: string[];
 };
 
+type ProBookingSummary = {
+  bookingId: string;
+  roomId: string | null;
+  roomName: string;
+  startDate: string;
+  endDate: string;
+  createdAt: string | null;
+  guestDisplayName: string;
+  status: string;
+  paymentStatus: string | null;
+  amount: string | null;
+  sourceLabel: string;
+  externalBookingId: string | null;
+  externalRevisionId: string | null;
+  importStatus: string | null;
+  ackStatus: string | null;
+  linkedBookingId: string | null;
+  isOta: boolean;
+};
+
+type CalendarWindowSummary = {
+  startDate: string;
+  endDate: string;
+  isCustomRange: boolean;
+  verificationUrl: string | null;
+  verificationTargetLabel: string | null;
+};
+
+type CalendarVerificationSummary = {
+  targetDate: string;
+  checkoutDate: string;
+  roomName: string;
+  sourceLabel: string;
+  targetDateBlocked: boolean;
+  checkoutDateBlocked: boolean;
+};
+
 function formatCalendarDayLabel(date: string): string {
   const value = new Date(`${date}T12:00:00+05:30`);
   return new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(value);
@@ -223,6 +284,12 @@ function enumerateIndiaDates(from: string, days: number): string[] {
   return Array.from({ length: days }, (_, index) => addIndiaDays(from, index));
 }
 
+function isIsoDate(value: string | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T12:00:00+05:30`);
+  return !Number.isNaN(parsed.getTime());
+}
+
 export default async function FamloProDashboardPage({
   searchParams,
 }: Readonly<FamloProDashboardPageProps>): Promise<React.JSX.Element> {
@@ -230,6 +297,7 @@ export default async function FamloProDashboardPage({
   const cookieStore = await cookies();
   const familyId = params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "";
   const initialSection = resolveInitialSection(params?.section);
+  const requestedCalendarStart = isIsoDate(params?.calendarStart) ? params?.calendarStart : null;
   const basicDashboardUrl = buildBasicFamloPlusUrl(familyId);
   const basicRoomUrl = buildBasicRoomUrl(familyId);
 
@@ -512,7 +580,7 @@ export default async function FamloProDashboardPage({
     },
   ];
 
-  const calendarFrom = getTodayInIndia();
+  const calendarFrom = requestedCalendarStart ?? getTodayInIndia();
   const calendarDates = enumerateIndiaDates(calendarFrom, 30);
   const calendarTo = calendarDates[calendarDates.length - 1] ?? calendarFrom;
   const calendarColumns: CalendarColumn[] = calendarDates.map((date) => ({
@@ -523,13 +591,14 @@ export default async function FamloProDashboardPage({
   }));
 
   let bookingRowsForCalendar: Array<Record<string, unknown>> = [];
+  let bookingRowsForWorkspace: Array<Record<string, unknown>> = [];
   if (host?.id) {
     const selectWithStayUnit =
       "id,status,payment_status,total_price,start_date,end_date,stay_unit_id,pricing_snapshot,users!user_id(name)";
     const selectFallback =
       "id,status,payment_status,total_price,start_date,end_date,pricing_snapshot,users!user_id(name)";
 
-    let bookingCalendarResult = await supabase
+    const bookingCalendarInitialResult = await supabase
       .from("bookings_v2")
       .select(selectWithStayUnit)
       .eq("host_id", host.id)
@@ -537,19 +606,51 @@ export default async function FamloProDashboardPage({
       .gte("end_date", calendarFrom);
 
     if (
-      bookingCalendarResult.error &&
-      String(bookingCalendarResult.error.message ?? "").includes("stay_unit_id")
+      bookingCalendarInitialResult.error &&
+      String(bookingCalendarInitialResult.error.message ?? "").includes("stay_unit_id")
     ) {
-      bookingCalendarResult = await supabase
+      const bookingCalendarFallbackResult = await supabase
         .from("bookings_v2")
         .select(selectFallback)
         .eq("host_id", host.id)
         .lte("start_date", calendarTo)
         .gte("end_date", calendarFrom);
+
+      if (!bookingCalendarFallbackResult.error) {
+        bookingRowsForCalendar = (bookingCalendarFallbackResult.data ?? []) as Array<Record<string, unknown>>;
+      }
+    } else if (!bookingCalendarInitialResult.error) {
+      bookingRowsForCalendar = (bookingCalendarInitialResult.data ?? []) as Array<Record<string, unknown>>;
     }
 
-    if (!bookingCalendarResult.error) {
-      bookingRowsForCalendar = (bookingCalendarResult.data ?? []) as Array<Record<string, unknown>>;
+    const workspaceSelectWithStayUnit =
+      "id,status,payment_status,total_price,start_date,end_date,created_at,stay_unit_id,pricing_snapshot,users!user_id(name)";
+    const workspaceSelectFallback =
+      "id,status,payment_status,total_price,start_date,end_date,created_at,pricing_snapshot,users!user_id(name)";
+
+    const bookingWorkspaceInitialResult = await supabase
+      .from("bookings_v2")
+      .select(workspaceSelectWithStayUnit)
+      .eq("host_id", host.id)
+      .order("start_date", { ascending: false })
+      .limit(120);
+
+    if (
+      bookingWorkspaceInitialResult.error &&
+      String(bookingWorkspaceInitialResult.error.message ?? "").includes("stay_unit_id")
+    ) {
+      const bookingWorkspaceFallbackResult = await supabase
+        .from("bookings_v2")
+        .select(workspaceSelectFallback)
+        .eq("host_id", host.id)
+        .order("start_date", { ascending: false })
+        .limit(120);
+
+      if (!bookingWorkspaceFallbackResult.error) {
+        bookingRowsForWorkspace = (bookingWorkspaceFallbackResult.data ?? []) as Array<Record<string, unknown>>;
+      }
+    } else if (!bookingWorkspaceInitialResult.error) {
+      bookingRowsForWorkspace = (bookingWorkspaceInitialResult.data ?? []) as Array<Record<string, unknown>>;
     }
   }
 
@@ -590,6 +691,67 @@ export default async function FamloProDashboardPage({
       .filter((revision) => revision.externalBookingId)
       .map((revision) => [revision.externalBookingId as string, revision])
   );
+  const proBookings: ProBookingSummary[] = bookingRowsForWorkspace
+    .flatMap((row) => {
+      const pricingSnapshot =
+        row.pricing_snapshot && typeof row.pricing_snapshot === "object" && !Array.isArray(row.pricing_snapshot)
+          ? (row.pricing_snapshot as Record<string, unknown>)
+          : {};
+      const userRecord =
+        row.users && typeof row.users === "object" && !Array.isArray(row.users)
+          ? (row.users as Record<string, unknown>)
+          : {};
+      const bookingId = asString(row.id);
+      const startDate = asString(row.start_date);
+      const endDate = asString(row.end_date);
+      const stayUnitId = asString(row.stay_unit_id) ?? asString(pricingSnapshot.stay_unit_id);
+      if (!bookingId || !startDate || !endDate) return [];
+
+      const externalBookingId = asString(pricingSnapshot.channel_external_booking_id);
+      const matchedRevision =
+        bookingRevisionByLinkedBookingId.get(bookingId) ??
+        (externalBookingId ? bookingRevisionByExternalBookingId.get(externalBookingId) : null) ??
+        null;
+      const channelProvider = asString(pricingSnapshot.channel_provider);
+      const otaName = asString(pricingSnapshot.ota_name) ?? matchedRevision?.otaName ?? null;
+      const isOta = channelProvider === "channex";
+      const bookingCurrency = asString(pricingSnapshot.currency) ?? matchedRevision?.currency ?? "INR";
+      const totalPrice = asNumber(row.total_price);
+      return [{
+        bookingId,
+        roomId: stayUnitId,
+        roomName: stayUnitId ? roomNameById.get(stayUnitId) ?? "Room" : "Room",
+        startDate,
+        endDate,
+        createdAt: asString(row.created_at),
+        guestDisplayName:
+          asString(pricingSnapshot.channel_guest_display_name) ??
+          asString(pricingSnapshot.channel_guest_name) ??
+          asString(pricingSnapshot.guest_name) ??
+          asString(userRecord.name) ??
+          (isOta ? "OTA Guest" : "Famlo Guest"),
+        status: String(row.status ?? "unknown"),
+        paymentStatus: asString(row.payment_status),
+        amount:
+          totalPrice > 0
+            ? formatCalendarAmount(totalPrice, bookingCurrency)
+            : matchedRevision?.amount != null
+              ? formatCalendarAmount(matchedRevision.amount, matchedRevision.currency ?? bookingCurrency)
+              : null,
+        sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : "Famlo Direct",
+        externalBookingId: externalBookingId ?? matchedRevision?.externalBookingId ?? null,
+        externalRevisionId:
+          asString(pricingSnapshot.channel_external_revision_id) ?? matchedRevision?.externalRevisionId ?? null,
+        importStatus: isOta ? matchedRevision?.importStatus ?? "preview" : "not_applicable",
+        ackStatus: isOta ? matchedRevision?.ackStatus ?? "not_acknowledged" : "not_applicable",
+        linkedBookingId: matchedRevision?.linkedBookingId ?? bookingId,
+        isOta,
+      } satisfies ProBookingSummary];
+    })
+    .sort((left, right) => {
+      if (left.isOta !== right.isOta) return left.isOta ? -1 : 1;
+      return right.startDate.localeCompare(left.startDate);
+    });
   for (const row of bookingRowsForCalendar) {
     const pricingSnapshot =
       row.pricing_snapshot && typeof row.pricing_snapshot === "object" && !Array.isArray(row.pricing_snapshot)
@@ -748,6 +910,43 @@ export default async function FamloProDashboardPage({
     ),
   }));
 
+  const bookingComVerificationTarget =
+    proBookings.find(
+      (booking) =>
+        booking.isOta &&
+        booking.startDate === "2026-06-10" &&
+        booking.endDate === "2026-06-11"
+    ) ?? null;
+  const juneVerificationWindowStart = bookingComVerificationTarget ? "2026-06-01" : null;
+  const calendarWindow: CalendarWindowSummary = {
+    startDate: calendarFrom,
+    endDate: calendarTo,
+    isCustomRange: Boolean(requestedCalendarStart),
+    verificationUrl: juneVerificationWindowStart
+      ? `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=inventory-calendar&calendarStart=${encodeURIComponent(juneVerificationWindowStart)}`
+      : null,
+    verificationTargetLabel: bookingComVerificationTarget
+      ? `${bookingComVerificationTarget.startDate} → ${bookingComVerificationTarget.endDate}`
+      : null,
+  };
+  const computedCalendarVerification: CalendarVerificationSummary | null =
+    bookingComVerificationTarget &&
+    bookingComVerificationTarget.roomId &&
+    calendarDates.includes(bookingComVerificationTarget.startDate) &&
+    calendarDates.includes(bookingComVerificationTarget.endDate)
+      ? {
+          targetDate: bookingComVerificationTarget.startDate,
+          checkoutDate: bookingComVerificationTarget.endDate,
+          roomName: bookingComVerificationTarget.roomName,
+          sourceLabel: bookingComVerificationTarget.sourceLabel,
+          targetDateBlocked:
+            bookingStatusByRoomDate.get(`${bookingComVerificationTarget.roomId}:${bookingComVerificationTarget.startDate}`) === "ota",
+          checkoutDateBlocked: Boolean(
+            bookingStatusByRoomDate.get(`${bookingComVerificationTarget.roomId}:${bookingComVerificationTarget.endDate}`)
+          ),
+        }
+      : null;
+
   return (
     <FamloProDashboardShell
       propertyName={propertyName}
@@ -772,8 +971,11 @@ export default async function FamloProDashboardPage({
       initialSettings={proSettings}
       channelFoundation={channelFoundation}
       channexConfig={channexConfig}
+      proBookings={proBookings}
       calendarColumns={calendarColumns}
       calendarRows={calendarRows}
+      calendarWindow={calendarWindow}
+      calendarVerification={computedCalendarVerification}
     />
   );
 }
