@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getAdminCookieName, verifyAdminSessionToken } from "@/lib/admin-auth";
+import { autoProcessPendingChannexFeedRevisions } from "@/lib/channex-booking-auto-apply";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import { pollChannexBookingFeedForFamily, shouldSkipChannexFeedPoll } from "@/lib/channex-booking-feed-sync";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -89,6 +90,36 @@ async function handleRequest(request: NextRequest): Promise<NextResponse> {
           familyId,
           action: "poll_booking_feed_cron",
         });
+        const autoApplySummary = await autoProcessPendingChannexFeedRevisions({
+          supabase,
+          familyId,
+        });
+
+        if (propertyRow.id) {
+          const metadata = asObject(propertyRow.metadata) ?? {};
+          const existingHealth = asObject(metadata.channexFeedHealth) ?? {};
+          await supabase
+            .from("channel_properties")
+            .update({
+              metadata: {
+                ...metadata,
+                channexFeedHealth: {
+                  ...existingHealth,
+                  autoAppliedCount: autoApplySummary.autoAppliedCount,
+                  autoImportedCount: autoApplySummary.autoImportedCount,
+                  autoCancelledCount: autoApplySummary.autoCancelledCount,
+                  pendingManualReviewCount: autoApplySummary.pendingManualReviewCount,
+                  failedAutoApplyCount: autoApplySummary.failedAutoApplyCount,
+                  acknowledgedCount: autoApplySummary.acknowledgedCount,
+                  lastAutoApplyAt: autoApplySummary.lastAutoApplyAt,
+                  lastAutoApplyState: autoApplySummary.lastAutoApplyState,
+                  lastAutoApplyMessage: autoApplySummary.lastAutoApplyMessage,
+                },
+              },
+            } as never)
+            .eq("id", propertyRow.id);
+        }
+
         results.push({
           familyId,
           externalPropertyId,
@@ -98,6 +129,7 @@ async function handleRequest(request: NextRequest): Promise<NextResponse> {
           revisionsFound: result.revisionsFound,
           storedCount: result.storedCount,
           channelHealth: result.channelHealth,
+          autoApplySummary,
         });
       } catch (error) {
         results.push({

@@ -227,6 +227,15 @@ type ChannelFeedHealthSnapshot = {
   failedImportCount: number;
   pendingApplyCount: number;
   consecutiveFailures: number;
+  autoAppliedCount: number;
+  autoImportedCount: number;
+  autoCancelledCount: number;
+  pendingManualReviewCount: number;
+  failedAutoApplyCount: number;
+  acknowledgedCount: number;
+  lastAutoApplyAt: string | null;
+  lastAutoApplyState: "synced" | "needs_review" | "failed_import" | "failed_cancellation_apply" | "waiting_for_manual_review";
+  lastAutoApplyMessage: string | null;
 };
 
 type GoLiveChecklistStatus = "ready" | "needs_action" | "blocked";
@@ -603,6 +612,21 @@ function readChannelFeedHealth(metadata: Record<string, unknown> | null): Channe
     failedImportCount: asNumberOrNull(health.failedImportCount) ?? 0,
     pendingApplyCount: asNumberOrNull(health.pendingApplyCount) ?? 0,
     consecutiveFailures: asNumberOrNull(health.consecutiveFailures) ?? 0,
+    autoAppliedCount: asNumberOrNull(health.autoAppliedCount) ?? 0,
+    autoImportedCount: asNumberOrNull(health.autoImportedCount) ?? 0,
+    autoCancelledCount: asNumberOrNull(health.autoCancelledCount) ?? 0,
+    pendingManualReviewCount: asNumberOrNull(health.pendingManualReviewCount) ?? 0,
+    failedAutoApplyCount: asNumberOrNull(health.failedAutoApplyCount) ?? 0,
+    acknowledgedCount: asNumberOrNull(health.acknowledgedCount) ?? 0,
+    lastAutoApplyAt: asStringOrNull(health.lastAutoApplyAt),
+    lastAutoApplyState:
+      asStringOrNull(health.lastAutoApplyState) === "failed_import" ||
+      asStringOrNull(health.lastAutoApplyState) === "failed_cancellation_apply" ||
+      asStringOrNull(health.lastAutoApplyState) === "waiting_for_manual_review" ||
+      asStringOrNull(health.lastAutoApplyState) === "needs_review"
+        ? (asStringOrNull(health.lastAutoApplyState) as ChannelFeedHealthSnapshot["lastAutoApplyState"])
+        : "synced",
+    lastAutoApplyMessage: asStringOrNull(health.lastAutoApplyMessage),
   };
 }
 
@@ -974,6 +998,16 @@ export default function FamloProDashboardShell({
     return Boolean(mapping?.externalRoomTypeId);
   });
   const channelFeedHealth = readChannelFeedHealth(primaryProperty?.metadata ?? null);
+  const autoApplyStateLabel =
+    channelFeedHealth?.lastAutoApplyState === "failed_import"
+      ? "Failed import"
+      : channelFeedHealth?.lastAutoApplyState === "failed_cancellation_apply"
+        ? "Failed cancellation apply"
+        : channelFeedHealth?.lastAutoApplyState === "waiting_for_manual_review"
+          ? "Waiting for manual review"
+          : channelFeedHealth?.pendingManualReviewCount
+            ? "Needs review"
+            : "Synced";
   const channelHealthNeedsAttention = Boolean(
     channelFeedHealth &&
       (!channelFeedHealth.channelAttached ||
@@ -981,6 +1015,8 @@ export default function FamloProDashboardShell({
         channelFeedHealth.unackedRevisionsCount > 0 ||
         channelFeedHealth.failedImportCount > 0 ||
         channelFeedHealth.pendingApplyCount > 0 ||
+        channelFeedHealth.failedAutoApplyCount > 0 ||
+        channelFeedHealth.pendingManualReviewCount > 0 ||
         Boolean(channelFeedHealth.lastError))
   );
   const channelHealthSummaryBadges = [
@@ -990,6 +1026,7 @@ export default function FamloProDashboardShell({
     `Last success: ${formatDateTime(channelFeedHealth?.lastSuccessfulPollAt ?? null)}`,
     `Unacked revisions: ${channelFeedHealth?.unackedRevisionsCount ?? 0}`,
     `Failed imports: ${channelFeedHealth?.failedImportCount ?? 0}`,
+    `Auto-applied: ${channelFeedHealth?.autoAppliedCount ?? 0}`,
   ];
   const firstMappedRoom = roomMappingRows.find((row) => Boolean(row.mapping?.externalRoomTypeId)) ?? null;
   const firstMappedRatePlan = rateMappingRows.find((row) => Boolean(row.ratePlan?.externalRatePlanId)) ?? null;
@@ -1164,6 +1201,24 @@ export default function FamloProDashboardShell({
           summary: `${channelFeedHealth?.pendingApplyCount ?? 0} feed revision${(channelFeedHealth?.pendingApplyCount ?? 0) === 1 ? "" : "s"} are stored but still need import/apply action.`,
           recommendedAction: "Open Bookings and finish the pending import or cancellation apply steps.",
           severity: "review" as const,
+        }]
+      : []),
+    ...((channelFeedHealth?.pendingManualReviewCount ?? 0) > 0
+      ? [{
+          key: "channel-feed-manual-review",
+          title: "Modification revision is waiting for manual review",
+          summary: `${channelFeedHealth?.pendingManualReviewCount ?? 0} Channex revision${(channelFeedHealth?.pendingManualReviewCount ?? 0) === 1 ? "" : "s"} were intentionally held for manual review.`,
+          recommendedAction: "Open Bookings and review the stored modification preview before any acknowledgement is sent.",
+          severity: "review" as const,
+        }]
+      : []),
+    ...((channelFeedHealth?.failedAutoApplyCount ?? 0) > 0
+      ? [{
+          key: "channel-feed-auto-apply-failed",
+          title: "Automatic booking sync needs intervention",
+          summary: `${channelFeedHealth?.failedAutoApplyCount ?? 0} automatic import/apply step${(channelFeedHealth?.failedAutoApplyCount ?? 0) === 1 ? "" : "s"} failed.`,
+          recommendedAction: "Inspect the latest auto-process sync log and fix the affected booking revision before acknowledging it.",
+          severity: "warning" as const,
         }]
       : []),
   ];
@@ -2370,6 +2425,9 @@ export default function FamloProDashboardShell({
                     <span className={`${styles.readinessPill} ${(channelFeedHealth?.pendingApplyCount ?? 0) === 0 ? styles.readinessPillOk : styles.readinessPillReview}`}>
                       Pending apply: {channelFeedHealth?.pendingApplyCount ?? 0}
                     </span>
+                    <span className={`${styles.readinessPill} ${channelHealthNeedsAttention ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                      Auto-apply state: {autoApplyStateLabel}
+                    </span>
                   </div>
                   <div className={styles.placeholderGrid} style={{ marginTop: 14 }}>
                     <div className={styles.placeholderRow}>
@@ -2393,6 +2451,24 @@ export default function FamloProDashboardShell({
                         {channelFeedHealth?.lastError
                           ? `${channelFeedHealth.lastError} (${formatDateTime(channelFeedHealth.lastErrorAt ?? null)})`
                           : "No recent polling error recorded."}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Auto-apply summary</div>
+                      <div className={styles.placeholderValue}>
+                        {channelFeedHealth?.autoAppliedCount ?? 0} applied · {channelFeedHealth?.pendingManualReviewCount ?? 0} waiting review
+                      </div>
+                      <div className={styles.placeholderCopy}>
+                        Last auto-apply: {formatDateTime(channelFeedHealth?.lastAutoApplyAt ?? null)}. {channelFeedHealth?.lastAutoApplyMessage ?? "No automatic apply run recorded yet."}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Auto-apply counters</div>
+                      <div className={styles.placeholderValue}>
+                        New imports {channelFeedHealth?.autoImportedCount ?? 0} · Cancellations {channelFeedHealth?.autoCancelledCount ?? 0}
+                      </div>
+                      <div className={styles.placeholderCopy}>
+                        Failed auto-apply: {channelFeedHealth?.failedAutoApplyCount ?? 0} · acknowledged automatically: {channelFeedHealth?.acknowledgedCount ?? 0}
                       </div>
                     </div>
                   </div>
