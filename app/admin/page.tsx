@@ -35,6 +35,7 @@ import RevenueHeatmap from "@/components/admin/RevenueHeatmap";
 import ShadowMode from "@/components/admin/ShadowMode";
 import SupportManager from "@/components/admin/SupportManager";
 import PlatformOpsDashboard from "@/components/admin/PlatformOpsDashboard";
+import AdminProPropertiesSummary from "@/components/admin/AdminProPropertiesSummary";
 import TestPropertyProvisioner from "@/components/admin/TestPropertyProvisioner";
 import TestimonialsDesk from "@/components/admin/TestimonialsDesk";
 import ManualPayoutDesk from "@/components/admin/ManualPayoutDesk";
@@ -60,6 +61,30 @@ function stableNumber(seed: string, max: number, offset = 0): number {
   }
 
   return (hash % max) + offset;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function isStaleByHours(timestamp: string | null | undefined, reference: Date, hours: number): boolean {
+  if (!timestamp) return true;
+  const value = Date.parse(timestamp);
+  if (!Number.isFinite(value)) return true;
+  return reference.getTime() - value > hours * 60 * 60 * 1000;
 }
 
 // Login form component (inline server action)
@@ -222,6 +247,270 @@ export default async function AdminPage({ searchParams }: Readonly<AdminPageProp
     });
 
     content = <FamloPlusDesk rows={famloPlusRows} />;
+
+  } else if (activeTab === "pro-channel-summary") {
+    const now = new Date();
+    const { data: families } = await supabase
+      .from("families")
+      .select("id,name,city,state")
+      .order("created_at", { ascending: false })
+      .limit(300);
+
+    const familyIds = (families ?? []).map((family) => family.id).filter(Boolean);
+    const [
+      subscriptionsResult,
+      settingsResult,
+      propertiesResult,
+      roomMappingsResult,
+      ratePlansResult,
+      revisionsResult,
+      stayUnitsResult,
+    ] = familyIds.length > 0
+      ? await Promise.all([
+          supabase
+            .from("host_pro_subscriptions")
+            .select("id,family_id,status,created_at")
+            .in("family_id", familyIds)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("host_pro_settings")
+            .select("family_id,id")
+            .in("family_id", familyIds),
+          supabase
+            .from("channel_properties")
+            .select("family_id,external_property_id,sync_status,metadata,last_synced_at")
+            .eq("provider_code", "channex")
+            .in("family_id", familyIds),
+          supabase
+            .from("channel_room_mappings")
+            .select("family_id,stay_unit_id,external_room_type_id")
+            .eq("provider_code", "channex")
+            .in("family_id", familyIds),
+          supabase
+            .from("channel_rate_plans")
+            .select("family_id,stay_unit_id,external_rate_plan_id")
+            .eq("provider_code", "channex")
+            .in("family_id", familyIds),
+          supabase
+            .from("channel_booking_revisions")
+            .select("family_id,external_booking_id,external_revision_id,import_status,ack_status,linked_booking_id,source")
+            .eq("provider_code", "channex")
+            .in("family_id", familyIds)
+            .limit(500),
+          supabase
+            .from("stay_units_v2")
+            .select("id,legacy_family_id,is_active,name,price_fullday")
+            .in("legacy_family_id", familyIds),
+        ])
+      : [
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+        ];
+
+    const latestSubscriptionByFamilyId = new Map<string, Record<string, unknown>>();
+    for (const row of (subscriptionsResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId || latestSubscriptionByFamilyId.has(familyId)) continue;
+      latestSubscriptionByFamilyId.set(familyId, row);
+    }
+
+    const settingsFamilyIds = new Set(
+      ((settingsResult.data ?? []) as Record<string, unknown>[])
+        .map((row) => asString(row.family_id))
+        .filter(Boolean) as string[]
+    );
+
+    const propertyByFamilyId = new Map<string, Record<string, unknown>>();
+    for (const row of (propertiesResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId || propertyByFamilyId.has(familyId)) continue;
+      propertyByFamilyId.set(familyId, row);
+    }
+
+    const roomMappingsByFamilyId = new Map<string, Set<string>>();
+    for (const row of (roomMappingsResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      const stayUnitId = asString(row.stay_unit_id);
+      if (!familyId || !stayUnitId || !asString(row.external_room_type_id)) continue;
+      const bucket = roomMappingsByFamilyId.get(familyId) ?? new Set<string>();
+      bucket.add(stayUnitId);
+      roomMappingsByFamilyId.set(familyId, bucket);
+    }
+
+    const ratePlansByFamilyId = new Map<string, Set<string>>();
+    for (const row of (ratePlansResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      const stayUnitId = asString(row.stay_unit_id);
+      if (!familyId || !stayUnitId || !asString(row.external_rate_plan_id)) continue;
+      const bucket = ratePlansByFamilyId.get(familyId) ?? new Set<string>();
+      bucket.add(stayUnitId);
+      ratePlansByFamilyId.set(familyId, bucket);
+    }
+
+    const revisionsByFamilyId = new Map<string, Record<string, unknown>[]>();
+    for (const row of (revisionsResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId) continue;
+      const bucket = revisionsByFamilyId.get(familyId) ?? [];
+      bucket.push(row);
+      revisionsByFamilyId.set(familyId, bucket);
+    }
+
+    const activeRoomsByFamilyId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of (stayUnitsResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.legacy_family_id);
+      if (!familyId || row.is_active !== true) continue;
+      const bucket = activeRoomsByFamilyId.get(familyId) ?? [];
+      bucket.push(row);
+      activeRoomsByFamilyId.set(familyId, bucket);
+    }
+
+    const proFamilyIds = new Set<string>([
+      ...Array.from(latestSubscriptionByFamilyId.keys()),
+      ...Array.from(settingsFamilyIds.values()),
+      ...Array.from(propertyByFamilyId.keys()),
+    ]);
+
+    const rows = (families ?? [])
+      .filter((family) => proFamilyIds.has(family.id))
+      .map((family) => {
+        const subscription = latestSubscriptionByFamilyId.get(family.id);
+        const property = propertyByFamilyId.get(family.id);
+        const metadata = asObject(property?.metadata);
+        const feedHealth = asObject(metadata.channexFeedHealth);
+        const ariHealth = asObject(metadata.channexAriHealth);
+        const activeRooms = activeRoomsByFamilyId.get(family.id) ?? [];
+        const mappedRoomIds = roomMappingsByFamilyId.get(family.id) ?? new Set<string>();
+        const mappedRatePlanIds = ratePlansByFamilyId.get(family.id) ?? new Set<string>();
+        const revisions = revisionsByFamilyId.get(family.id) ?? [];
+
+        const channelAttachedFromAri = ariHealth.channelAttached === true && ariHealth.channelActive === true;
+        const channelAttachedFromFeed = feedHealth.channelAttached === true && feedHealth.channelActive === true;
+        const currentChannelAttached = channelAttachedFromAri || (!("channelAttached" in ariHealth) && channelAttachedFromFeed);
+
+        const activeRoomIds = activeRooms
+          .map((room) => asString(room.id))
+          .filter(Boolean) as string[];
+        const roomMappingReady = activeRoomIds.length > 0 && activeRoomIds.every((roomId) => mappedRoomIds.has(roomId));
+        const rateMappingReady = activeRoomIds.length > 0 && activeRoomIds.every((roomId) => mappedRatePlanIds.has(roomId));
+
+        const unackedRevisionsCount = asNumber(feedHealth.unackedRevisionsCount, 0);
+        const failedImportCount = asNumber(feedHealth.failedImportCount, 0) + asNumber(feedHealth.failedAutoApplyCount, 0);
+        const pendingManualReviewCount = asNumber(feedHealth.pendingManualReviewCount, 0);
+        const latestAriStatus = asString(ariHealth.lastAriSyncStatus) ?? "not_started";
+        const latestAriSuccess =
+          latestAriStatus === "synced" &&
+          !isStaleByHours(asString(ariHealth.lastSuccessfulAriSyncAt), now, 24);
+        const latestFeedPollSuccessful =
+          currentChannelAttached &&
+          Boolean(asString(feedHealth.lastSuccessfulPollAt)) &&
+          !asString(feedHealth.lastError) &&
+          !isStaleByHours(asString(feedHealth.lastSuccessfulPollAt), now, 24);
+
+        const bookingProofCompleted = revisions.some((revision) => revision.import_status === "imported" && revision.ack_status === "acknowledged");
+        const cancellationProofCompleted = revisions.some((revision) => revision.import_status === "cancelled_applied" && revision.ack_status === "acknowledged");
+        const modificationWorkflowAvailable = revisions.some((revision) => revision.import_status === "modified_applied" || revision.import_status === "modified_pending_review");
+
+        let criticalConflictsCount = 0;
+        if (!asString(property?.external_property_id)) criticalConflictsCount += 1;
+        if (!currentChannelAttached) criticalConflictsCount += 1;
+        if (latestAriStatus === "sync_failed" || latestAriStatus === "channel_disconnected") criticalConflictsCount += 1;
+        if (asString(feedHealth.lastError)) criticalConflictsCount += 1;
+        if (failedImportCount > 0) criticalConflictsCount += 1;
+        if (!roomMappingReady) criticalConflictsCount += 1;
+        if (!rateMappingReady) criticalConflictsCount += 1;
+
+        let goLiveReadiness: "Ready" | "Needs attention" | "Not ready" = "Ready";
+        let readinessReason = "Core launch, feed, and sync signals are aligned.";
+        if (
+          criticalConflictsCount > 0 ||
+          !latestAriSuccess ||
+          !latestFeedPollSuccessful ||
+          !bookingProofCompleted ||
+          !cancellationProofCompleted ||
+          !modificationWorkflowAvailable
+        ) {
+          goLiveReadiness = "Not ready";
+          if (!currentChannelAttached) {
+            readinessReason = "Channel disconnected or inactive. Famlo should stay blocked until channel health is restored.";
+          } else if (!roomMappingReady) {
+            readinessReason = "One or more active rooms are still missing Channex room mappings.";
+          } else if (!rateMappingReady) {
+            readinessReason = "One or more active rooms are still missing Channex rate mappings.";
+          } else if (!latestAriSuccess) {
+            readinessReason = "Latest 365-day ARI sync is not currently healthy enough for go-live.";
+          } else if (!latestFeedPollSuccessful) {
+            readinessReason = "Booking feed polling is not currently fresh and successful.";
+          } else if (!bookingProofCompleted) {
+            readinessReason = "Real new-booking proof is not fully completed yet.";
+          } else if (!cancellationProofCompleted) {
+            readinessReason = "Real cancellation proof is not fully completed yet.";
+          } else {
+            readinessReason = "Real modification-review workflow is not fully completed yet.";
+          }
+        } else if (unackedRevisionsCount > 0 || pendingManualReviewCount > 0) {
+          goLiveReadiness = "Needs attention";
+          readinessReason = pendingManualReviewCount > 0
+            ? "Modification revisions are waiting for manual operator review."
+            : "One or more revisions still need acknowledgement.";
+        }
+
+        return {
+          familyId: family.id,
+          familyName: family.name || "Famlo Home",
+          locationLabel: [family.city, family.state].filter(Boolean).join(", ") || "Location not saved",
+          famloPlusStatus: asString(subscription?.status) ?? (settingsFamilyIds.has(family.id) ? "configured" : "inactive"),
+          channexPropertyId: asString(property?.external_property_id),
+          channelAttached: currentChannelAttached,
+          channelActive: currentChannelAttached,
+          activeChannelTitle: asString(ariHealth.activeChannelTitle) ?? asString(feedHealth.activeChannelTitle),
+          activeChannelId: asString(ariHealth.activeChannelId) ?? asString(feedHealth.activeChannelId),
+          ariHealthLabel:
+            latestAriStatus === "synced"
+              ? "Synced"
+              : latestAriStatus === "sync_failed"
+                ? "Sync failed"
+                : latestAriStatus === "sync_overdue"
+                  ? "Sync overdue"
+                  : latestAriStatus === "channel_disconnected"
+                    ? "Channel disconnected"
+                    : "Not started",
+          feedHealthLabel:
+            !currentChannelAttached
+              ? "Channel disconnected"
+              : asString(feedHealth.lastError)
+                ? "Feed poll failed"
+                : pendingManualReviewCount > 0
+                  ? "Needs review"
+                  : latestFeedPollSuccessful
+                    ? "Synced"
+                    : "Needs attention",
+          unackedRevisionsCount,
+          failedImportCount,
+          pendingManualReviewCount,
+          criticalConflictsCount,
+          goLiveReadiness,
+          readinessReason,
+          roomMappingReady,
+          rateMappingReady,
+          bookingProofCompleted,
+          cancellationProofCompleted,
+          modificationWorkflowAvailable,
+          possibleStagingIssue: !currentChannelAttached && Boolean(asString(property?.external_property_id)),
+        };
+      })
+      .sort((left, right) => {
+        const score = (value: "Ready" | "Needs attention" | "Not ready") =>
+          value === "Not ready" ? 0 : value === "Needs attention" ? 1 : 2;
+        return score(left.goLiveReadiness) - score(right.goLiveReadiness) || left.familyName.localeCompare(right.familyName);
+      });
+
+    content = <AdminProPropertiesSummary rows={rows} />;
 
   } else if (activeTab === "test-properties") {
     const { data: families } = await supabase
