@@ -761,6 +761,16 @@ function bookingNextAction(booking: ProBookingSummary): string {
   return "No immediate action needed.";
 }
 
+function countCalendarCellsByStatus(
+  calendarRows: CalendarRow[],
+  status: CalendarCell["status"]
+): number {
+  return calendarRows.reduce(
+    (sum, row) => sum + row.availabilityCells.filter((cell) => cell.status === status).length,
+    0
+  );
+}
+
 function asStringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -2082,6 +2092,17 @@ export default function FamloProDashboardShell({
     channelAriHealth?.lastAriSyncAt ??
     lastBookingFeedLog?.createdAt ??
     null;
+  const visibleRoomsInCalendar = calendarRows.length;
+  const famloCalendarCells = countCalendarCellsByStatus(calendarRows, "famlo");
+  const otaCalendarCells = countCalendarCellsByStatus(calendarRows, "ota");
+  const pendingCalendarCells = countCalendarCellsByStatus(calendarRows, "pending");
+  const manualBlockCalendarCells = countCalendarCellsByStatus(calendarRows, "manual_block");
+  const pastCalendarCells = countCalendarCellsByStatus(calendarRows, "past");
+  const calendarAttentionCount =
+    pendingCalendarCells +
+    (calendarVerification && !calendarVerification.targetDateBlocked ? 1 : 0) +
+    (calendarVerification && calendarVerification.checkoutDateBlocked ? 1 : 0) +
+    (conflictItems.length > 0 ? 1 : 0);
   const acknowledgementGuardHealthy = channelFoundation.bookingRevisions.every((revision) => {
     if (revision.ackStatus !== "acknowledged") return true;
     return Boolean(revision.externalRevisionId);
@@ -3294,11 +3315,96 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Calendar</h3>
                   <p className={styles.cardCopy}>
-                    Professional read-only channel-manager view for the next 30 days. Existing Famlo calendar logic and iCal behavior remain untouched in this phase.
+                    Calendar for this property. View Famlo bookings, OTA bookings, manual blocks, and availability from one place. Checkout-day availability rules are preserved.
                   </p>
                 </div>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Visible rooms</div>
+                    <div className={styles.metricValue}>{visibleRoomsInCalendar}</div>
+                    <div className={styles.metricHint}>Room rows currently shown in this property calendar window.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Famlo bookings</div>
+                    <div className={styles.metricValue}>{famloCalendarCells}</div>
+                    <div className={styles.metricHint}>Calendar cells blocked by direct Famlo reservations.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>OTA bookings</div>
+                    <div className={styles.metricValue}>{otaCalendarCells}</div>
+                    <div className={styles.metricHint}>Cells blocked by Booking.com or other OTA-linked stays.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Pending / attention</div>
+                    <div className={styles.metricValue}>{pendingCalendarCells}</div>
+                    <div className={styles.metricHint}>Pending approval or awaiting-payment cells that still need review.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Manual blocks</div>
+                    <div className={styles.metricValue}>{manualBlockCalendarCells}</div>
+                    <div className={styles.metricHint}>Manual blocked dates derived from the current Famlo calendar path.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Past dates</div>
+                    <div className={styles.metricValue}>{pastCalendarCells}</div>
+                    <div className={styles.metricHint}>Older dates remain visible for context but stay read-only here.</div>
+                  </article>
+                </div>
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Unified calendar view</div>
+                    <div className={styles.feedCopy}>
+                      This view keeps Famlo bookings, OTA bookings, manual blocks, and availability in one room-by-room workspace without changing any existing calendar or sync rules.
+                    </div>
+                    <div className={styles.roomReadinessRow}>
+                      <span className={styles.readinessPill}>Famlo booking</span>
+                      <span className={styles.readinessPill}>OTA booking</span>
+                      <span className={styles.readinessPill}>Pending approval</span>
+                      <span className={styles.readinessPill}>Manual block</span>
+                      <span className={styles.readinessPill}>Past date</span>
+                      <span className={styles.readinessPill}>Available</span>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Calendar attention</div>
+                    <div className={styles.feedCopy}>
+                      Use this summary to spot whether the current property window needs operational review before you rely on availability.
+                    </div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Checkout-day rule</div>
+                        <div className={styles.feedCopy}>
+                          {calendarVerification
+                            ? calendarVerification.targetDateBlocked && !calendarVerification.checkoutDateBlocked
+                              ? `${calendarVerification.roomName} keeps checkout-day availability correct in the current verification window.`
+                              : `${calendarVerification.roomName} needs review because the verification window does not match the expected checkout-day state.`
+                            : "Checkout-day verification remains available below whenever a Booking.com verification target is present."}
+                        </div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Calendar attention count</div>
+                        <div className={styles.feedCopy}>
+                          {calendarAttentionCount > 0
+                            ? `${calendarAttentionCount} calendar signal${calendarAttentionCount === 1 ? "" : "s"} currently need review across pending stays, verification, or open sync issues.`
+                            : "No open calendar attention signals are visible in the current Pro calendar."}
+                        </div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Sync health context</div>
+                        <div className={styles.feedCopy}>
+                          {conflictItems.length > 0
+                            ? `${conflictItems.length} broader sync health issue${conflictItems.length === 1 ? "" : "s"} are open for this property. Review Sync Health if the calendar looks unexpected.`
+                            : "No broader sync-health blocker is currently flagged for this property."}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
                 <div className={styles.placeholderGrid}>
                   <div className={styles.placeholderRow}>
                     <div className={styles.placeholderTitle}>Calendar window</div>
@@ -3401,7 +3507,7 @@ export default function FamloProDashboardShell({
                             <div>
                               <div className={styles.listTitle}>Booking details</div>
                               <div className={styles.cardCopy}>
-                                Read-only operational view for the selected Pro calendar booking cell.
+                                Review the selected calendar reservation or blocked stay context without changing any existing booking or availability rules.
                               </div>
                             </div>
                             <button
@@ -3570,6 +3676,14 @@ export default function FamloProDashboardShell({
                     </div>
                   </div>
                 )}
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Operational calendar checks</div>
+                    <div className={styles.feedCopy}>
+                      Advanced calendar verification stays available here so OTA and checkout-day correctness can still be reviewed without changing any current availability logic.
+                    </div>
+                  </article>
+                </div>
               </div>
             </section>
           )}
