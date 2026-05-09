@@ -1608,6 +1608,10 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .propertyTabGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .channelGrid,
   .roleGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1654,6 +1658,26 @@
     padding: 20px;
   }
 
+  .propertyCenterHeader,
+  .propertySwitcherCard,
+  .propertySubSectionBar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .propertyCenterStatus,
+  .propertySwitcherControls,
+  .propertySwitcherStatusRow {
+    width: 100%;
+    justify-content: flex-start;
+    justify-items: stretch;
+  }
+
+  .propertySwitcherField {
+    min-width: 0;
+    width: 100%;
+  }
+
   .sectionIntro {
     flex-direction: column;
     align-items: flex-start;
@@ -1677,14 +1701,27 @@
 }
 
 @media (max-width: 640px) {
+  .propertyCenterShell {
+    padding: 16px;
+  }
+
+  .propertyTabGrid {
+    grid-template-columns: 1fr;
+  }
+
   .statGrid,
   .channelGrid,
   .roleGrid {
     grid-template-columns: 1fr;
   }
 
+  .propertyCenterTitle,
   .headerTitle,
   .heroTitle {
     font-size: 28px;
+  }
+
+  .sectionTitle {
+    font-size: 24px;
   }
 }
