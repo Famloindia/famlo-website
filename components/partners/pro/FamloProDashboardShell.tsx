@@ -2480,6 +2480,213 @@ export default function FamloProDashboardShell({
     : primaryProperty?.syncStatus === "connected"
       ? "Channel active"
       : "Channel health unavailable";
+  const pilotHomeCards = [
+    {
+      label: "Selected property",
+      value: propertyName || "Selected property",
+      hint: selectedPropertyLocation,
+    },
+    {
+      label: "Active rooms",
+      value: `${activeRoomsCount}`,
+      hint: inactiveRoomsCount > 0 ? `${inactiveRoomsCount} inactive room${inactiveRoomsCount === 1 ? "" : "s"}` : "All surfaced rooms are active",
+    },
+    {
+      label: "Content readiness",
+      value: `${propertyContentReadyCount}/${propertyContentChecks.length}`,
+      hint: propertyContentReadyCount === propertyContentChecks.length ? "Core property content is ready" : `Missing: ${joinMissingLabels(propertyContentChecks)}`,
+    },
+    {
+      label: "Rooms missing setup",
+      value: `${roomsMissingPrice + photosReadiness.missingRooms}`,
+      hint: `${roomsMissingPrice} missing price · ${photosReadiness.missingRooms} missing photos`,
+    },
+    {
+      label: "Bookings",
+      value: `${totalBookingsCount}`,
+      hint: actionNeededBookingsCount > 0 ? `${actionNeededBookingsCount} still need attention` : "No open booking attention",
+    },
+    {
+      label: "Calendar attention",
+      value: `${calendarAttentionCount}`,
+      hint: calendarAttentionCount > 0 ? "Review pending or verification signals" : "Calendar window looks clear",
+    },
+    {
+      label: "Channels",
+      value: selectedPropertyChannelStatus,
+      hint: `${roomMappingsReadyCount}/${activeRoomsCount || 0} rooms mapped · ${rateMappingsReadyCount}/${activeRoomsCount || 0} rates mapped`,
+    },
+    {
+      label: "Sync Health",
+      value: `${healthySyncCheckCount}/${syncHealthChecks.length}`,
+      hint: criticalConflictCount > 0 ? `${criticalConflictCount} critical issue${criticalConflictCount === 1 ? "" : "s"}` : "No critical sync issue detected",
+    },
+    {
+      label: "Booking value",
+      value: formatCurrency(totalBookingValue),
+      hint: "Booking value only, not final payout",
+    },
+    {
+      label: "Action needed",
+      value: `${conflictItems.length + actionNeededBookingsCount}`,
+      hint: conflictItems.length > 0 ? `${conflictItems.length} sync or setup issue${conflictItems.length === 1 ? "" : "s"}` : "No urgent host action right now",
+    },
+  ];
+  const quickActionItems = [
+    {
+      title: "Manage Rooms",
+      body: "Add rooms, update prices, upload photos, and keep this property inventory accurate.",
+      badge: `${rooms.length} room${rooms.length === 1 ? "" : "s"}`,
+      targetSection: "rooms-units" as const,
+    },
+    {
+      title: "Edit Content & Photos",
+      body: "Shape how this property appears on Famlo with its own story, vibe, and gallery.",
+      badge: `${propertyContentReadyCount}/${propertyContentChecks.length} ready`,
+      targetSection: "ota-content" as const,
+    },
+    {
+      title: "Review Pricing & Rules",
+      body: "Catch missing prices and confirm stay rules before going live.",
+      badge: roomsMissingPrice === 0 ? "Pricing ready" : `${roomsMissingPrice} missing price`,
+      targetSection: "rates-restrictions" as const,
+    },
+    {
+      title: "View Bookings",
+      body: "Manage Famlo and OTA reservations from one place for this property.",
+      badge: `${totalBookingsCount} bookings`,
+      targetSection: "bookings" as const,
+    },
+    {
+      title: "Open Calendar",
+      body: "Review availability, bookings, manual blocks, and checkout-day correctness.",
+      badge: `${calendarAttentionCount} attention`,
+      targetSection: "inventory-calendar" as const,
+    },
+    {
+      title: "Check Channels",
+      body: "See whether this property is connected, mapped, and healthy across OTAs.",
+      badge: selectedPropertyChannelStatus,
+      targetSection: "connected-channels" as const,
+    },
+    {
+      title: "Fix Sync Issues",
+      body: "Review conflicts, mapping gaps, and sync issues before relying on unattended operations.",
+      badge: `${conflictItems.length} open`,
+      targetSection: criticalConflictCount > 0 ? ("conflicts" as const) : ("sync-logs" as const),
+    },
+    {
+      title: "View Revenue",
+      body: "Understand booking value and payment status for this property.",
+      badge: formatCurrency(totalBookingValue),
+      targetSection: "revenue" as const,
+    },
+    {
+      title: "View Reports",
+      body: "Review booking mix, room activity, and early pilot performance insights.",
+      badge: `${activeRoomsCount} active rooms`,
+      targetSection: "reports" as const,
+    },
+  ];
+  const goLiveHostChecklist = [
+    {
+      title: "Property profile and content complete",
+      statusLabel: propertyContentReadyCount === propertyContentChecks.length ? "Done" : "Needs attention",
+      statusClass: propertyContentReadyCount === propertyContentChecks.length ? styles.readinessPillOk : styles.readinessPillReview,
+      detail: propertyContentReadyCount === propertyContentChecks.length
+        ? "Title and core property content are in place for this property."
+        : `Complete the missing property content: ${joinMissingLabels(propertyContentChecks)}.`,
+      targetSection: "ota-content" as const,
+    },
+    {
+      title: "At least one active room",
+      statusLabel: activeRoomsCount > 0 ? "Done" : "Needs attention",
+      statusClass: activeRoomsCount > 0 ? styles.readinessPillOk : styles.readinessPillMissing,
+      detail: activeRoomsCount > 0 ? `${activeRoomsCount} active room${activeRoomsCount === 1 ? "" : "s"} ready in Famlo.` : "Activate at least one room before expecting this property to sell.",
+      targetSection: "rooms-units" as const,
+    },
+    {
+      title: "Room photos added",
+      statusLabel: rooms.length === 0 ? "Needs attention" : photosReadiness.missingRooms === 0 ? "Done" : "Needs attention",
+      statusClass: rooms.length > 0 && photosReadiness.missingRooms === 0 ? styles.readinessPillOk : styles.readinessPillReview,
+      detail: rooms.length === 0
+        ? "Add rooms first so photo coverage can be reviewed."
+        : photosReadiness.missingRooms === 0
+          ? "Every surfaced room has photo coverage."
+          : `${photosReadiness.missingRooms} room${photosReadiness.missingRooms === 1 ? "" : "s"} still need photos.`,
+      targetSection: "rooms-units" as const,
+    },
+    {
+      title: "Room price added",
+      statusLabel: rooms.length === 0 ? "Needs attention" : roomsMissingPrice === 0 ? "Done" : "Needs attention",
+      statusClass: rooms.length > 0 && roomsMissingPrice === 0 ? styles.readinessPillOk : styles.readinessPillReview,
+      detail: rooms.length === 0
+        ? "Add rooms first so pricing can be reviewed."
+        : roomsMissingPrice === 0
+          ? "Every surfaced room has a base price."
+          : `${roomsMissingPrice} room${roomsMissingPrice === 1 ? "" : "s"} still need a base price.`,
+      targetSection: "rates-restrictions" as const,
+    },
+    {
+      title: "Calendar ready",
+      statusLabel: visibleRoomsInCalendar > 0 ? "Done" : "Needs attention",
+      statusClass: visibleRoomsInCalendar > 0 ? styles.readinessPillOk : styles.readinessPillReview,
+      detail: visibleRoomsInCalendar > 0
+        ? `${visibleRoomsInCalendar} room row${visibleRoomsInCalendar === 1 ? "" : "s"} are visible in the property calendar.`
+        : "Calendar rows are not yet visible for this property.",
+      targetSection: "inventory-calendar" as const,
+    },
+    {
+      title: "Booking workspace ready",
+      statusLabel: "Done",
+      statusClass: styles.readinessPillOk,
+      detail: "Famlo direct and OTA reservations are available together in the Pro bookings workspace.",
+      targetSection: "bookings" as const,
+    },
+    {
+      title: "Channel connected",
+      statusLabel: currentChannelAttached ? "Done" : "Famlo team review",
+      statusClass: currentChannelAttached ? styles.readinessPillOk : styles.readinessPillMissing,
+      detail: currentChannelAttached
+        ? "This property currently has an active connected channel."
+        : "A connected OTA channel is not healthy yet for this property.",
+      targetSection: "connected-channels" as const,
+    },
+    {
+      title: "Room mapping ready",
+      statusLabel: activeRoomsCount === 0 ? "Needs attention" : allActiveRoomsMapped ? "Done" : "Famlo team review",
+      statusClass: activeRoomsCount > 0 && allActiveRoomsMapped ? styles.readinessPillOk : styles.readinessPillReview,
+      detail: activeRoomsCount === 0
+        ? "Add and activate rooms before mapping can be reviewed."
+        : `${roomMappingsReadyCount}/${activeRoomsCount} active room${activeRoomsCount === 1 ? "" : "s"} are mapped.`,
+      targetSection: "room-mapping" as const,
+    },
+    {
+      title: "Rate mapping ready",
+      statusLabel: activeRoomsCount === 0 ? "Needs attention" : allActiveRoomsHaveRatePlans ? "Done" : "Famlo team review",
+      statusClass: activeRoomsCount > 0 && allActiveRoomsHaveRatePlans ? styles.readinessPillOk : styles.readinessPillReview,
+      detail: activeRoomsCount === 0
+        ? "Add and activate rooms before rate mapping can be reviewed."
+        : `${rateMappingsReadyCount}/${activeRoomsCount} active room${activeRoomsCount === 1 ? "" : "s"} have connected rate plans.`,
+      targetSection: "rate-mapping" as const,
+    },
+    {
+      title: "Sync Health checked",
+      statusLabel: criticalConflictCount === 0 && warningConflictCount === 0 ? "Done" : "Needs attention",
+      statusClass: criticalConflictCount === 0 && warningConflictCount === 0 ? styles.readinessPillOk : styles.readinessPillReview,
+      detail: syncHealthLastCheckedAt
+        ? `Last checked ${formatDateTime(syncHealthLastCheckedAt)} with ${conflictItems.length} open issue${conflictItems.length === 1 ? "" : "s"}.`
+        : "No recent sync health check is recorded yet.",
+      targetSection: conflictItems.length > 0 ? ("conflicts" as const) : ("sync-logs" as const),
+    },
+    {
+      title: "Revenue and reports available",
+      statusLabel: "Coming later",
+      statusClass: styles.readinessPillReview,
+      detail: "Revenue and Reports are available as pilot summaries today. Final payout and export workflows will come later.",
+      targetSection: "revenue" as const,
+    },
+  ];
   const sectionDescriptor = buildSectionDescriptor(
     activeSection,
     setupProgressPercent,
@@ -2659,31 +2866,31 @@ export default function FamloProDashboardShell({
                   <div>
                     <div className={styles.eyebrow}>Famlo Pro</div>
                     <h2 className={styles.heroTitle}>
-                      Multi-property control for serious homestay operations
+                      Famlo Pro command center
                     </h2>
                     <p className={styles.heroText}>
-                      This Pro workspace keeps Famlo as the source of truth for property identity, rooms, bookings,
-                      and availability. Use Property Center for host-facing management while the existing channel engine
-                      continues to run safely underneath.
+                      Manage this property&apos;s rooms, content, pricing, bookings, calendar, channels, and sync
+                      health from one place. Existing provider, sync, and OTA workflows continue to run safely
+                      underneath without changing their current logic.
                     </p>
                     <div className={styles.heroMeta}>
                       <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Property</span>
+                        <span className={styles.heroMetaLabel}>Selected property</span>
                         <span className={styles.heroMetaValue}>{propertyName}</span>
                       </div>
                       <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Host ID</span>
-                        <span className={styles.heroMetaValue}>{hostCode ?? "Pending"}</span>
+                        <span className={styles.heroMetaLabel}>Location</span>
+                        <span className={styles.heroMetaValue}>{selectedPropertyLocation}</span>
                       </div>
                       <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Access</span>
-                        <span className={styles.heroMetaValue}>{accessReason}</span>
+                        <span className={styles.heroMetaLabel}>Family scope</span>
+                        <span className={styles.heroMetaValue}>{familyId}</span>
                       </div>
                     </div>
                   </div>
 
                   <div className={styles.heroPanel}>
-                    <div className={styles.heroPanelTitle}>Go-live readiness</div>
+                    <div className={styles.heroPanelTitle}>Pilot go-live snapshot</div>
                     <div className={styles.inlineBadgeRow}>
                       <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
                       <span className={styles.readinessPill}>{goLiveChecklist.filter((item) => item.status === "ready").length}/{goLiveChecklist.length} ready</span>
@@ -2691,24 +2898,24 @@ export default function FamloProDashboardShell({
                     <div className={styles.feedCopy}>{goLiveSummary.explanation}</div>
                     <div className={styles.heroPanelList}>
                       <div className={styles.heroPanelItem}>
-                        <span>Environment</span>
-                        <strong>{formatChannexEnvironmentLabel(channexConfig.environment)}</strong>
+                        <span>Channel status</span>
+                        <strong>{selectedPropertyChannelStatus}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>365-day sync</span>
-                        <strong>{ariHealth.lastSuccessful365DaySync ? ariHealth.statusLabel : "Never synced"}</strong>
+                        <span>Active rooms</span>
+                        <strong>{activeRoomsCount === 0 ? "None yet" : `${activeRoomsCount} ready`}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Critical conflicts</span>
-                        <strong>{criticalConflictCount === 0 ? "None open" : `${criticalConflictCount} open`}</strong>
+                        <span>Rooms missing setup</span>
+                        <strong>{roomsMissingPrice + photosReadiness.missingRooms === 0 ? "None open" : `${roomsMissingPrice + photosReadiness.missingRooms} open`}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Open issues</span>
-                        <strong>{conflictItems.length === 0 ? "None open" : `${conflictItems.length} open`}</strong>
+                        <span>Bookings</span>
+                        <strong>{totalBookingsCount === 0 ? "No reservations yet" : `${totalBookingsCount} total`}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Booking proof</span>
-                        <strong>{bookingProofCompleted ? "Completed" : bookingImportTested ? "Partial" : "Needs test"}</strong>
+                        <span>Action needed</span>
+                        <strong>{conflictItems.length + actionNeededBookingsCount === 0 ? "All clear" : `${conflictItems.length + actionNeededBookingsCount} open`}</strong>
                       </div>
                     </div>
                   </div>
@@ -2716,7 +2923,7 @@ export default function FamloProDashboardShell({
               </section>
 
               <section className={styles.statGrid}>
-                {metrics.map((metric) => (
+                {pilotHomeCards.map((metric) => (
                   <article key={metric.label} className={`${styles.card} ${styles.statCard}`}>
                     <div className={styles.statLabel}>{metric.label}</div>
                     <div className={styles.statValue}>{metric.value}</div>
@@ -2729,26 +2936,30 @@ export default function FamloProDashboardShell({
                 <article className={styles.card}>
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardTitle}>Setup Progress</h3>
+                      <h3 className={styles.cardTitle}>Pilot go-live checklist</h3>
                       <p className={styles.cardCopy}>
-                        Go-live readiness for inventory, identity, and future provider mapping.
+                        See what is ready for this property, what still needs attention, and what Famlo team may need
+                        to review before pilot go-live.
                       </p>
                     </div>
                     <span className={styles.badge}>{setupProgressPercent}% ready</span>
                   </div>
                   <div className={styles.cardBody}>
                     <div className={styles.checkGrid}>
-                      {setupItems.slice(0, 6).map((item) => (
-                        <div key={item.key} className={styles.checkItem}>
-                          <div className={`${styles.checkIcon} ${item.complete ? styles.checkIconDone : styles.checkIconTodo}`}>
-                            {item.complete ? <Check size={18} /> : <X size={18} />}
-                          </div>
+                      {goLiveHostChecklist.slice(0, 6).map((item) => (
+                        <div key={item.title} className={styles.checkItem}>
                           <div>
                             <div className={styles.checkTitle}>{item.title}</div>
-                            <div className={styles.checkMeta}>{item.hint}</div>
+                            <div className={styles.checkMeta}>{item.detail}</div>
                           </div>
+                          <span className={`${styles.readinessPill} ${item.statusClass}`}>{item.statusLabel}</span>
                         </div>
                       ))}
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("setup-guide")}>
+                        Open setup guide
+                      </button>
                     </div>
                   </div>
                 </article>
@@ -2756,57 +2967,29 @@ export default function FamloProDashboardShell({
                 <article className={styles.card}>
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardTitle}>Go-live readiness</h3>
+                      <h3 className={styles.cardTitle}>Quick actions</h3>
                       <p className={styles.cardCopy}>
-                        Read-only launch summary built from current Pro setup, mapping, booking, and sync signals.
+                        Jump straight into the place where you need to manage this property next.
                       </p>
                     </div>
                     <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
                   </div>
                   <div className={styles.cardBody}>
                     <div className={styles.stack}>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Environment + guardrails</div>
-                        <div className={styles.feedCopy}>
-                          {formatChannexEnvironmentLabel(channexConfig.environment)} is selected and
-                          {" "}
-                          {channexConfig.environment === "production" && !channexConfig.productionMutationsAllowed
-                            ? "production writes are still blocked by the safety flag."
-                            : "the current mutation guardrails are aligned with this mode."}
-                        </div>
-                      </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Fresh 365-day sync</div>
-                        <div className={styles.feedCopy}>
-                          {hasRecent365DaySuccess
-                            ? `A recent 365-day ARI sync is available from ${formatDateTime(ariHealth.lastSuccessful365DaySync?.createdAt ?? null)}.`
-                            : "A fresh 365-day ARI sync is still required before live connection."}
-                        </div>
-                      </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Conflict queue</div>
-                        <div className={styles.feedCopy}>
-                          {criticalConflictCount === 0
-                            ? "No critical conflicts are currently blocking launch."
-                            : `${criticalConflictCount} critical conflicts still need review before any pilot decision.`}
-                        </div>
-                      </div>
-                      {channelDetachedStagingIssue ? (
-                        <div className={styles.feedItem}>
-                          <div className={styles.feedTitle}>Staging channel reality</div>
-                          <div className={styles.feedCopy}>
-                            The current Booking.com staging channel looks detached or inactive. This can happen with shared test ids, but Famlo should still show the property as not ready until the channel is healthy again.
+                      {quickActionItems.slice(0, 6).map((item) => (
+                        <div key={item.title} className={styles.actionItem}>
+                          <div>
+                            <div className={styles.actionTitle}>{item.title}</div>
+                            <div className={styles.actionCopy}>{item.body}</div>
+                          </div>
+                          <div className={styles.inlineActionRow}>
+                            <span className={styles.badge}>{item.badge}</span>
+                            <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection(item.targetSection)}>
+                              Open
+                            </button>
                           </div>
                         </div>
-                      ) : null}
-                      <div className={styles.inlineActionRow}>
-                        <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("setup-guide")}>
-                          Open readiness checklist
-                        </button>
-                        <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("conflicts")}>
-                          Review conflicts
-                        </button>
-                      </div>
+                      ))}
                     </div>
                   </div>
                 </article>
@@ -2816,9 +2999,9 @@ export default function FamloProDashboardShell({
                 <article className={styles.card}>
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardTitle}>Action Center</h3>
+                      <h3 className={styles.cardTitle}>Property readiness focus</h3>
                       <p className={styles.cardCopy}>
-                        Priority tasks before a future multi-channel go-live.
+                        Priority signals that tell you whether this property is ready for cleaner pilot operations.
                       </p>
                     </div>
                   </div>
@@ -2840,23 +3023,26 @@ export default function FamloProDashboardShell({
                 <article className={styles.card}>
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardTitle}>Live Feed</h3>
+                      <h3 className={styles.cardTitle}>Workspace shortcuts</h3>
                       <p className={styles.cardCopy}>
-                        Operational feed placeholder for sync jobs, imports, and setup events.
+                        Open the right section fast when a host asks what to do next for this property.
                       </p>
                     </div>
                   </div>
                   <div className={styles.cardBody}>
                     <div className={styles.stack}>
-                      {feedItems.map((item) => (
+                      {quickActionItems.slice(6).map((item) => (
                         <div key={item.title} className={styles.feedItem}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                             <div className={styles.feedTitle}>{item.title}</div>
-                            <span className={toneBadgeClass(item.tone)}>
-                              {item.tone === "success" ? "Ready" : item.tone === "warning" ? "Blocked" : "Info"}
-                            </span>
+                            <span className={styles.badge}>{item.badge}</span>
                           </div>
                           <div className={styles.feedCopy}>{item.body}</div>
+                          <div className={styles.inlineActionRow}>
+                            <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection(item.targetSection)}>
+                              Open section
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -2883,7 +3069,8 @@ export default function FamloProDashboardShell({
                     <div>
                       <h3 className={styles.cardTitle}>Setup Guide</h3>
                       <p className={styles.cardCopy}>
-                        Future PMS onboarding checklist for property identity, rates, rules, and channel readiness.
+                        Use this host-friendly checklist to see what is ready for this property, what still needs
+                        attention, and what Famlo team may need to review before pilot go-live.
                       </p>
                     </div>
                 <span className={styles.badge}>{setupProgressPercent}% ready</span>
@@ -2913,12 +3100,50 @@ export default function FamloProDashboardShell({
                 </div>
 
                 <div className={styles.recommendationCard}>
-                  <div className={styles.summaryLabel}>Recommended next action</div>
-                  <div className={styles.recommendationText}>{recommendedNextAction}</div>
+                  <div className={styles.summaryLabel}>Pilot go-live guidance</div>
+                  <div className={styles.recommendationText}>
+                    Review this selected property from top to bottom: complete content, activate at least one room,
+                    confirm pricing and photos, then check channels and Sync Health before expecting OTA-ready operations.
+                  </div>
                   <div className={styles.inlineActionRow}>
-                    <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("settings")}>
-                      Open Pro Settings
+                    <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("rooms-units")}>
+                      Manage rooms
                     </button>
+                    <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("connected-channels")}>
+                      Check channels
+                    </button>
+                  </div>
+                </div>
+
+                <div className={styles.listCard}>
+                  <div className={styles.cardHeaderCompact}>
+                    <div>
+                      <div className={styles.listTitle}>Host go-live checklist</div>
+                      <div className={styles.cardCopy}>
+                        Simple pilot checks for this property using current Famlo Pro data only.
+                      </div>
+                    </div>
+                    <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
+                  </div>
+                  <div className={styles.logList}>
+                    {goLiveHostChecklist.map((item) => (
+                      <article key={item.title} className={styles.logRow}>
+                        <div>
+                          <div className={styles.logTitle}>{item.title}</div>
+                          <div className={styles.logCopy}>{item.detail}</div>
+                        </div>
+                        <div className={styles.logMeta}>
+                          <span className={`${styles.readinessPill} ${item.statusClass}`}>{item.statusLabel}</span>
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            onClick={() => setActiveSection(item.targetSection)}
+                          >
+                            Open section
+                          </button>
+                        </div>
+                      </article>
+                    ))}
                   </div>
                 </div>
 
