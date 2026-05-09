@@ -197,6 +197,8 @@ type ConflictItem = {
   severity: "info" | "warning" | "critical";
   relatedLabel?: string | null;
   lastDetectedAt?: string | null;
+  targetSection?: ProSectionId;
+  actionLabel?: string | null;
 };
 
 type AriHealthStatus = "healthy" | "warning" | "failed" | "never_synced";
@@ -1596,58 +1598,68 @@ export default function FamloProDashboardShell({
     .filter((revision) => revision.importStatus === "imported" && revision.ackStatus !== "acknowledged")
     .map((revision) => ({
       key: `booking-imported-${revision.id}`,
-      title: "Booking imported but not acknowledged",
-      summary: `${revision.externalBookingId ?? "Unknown booking"} is linked to Famlo${revision.linkedBookingId ? ` via ${revision.linkedBookingId}` : ""} but still awaits Channex acknowledgement.`,
+      title: "Booking feed still needs review",
+      summary: "A Booking.com reservation reached Famlo, but the final sync review is still pending.",
       recommendedAction: revision.externalRevisionId
-        ? "Review the imported booking in Famlo and acknowledge it from the Bookings workspace when operational checks are complete."
-        : "This booking came from Booking List preview only. Wait for Booking Revision Feed to surface a revision id before acknowledgement.",
+        ? "Review the booking in Famlo Pro before marking the sync fully complete."
+        : "Wait for the Booking Revision Feed to surface a revision id before treating this sync as complete.",
       severity: "warning",
       relatedLabel: revision.externalBookingId ?? revision.linkedBookingId ?? "Booking revision",
       lastDetectedAt: revision.updatedAt ?? revision.createdAt ?? null,
+      targetSection: "sync-logs" as const,
+      actionLabel: "View sync logs",
     }));
   const bookingListPreviewConflicts: ConflictItem[] = channelFoundation.bookingRevisions
     .filter((revision) => revision.source === "booking_list_api" && !revision.externalRevisionId && revision.ackStatus !== "acknowledged")
     .map((revision) => ({
       key: `booking-list-preview-${revision.id}`,
-      title: "Booking List preview cannot acknowledge yet",
-      summary: `${revision.externalBookingId ?? "Unknown booking"} has no Booking Revision Feed id, so Channex acknowledgement cannot be sent.`,
-      recommendedAction: "Fetch the Booking Revision Feed again later and wait for a revision id before acknowledging this booking.",
+      title: "Booking feed is still waiting for a final revision",
+      summary: "A preview booking was found, but the final provider revision has not appeared yet.",
+      recommendedAction: "Check the booking feed again later before treating this reservation as fully synced.",
       severity: "info",
       relatedLabel: revision.externalBookingId ?? "Booking preview",
       lastDetectedAt: revision.updatedAt ?? revision.createdAt ?? null,
+      targetSection: "sync-logs" as const,
+      actionLabel: "View sync logs",
     }));
   const unmappedRoomConflicts: ConflictItem[] = rooms
     .filter((room) => room.isActive && !roomMappingsByRoomId.get(room.id)?.externalRoomTypeId)
     .map((room) => ({
       key: `unmapped-room-${room.id}`,
-      title: "Room mapping missing",
-      summary: `${room.name} does not have an external Channex room type id yet.`,
-      recommendedAction: "Complete room-type creation or mapping before relying on channel distribution for this room.",
+      title: "Some rooms are not connected to the channel",
+      summary: `${room.name} is active in Famlo, but it is not mapped to the connected OTA yet.`,
+      recommendedAction: "Complete room mapping before expecting this room to sell through connected channels.",
       severity: "warning",
       relatedLabel: room.name,
       lastDetectedAt: new Date(timeAnchor).toISOString(),
+      targetSection: "room-mapping" as const,
+      actionLabel: "Fix room mapping",
     }));
   const unmappedRateConflicts: ConflictItem[] = rooms
     .filter((room) => room.isActive && !ratePlansByRoomId.get(room.id)?.externalRatePlanId)
     .map((room) => ({
       key: `unmapped-rate-${room.id}`,
-      title: "Rate mapping missing",
-      summary: `${standardRatePlanName} for ${room.name} does not have an external provider rate plan id yet.`,
-      recommendedAction: "Create or map the standard rate plan before expecting rate distribution for this room.",
+      title: "Price setup is incomplete",
+      summary: `${room.name} is missing a connected channel rate plan for ${standardRatePlanName}.`,
+      recommendedAction: "Finish rate mapping before expecting this room’s price to flow to connected channels.",
       severity: "warning",
       relatedLabel: room.name,
       lastDetectedAt: new Date(timeAnchor).toISOString(),
+      targetSection: "rate-mapping" as const,
+      actionLabel: "Fix rate mapping",
     }));
   const failedSyncConflicts: ConflictItem[] = channelFoundation.syncLogs
     .filter((log) => log.status !== "success")
     .map((log) => ({
       key: `failed-log-${log.id}`,
-      title: "Failed or warning sync log",
-      summary: `${labelizeToken(log.action, "sync action")} returned ${labelizeToken(log.status, "unknown")}${log.message ? `: ${log.message}` : "."}`,
-      recommendedAction: "Review the sync log payload summary and rerun the relevant operational step only after the underlying issue is cleared.",
+      title: log.status === "failed" ? "Availability sync needs review" : "Sync issue needs review",
+      summary: `${labelizeToken(log.action, "Sync step")} reported a ${labelizeToken(log.status, "warning")} state for this property.`,
+      recommendedAction: "Open the sync logs and review the latest issue before trusting unattended channel sync.",
       severity: log.status === "failed" ? "critical" : "warning",
       relatedLabel: labelizeToken(log.action, "sync action"),
       lastDetectedAt: log.createdAt,
+      targetSection: "sync-logs" as const,
+      actionLabel: "View sync logs",
     }));
   const ariHealthConflicts: ConflictItem[] = [
     ...(ariHealth.lastSuccessful365DaySync
@@ -1660,16 +1672,20 @@ export default function FamloProDashboardShell({
           severity: "warning" as const,
           relatedLabel: currentPropertyLabel,
           lastDetectedAt: ariHealth.lastAriSyncAt ?? null,
+          targetSection: "sync-logs" as const,
+          actionLabel: "View sync logs",
         }]),
     ...(ariHealth.lastProblemSync
       ? [{
           key: `ari-problem-${ariHealth.lastProblemSync.action}-${ariHealth.lastProblemSync.createdAt ?? "unknown"}`,
-          title: "365-day sync failed or warned",
-          summary: `${labelizeToken(ariHealth.lastProblemSync.action, "ARI sync")} returned ${labelizeToken(ariHealth.lastProblemSync.status, "unknown")}${ariHealth.lastProblemSync.message ? `: ${ariHealth.lastProblemSync.message}` : "."}`,
+          title: "Availability sync needs review",
+          summary: `${labelizeToken(ariHealth.lastProblemSync.action, "Availability sync")} reported a ${labelizeToken(ariHealth.lastProblemSync.status, "warning")} state for this property.`,
           recommendedAction: "Review the last ARI sync summary and rerun the 365-day sync when the issue is cleared.",
           severity: ariHealth.lastProblemSync.status === "failed" ? "critical" as const : "warning" as const,
           relatedLabel: currentPropertyLabel,
           lastDetectedAt: ariHealth.lastProblemSync.createdAt ?? null,
+          targetSection: "sync-logs" as const,
+          actionLabel: "View sync logs",
         }]
       : []),
     ...(ariHealth.lastSuccessful365DaySync && isStaleByHours(ariHealth.lastSuccessful365DaySync.createdAt, timeAnchor, 24)
@@ -1681,6 +1697,8 @@ export default function FamloProDashboardShell({
           severity: "warning" as const,
           relatedLabel: currentPropertyLabel,
           lastDetectedAt: ariHealth.lastSuccessful365DaySync.createdAt ?? null,
+          targetSection: "sync-logs" as const,
+          actionLabel: "View sync logs",
         }]
       : []),
     ...(ariHealth.statusLabel === "Sync overdue"
@@ -1692,6 +1710,8 @@ export default function FamloProDashboardShell({
           severity: "warning" as const,
           relatedLabel: currentPropertyLabel,
           lastDetectedAt: ariHealth.lastAriSyncAt ?? null,
+          targetSection: "sync-logs" as const,
+          actionLabel: "View sync logs",
         }]
       : []),
   ];
@@ -1705,100 +1725,157 @@ export default function FamloProDashboardShell({
     ...(channelFeedHealth && !channelFeedHealth.channelAttached
       ? [{
           key: "channel-detached",
-          title: "Channel detached or missing",
-          summary: "Channex feed health says the property currently has no attached channel.",
-          recommendedAction: "Check the Channex channel attachment before relying on automatic booking feed polling.",
+          title: "Booking.com connection needs attention",
+          summary: "This property does not currently have an active connected channel.",
+          recommendedAction: "Check the channel connection before relying on automatic booking feed polling.",
           severity: "critical" as const,
           relatedLabel: currentPropertyLabel,
           lastDetectedAt: channelFeedHealth?.lastPollAt ?? null,
+          targetSection: "connected-channels" as const,
+          actionLabel: "Check channels",
         }]
       : []),
     ...(channelFeedHealth?.channelAttached && !channelFeedHealth.channelActive
       ? [{
           key: "channel-inactive",
-          title: "Channel is attached but inactive",
-          summary: "Channex can still see a channel relationship, but the active state is off.",
+          title: "Booking.com connection needs attention",
+          summary: "The property is attached to a channel, but that connection is not active right now.",
           recommendedAction: "Activate the channel in Channex before relying on feed polling or ARI sync.",
           severity: "critical" as const,
           relatedLabel: channelFeedHealth?.activeChannelTitle ?? currentPropertyLabel,
           lastDetectedAt: channelFeedHealth?.lastPollAt ?? null,
+          targetSection: "connected-channels" as const,
+          actionLabel: "Check channels",
         }]
       : []),
     ...(channelFeedHealth?.lastError
       ? [{
           key: "channel-feed-last-error",
-          title: "Feed poll failed",
-          summary: channelFeedHealth?.lastError ?? "Unknown feed polling error.",
-          recommendedAction: "Review the latest cron poll log and clear the Channex feed issue before trusting unattended sync.",
+          title: "Booking feed needs attention",
+          summary: "The latest booking feed check did not complete cleanly for this property.",
+          recommendedAction: "Review the latest sync log and clear the feed issue before trusting unattended booking sync.",
           severity: "critical" as const,
           relatedLabel: channelFeedHealth?.activeChannelTitle ?? currentPropertyLabel,
           lastDetectedAt: channelFeedHealth?.lastErrorAt ?? channelFeedHealth?.lastPollAt ?? null,
+          targetSection: "sync-logs" as const,
+          actionLabel: "View sync logs",
         }]
       : []),
     ...((channelFeedHealth?.unackedRevisionsCount ?? 0) > 0
       ? [{
           key: "channel-feed-unacked",
-          title: "Unacknowledged revisions exist",
-          summary: `${channelFeedHealth?.unackedRevisionsCount ?? 0} Channex revision${(channelFeedHealth?.unackedRevisionsCount ?? 0) === 1 ? "" : "s"} still need acknowledgement.`,
-          recommendedAction: "Open Bookings and complete review or acknowledgement for pending revisions.",
+          title: "Booking sync still needs review",
+          summary: `${channelFeedHealth?.unackedRevisionsCount ?? 0} booking sync update${(channelFeedHealth?.unackedRevisionsCount ?? 0) === 1 ? "" : "s"} are still waiting for final review.`,
+          recommendedAction: "Open the sync logs or booking review flow and finish the pending review steps.",
           severity: "warning" as const,
           relatedLabel: channelFeedHealth?.activeChannelTitle ?? currentPropertyLabel,
           lastDetectedAt: channelFeedHealth?.lastPollAt ?? null,
+          targetSection: "sync-logs" as const,
+          actionLabel: "View sync logs",
         }]
       : []),
     ...((channelFeedHealth?.failedImportCount ?? 0) > 0
       ? [{
           key: "channel-feed-failed-import",
-          title: "Feed import needs operator review",
-          summary: `${channelFeedHealth?.failedImportCount ?? 0} feed revision${(channelFeedHealth?.failedImportCount ?? 0) === 1 ? "" : "s"} failed automatic storage/import handling.`,
-          recommendedAction: "Review the preview rows and rerun the appropriate booking action from Famlo Pro.",
+          title: "Booking import needs review",
+          summary: `${channelFeedHealth?.failedImportCount ?? 0} booking update${(channelFeedHealth?.failedImportCount ?? 0) === 1 ? "" : "s"} could not be imported automatically.`,
+          recommendedAction: "Famlo team may need to review this before the booking feed is fully healthy again.",
           severity: "critical" as const,
           relatedLabel: channelFeedHealth?.activeChannelTitle ?? currentPropertyLabel,
           lastDetectedAt: channelFeedHealth?.lastPollAt ?? null,
+          targetSection: "conflicts" as const,
+          actionLabel: "View conflicts",
         }]
       : []),
     ...((channelFeedHealth?.pendingApplyCount ?? 0) > 0
       ? [{
           key: "channel-feed-pending-apply",
-          title: "New or cancelled revision is pending apply",
-          summary: `${channelFeedHealth?.pendingApplyCount ?? 0} feed revision${(channelFeedHealth?.pendingApplyCount ?? 0) === 1 ? "" : "s"} are stored but still need import/apply action.`,
-          recommendedAction: "Open Bookings and finish the pending import or cancellation apply steps.",
+          title: "Booking update is still pending",
+          summary: `${channelFeedHealth?.pendingApplyCount ?? 0} booking update${(channelFeedHealth?.pendingApplyCount ?? 0) === 1 ? "" : "s"} still need to be applied safely.`,
+          recommendedAction: "Review the pending sync items before treating the booking feed as fully healthy.",
           severity: "warning" as const,
           relatedLabel: channelFeedHealth?.activeChannelTitle ?? currentPropertyLabel,
           lastDetectedAt: channelFeedHealth?.lastPollAt ?? null,
+          targetSection: "conflicts" as const,
+          actionLabel: "View conflicts",
         }]
       : []),
     ...((channelFeedHealth?.pendingManualReviewCount ?? 0) > 0
       ? [{
           key: "channel-feed-manual-review",
-          title: "Modification revision is waiting for manual review",
-          summary: `${channelFeedHealth?.pendingManualReviewCount ?? 0} Channex revision${(channelFeedHealth?.pendingManualReviewCount ?? 0) === 1 ? "" : "s"} were intentionally held for manual review.`,
-          recommendedAction: "Open Bookings and review the stored modification preview before any acknowledgement is sent.",
+          title: "Modification review needed",
+          summary: `${channelFeedHealth?.pendingManualReviewCount ?? 0} booking change${(channelFeedHealth?.pendingManualReviewCount ?? 0) === 1 ? "" : "s"} are waiting for manual review.`,
+          recommendedAction: "Famlo team may need to review this before the change is accepted safely.",
           severity: "info" as const,
           relatedLabel: channelFeedHealth?.activeChannelTitle ?? currentPropertyLabel,
           lastDetectedAt: channelFeedHealth?.lastPollAt ?? null,
+          targetSection: "conflicts" as const,
+          actionLabel: "View conflicts",
         }]
       : []),
     ...((channelFeedHealth?.failedAutoApplyCount ?? 0) > 0
       ? [{
           key: "channel-feed-auto-apply-failed",
-          title: "Automatic booking sync needs intervention",
-          summary: `${channelFeedHealth?.failedAutoApplyCount ?? 0} automatic import/apply step${(channelFeedHealth?.failedAutoApplyCount ?? 0) === 1 ? "" : "s"} failed.`,
-          recommendedAction: "Inspect the latest auto-process sync log and fix the affected booking revision before acknowledging it.",
+          title: "Cancellation or booking sync needs review",
+          summary: `${channelFeedHealth?.failedAutoApplyCount ?? 0} automatic booking update${(channelFeedHealth?.failedAutoApplyCount ?? 0) === 1 ? "" : "s"} could not be completed safely.`,
+          recommendedAction: "Famlo team may need to review this before sync can return to healthy.",
           severity: "critical" as const,
           relatedLabel: channelFeedHealth?.activeChannelTitle ?? currentPropertyLabel,
           lastDetectedAt: channelFeedHealth?.lastAutoApplyAt ?? channelFeedHealth?.lastPollAt ?? null,
+          targetSection: "conflicts" as const,
+          actionLabel: "View conflicts",
         }]
       : []),
     ...(ariHealth.statusLabel === "Channel disconnected"
       ? [{
           key: "ari-channel-disconnected",
-          title: "Daily ARI sync is blocked by channel state",
-          summary: "The latest ARI health snapshot says the Channex channel is detached or inactive.",
+          title: "Availability sync needs review",
+          summary: "Daily price and calendar sync is blocked because the current channel is detached or inactive.",
           recommendedAction: "Reconnect the Channex channel before relying on daily inventory sync.",
           severity: "critical" as const,
           relatedLabel: currentPropertyLabel,
           lastDetectedAt: ariHealth.lastAriSyncAt ?? null,
+          targetSection: "connected-channels" as const,
+          actionLabel: "Check channels",
+        }]
+      : []),
+    ...(rooms.filter((room) => room.isActive).length === 0
+      ? [{
+          key: "no-active-room",
+          title: "No active room is ready to sell",
+          summary: "This property has no active room available for booking sync or OTA setup.",
+          recommendedAction: "Activate at least one room before expecting channel readiness.",
+          severity: "critical" as const,
+          relatedLabel: currentPropertyLabel,
+          lastDetectedAt: new Date(timeAnchor).toISOString(),
+          targetSection: "conflicts" as const,
+          actionLabel: "View conflicts",
+        }]
+      : []),
+    ...(roomsMissingPrice > 0
+      ? [{
+          key: "rooms-missing-price",
+          title: "Some rooms are missing prices",
+          summary: `${roomsMissingPrice} room${roomsMissingPrice === 1 ? "" : "s"} still need a base price before this property is ready to sell cleanly.`,
+          recommendedAction: "Finish room pricing setup before relying on channel readiness.",
+          severity: "warning" as const,
+          relatedLabel: currentPropertyLabel,
+          lastDetectedAt: new Date(timeAnchor).toISOString(),
+          targetSection: "conflicts" as const,
+          actionLabel: "View conflicts",
+        }]
+      : []),
+    ...(photosReadiness.missingRooms > 0
+      ? [{
+          key: "rooms-missing-photos",
+          title: "Some rooms still need photos",
+          summary: `${photosReadiness.missingRooms} room${photosReadiness.missingRooms === 1 ? "" : "s"} do not yet have photos counted for distribution readiness.`,
+          recommendedAction: "Add room photos before relying on OTA-ready content quality.",
+          severity: "info" as const,
+          relatedLabel: currentPropertyLabel,
+          lastDetectedAt: new Date(timeAnchor).toISOString(),
+          targetSection: "conflicts" as const,
+          actionLabel: "View conflicts",
         }]
       : []),
   ];
@@ -1834,6 +1911,23 @@ export default function FamloProDashboardShell({
     currentPropertyLabel;
   const criticalConflictCount = conflictItems.filter((item) => item.severity === "critical").length;
   const warningConflictCount = conflictItems.filter((item) => item.severity === "warning").length;
+  const infoConflictCount = conflictItems.filter((item) => item.severity === "info").length;
+  const syncHealthChecks = [
+    { label: "Channel connected", healthy: currentChannelAttached },
+    { label: "At least one active room", healthy: rooms.some((room) => room.isActive) },
+    { label: "Room mapping ready", healthy: allActiveRoomsMapped },
+    { label: "Rate mapping ready", healthy: allActiveRoomsHaveRatePlans },
+    { label: "Booking feed healthy", healthy: bookingFeedHealthy },
+    { label: "Availability sync healthy", healthy: ariHealth.status === "healthy" },
+    { label: "Room prices complete", healthy: roomsMissingPrice === 0 && rooms.length > 0 },
+    { label: "Room photos coverage", healthy: photosReadiness.missingRooms === 0 && rooms.length > 0 },
+  ];
+  const healthySyncCheckCount = syncHealthChecks.filter((item) => item.healthy).length;
+  const syncHealthLastCheckedAt =
+    channelFeedHealth?.lastPollAt ??
+    channelAriHealth?.lastAriSyncAt ??
+    lastBookingFeedLog?.createdAt ??
+    null;
   const acknowledgementGuardHealthy = channelFoundation.bookingRevisions.every((revision) => {
     if (revision.ackStatus !== "acknowledged") return true;
     return Boolean(revision.externalRevisionId);
@@ -3883,16 +3977,81 @@ export default function FamloProDashboardShell({
             <section className={styles.card}>
               <div className={styles.cardHeader}>
                 <div>
-                  <h3 className={styles.cardTitle}>Conflicts</h3>
+                  <h3 className={styles.cardTitle}>Sync Health</h3>
                   <p className={styles.cardCopy}>
-                    Read-only operational queue for booking acknowledgement gaps, mapping issues, failed syncs, and stale provider state.
+                    Use this page to understand what needs attention before this property is truly healthy on connected OTAs.
                   </p>
                 </div>
                 <span className={`${styles.badge} ${conflictItems.length > 0 ? styles.badgeMuted : ""}`.trim()}>
-                  {conflictItems.length > 0 ? `${conflictItems.length} issues` : "No conflicts"}
+                  {conflictItems.length > 0 ? `${conflictItems.length} issues` : "Everything looks healthy"}
                 </span>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.summaryGrid}>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>Total issues</div>
+                    <div className={styles.summaryValue}>{conflictItems.length}</div>
+                    <div className={styles.summaryCopy}>Current Sync Health issues surfaced from channels, mappings, booking feed, and room readiness.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>Critical issues</div>
+                    <div className={styles.summaryValue}>{criticalConflictCount}</div>
+                    <div className={styles.summaryCopy}>These usually block a property from being safely ready to sell.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>Warnings</div>
+                    <div className={styles.summaryValue}>{warningConflictCount + infoConflictCount}</div>
+                    <div className={styles.summaryCopy}>These do not always block launch, but they still need review.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>Healthy checks</div>
+                    <div className={styles.summaryValue}>{healthySyncCheckCount}/{syncHealthChecks.length}</div>
+                    <div className={styles.summaryCopy}>
+                      Last checked: {syncHealthLastCheckedAt ? formatDateTime(syncHealthLastCheckedAt) : "No recent check recorded"}
+                    </div>
+                  </article>
+                </div>
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Health checklist</div>
+                    <div className={styles.summaryCopy}>
+                      Quick view of whether this property is connected, mapped, priced, and syncing cleanly.
+                    </div>
+                    <div className={styles.inlineBadgeRow}>
+                      {syncHealthChecks.map((item) => (
+                        <span
+                          key={item.label}
+                          className={`${styles.readinessPill} ${item.healthy ? styles.readinessPillOk : styles.readinessPillReview}`}
+                        >
+                          {item.label}: {item.healthy ? "Healthy" : "Needs review"}
+                        </span>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Next actions</div>
+                    <div className={styles.summaryCopy}>
+                      Technical mapping and logs remain available under Advanced, while channel setup stays under Channels.
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("connected-channels")}>
+                        Check channels
+                      </button>
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("room-mapping")}>
+                        Fix room mapping
+                      </button>
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("rate-mapping")}>
+                        Fix rate mapping
+                      </button>
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("sync-logs")}>
+                        View sync logs
+                      </button>
+                    </div>
+                  </article>
+                </div>
+
                 {conflictItems.length > 0 ? (
                   <div className={styles.logList}>
                     {conflictItems.map((item) => (
@@ -3907,6 +4066,17 @@ export default function FamloProDashboardShell({
                             <div className={styles.conflictActionCopy}>Last detected: {formatDateTime(item.lastDetectedAt)}</div>
                           ) : null}
                           <div className={styles.conflictActionCopy}>Recommended action: {item.recommendedAction}</div>
+                          {item.targetSection ? (
+                            <div className={styles.inlineActionRow}>
+                              <button
+                                type="button"
+                                className={styles.secondaryActionButton}
+                                onClick={() => setActiveSection(item.targetSection!)}
+                              >
+                                {item.actionLabel ?? "Open related section"}
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                         <div className={styles.logMeta}>
                           <span
@@ -3930,9 +4100,9 @@ export default function FamloProDashboardShell({
                   </div>
                 ) : (
                   <div className={styles.emptyState}>
-                    <div className={styles.emptyTitle}>Nothing to reconcile</div>
+                    <div className={styles.emptyTitle}>Everything looks healthy</div>
                     <div className={styles.emptyCopy}>
-                      With {connectedPropertyCount} connected properties and the current sync state, there are no room, rate, acknowledgement, or stale-sync issues to review right now.
+                      There are no open channel, mapping, feed, or availability sync issues for this property right now.
                     </div>
                   </div>
                 )}
