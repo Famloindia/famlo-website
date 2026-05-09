@@ -334,6 +334,15 @@ export default function HostRoomsManager({
       return;
     }
 
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(
+        `Delete ${target.name || "this room"} from the selected property? This only removes the Famlo room inventory entry.`
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
     setRoomsSaving(true);
     setRoomsMessage(null);
     try {
@@ -619,6 +628,13 @@ export default function HostRoomsManager({
           <div style={{ marginBottom: 20, padding: "16px 18px", borderRadius: 16, background: "#eff6ff", color: "#1d4ed8", fontSize: 13, fontWeight: 700 }}>
             <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>{emptyTitle}</div>
             <div>{emptyCopy}</div>
+          </div>
+        ) : null}
+
+        {loadedPersistedRooms && roomStats.activeRooms === 0 ? (
+          <div style={{ marginBottom: 20, padding: "16px 18px", borderRadius: 16, background: "#fff7ed", color: "#9a3412", fontSize: 13, fontWeight: 700 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>All rooms inactive</div>
+            <div>Turn on at least one room to make this property bookable on Famlo.</div>
           </div>
         ) : null}
 

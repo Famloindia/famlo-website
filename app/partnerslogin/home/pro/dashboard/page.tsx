@@ -510,6 +510,7 @@ export default async function FamloProDashboardPage({
     bathroomType: room.bathroomType,
     priceFullday: room.priceFullday,
     isActive: room.isActive,
+    isPrimary: room.isPrimary,
     amenitiesCount: room.amenities.length,
     photosCount: room.photos.length + room.localityPhotos.length,
   }));

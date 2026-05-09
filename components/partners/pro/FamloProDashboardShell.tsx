@@ -79,6 +79,7 @@ type RoomSummary = {
   bathroomType: string | null;
   priceFullday: number;
   isActive: boolean;
+  isPrimary: boolean;
   amenitiesCount: number;
   photosCount: number;
 };
@@ -623,6 +624,18 @@ function roomReadinessChecklist(room: RoomSummary): Array<{ label: string; compl
     { label: "Photos", complete: room.photosCount > 0 },
     { label: "Active", complete: room.isActive },
   ];
+}
+
+function countRoomsMissingPhotos(rooms: RoomSummary[]): number {
+  return rooms.filter((room) => room.photosCount <= 0).length;
+}
+
+function countRoomsMissingPrice(rooms: RoomSummary[]): number {
+  return rooms.filter((room) => room.priceFullday <= 0).length;
+}
+
+function hasPrimaryReadyRoom(rooms: RoomSummary[]): boolean {
+  return rooms.some((room) => room.isPrimary);
 }
 
 function contentStatusLabel(complete: number, total: number): string {
@@ -2507,18 +2520,70 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Rooms</h3>
                   <p className={styles.cardCopy}>
-                    Manage rooms for this selected property. Changes here update the Famlo property inventory.
+                    Rooms for this property. Changes here update the Famlo room inventory for the selected property.
                   </p>
                 </div>
                 <span className={styles.badge}>{rooms.length} units</span>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Room readiness</div>
+                    <div className={styles.roomStats}>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Total rooms</div>
+                        <div className={styles.miniValue}>{rooms.length}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Active rooms</div>
+                        <div className={styles.miniValue}>{rooms.filter((room) => room.isActive).length}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Missing photos</div>
+                        <div className={styles.miniValue}>{countRoomsMissingPhotos(rooms)}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Missing price</div>
+                        <div className={styles.miniValue}>{countRoomsMissingPrice(rooms)}</div>
+                      </div>
+                    </div>
+                    <div className={styles.roomReadinessRow}>
+                      <span className={`${styles.readinessPill} ${hasPrimaryReadyRoom(rooms) ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                        Primary room: {hasPrimaryReadyRoom(rooms) ? "Selected" : "Missing"}
+                      </span>
+                      <span className={styles.readinessPill}>
+                        Property scope: {familyId}
+                      </span>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Room publishing notes</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Famlo inventory first</div>
+                        <div className={styles.feedCopy}>Use this area to update rooms, photos, amenities, pricing, and room locations for the selected property.</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>OTA controls stay separate</div>
+                        <div className={styles.feedCopy}>OTA/channel listing controls will stay under Channels and Advanced, not inside room editing.</div>
+                      </div>
+                      {rooms.length > 0 && rooms.every((room) => !room.isActive) ? (
+                        <div className={styles.feedItem}>
+                          <div className={styles.feedTitle}>All rooms are inactive</div>
+                          <div className={styles.feedCopy}>Turn on at least one room if you want this property to stay bookable on Famlo.</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </article>
+                </div>
+
                 <HostRoomsManager
                   familyId={familyId}
                   homeLat={propertyHomeLat ?? undefined}
                   homeLng={propertyHomeLng ?? undefined}
-                  title="Rooms"
-                  description="Manage rooms for this selected property."
+                  title="Rooms for this property"
+                  description="Changes here update the Famlo room inventory for the selected property."
                   propertyLabel={propertyLocalityLabel ?? locationLabel}
                   showChannelManager={false}
                   viewRoomPage
