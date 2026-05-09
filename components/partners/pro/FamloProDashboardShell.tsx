@@ -79,7 +79,11 @@ type RoomSummary = {
   maxGuests: number;
   bedInfo: string | null;
   bathroomType: string | null;
+  priceMorning: number;
+  priceAfternoon: number;
+  priceEvening: number;
   priceFullday: number;
+  quarterEnabled: boolean;
   isActive: boolean;
   isPrimary: boolean;
   amenitiesCount: number;
@@ -1365,25 +1369,33 @@ export default function FamloProDashboardShell({
   const roomsMissingPrice = rooms.filter((room) => room.priceFullday <= 0).length;
   const lowestRoomPrice = pricedRooms.length > 0 ? Math.min(...pricedRooms.map((room) => room.priceFullday)) : null;
   const highestRoomPrice = pricedRooms.length > 0 ? Math.max(...pricedRooms.map((room) => room.priceFullday)) : null;
+  const primaryRoom = rooms.find((room) => room.isPrimary) ?? null;
+  const roomsWithSmartPricing = rooms.filter((room) => room.quarterEnabled || room.priceMorning > 0 || room.priceEvening > 0).length;
+  const roomPlaceholder: RoomSummary = {
+    id: "placeholder",
+    name: "No rooms surfaced",
+    unitType: "",
+    description: null,
+    maxGuests: 0,
+    bedInfo: null,
+    bathroomType: null,
+    priceMorning: 0,
+    priceAfternoon: 0,
+    priceEvening: 0,
+    priceFullday: 0,
+    quarterEnabled: false,
+    isActive: false,
+    isPrimary: false,
+    amenitiesCount: 0,
+    photosCount: 0,
+  };
   const propertyContentReadyCount = propertyContentChecks.filter((item) => item.ready).length;
   const contactReadyCount = contactChecks.filter((item) => item.ready).length;
   const locationReadyCount = locationChecks.filter((item) => item.ready).length;
   const policyReadyCount = policyChecks.filter((item) => item.ready).length;
   const roomMappingRows = (rooms.length > 0
     ? rooms
-    : [{
-        id: "placeholder",
-        name: "No rooms surfaced",
-        unitType: "",
-        description: null,
-        maxGuests: 0,
-        bedInfo: null,
-        bathroomType: null,
-        priceFullday: 0,
-        isActive: false,
-        amenitiesCount: 0,
-        photosCount: 0,
-      }]).map((room) => {
+    : [roomPlaceholder]).map((room) => {
     const mapping = room.id === "placeholder" ? null : roomMappingsByRoomId.get(room.id) ?? null;
     return {
       room,
@@ -1394,19 +1406,7 @@ export default function FamloProDashboardShell({
   });
   const rateMappingRows = (rooms.length > 0
     ? rooms
-    : [{
-        id: "placeholder",
-        name: "No rooms surfaced",
-        unitType: "",
-        description: null,
-        maxGuests: 0,
-        bedInfo: null,
-        bathroomType: null,
-        priceFullday: 0,
-        isActive: false,
-        amenitiesCount: 0,
-        photosCount: 0,
-      }]).map((room) => {
+    : [roomPlaceholder]).map((room) => {
     const ratePlan = room.id === "placeholder" ? null : ratePlansByRoomId.get(room.id) ?? null;
     return {
       room,
@@ -2770,7 +2770,7 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Pricing & Rules</h3>
                   <p className={styles.cardCopy}>
-                    Room-level pricing stays simple here. Channel-wise pricing will come later, and OTA/channel controls stay under Channels and Advanced.
+                    Pricing & Rules for this property. Use this page to catch missing prices and review stay rules before going live.
                   </p>
                 </div>
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>Manual only</span>
@@ -2796,6 +2796,10 @@ export default function FamloProDashboardShell({
                         <div className={styles.miniLabel}>Active / inactive</div>
                         <div className={styles.miniValue}>{activeRoomsCount} / {inactiveRoomsCount}</div>
                       </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Smart pricing rooms</div>
+                        <div className={styles.miniValue}>{roomsWithSmartPricing}</div>
+                      </div>
                     </div>
                     <div className={styles.roomReadinessRow}>
                       <span className={styles.readinessPill}>
@@ -2803,6 +2807,9 @@ export default function FamloProDashboardShell({
                       </span>
                       <span className={styles.readinessPill}>
                         Highest room price: {highestRoomPrice != null ? formatCurrency(highestRoomPrice) : "Missing"}
+                      </span>
+                      <span className={styles.readinessPill}>
+                        Primary room price: {primaryRoom?.priceFullday && primaryRoom.priceFullday > 0 ? formatCurrency(primaryRoom.priceFullday) : "Missing"}
                       </span>
                     </div>
                   </article>
@@ -2812,15 +2819,82 @@ export default function FamloProDashboardShell({
                     <div className={styles.stack}>
                       <div className={styles.feedItem}>
                         <div className={styles.feedTitle}>Room prices stay room-level</div>
-                        <div className={styles.feedCopy}>Room-level prices can be edited from Rooms and continue to use the current Famlo price fields.</div>
+                        <div className={styles.feedCopy}>Room prices are managed from Rooms and continue to use the current Famlo price fields.</div>
                       </div>
                       <div className={styles.feedItem}>
                         <div className={styles.feedTitle}>Rules stay lightweight</div>
-                        <div className={styles.feedCopy}>Minimum stay, maximum stay, and check-in timing tools remain available below without changing pricing semantics.</div>
+                        <div className={styles.feedCopy}>Check-in, check-out, and house-rule context stays property-level. Advanced stay rules are coming later.</div>
                       </div>
                       <div className={styles.feedItem}>
                         <div className={styles.feedTitle}>Channel pricing comes later</div>
-                        <div className={styles.feedCopy}>No channel-wise pricing backend is added in this phase.</div>
+                        <div className={styles.feedCopy}>Room-level pricing works today. Channel-wise pricing will come later and is not added in this phase.</div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Room pricing by inventory</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 12 }}>
+                      Review each room’s current price setup here, then open Rooms to edit the actual values.
+                    </div>
+                    <div className={styles.stack}>
+                      {(rooms.length > 0 ? rooms : [roomPlaceholder]).map((room) => (
+                        <div key={room.id} className={styles.feedItem}>
+                          <div className={styles.feedTitle}>
+                            {room.name}
+                            {room.id !== "placeholder" ? ` · ${room.isActive ? "Active" : "Inactive"}` : ""}
+                          </div>
+                          <div className={styles.feedCopy}>
+                            {room.id === "placeholder"
+                              ? "No room inventory is available yet for this property."
+                              : `${room.unitType || "Famlo room"} · Base ${room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing"} · Low demand ${room.priceMorning > 0 ? formatCurrency(room.priceMorning) : "Not set"} · High demand ${room.priceEvening > 0 ? formatCurrency(room.priceEvening) : "Not set"} · ${room.quarterEnabled ? "Smart pricing on" : "Smart pricing off"}`}
+                          </div>
+                          {room.id !== "placeholder" ? (
+                            <div className={styles.roomReadinessRow}>
+                              <span className={`${styles.readinessPill} ${room.priceFullday > 0 ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                                {room.priceFullday > 0 ? "Base price set" : "Missing base price"}
+                              </span>
+                              <span className={styles.readinessPill}>
+                                {room.isPrimary ? "Primary room" : "Secondary room"}
+                              </span>
+                              <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("rooms-units")}>
+                                Edit in Rooms
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Property rules snapshot</div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Check-in time</div>
+                        <div className={styles.placeholderValue}>{propertyContent.checkInTime || initialSettings.checkInTime || "Not set"}</div>
+                        <div className={styles.placeholderCopy}>Saved from current property content settings.</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Check-out time</div>
+                        <div className={styles.placeholderValue}>{propertyContent.checkOutTime || initialSettings.checkOutTime || "Not set"}</div>
+                        <div className={styles.placeholderCopy}>Guests will continue seeing the existing Famlo timing until later OTA-specific rules exist.</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>House rules</div>
+                        <div className={styles.placeholderValue}>{propertyContent.houseRules ? "Available" : "Needs review"}</div>
+                        <div className={styles.placeholderCopy}>{propertyContent.houseRules || initialSettings.houseRules || "Add property house rules from Content & Photos to complete the stay policy summary."}</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Cancellation / stay rules</div>
+                        <div className={styles.placeholderValue}>{initialSettings.cancellationPolicyLabel || "Coming later"}</div>
+                        <div className={styles.placeholderCopy}>
+                          {initialSettings.cancellationPolicyLabel
+                            ? "Current cancellation label is saved in OTA readiness settings."
+                            : "Advanced stay rules such as min stay and max stay are coming later. No new DB fields are added in this phase."}
+                        </div>
                       </div>
                     </div>
                   </article>
@@ -2856,7 +2930,7 @@ export default function FamloProDashboardShell({
                   <div className={styles.mappingHeader}>Stop Sell</div>
                   <div className={styles.mappingHeader}>CTA / CTD</div>
                   <div className={styles.mappingHeader}>Meal Plan</div>
-                  {(rooms.length > 0 ? rooms : [{ id: "placeholder", name: "No rooms surfaced", unitType: "", description: null, maxGuests: 0, bedInfo: null, bathroomType: null, priceFullday: 0, isActive: false, amenitiesCount: 0, photosCount: 0 }]).map((room) => (
+                  {(rooms.length > 0 ? rooms : [roomPlaceholder]).map((room) => (
                     <Fragment key={room.id}>
                       <div className={styles.mappingCell}>
                         <div className={styles.mappingTitle}>{room.name}</div>
