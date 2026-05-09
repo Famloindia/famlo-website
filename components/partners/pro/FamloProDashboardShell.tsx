@@ -1388,6 +1388,7 @@ export default function FamloProDashboardShell({
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(rooms[0]?.id ?? null);
   const [propertyContent, setPropertyContent] = useState<PropertyContentDraft>(initialPropertyContent);
   const [propertyGallery, setPropertyGallery] = useState<PhotoItem[]>(propertyPhotos);
   const [propertyContentSaving, startPropertyContentSaving] = useTransition();
@@ -1400,6 +1401,7 @@ export default function FamloProDashboardShell({
   const activePropertyTab = resolvePropertyTab(activeSection);
   const activePropertyTabLinks = PROPERTY_TAB_SECTION_LINKS[activePropertyTab];
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
+  const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
 
   useEffect(() => {
     setPropertyContent(initialPropertyContent);
@@ -1407,7 +1409,11 @@ export default function FamloProDashboardShell({
     setPropertyContentFeedback(null);
     setBookingFilter("All");
     setSelectedBooking(null);
-  }, [familyId, initialPropertyContent, propertyPhotos]);
+    setSelectedRoomId((current) => {
+      if (current && rooms.some((room) => room.id === current)) return current;
+      return rooms[0]?.id ?? null;
+    });
+  }, [familyId, initialPropertyContent, propertyPhotos, rooms]);
 
   const handleSavePropertyContent = async (options: {
     updatedListing: PropertyContentDraft;
@@ -2154,7 +2160,7 @@ export default function FamloProDashboardShell({
   const goLiveChecklist: GoLiveChecklistItem[] = [
     {
       key: "famlo-plus-active",
-      title: "Famlo+ active",
+      title: "Famlo Pro active",
       status: famloPlusStatus === "active" || famloPlusStatus === "grace" ? "ready" : "blocked",
       statusLabel: checklistStatusLabel(famloPlusStatus === "active" || famloPlusStatus === "grace" ? "ready" : "blocked"),
       explanation:
@@ -2163,8 +2169,8 @@ export default function FamloProDashboardShell({
           : `Famlo Pro access is ${labelizeToken(famloPlusStatus, "inactive")}, so live channel launch should stay blocked.`,
       recommendedAction:
         famloPlusStatus === "active" || famloPlusStatus === "grace"
-          ? "Keep the current Famlo+ entitlement active through pilot launch."
-          : "Renew or activate Famlo+ before planning live channel connection.",
+          ? "Keep the current Famlo Pro entitlement active through pilot launch."
+          : "Renew or activate Famlo Pro before planning live channel connection.",
       targetSection: "dashboard",
     },
     {
@@ -2480,6 +2486,84 @@ export default function FamloProDashboardShell({
     : primaryProperty?.syncStatus === "connected"
       ? "Channel active"
       : "Channel health unavailable";
+  const propertyCardRows = propertyOptions.map((option) => {
+    const isSelected = option.familyId === familyId;
+    const optionLocation = [option.locality, option.city, option.state].filter(Boolean).join(", ") || "Location details pending";
+    return {
+      option,
+      isSelected,
+      location: optionLocation,
+      activeRoomsLabel: isSelected ? `${activeRoomsCount} active rooms` : "Open property to review rooms",
+      contentLabel: isSelected
+        ? `${propertyContentReadyCount}/${propertyContentChecks.length} content ready`
+        : "Open property to review content",
+      healthLabel: isSelected ? selectedPropertyChannelStatus : "Open property to review channel health",
+      actionLabel: isSelected
+        ? `${conflictItems.length + actionNeededBookingsCount} action needed`
+        : formatPropertySwitcherStatusLabel(option.famloPlusStatus),
+    };
+  });
+  const roomCards = rooms.map((room) => {
+    const roomMapping = roomMappingsByRoomId.get(room.id) ?? null;
+    const roomRatePlan = ratePlansByRoomId.get(room.id) ?? null;
+    return {
+      room,
+      selected: room.id === selectedRoom?.id,
+      famloStatus: room.isActive ? "Active in Famlo" : "Inactive in Famlo",
+      channelStatus: room.isActive
+        ? roomMapping?.externalRoomTypeId
+          ? roomRatePlan?.externalRatePlanId
+            ? "Booking.com ready"
+            : "Rate mapping needed"
+          : "Room mapping needed"
+        : "Activate room to continue",
+      warning:
+        room.photosCount <= 0
+          ? "Missing photos"
+          : room.priceFullday <= 0
+            ? "Missing price"
+            : null,
+    };
+  });
+  const roomControlCenterSections = [
+    {
+      title: "Details",
+      hint: "Update room information, occupancy, and Famlo basics.",
+      targetSection: "rooms-units" as const,
+    },
+    {
+      title: "Photos",
+      hint: "Review room photos and image coverage for this room.",
+      targetSection: "rooms-units" as const,
+    },
+    {
+      title: "Pricing",
+      hint: "Check room price coverage and pricing readiness.",
+      targetSection: "rates-restrictions" as const,
+    },
+    {
+      title: "Calendar",
+      hint: "Review booking coverage and availability for this room.",
+      targetSection: "inventory-calendar" as const,
+    },
+    {
+      title: "Channels",
+      hint: "See connected channel readiness for this room.",
+      targetSection: "connected-channels" as const,
+    },
+    {
+      title: "Mapping",
+      hint: "Open room and rate mapping for this room.",
+      targetSection: roomCards.find((item) => item.room.id === selectedRoom?.id)?.channelStatus === "Rate mapping needed"
+        ? ("rate-mapping" as const)
+        : ("room-mapping" as const),
+    },
+    {
+      title: "Sync Health",
+      hint: "Review sync issues that could affect this room.",
+      targetSection: criticalConflictCount > 0 ? ("conflicts" as const) : ("sync-logs" as const),
+    },
+  ];
   const pilotHomeCards = [
     {
       label: "Selected property",
@@ -2759,7 +2843,7 @@ export default function FamloProDashboardShell({
           <div className={styles.headerActions}>
             <span className={`${styles.chip} ${styles.chipPrimary}`}>
               <Sparkles size={14} />
-              Famlo+ {famloPlusStatus}
+              Famlo Pro {famloPlusStatus}
             </span>
             <span className={styles.chip}>
               <CalendarClock size={14} />
@@ -2776,14 +2860,14 @@ export default function FamloProDashboardShell({
             <section className={styles.propertyCenterShell}>
               <div className={styles.propertyCenterHeader}>
                 <div>
-                  <div className={styles.sectionEyebrow}>Selected property</div>
-                  <h2 className={styles.propertyCenterTitle}>{currentPropertyOption?.name ?? propertyName ?? "Selected property"}</h2>
+                  <div className={styles.sectionEyebrow}>Choose a property</div>
+                  <h2 className={styles.propertyCenterTitle}>Properties, then rooms, then room control</h2>
                   <p className={styles.propertyCenterCopy}>
-                    Manage this property's rooms, content, pricing, channels, and sync health. Advanced technical screens
-                    stay available under Advanced without changing any current sync logic.
+                    Choose a property first, then choose a room to manage. Property story and host presence can be
+                    different for each property, while account and legal identity stay managed separately.
                   </p>
                   <div className={styles.propertyHeaderMeta}>
-                    <span className={styles.propertyHeaderMetaItem}>{selectedPropertyLocation}</span>
+                    <span className={styles.propertyHeaderMetaItem}>Selected property: {currentPropertyOption?.name ?? propertyName ?? "Selected property"}</span>
                     <span className={styles.propertyHeaderMetaItem}>Family scope: {familyId}</span>
                   </div>
                 </div>
@@ -2801,36 +2885,211 @@ export default function FamloProDashboardShell({
                 activeSection={activeSection}
               />
 
-              <div className={styles.propertyTabGrid}>
-                {PROPERTY_TABS.map((tab) => {
-                  const Icon = tab.icon;
-                  const active = isPropertyTabActive(tab.id, activeSection);
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      className={`${styles.propertyTabButton} ${active ? styles.propertyTabButtonActive : ""}`}
-                      onClick={() => setActiveSection(active ? activeSection : tab.defaultSection)}
-                    >
-                      <div className={styles.propertyTabIconWrap}>
-                        <Icon className={styles.propertyTabIcon} />
+              <div className={styles.propertySubSectionBar}>
+                <div>
+                  <div className={styles.propertySubSectionTitle}>Choose a property</div>
+                  <div className={styles.propertySubSectionCopy}>
+                    Property story and host presence can be different for each property. Account and legal identity remain managed separately.
+                  </div>
+                </div>
+                <span className={styles.sectionStatus}>{propertyOptions.length} properties</span>
+              </div>
+
+              <div className={styles.listGrid}>
+                {propertyCardRows.map((item) => (
+                  <article key={item.option.familyId} className={styles.listCard}>
+                    <div className={styles.cardHeaderCompact}>
+                      <div>
+                        <div className={styles.listTitle}>{item.option.name}</div>
+                        <div className={styles.cardCopy}>{item.location}</div>
                       </div>
-                      <div className={styles.propertyTabText}>
-                        <span className={styles.propertyTabTitle}>{tab.title}</span>
-                        <span className={styles.propertyTabHint}>{tab.hint}</span>
+                      <span className={`${styles.readinessPill} ${item.isSelected ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                        {item.isSelected ? "Selected property" : "Open property"}
+                      </span>
+                    </div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Rooms</div>
+                        <div className={styles.feedCopy}>{item.activeRoomsLabel}</div>
                       </div>
-                    </button>
-                  );
-                })}
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Content readiness</div>
+                        <div className={styles.feedCopy}>{item.contentLabel}</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Channels and Sync Health</div>
+                        <div className={styles.feedCopy}>{item.healthLabel}</div>
+                      </div>
+                      <div className={styles.inlineBadgeRow}>
+                        <span className={styles.readinessPill}>{item.actionLabel}</span>
+                        <span className={styles.readinessPill}>{formatPropertySwitcherStatusLabel(item.option.famloPlusStatus)}</span>
+                      </div>
+                      <div className={styles.inlineActionRow}>
+                        <button
+                          type="button"
+                          className={item.isSelected ? styles.secondaryActionButton : styles.primaryActionButton}
+                          onClick={() => {
+                            if (item.isSelected) {
+                              setActiveSection("rooms-units");
+                              return;
+                            }
+                            router.push(
+                              `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(item.option.familyId)}&section=${encodeURIComponent(activeSection)}`
+                            );
+                          }}
+                        >
+                          {item.isSelected ? "Open selected property" : "Open property"}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+                <article className={styles.listCard}>
+                  <div className={styles.cardHeaderCompact}>
+                    <div>
+                      <div className={styles.listTitle}>Add Property</div>
+                      <div className={styles.cardCopy}>Coming soon for Famlo Pro hosts who manage more than one property.</div>
+                    </div>
+                    <span className={`${styles.readinessPill} ${styles.readinessPillReview}`}>Pro only</span>
+                  </div>
+                  <div className={styles.feedCopy}>
+                    Property creation flow is not live in this phase yet. Famlo can still scope each existing property separately today.
+                  </div>
+                </article>
               </div>
 
               <div className={styles.propertySubSectionBar}>
                 <div>
-                  <div className={styles.propertySubSectionTitle}>
-                    {PROPERTY_TABS.find((tab) => tab.id === activePropertyTab)?.title ?? "Overview"}
-                  </div>
+                  <div className={styles.propertySubSectionTitle}>Choose a room to manage</div>
                   <div className={styles.propertySubSectionCopy}>
-                    {PROPERTY_TABS.find((tab) => tab.id === activePropertyTab)?.hint ?? "Property workspace"}
+                    Pick a room card to open a simpler room control center for this selected property.
+                  </div>
+                </div>
+                <span className={styles.sectionStatus}>{rooms.length} rooms</span>
+              </div>
+
+              <div className={styles.listGrid}>
+                {roomCards.map((item) => (
+                  <article key={item.room.id} className={styles.listCard}>
+                    <div className={styles.cardHeaderCompact}>
+                      <div>
+                        <div className={styles.listTitle}>{item.room.name || "Untitled room"}</div>
+                        <div className={styles.cardCopy}>{item.room.unitType || "Room details pending"}</div>
+                      </div>
+                      <span className={`${styles.readinessPill} ${item.room.isActive ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                        {item.room.isActive ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Room photo</div>
+                        <div className={styles.feedCopy}>{item.room.photosCount > 0 ? `${item.room.photosCount} photo${item.room.photosCount === 1 ? "" : "s"} added` : "No room photo yet"}</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Base price</div>
+                        <div className={styles.feedCopy}>{item.room.priceFullday > 0 ? formatCurrency(item.room.priceFullday) : "Price missing"}</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Famlo status</div>
+                        <div className={styles.feedCopy}>{item.famloStatus}</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Booking.com or channel status</div>
+                        <div className={styles.feedCopy}>{item.channelStatus}</div>
+                      </div>
+                      <div className={styles.inlineBadgeRow}>
+                        {item.warning ? (
+                          <span className={`${styles.readinessPill} ${styles.readinessPillReview}`}>{item.warning}</span>
+                        ) : (
+                          <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Ready for review</span>
+                        )}
+                        {item.room.isPrimary ? <span className={styles.readinessPill}>Primary room</span> : null}
+                      </div>
+                      <div className={styles.inlineActionRow}>
+                        <button
+                          type="button"
+                          className={item.selected ? styles.secondaryActionButton : styles.primaryActionButton}
+                          onClick={() => {
+                            setSelectedRoomId(item.room.id);
+                            setActiveSection("rooms-units");
+                          }}
+                        >
+                          Manage room
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+                <article className={styles.listCard}>
+                  <div className={styles.cardHeaderCompact}>
+                    <div>
+                      <div className={styles.listTitle}>Add Room</div>
+                      <div className={styles.cardCopy}>Create another sellable unit inside this selected property.</div>
+                    </div>
+                    <span className={styles.readinessPill}>Famlo Pro</span>
+                  </div>
+                  <div className={styles.inlineActionRow}>
+                    <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("rooms-units")}>
+                      Open Rooms
+                    </button>
+                  </div>
+                </article>
+              </div>
+
+              <div className={styles.propertySubSectionBar}>
+                <div>
+                  <div className={styles.propertySubSectionTitle}>Room control center</div>
+                  <div className={styles.propertySubSectionCopy}>
+                    Manage this room&apos;s details, photos, pricing, channel setup, and sync health from one place.
+                  </div>
+                </div>
+                <span className={styles.sectionStatus}>{selectedRoom ? selectedRoom.name : "No room selected"}</span>
+              </div>
+
+              <div className={styles.listGrid}>
+                <article className={styles.listCard}>
+                  <div className={styles.cardHeaderCompact}>
+                    <div>
+                      <div className={styles.listTitle}>{selectedRoom?.name ?? "Choose a room to manage"}</div>
+                      <div className={styles.cardCopy}>
+                        {selectedRoom
+                          ? `${selectedRoom.maxGuests} guests · ${selectedRoom.bathroomType ?? "Bathroom pending"} · ${selectedRoom.bedInfo ?? "Bed info pending"}`
+                          : "Select a room card above to open its control center."}
+                      </div>
+                    </div>
+                    {selectedRoom ? (
+                      <span className={`${styles.readinessPill} ${selectedRoom.isActive ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                        {selectedRoom.isActive ? "Active in Famlo" : "Inactive in Famlo"}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className={styles.feedCopy}>
+                    Property story and host presence can be different for each property. Account and legal identity remain managed separately.
+                  </div>
+                </article>
+              </div>
+
+              <div className={styles.propertyTabGrid}>
+                {roomControlCenterSections.map((item) => (
+                  <button
+                    key={item.title}
+                    type="button"
+                    className={`${styles.propertyTabButton} ${activeSection === item.targetSection ? styles.propertyTabButtonActive : ""}`}
+                    onClick={() => setActiveSection(item.targetSection)}
+                  >
+                    <div className={styles.propertyTabText}>
+                      <span className={styles.propertyTabTitle}>{item.title}</span>
+                      <span className={styles.propertyTabHint}>{item.hint}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className={styles.propertySubSectionBar}>
+                <div>
+                  <div className={styles.propertySubSectionTitle}>Advanced and fallback sections</div>
+                  <div className={styles.propertySubSectionCopy}>
+                    Existing property sections stay available below so current deep links and technical workflows remain safe.
                   </div>
                 </div>
                 <span className={styles.sectionStatus}>{propertyCenterStatusLabel(activePropertyTab, activeSection)}</span>
@@ -3152,7 +3411,7 @@ export default function FamloProDashboardShell({
                     <div>
                       <div className={styles.listTitle}>Go-live readiness checklist</div>
                       <div className={styles.cardCopy}>
-                        Live connection summary for Famlo+, mapping, ARI, booking proof, and safety guardrails.
+                        Live connection summary for Famlo Pro, mapping, ARI, booking proof, and safety guardrails.
                       </div>
                     </div>
                     <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
