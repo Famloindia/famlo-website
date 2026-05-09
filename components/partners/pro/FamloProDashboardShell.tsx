@@ -771,6 +771,14 @@ function countCalendarCellsByStatus(
   );
 }
 
+function parseBookingAmount(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const normalized = value.replace(/[^0-9.-]/g, "");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function asStringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -1280,8 +1288,8 @@ function buildSectionDescriptor(
     return {
       eyebrow: "Insights",
       title: "Revenue",
-      copy: "Commercial summary shell for source mix, ADR, occupancy, and payout timing.",
-      status: "Coming soon",
+      copy: "Booking value and payment-status summary for this property using existing reservations only.",
+      status: "Pilot summary",
     };
   }
 
@@ -1289,8 +1297,8 @@ function buildSectionDescriptor(
     return {
       eyebrow: "Insights",
       title: "Reports",
-      copy: "Placeholder for exportable operational and commercial reporting across reservations and sync health.",
-      status: "Coming soon",
+      copy: "Early pilot reporting for bookings, source mix, room activity, and visible calendar usage.",
+      status: "Pilot insights",
     };
   }
 
@@ -1479,6 +1487,35 @@ export default function FamloProDashboardShell({
   const actionNeededBookingsCount = proBookings.filter(isActionNeededBooking).length;
   const confirmedBookingsCount = proBookings.filter(isConfirmedBooking).length;
   const filteredProBookings = proBookings.filter((booking) => matchesBookingFilter(booking, bookingFilter));
+  const bookingsWithValue = proBookings
+    .map((booking) => ({ booking, parsedAmount: parseBookingAmount(booking.amount) }))
+    .filter((entry): entry is { booking: ProBookingSummary; parsedAmount: number } => entry.parsedAmount != null);
+  const totalBookingValue = bookingsWithValue.reduce((sum, entry) => sum + entry.parsedAmount, 0);
+  const famloDirectBookingValue = bookingsWithValue
+    .filter((entry) => !entry.booking.isOta)
+    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
+  const otaBookingValue = bookingsWithValue
+    .filter((entry) => entry.booking.isOta)
+    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
+  const confirmedBookingValue = bookingsWithValue
+    .filter((entry) => isConfirmedBooking(entry.booking))
+    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
+  const pendingBookingValue = bookingsWithValue
+    .filter((entry) => isPendingApprovalBooking(entry.booking) || normalizeToken(entry.booking.paymentStatus) === "awaiting_payment")
+    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
+  const cancelledBookingValue = bookingsWithValue
+    .filter((entry) => isCancelledBooking(entry.booking))
+    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
+  const averageBookingValue = bookingsWithValue.length > 0 ? totalBookingValue / bookingsWithValue.length : null;
+  const topRoomByBookingCount =
+    Object.entries(
+      proBookings.reduce<Record<string, number>>((acc, booking) => {
+        const roomName = booking.roomName || "Room";
+        acc[roomName] = (acc[roomName] ?? 0) + 1;
+        return acc;
+      }, {})
+    )
+      .sort((left, right) => right[1] - left[1])[0] ?? null;
   const propertyContentChecks = [
     { label: "OTA title", ready: Boolean(initialSettings.otaTitle) && initialSettings.exists },
     { label: "Property description", ready: Boolean(initialSettings.propertyDescription) },
@@ -2098,6 +2135,8 @@ export default function FamloProDashboardShell({
   const pendingCalendarCells = countCalendarCellsByStatus(calendarRows, "pending");
   const manualBlockCalendarCells = countCalendarCellsByStatus(calendarRows, "manual_block");
   const pastCalendarCells = countCalendarCellsByStatus(calendarRows, "past");
+  const occupiedOrBlockedCalendarCells =
+    famloCalendarCells + otaCalendarCells + pendingCalendarCells + manualBlockCalendarCells;
   const calendarAttentionCount =
     pendingCalendarCells +
     (calendarVerification && !calendarVerification.targetDateBlocked ? 1 : 0) +
@@ -4796,29 +4835,205 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "revenue" && (
-            <PlaceholderSection
-              title="Revenue"
-              copy="Commercial shell for source mix, ADR, occupancy, and direct versus OTA contribution analysis."
-              items={[
-                "Revenue by source",
-                "Occupancy placeholder",
-                "ADR / RevPAR placeholder",
-                "Payout timing placeholder",
-              ]}
-            />
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Revenue</h3>
+                  <p className={styles.cardCopy}>
+                    Revenue for this property. This view shows booking value and payment status from existing reservations. Final payouts and settlements will be added later.
+                  </p>
+                </div>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Total booking value</div>
+                    <div className={styles.metricValue}>{formatCurrency(totalBookingValue)}</div>
+                    <div className={styles.metricHint}>Combined booking value from all visible reservations in the current Pro workspace.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Famlo direct value</div>
+                    <div className={styles.metricValue}>{formatCurrency(famloDirectBookingValue)}</div>
+                    <div className={styles.metricHint}>Booking value currently coming from direct Famlo reservations.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>OTA value</div>
+                    <div className={styles.metricValue}>{formatCurrency(otaBookingValue)}</div>
+                    <div className={styles.metricHint}>Booking value currently linked to OTA or Booking.com reservations.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Confirmed value</div>
+                    <div className={styles.metricValue}>{formatCurrency(confirmedBookingValue)}</div>
+                    <div className={styles.metricHint}>Reservations already confirmed, checked in, or completed.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Pending / awaiting payment</div>
+                    <div className={styles.metricValue}>{formatCurrency(pendingBookingValue)}</div>
+                    <div className={styles.metricHint}>Value still sitting in pending approval or awaiting-payment bookings.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Cancelled value</div>
+                    <div className={styles.metricValue}>{formatCurrency(cancelledBookingValue)}</div>
+                    <div className={styles.metricHint}>Cancelled reservation value is shown for visibility only, not as final payout.</div>
+                  </article>
+                </div>
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Revenue notes</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Booking value, not final payout</div>
+                        <div className={styles.feedCopy}>These figures come from current booking amounts only. They do not represent final payout, settlement, refund, or commission calculations.</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Estimated host earning</div>
+                        <div className={styles.feedCopy}>Coming later. The current Pro shell does not invent payout numbers when commission, payout timing, or settlement state cannot be derived safely.</div>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Payment status snapshot</div>
+                    <div className={styles.roomReadinessRow}>
+                      <span className={styles.readinessPill}>Confirmed bookings: {confirmedBookingsCount}</span>
+                      <span className={styles.readinessPill}>Pending approvals: {pendingApprovalBookingsCount}</span>
+                      <span className={styles.readinessPill}>Action needed: {actionNeededBookingsCount}</span>
+                      <span className={styles.readinessPill}>Cancelled: {cancelledBookingsCount}</span>
+                    </div>
+                  </article>
+                </div>
+
+                {proBookings.length > 0 ? (
+                  <div className={styles.mappingTable}>
+                    <div className={styles.mappingHeader}>Source</div>
+                    <div className={styles.mappingHeader}>Guest / Room</div>
+                    <div className={styles.mappingHeader}>Date</div>
+                    <div className={styles.mappingHeader}>Amount</div>
+                    <div className={styles.mappingHeader}>Payment status</div>
+                    <div className={styles.mappingHeader}>Booking status</div>
+                    {proBookings.map((booking) => (
+                      <Fragment key={`revenue-${booking.bookingId}`}>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.sourceLabel}</div>
+                          <div className={styles.mappingSubcopy}>{booking.isOta ? "OTA reservation" : "Famlo direct reservation"}</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
+                          <div className={styles.mappingSubcopy}>{booking.roomName}</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.startDate} → {booking.endDate}</div>
+                          <div className={styles.mappingSubcopy}>Created {formatDateTime(booking.createdAt)}</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
+                          <div className={styles.mappingSubcopy}>Booking value</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{labelizeToken(booking.paymentStatus, "unknown")}</div>
+                          <div className={styles.mappingSubcopy}>Current payment state only</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{labelizeToken(booking.status, "unknown")}</div>
+                          <div className={styles.mappingSubcopy}>{bookingHealthLabel(booking)}</div>
+                        </div>
+                      </Fragment>
+                    ))}
+                  </div>
+                ) : (
+                  <div className={styles.emptyState}>
+                    <div className={styles.emptyTitle}>No booking value to summarize yet</div>
+                    <div className={styles.emptyCopy}>
+                      Once this property has direct or OTA reservations, their booking value and payment-status summary will appear here.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
           )}
 
           {activeSection === "reports" && (
-            <PlaceholderSection
-              title="Reports"
-              copy="Placeholder for future exports across reservations, room nights, source mix, and sync health."
-              items={[
-                "Reservation report placeholder",
-                "Source mix report placeholder",
-                "Inventory report placeholder",
-                "Finance export placeholder",
-              ]}
-            />
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Reports</h3>
+                  <p className={styles.cardCopy}>
+                    Reports for this property. Use these early insights to understand bookings, source mix, and room activity. Advanced occupancy, ADR, RevPAR, and monthly exports will come later.
+                  </p>
+                </div>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Total bookings</div>
+                    <div className={styles.metricValue}>{totalBookingsCount}</div>
+                    <div className={styles.metricHint}>All current direct and OTA reservations surfaced in Pro.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Direct vs OTA mix</div>
+                    <div className={styles.metricValue}>{famloDirectBookingsCount} / {otaBookingsCount}</div>
+                    <div className={styles.metricHint}>Direct first, OTA second, based on the current unified bookings workspace.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Active rooms</div>
+                    <div className={styles.metricValue}>{rooms.filter((room) => room.isActive).length}</div>
+                    <div className={styles.metricHint}>Rooms currently marked active in the selected property inventory.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Occupied / blocked cells</div>
+                    <div className={styles.metricValue}>{occupiedOrBlockedCalendarCells}</div>
+                    <div className={styles.metricHint}>Calendar cells currently occupied or manually blocked in the visible Pro window.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Cancelled bookings</div>
+                    <div className={styles.metricValue}>{cancelledBookingsCount}</div>
+                    <div className={styles.metricHint}>Reservations currently carrying cancelled or rejected state.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Action-needed bookings</div>
+                    <div className={styles.metricValue}>{actionNeededBookingsCount}</div>
+                    <div className={styles.metricHint}>Bookings that still need approval, OTA review, payment attention, or sync follow-up.</div>
+                  </article>
+                </div>
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Pilot performance snapshot</div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Average booking value</div>
+                        <div className={styles.placeholderValue}>{averageBookingValue != null ? formatCurrency(averageBookingValue) : "Not available"}</div>
+                        <div className={styles.placeholderCopy}>Calculated only from bookings where a safe booking-value amount is already visible.</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Top room by booking count</div>
+                        <div className={styles.placeholderValue}>{topRoomByBookingCount ? topRoomByBookingCount[0] : "Not available"}</div>
+                        <div className={styles.placeholderCopy}>
+                          {topRoomByBookingCount
+                            ? `${topRoomByBookingCount[1]} booking${topRoomByBookingCount[1] === 1 ? "" : "s"} currently surfaced for this room.`
+                            : "No booking mix is available yet for room ranking."}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>What this report covers today</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Bookings and source mix</div>
+                        <div className={styles.feedCopy}>This shell reports on direct versus OTA booking mix, room activity, and visible calendar usage using existing Pro data only.</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Advanced reporting comes later</div>
+                        <div className={styles.feedCopy}>ADR, RevPAR, occupancy trends, monthly exports, and finance-grade settlement reporting are intentionally out of scope in this pilot phase.</div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </section>
           )}
 
           {activeSection === "property" && (
