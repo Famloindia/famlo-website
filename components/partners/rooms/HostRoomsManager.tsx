@@ -60,6 +60,9 @@ type HostRoomsManagerProps = {
   showChannelManager?: boolean;
   emptyTitle?: string;
   emptyCopy?: string;
+  selectedRoomId?: string | null;
+  createMode?: boolean;
+  compactMode?: boolean;
 };
 
 function parsePhotoList(value: string): string[] {
@@ -171,6 +174,9 @@ export default function HostRoomsManager({
   showChannelManager = true,
   emptyTitle = "No rooms yet",
   emptyCopy = "Create the first room for this property to start building your Famlo inventory.",
+  selectedRoomId = null,
+  createMode = false,
+  compactMode = false,
 }: HostRoomsManagerProps) {
   const [roomDrafts, setRoomDrafts] = useState<RoomFormState[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
@@ -180,6 +186,7 @@ export default function HostRoomsManager({
   const [detectingRoomLocationId, setDetectingRoomLocationId] = useState<string>("");
   const [openCalendars, setOpenCalendars] = useState<Record<string, boolean>>({});
   const [loadedPersistedRooms, setLoadedPersistedRooms] = useState(false);
+  const [createDraftId, setCreateDraftId] = useState<string | null>(null);
 
   const roomStats = useMemo(() => {
     const activeRooms = roomDrafts.filter((room) => room.isActive).length;
@@ -228,6 +235,34 @@ export default function HostRoomsManager({
       cancelled = true;
     };
   }, [familyId]);
+
+  useEffect(() => {
+    if (!createMode) {
+      setCreateDraftId(null);
+      return;
+    }
+
+    if (createDraftId && roomDrafts.some((room) => room.id === createDraftId)) {
+      return;
+    }
+
+    const blankRoom = createBlankRoom(roomDrafts.length === 0);
+    setCreateDraftId(blankRoom.id);
+    setRoomDrafts((current) => [...current, blankRoom]);
+  }, [createDraftId, createMode, roomDrafts]);
+
+  const visibleRoomDrafts = useMemo(() => {
+    if (createMode) {
+      return createDraftId ? roomDrafts.filter((room) => room.id === createDraftId) : [];
+    }
+
+    if (selectedRoomId) {
+      const selectedRoom = roomDrafts.find((room) => room.id === selectedRoomId);
+      return selectedRoom ? [selectedRoom] : [];
+    }
+
+    return roomDrafts;
+  }, [createDraftId, createMode, roomDrafts, selectedRoomId]);
 
   const updateRoomField = (roomId: string, field: keyof RoomFormState, value: string | boolean): void => {
     setRoomDrafts((current) =>
@@ -557,7 +592,8 @@ export default function HostRoomsManager({
   }
 
   return (
-    <div className={`${dashboardStyles.flexCol} ${dashboardStyles.animateIn}`} style={{ gap: "32px" }}>
+    <div className={`${dashboardStyles.flexCol} ${dashboardStyles.animateIn}`} style={{ gap: compactMode ? "20px" : "32px" }}>
+      {!compactMode ? (
       <section className={dashboardStyles.glassCard} style={{ padding: "36px", borderRadius: "28px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", flexWrap: "wrap" }}>
           <div style={{ display: "grid", gap: "8px" }}>
@@ -618,16 +654,30 @@ export default function HostRoomsManager({
           </div>
         ) : null}
       </section>
+      ) : null}
 
-      <section id="dashboard-rooms" className={dashboardStyles.glassCard} style={{ padding: "32px" }}>
-        {roomsLoading && roomDrafts.length === 0 ? (
+      <section id="dashboard-rooms" className={dashboardStyles.glassCard} style={{ padding: compactMode ? "20px" : "32px" }}>
+        {roomsLoading && visibleRoomDrafts.length === 0 ? (
           <div style={{ fontSize: "14px", color: "rgba(14,43,87,0.68)", fontWeight: 700 }}>Loading rooms...</div>
         ) : null}
 
-        {!loadedPersistedRooms && !roomsLoading ? (
+        {!loadedPersistedRooms && !roomsLoading && !selectedRoomId && !createMode ? (
           <div style={{ marginBottom: 20, padding: "16px 18px", borderRadius: 16, background: "#eff6ff", color: "#1d4ed8", fontSize: 13, fontWeight: 700 }}>
             <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>{emptyTitle}</div>
             <div>{emptyCopy}</div>
+          </div>
+        ) : null}
+
+        {!roomsLoading && visibleRoomDrafts.length === 0 && (selectedRoomId || createMode) ? (
+          <div style={{ marginBottom: 20, padding: "16px 18px", borderRadius: 16, background: "#eff6ff", color: "#1d4ed8", fontSize: 13, fontWeight: 700 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
+              {createMode ? "Create room" : "Selected room"}
+            </div>
+            <div>
+              {createMode
+                ? "Preparing a new room draft for this property."
+                : "The selected room could not be loaded yet. Refresh and try again."}
+            </div>
           </div>
         ) : null}
 
@@ -639,7 +689,7 @@ export default function HostRoomsManager({
         ) : null}
 
         <div style={{ display: "grid", gap: "20px", minWidth: 0 }}>
-          {roomDrafts.map((room, index) => {
+          {visibleRoomDrafts.map((room, index) => {
             const roomPhotos = parseCsvList(room.photos);
             const localityPhotos = parseCsvList(room.localityPhotos);
             const amenityValues = parseCsvList(room.amenities);

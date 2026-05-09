@@ -395,6 +395,406 @@
   font-weight: 800;
 }
 
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.propertySelectorBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 18px;
+  border-radius: 28px;
+  background: #fffdfb;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.propertySelectorHeadline {
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 900;
+  letter-spacing: -0.06em;
+  color: #0f172a;
+}
+
+.propertySelectorControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.addPropertyControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: white;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.addPropertyIconWrap {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #0f172a;
+}
+
+.propertySelectorField {
+  min-width: min(100%, 520px);
+}
+
+.propertySelectorSelect {
+  width: 100%;
+  min-height: 56px;
+  border-radius: 999px;
+  border: 2px solid rgba(15, 23, 42, 0.84);
+  background: #f8fbff;
+  color: #0f172a;
+  padding: 12px 18px;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.propertySelectorMetaRow,
+.roomControlMetaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.propertySelectorMetaPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: rgba(15, 23, 42, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.propertiesRoomShowcaseGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.propertyRoomShowcaseCard,
+.addRoomShowcaseCard {
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.propertyRoomShowcaseCard {
+  display: grid;
+  grid-template-rows: 170px auto;
+  border-radius: 28px;
+  background: white;
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.propertyRoomShowcaseCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.16);
+}
+
+.propertyRoomShowcaseCardActive {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  box-shadow: 0 24px 48px rgba(37, 99, 235, 0.18);
+}
+
+.propertyRoomShowcaseMedia {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.78)),
+    linear-gradient(135deg, #2255b4, #10233f 60%, #8d5b2d);
+  background-size: cover;
+  background-position: center;
+}
+
+.propertyRoomShowcaseTopRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.propertyRoomTypePill,
+.propertyRoomStatePill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.propertyRoomTypePill {
+  background: rgba(255, 255, 255, 0.92);
+  color: #2563eb;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.propertyRoomStatePillActive {
+  background: #6ecf63;
+  color: #10360f;
+}
+
+.propertyRoomStatePillMuted {
+  background: rgba(255, 255, 255, 0.88);
+  color: #475569;
+}
+
+.propertyRoomShowcaseBottom {
+  display: grid;
+  gap: 6px;
+  color: white;
+}
+
+.propertyRoomShowcaseTitle {
+  font-size: 34px;
+  line-height: 0.96;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+}
+
+.propertyRoomShowcasePrice {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+}
+
+.propertyRoomShowcasePrice span {
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.84;
+}
+
+.propertyRoomShowcaseBody {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.propertyRoomShowcaseChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.propertyRoomChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #f8fbff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.propertyRoomShowcaseFooter {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.propertyRoomFooterBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.propertyRoomManageLabel {
+  font-size: 13px;
+  font-weight: 900;
+  color: #2563eb;
+  white-space: nowrap;
+}
+
+.addRoomShowcaseCard {
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  min-height: 310px;
+  padding: 24px;
+  border-radius: 28px;
+  background: white;
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.addRoomShowcaseIcon {
+  width: 86px;
+  height: 86px;
+  border-radius: 999px;
+  border: 4px solid #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #0f172a;
+}
+
+.addRoomShowcaseTitle {
+  font-size: 24px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.addRoomShowcaseCopy {
+  max-width: 260px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.roomControlCenterShell {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.08);
+}
+
+.roomControlCenterHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.roomControlCenterTitle {
+  margin: 6px 0 0;
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  color: #0f172a;
+}
+
+.roomControlCenterCopy {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.64);
+  max-width: 820px;
+}
+
+.roomControlCenterClose {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: white;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.roomControlTabRow {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.roomControlTabButton {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f8fbff;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.roomControlTabButton:hover {
+  transform: translateY(-1px);
+  border-color: rgba(37, 99, 235, 0.24);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
+}
+
+.roomControlTabButtonActive {
+  background: linear-gradient(135deg, #165dcc, #0f4cba);
+  color: white;
+  border-color: transparent;
+}
+
+.roomControlTabTitle {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.roomControlTabHint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.roomControlTabButtonActive .roomControlTabHint {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.roomControlPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.roomControlPlaceholder,
+.propertyCenterHintCard {
+  border-radius: 24px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f8fbff;
+  padding: 18px;
+}
+
 .propertyTabGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1617,6 +2017,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .propertiesRoomShowcaseGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .roomControlTabRow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .channelGrid,
   .roleGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1665,7 +2073,9 @@
 
   .propertyCenterHeader,
   .propertySwitcherCard,
-  .propertySubSectionBar {
+  .propertySubSectionBar,
+  .propertySelectorBar,
+  .roomControlCenterHeader {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -1681,6 +2091,15 @@
   .propertySwitcherField {
     min-width: 0;
     width: 100%;
+  }
+
+  .propertySelectorControls,
+  .propertySelectorField {
+    width: 100%;
+  }
+
+  .propertySelectorSelect {
+    font-size: 16px;
   }
 
   .sectionIntro {
@@ -1702,6 +2121,16 @@
 
   .mappingHeader {
     display: none;
+  }
+
+  .propertiesRoomShowcaseGrid,
+  .roomControlTabRow {
+    grid-template-columns: 1fr;
+  }
+
+  .propertyRoomShowcaseFooter {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
@@ -1726,6 +2155,11 @@
     font-size: 28px;
   }
 
+  .propertySelectorHeadline,
+  .roomControlCenterTitle {
+    font-size: 24px;
+  }
+
   .sectionTitle {
     font-size: 24px;
   }
@@ -1741,5 +2175,23 @@
   .calendarDrawer {
     padding: 18px;
     border-radius: 18px;
+  }
+
+  .propertySelectorBar,
+  .roomControlCenterShell {
+    padding: 14px;
+  }
+
+  .addPropertyControl,
+  .propertySelectorSelect {
+    width: 100%;
+  }
+
+  .propertiesRoomShowcaseGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .propertyRoomShowcaseCard {
+    grid-template-rows: 160px auto;
   }
 }

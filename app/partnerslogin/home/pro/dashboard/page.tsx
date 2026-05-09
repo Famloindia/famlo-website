@@ -572,6 +572,7 @@ export default async function FamloProDashboardPage({
     isPrimary: room.isPrimary,
     amenitiesCount: room.amenities.length,
     photosCount: room.photos.length + room.localityPhotos.length,
+    photoUrl: room.photos[0] ?? room.localityPhotos[0] ?? null,
   }));
   const activeRoomIds = rooms.filter((room) => room.isActive).map((room) => room.id);
   const roomMappingsByRoomId = new Map(
