@@ -2522,34 +2522,116 @@ export default function FamloProDashboardShell({
           ? "Missing photos"
           : room.priceFullday <= 0
             ? "Missing price"
-            : null,
+        : null,
     };
   });
+  const selectedRoomCard = roomCards.find((item) => item.room.id === selectedRoom?.id) ?? null;
+  const selectedRoomCalendarRow = calendarRows.find((row) => row.roomId === selectedRoom?.id) ?? null;
+  const selectedRoomConflictCount = selectedRoom
+    ? conflictItems.filter((item) => item.relatedLabel === selectedRoom.name).length
+    : 0;
+  const selectedRoomDetailsReady = Boolean(
+    selectedRoom &&
+    selectedRoom.name.trim().length > 0 &&
+    selectedRoom.maxGuests > 0 &&
+    selectedRoom.bathroomType &&
+    selectedRoom.bedInfo
+  );
+  const selectedRoomPhotosReady = Boolean(selectedRoom && selectedRoom.photosCount > 0);
+  const selectedRoomPricingReady = Boolean(selectedRoom && selectedRoom.priceFullday > 0);
+  const selectedRoomChannelReady = selectedRoomCard?.channelStatus === "Booking.com ready";
+  const selectedRoomMappingReady = Boolean(
+    selectedRoom &&
+    roomMappingsByRoomId.get(selectedRoom.id)?.externalRoomTypeId &&
+    ratePlansByRoomId.get(selectedRoom.id)?.externalRatePlanId
+  );
+  const selectedRoomCalendarHealthy = Boolean(selectedRoom && selectedRoomCalendarRow);
+  const selectedRoomStatusCards = [
+    {
+      label: "Room details",
+      value: selectedRoom ? (selectedRoomDetailsReady ? "Ready" : "Needs review") : "Choose a room",
+      hint: selectedRoom
+        ? `${selectedRoom.maxGuests} guests · ${selectedRoom.bathroomType ?? "Bathroom pending"}`
+        : "Select a room card above first.",
+      statusClass: selectedRoomDetailsReady ? styles.readinessPillOk : styles.readinessPillReview,
+    },
+    {
+      label: "Photos",
+      value: selectedRoom ? `${selectedRoom.photosCount} added` : "Choose a room",
+      hint: selectedRoomPhotosReady ? "Photo coverage is available." : "Add room photos for better quality and distribution readiness.",
+      statusClass: selectedRoomPhotosReady ? styles.readinessPillOk : styles.readinessPillReview,
+    },
+    {
+      label: "Pricing",
+      value: selectedRoom && selectedRoom.priceFullday > 0 ? formatCurrency(selectedRoom.priceFullday) : "Price missing",
+      hint: selectedRoomPricingReady ? "Base room price is set." : "Finish room pricing before expecting clean sellability.",
+      statusClass: selectedRoomPricingReady ? styles.readinessPillOk : styles.readinessPillReview,
+    },
+    {
+      label: "Calendar",
+      value: selectedRoomCalendarHealthy ? "Visible" : "Needs review",
+      hint: selectedRoomCalendarHealthy ? "This room appears in the property calendar." : "Room calendar row is not visible yet for this property window.",
+      statusClass: selectedRoomCalendarHealthy ? styles.readinessPillOk : styles.readinessPillReview,
+    },
+    {
+      label: "Channels",
+      value: selectedRoomCard?.channelStatus ?? "Choose a room",
+      hint: currentChannelAttached ? "Channel readiness uses current connected room and rate setup." : "Connect and review channels before expecting OTA-ready behavior.",
+      statusClass: selectedRoomChannelReady ? styles.readinessPillOk : styles.readinessPillReview,
+    },
+    {
+      label: "Mapping",
+      value: selectedRoomMappingReady ? "Ready" : "Needs review",
+      hint: selectedRoomMappingReady ? "Room and rate mapping are available." : "Room mapping or rate mapping still needs attention.",
+      statusClass: selectedRoomMappingReady ? styles.readinessPillOk : styles.readinessPillReview,
+    },
+    {
+      label: "Sync Health",
+      value: selectedRoom ? `${selectedRoomConflictCount} issue${selectedRoomConflictCount === 1 ? "" : "s"}` : "Choose a room",
+      hint: selectedRoomConflictCount === 0 ? "No room-specific issue is surfaced right now." : "Open Sync Health or Mapping to review room-specific issues.",
+      statusClass: selectedRoomConflictCount === 0 ? styles.readinessPillOk : styles.readinessPillReview,
+    },
+  ];
   const roomControlCenterSections = [
     {
       title: "Details",
       hint: "Update room information, occupancy, and Famlo basics.",
       targetSection: "rooms-units" as const,
+      status: selectedRoomDetailsReady ? "Ready" : "Needs review",
+      statusClass: selectedRoomDetailsReady ? styles.readinessPillOk : styles.readinessPillReview,
+      actionLabel: "Open room details",
     },
     {
       title: "Photos",
       hint: "Review room photos and image coverage for this room.",
       targetSection: "rooms-units" as const,
+      status: selectedRoomPhotosReady ? `${selectedRoom?.photosCount ?? 0} added` : "Needs photos",
+      statusClass: selectedRoomPhotosReady ? styles.readinessPillOk : styles.readinessPillReview,
+      actionLabel: "Open room photos",
     },
     {
       title: "Pricing",
       hint: "Check room price coverage and pricing readiness.",
       targetSection: "rates-restrictions" as const,
+      status: selectedRoomPricingReady ? "Price ready" : "Price missing",
+      statusClass: selectedRoomPricingReady ? styles.readinessPillOk : styles.readinessPillReview,
+      actionLabel: "Open pricing",
     },
     {
       title: "Calendar",
       hint: "Review booking coverage and availability for this room.",
       targetSection: "inventory-calendar" as const,
+      status: selectedRoomCalendarHealthy ? "Visible" : "Needs review",
+      statusClass: selectedRoomCalendarHealthy ? styles.readinessPillOk : styles.readinessPillReview,
+      actionLabel: "Open calendar",
     },
     {
       title: "Channels",
       hint: "See connected channel readiness for this room.",
       targetSection: "connected-channels" as const,
+      status: selectedRoomCard?.channelStatus ?? "Choose a room",
+      statusClass: selectedRoomChannelReady ? styles.readinessPillOk : styles.readinessPillReview,
+      actionLabel: "Open channels",
     },
     {
       title: "Mapping",
@@ -2557,11 +2639,17 @@ export default function FamloProDashboardShell({
       targetSection: roomCards.find((item) => item.room.id === selectedRoom?.id)?.channelStatus === "Rate mapping needed"
         ? ("rate-mapping" as const)
         : ("room-mapping" as const),
+      status: selectedRoomMappingReady ? "Ready" : "Needs review",
+      statusClass: selectedRoomMappingReady ? styles.readinessPillOk : styles.readinessPillReview,
+      actionLabel: "Open mapping",
     },
     {
       title: "Sync Health",
       hint: "Review sync issues that could affect this room.",
       targetSection: criticalConflictCount > 0 ? ("conflicts" as const) : ("sync-logs" as const),
+      status: selectedRoom ? (selectedRoomConflictCount === 0 ? "Healthy" : `${selectedRoomConflictCount} open`) : "Choose a room",
+      statusClass: selectedRoom && selectedRoomConflictCount === 0 ? styles.readinessPillOk : styles.readinessPillReview,
+      actionLabel: "Open sync health",
     },
   ];
   const pilotHomeCards = [
@@ -3038,9 +3126,10 @@ export default function FamloProDashboardShell({
 
               <div className={styles.propertySubSectionBar}>
                 <div>
-                  <div className={styles.propertySubSectionTitle}>Room control center</div>
+                  <div className={styles.propertySubSectionTitle}>Manage this room</div>
                   <div className={styles.propertySubSectionCopy}>
-                    Manage this room&apos;s details, photos, pricing, channel setup, and sync health from one place.
+                    Review this room&apos;s details, photos, pricing, calendar, channels, and sync health from one place.
+                    Advanced channel setup remains under Mapping and Sync Health.
                   </div>
                 </div>
                 <span className={styles.sectionStatus}>{selectedRoom ? selectedRoom.name : "No room selected"}</span>
@@ -3063,25 +3152,60 @@ export default function FamloProDashboardShell({
                       </span>
                     ) : null}
                   </div>
+                  <div className={styles.inlineBadgeRow}>
+                    <span className={styles.readinessPill}>Property: {currentPropertyOption?.name ?? propertyName}</span>
+                    <span className={styles.readinessPill}>
+                      Base price: {selectedRoom && selectedRoom.priceFullday > 0 ? formatCurrency(selectedRoom.priceFullday) : "Missing"}
+                    </span>
+                    <span className={`${styles.readinessPill} ${selectedRoomPhotosReady ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                      Photos: {selectedRoomPhotosReady ? "Ready" : "Needs review"}
+                    </span>
+                    <span className={`${styles.readinessPill} ${selectedRoomChannelReady ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                      {selectedRoomCard?.channelStatus ?? "Channel status pending"}
+                    </span>
+                    <span className={`${styles.readinessPill} ${selectedRoomConflictCount === 0 ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                      Sync issues: {selectedRoom ? selectedRoomConflictCount : 0}
+                    </span>
+                  </div>
                   <div className={styles.feedCopy}>
                     Property story and host presence can be different for each property. Account and legal identity remain managed separately.
                   </div>
                 </article>
               </div>
 
+              <div className={styles.summaryGrid}>
+                {selectedRoomStatusCards.map((item) => (
+                  <article key={item.label} className={styles.summaryCard}>
+                    <div className={styles.summaryLabel}>{item.label}</div>
+                    <div className={styles.summaryValue}>{item.value}</div>
+                    <div className={styles.summaryCopy}>{item.hint}</div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${item.statusClass}`}>{item.value === "Choose a room" ? "Choose room" : item.value === "Needs review" || item.value === "Price missing" || item.value === "Needs photos" ? "Needs review" : "Ready"}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+
               <div className={styles.propertyTabGrid}>
                 {roomControlCenterSections.map((item) => (
-                  <button
-                    key={item.title}
-                    type="button"
-                    className={`${styles.propertyTabButton} ${activeSection === item.targetSection ? styles.propertyTabButtonActive : ""}`}
-                    onClick={() => setActiveSection(item.targetSection)}
-                  >
+                  <article key={item.title} className={`${styles.propertyTabButton} ${activeSection === item.targetSection ? styles.propertyTabButtonActive : ""}`}>
                     <div className={styles.propertyTabText}>
                       <span className={styles.propertyTabTitle}>{item.title}</span>
                       <span className={styles.propertyTabHint}>{item.hint}</span>
                     </div>
-                  </button>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={`${styles.readinessPill} ${item.statusClass}`}>{item.status}</span>
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <button
+                        type="button"
+                        className={styles.secondaryActionButton}
+                        onClick={() => setActiveSection(item.targetSection)}
+                      >
+                        {item.actionLabel}
+                      </button>
+                    </div>
+                  </article>
                 ))}
               </div>
 
