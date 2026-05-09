@@ -2843,7 +2843,7 @@ export default function FamloProDashboardShell({
           <div className={styles.headerActions}>
             <span className={`${styles.chip} ${styles.chipPrimary}`}>
               <Sparkles size={14} />
-              Famlo Pro {famloPlusStatus}
+              {formatPropertySwitcherStatusLabel(famloPlusStatus)}
             </span>
             <span className={styles.chip}>
               <CalendarClock size={14} />
