@@ -33,6 +33,7 @@ import {
 
 import HostRoomsManager from "@/components/partners/rooms/HostRoomsManager";
 import PropertyContentManager from "@/components/partners/property/PropertyContentManager";
+import MessagesTab from "@/components/partners/tabs/MessagesTab";
 import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
 import {
   PRO_PROPERTY_MODEL_OPTIONS,
@@ -334,6 +335,7 @@ type PropertyContentDraft = {
 
 interface FamloProDashboardShellProps {
   familyId: string;
+  hostUserId: string | null;
   propertyOptions: PropertySwitcherOption[];
   propertyName: string;
   propertyLocalityLabel: string | null;
@@ -1358,6 +1360,7 @@ function buildSectionDescriptor(
 
 export default function FamloProDashboardShell({
   familyId,
+  hostUserId,
   propertyOptions,
   propertyName,
   propertyLocalityLabel,
@@ -1397,6 +1400,7 @@ export default function FamloProDashboardShell({
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
   const [selectedBooking, setSelectedBooking] = useState<ProBookingSummary | null>(null);
+  const [activeMessageConversationId, setActiveMessageConversationId] = useState<string | null>(null);
   const [timeAnchor] = useState(() => Date.now());
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
@@ -1410,6 +1414,7 @@ export default function FamloProDashboardShell({
     setPropertyContentFeedback(null);
     setBookingFilter("All");
     setSelectedBooking(null);
+    setActiveMessageConversationId(null);
     setSelectedRoomId((current) => {
       if (current && rooms.some((room) => room.id === current)) return current;
       return rooms[0]?.id ?? null;
@@ -5456,18 +5461,18 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Messages</h3>
                   <p className={styles.cardCopy}>
-                    Messages are being upgraded in Famlo Pro. Use the existing working Famlo inbox for guest conversations while
-                    OTA threads and review workflows stay in a later phase.
+                    Messages for this property. The existing working Famlo host inbox is embedded below, while OTA threads and
+                    review workflows stay in a later phase.
                   </p>
                 </div>
               </div>
               <div className={styles.cardBody}>
                 <div className={styles.listGrid}>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Current safest path</div>
-                    <div className={styles.metricValue}>Open working inbox</div>
+                    <div className={styles.miniLabel}>Live inbox</div>
+                    <div className={styles.metricValue}>Embedded</div>
                     <div className={styles.metricHint}>
-                      Guest messaging already works through the current Famlo host inbox and existing conversation APIs.
+                      Guest messaging continues to use the same working Famlo host inbox and existing conversation APIs.
                     </div>
                   </article>
                   <article className={styles.summaryCard}>
@@ -5479,15 +5484,33 @@ export default function FamloProDashboardShell({
                   </article>
                 </div>
 
+                {hostUserId ? (
+                  <div className={styles.listCard} style={{ padding: 0, overflow: "hidden" }}>
+                    <MessagesTab
+                      familyId={familyId}
+                      hostUserId={hostUserId}
+                      activeFamily={{ property_name: propertyName }}
+                      initialConversationId={activeMessageConversationId}
+                      setActiveConversationId={setActiveMessageConversationId}
+                    />
+                  </div>
+                ) : (
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Messages are being upgraded</div>
+                    <div className={styles.feedCopy}>
+                      We could not safely resolve the authenticated host inbox in this Pro session, so use the working Basic inbox below.
+                    </div>
+                  </article>
+                )}
+
                 <div className={styles.listGrid}>
                   <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Open Messages</div>
+                    <div className={styles.listTitle}>Fallback inbox access</div>
                     <div className={styles.stack}>
                       <div className={styles.feedItem}>
                         <div className={styles.feedTitle}>Use the existing Famlo host inbox</div>
                         <div className={styles.feedCopy}>
-                          Open the current working messages experience for this property. This keeps conversation access, auth
-                          scoping, and live message behavior on the already-safe path.
+                          If you ever need the original host messaging page, this link still opens the same working inbox for the current property.
                         </div>
                       </div>
                       <div className={styles.feedItem}>

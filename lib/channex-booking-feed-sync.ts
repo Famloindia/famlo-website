@@ -172,6 +172,15 @@ function summarizeGuestName(customer: unknown): string | null {
   return combined || null;
 }
 
+function summarizeRoomGuestName(revision: Record<string, unknown>): string | null {
+  const firstRoom = extractFirstRoom(revision);
+  const firstGuest = asObject(asArray(firstRoom?.guests)[0]);
+  const name = asStringOrNull(firstGuest?.name);
+  const surname = asStringOrNull(firstGuest?.surname);
+  const combined = [name, surname].filter(Boolean).join(" ");
+  return combined || null;
+}
+
 function extractDiscoveredPropertyIds(revision: Record<string, unknown>): string[] {
   const attributes = getAttributes(revision);
   const relationships = getRelationships(revision);
@@ -259,6 +268,76 @@ function summarizeRevision(
   };
 }
 
+type FeedRevisionLifecycleState = {
+  import_status: string;
+  ack_status: string;
+  linked_booking_id: string | null;
+};
+
+function resolveNextRevisionLifecycleState(
+  existingRow: Record<string, unknown>,
+  preparedRow: PreparedFeedRow
+): FeedRevisionLifecycleState {
+  const existingImportStatus = asStringOrNull(existingRow.import_status) ?? preparedRow.import_status;
+  const existingAckStatus = asStringOrNull(existingRow.ack_status) ?? preparedRow.ack_status;
+  const existingLinkedBookingId = asStringOrNull(existingRow.linked_booking_id);
+  const existingRevisionId = asStringOrNull(existingRow.external_revision_id);
+  const normalizedStatus = (preparedRow.status ?? "").trim().toLowerCase();
+  const revisionChanged = Boolean(preparedRow.external_revision_id && existingRevisionId && preparedRow.external_revision_id !== existingRevisionId);
+
+  if (!revisionChanged) {
+    if (normalizedStatus === "modified" && !["modified_pending_review", "modified_applied"].includes(existingImportStatus)) {
+      return {
+        import_status: "modified_pending_review",
+        ack_status: "not_acknowledged",
+        linked_booking_id: existingLinkedBookingId,
+      };
+    }
+    if (normalizedStatus === "cancelled" && existingImportStatus !== "cancelled_applied") {
+      return {
+        import_status: "preview",
+        ack_status: "not_acknowledged",
+        linked_booking_id: existingLinkedBookingId,
+      };
+    }
+    return {
+      import_status: existingImportStatus,
+      ack_status: existingAckStatus,
+      linked_booking_id: existingLinkedBookingId,
+    };
+  }
+
+  if (normalizedStatus === "modified") {
+    return {
+      import_status: "modified_pending_review",
+      ack_status: "not_acknowledged",
+      linked_booking_id: existingLinkedBookingId,
+    };
+  }
+
+  if (normalizedStatus === "cancelled") {
+    return {
+      import_status: "preview",
+      ack_status: "not_acknowledged",
+      linked_booking_id: existingLinkedBookingId,
+    };
+  }
+
+  if (normalizedStatus === "new") {
+    return {
+      import_status: existingLinkedBookingId ? "imported" : "preview",
+      ack_status: "not_acknowledged",
+      linked_booking_id: existingLinkedBookingId,
+    };
+  }
+
+  return {
+    import_status: "preview",
+    ack_status: "not_acknowledged",
+    linked_booking_id: existingLinkedBookingId,
+  };
+}
+
 function classifyRevisionForPropertyMatch(
   revision: Record<string, unknown>,
   expectedPropertyId: string
@@ -335,7 +414,7 @@ async function storeMatchedFeedRevisions(input: {
       status: summary.status,
       arrival_date: summary.arrivalDate,
       departure_date: summary.departureDate,
-      guest_name: summary.guestName,
+      guest_name: summary.guestName ?? summarizeRoomGuestName(revision),
       amount: asNumericStringOrNull(summary.amount),
       currency: summary.currency,
       payment_collect: summary.paymentCollect,
@@ -417,6 +496,8 @@ async function storeMatchedFeedRevisions(input: {
       continue;
     }
 
+    const lifecycleState = resolveNextRevisionLifecycleState(existingRow, preparedRow);
+
     const { error } = await input.supabase
       .from("channel_booking_revisions")
       .update({
@@ -435,9 +516,9 @@ async function storeMatchedFeedRevisions(input: {
         payment_collect: preparedRow.payment_collect,
         raw_payload: mergeRevisionPayload(existingRow.raw_payload, preparedRow.raw_payload, observedAt),
         source: asStringOrNull(existingRow.source) ?? preparedRow.source,
-        import_status: asStringOrNull(existingRow.import_status) ?? preparedRow.import_status,
-        ack_status: asStringOrNull(existingRow.ack_status) ?? preparedRow.ack_status,
-        linked_booking_id: asStringOrNull(existingRow.linked_booking_id),
+        import_status: lifecycleState.import_status,
+        ack_status: lifecycleState.ack_status,
+        linked_booking_id: lifecycleState.linked_booking_id,
         updated_at: observedAt,
       } as never)
       .eq("id", existingRow.id);

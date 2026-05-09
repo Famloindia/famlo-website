@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { acknowledgeChannexBookingRevision } from "@/lib/channel-providers/channex/client";
+import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -70,6 +72,28 @@ function resolveStayUnitId(record: JsonRecord | null | undefined): string | null
   const direct = asStringOrNull(record?.stay_unit_id);
   if (direct) return direct;
   return asStringOrNull(asObject(record?.pricing_snapshot).stay_unit_id);
+}
+
+function resolveChannelExternalBookingId(record: JsonRecord | null | undefined): string | null {
+  return asStringOrNull(asObject(record?.pricing_snapshot).channel_external_booking_id);
+}
+
+function resolveChannelExternalRoomTypeId(record: JsonRecord | null | undefined): string | null {
+  return asStringOrNull(asObject(record?.pricing_snapshot).channel_external_room_type_id);
+}
+
+function resolveIncomingGuestName(rawPayload: JsonRecord, fallbackName: string | null): string {
+  const attributes = asObject(rawPayload.attributes);
+  const firstRoom = asObject((Array.isArray(attributes.rooms) ? attributes.rooms : [])[0]);
+  const firstGuest = asObject((Array.isArray(firstRoom.guests) ? firstRoom.guests : [])[0]);
+  const roomGuestName = [asStringOrNull(firstGuest.name), asStringOrNull(firstGuest.surname)].filter(Boolean).join(" ");
+  if (roomGuestName) return roomGuestName;
+
+  const customer = asObject(attributes.customer);
+  const customerName = [asStringOrNull(customer.name), asStringOrNull(customer.surname)].filter(Boolean).join(" ");
+  if (customerName) return customerName;
+
+  return fallbackName ?? "OTA Guest";
 }
 
 function isBlockingBookingStatus(status: string | null): boolean {
@@ -145,6 +169,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
     }
 
+    const blockedMutation = await ensureChannexMutationAllowed({
+      supabase,
+      familyId,
+      action: "apply_booking_modification",
+      route: "/api/host/pro/channel/channex/bookings/apply-modification",
+    });
+    if (blockedMutation) return blockedMutation;
+
     const importStatus = asStringOrNull(revisionRow.import_status) ?? "preview";
     const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
     const externalBookingId = asStringOrNull(revisionRow.external_booking_id);
@@ -155,7 +187,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     const amountNumber = asNumberOrNull(revisionRow.amount);
     const currency = asStringOrNull(revisionRow.currency);
 
-    if (importStatus !== "modified_pending_review") {
+    if (importStatus === "modified_applied" && asStringOrNull(revisionRow.ack_status) === "acknowledged") {
+      return NextResponse.json(
+        {
+          ok: true,
+          status: "already_applied",
+          message: "This Channex modification was already applied and acknowledged.",
+          bookingId: linkedBookingId,
+        },
+        { status: 200 }
+      );
+    }
+    if (!["modified_pending_review", "modified_applied"].includes(importStatus)) {
       return NextResponse.json(
         { error: "Only modified_pending_review revisions can be applied in this phase.", status: importStatus },
         { status: 409 }
@@ -269,10 +312,87 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const currentPricingSnapshot = asObject(linkedBooking.pricing_snapshot);
     const currentStayUnitId = resolveStayUnitId(linkedBooking);
+    const currentExternalBookingId = resolveChannelExternalBookingId(linkedBooking);
+    const currentExternalRoomTypeId = resolveChannelExternalRoomTypeId(linkedBooking);
     const currentStartDate = normalizeDateOnly(asStringOrNull(linkedBooking.start_date));
     const currentEndDate = normalizeDateOnly(asStringOrNull(linkedBooking.end_date));
     if (!currentStartDate || !currentEndDate) {
       return NextResponse.json({ error: "Linked Famlo booking is missing a valid date range." }, { status: 409 });
+    }
+    if (currentExternalBookingId && currentExternalBookingId !== externalBookingId) {
+      return NextResponse.json({ error: "Linked Famlo booking does not match this external booking id." }, { status: 409 });
+    }
+    if (currentExternalRoomTypeId && currentExternalRoomTypeId !== externalRoomTypeId) {
+      return NextResponse.json(
+        {
+          error: "Room type changed in the Channex revision. Leave this for manual operator review.",
+          status: "room_type_change_requires_review",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (importStatus === "modified_applied") {
+      const externalRevisionId = asStringOrNull(revisionRow.external_revision_id);
+      if (!externalRevisionId) {
+        return NextResponse.json(
+          {
+            ok: true,
+            status: "already_applied",
+            message: "This modification was already applied. Acknowledgement is still blocked because external_revision_id is missing.",
+            bookingId: linkedBookingId,
+          },
+          { status: 200 }
+        );
+      }
+
+      if (asStringOrNull(revisionRow.ack_status) === "acknowledged") {
+        return NextResponse.json(
+          {
+            ok: true,
+            status: "already_applied",
+            message: "This modification was already applied and acknowledged.",
+            bookingId: linkedBookingId,
+          },
+          { status: 200 }
+        );
+      }
+
+      const ackResult = await acknowledgeChannexBookingRevision(externalRevisionId);
+      if (!ackResult.ok) {
+        return NextResponse.json(
+          {
+            ok: true,
+            status: "already_applied_not_acknowledged",
+            message: `This modification was already applied, but acknowledgement still failed: ${ackResult.message}`,
+            bookingId: linkedBookingId,
+          },
+          { status: 200 }
+        );
+      }
+
+      await supabase
+        .from("channel_booking_revisions")
+        .update({
+          ack_status: "acknowledged",
+          raw_payload: {
+            ...asObject(revisionRow.raw_payload),
+            acknowledged_at: new Date().toISOString(),
+            acknowledged_via: "manual_modification_apply_route",
+          },
+          updated_at: new Date().toISOString(),
+        } as never)
+        .eq("id", channelBookingRevisionId);
+
+      return NextResponse.json(
+        {
+          ok: true,
+          status: "already_applied",
+          message: "This modification was already applied earlier and is now acknowledged.",
+          bookingId: linkedBookingId,
+        },
+        { status: 200 }
+      );
     }
 
     let overlapResult:
@@ -362,6 +482,19 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const now = new Date().toISOString();
     const nextTotalPrice = amountNumber != null ? Math.round(amountNumber) : asNumberOrNull(linkedBooking.total_price);
+    const rawPayload = asObject(revisionRow.raw_payload);
+    const guestEmail =
+      asStringOrNull(rawPayload.email) ??
+      asStringOrNull(rawPayload.guest_email) ??
+      asStringOrNull(rawPayload.customer_email);
+    const guestPhone =
+      asStringOrNull(rawPayload.phone) ??
+      asStringOrNull(rawPayload.guest_phone) ??
+      asStringOrNull(rawPayload.customer_phone);
+    const guestName = resolveIncomingGuestName(
+      rawPayload,
+      asStringOrNull(revisionRow.guest_name) ?? asStringOrNull(currentPricingSnapshot.channel_guest_name)
+    );
     const nextPricingSnapshot: JsonRecord = {
       ...currentPricingSnapshot,
       stay_unit_id: targetStayUnitId,
@@ -387,6 +520,29 @@ export async function POST(request: Request): Promise<NextResponse> {
         end_date: departureDate,
         stay_unit_id: targetStayUnitId,
         total_price: nextTotalPrice,
+      },
+      channel_guest_name: guestName,
+      channel_guest_display_name: guestName,
+      guest_name: guestName,
+      channel_guest_email: guestEmail,
+      channel_guest_phone: guestPhone,
+      channel_modification: {
+        external_revision_id: asStringOrNull(revisionRow.external_revision_id),
+        raw_payload: rawPayload,
+        from: {
+          start_date: currentStartDate,
+          end_date: currentEndDate,
+          amount: asNumberOrNull(linkedBooking.total_price),
+          currency: asStringOrNull(currentPricingSnapshot.currency),
+          guest_name: asStringOrNull(currentPricingSnapshot.channel_guest_name) ?? asStringOrNull(currentPricingSnapshot.guest_name),
+        },
+        to: {
+          start_date: arrivalDate,
+          end_date: departureDate,
+          amount: nextTotalPrice,
+          currency,
+          guest_name: guestName,
+        },
       },
     };
 
@@ -451,15 +607,69 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     if (revisionUpdateError) throw revisionUpdateError;
 
+    const externalRevisionId = asStringOrNull(revisionRow.external_revision_id);
+    if (!externalRevisionId) {
+      return NextResponse.json(
+        {
+          ok: true,
+          status: "modified_applied",
+          message: "Modification applied to Famlo, but acknowledgement is blocked because external_revision_id is missing.",
+          bookingId: linkedBookingId,
+        },
+        { status: 200 }
+      );
+    }
+
+    const ackResult = await acknowledgeChannexBookingRevision(externalRevisionId);
+    if (!ackResult.ok) {
+      await logApplyResult({
+        supabase,
+        familyId,
+        status: "failed",
+        message: `Modification applied, but acknowledgement failed: ${ackResult.message}`,
+        payload: {
+          channel_booking_revision_id: channelBookingRevisionId,
+          external_booking_id: externalBookingId,
+          linked_booking_id: linkedBookingId,
+          external_revision_id: externalRevisionId,
+          acknowledgement_failed: true,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          status: "modified_applied_not_acknowledged",
+          message: `Modification applied to Famlo, but Channex acknowledgement still failed: ${ackResult.message}`,
+          bookingId: linkedBookingId,
+        },
+        { status: 200 }
+      );
+    }
+
+    await supabase
+      .from("channel_booking_revisions")
+      .update({
+        ack_status: "acknowledged",
+        raw_payload: {
+          ...rawPayload,
+          acknowledged_at: now,
+          acknowledged_via: "manual_modification_apply_route",
+        },
+        updated_at: now,
+      } as never)
+      .eq("id", channelBookingRevisionId);
+
     await logApplyResult({
       supabase,
       familyId,
       status: "success",
-      message: "Applied Channex booking modification to the linked Famlo booking. Channex acknowledgement remains pending.",
+      message: "Applied Channex booking modification to the linked Famlo booking and acknowledged the real revision.",
       payload: {
         channel_booking_revision_id: channelBookingRevisionId,
         external_booking_id: externalBookingId,
         linked_booking_id: linkedBookingId,
+        external_revision_id: externalRevisionId,
         source,
         from_start_date: currentStartDate,
         from_end_date: currentEndDate,
@@ -474,7 +684,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       {
         ok: true,
         status: "modified_applied",
-        message: "Modification applied to Famlo. Not acknowledged yet.",
+        message: "Modification applied to Famlo and acknowledged successfully.",
         bookingId: linkedBookingId,
       },
       { status: 200 }

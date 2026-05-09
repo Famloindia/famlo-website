@@ -286,6 +286,7 @@ type PropertySwitcherOption = {
   name: string;
   city: string | null;
   state: string | null;
+  country: string | null;
   locality: string | null;
   famloPlusStatus: string | null;
   isActive: boolean;
@@ -394,6 +395,14 @@ export default async function FamloProDashboardPage({
   ]);
 
   const hostSession = await resolveAuthorizedHostSession(supabase);
+  const meta = parseHostListingMeta(asString(family?.admin_notes));
+  const storedProSettings = await loadHostProSettings(supabase, familyId);
+  const propertyLocalityLabel =
+    asString(meta.neighbourhood) ??
+    asString(meta.neighborhoodDesc);
+  const resolvedPropertyCity = storedProSettings.city ?? asString(family?.city);
+  const resolvedPropertyState = storedProSettings.state ?? asString(family?.state);
+  const resolvedPropertyCountry = storedProSettings.country ?? null;
   let propertyOptions: PropertySwitcherOption[] = [];
 
   if (hostSession?.hostUserId) {
@@ -454,7 +463,10 @@ export default async function FamloProDashboardPage({
             "Famlo Property",
           city: asString(row.city),
           state: asString(row.state),
-          locality: asString(meta.neighbourhood) ?? asString(meta.neighborhoodDesc),
+          country: null,
+          locality:
+            asString(meta.neighbourhood) ??
+            asString(meta.neighborhoodDesc),
           famloPlusStatus: accessMap[id]?.status ?? null,
           isActive: row.is_active !== false,
         } satisfies PropertySwitcherOption;
@@ -476,9 +488,13 @@ export default async function FamloProDashboardPage({
           asString(family?.name) ??
           asString(host?.display_name) ??
           "Famlo Property",
-        city: asString(family?.city),
-        state: asString(family?.state),
-        locality: asString(currentMeta.neighbourhood) ?? asString(currentMeta.neighborhoodDesc),
+        city: resolvedPropertyCity,
+        state: resolvedPropertyState,
+        country: resolvedPropertyCountry,
+        locality:
+          propertyLocalityLabel ??
+          asString(currentMeta.neighbourhood) ??
+          asString(currentMeta.neighborhoodDesc),
         famloPlusStatus: access.status,
         isActive: family?.is_active !== false,
       },
@@ -492,23 +508,21 @@ export default async function FamloProDashboardPage({
     asString(host?.display_name) ??
     "Famlo Property";
   const hostCode = asString(family?.host_id);
-  const meta = parseHostListingMeta(asString(family?.admin_notes));
   const { data: propertyPhotosRows } = await supabase
     .from("family_photos")
     .select("id,url,is_primary,family_id")
     .eq("family_id", familyId)
     .order("is_primary", { ascending: false });
-  const propertyLocalityLabel = asString(meta.neighbourhood) ?? asString(meta.neighborhoodDesc);
   const locationLabel =
-    [propertyLocalityLabel, asString(family?.city), asString(family?.state)].filter(Boolean).join(", ") || "Location pending";
-  const storedProSettings = await loadHostProSettings(supabase, familyId);
+    [propertyLocalityLabel, resolvedPropertyCity, resolvedPropertyState, resolvedPropertyCountry].filter(Boolean).join(", ") ||
+    "Location pending";
   const channelFoundation = await loadHostProChannelFoundation(supabase, familyId);
   const channexConfig = getChannexConfigSummary();
   const proSettings = {
     ...storedProSettings,
     otaTitle: storedProSettings.otaTitle ?? propertyName,
-    state: storedProSettings.state ?? asString(family?.state),
-    city: storedProSettings.city ?? asString(family?.city),
+    state: resolvedPropertyState,
+    city: resolvedPropertyCity,
     addressLine: storedProSettings.addressLine ?? asString(meta.propertyAddress),
   };
   const propertyPhotos: PhotoItem[] = ((propertyPhotosRows ?? []) as Array<Record<string, unknown>>).map((photo) => ({
@@ -1099,6 +1113,7 @@ export default async function FamloProDashboardPage({
 
   return (
     <FamloProDashboardShell
+      hostUserId={hostSession?.hostUserId ?? null}
       propertyName={propertyName}
       propertyLocalityLabel={propertyLocalityLabel}
       propertyHomeLat={typeof family?.lat === "number" ? family.lat : null}
