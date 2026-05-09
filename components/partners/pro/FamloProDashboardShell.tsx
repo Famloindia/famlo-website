@@ -133,6 +133,16 @@ type ProBookingSummary = {
   isOta: boolean;
 };
 
+type BookingWorkspaceFilter =
+  | "All"
+  | "Famlo Direct"
+  | "OTA"
+  | "Pending approval"
+  | "Confirmed"
+  | "Cancelled"
+  | "Modified / Review needed"
+  | "Action needed";
+
 type CalendarBookingDetail = {
   bookingId: string;
   roomName: string;
@@ -542,7 +552,16 @@ const CHANNEL_CARDS = [
   "Google Hotel",
 ];
 
-const BOOKING_FILTERS = ["All", "Famlo Direct", "Airbnb", "Booking.com", "Agoda", "Expedia", "Cancelled", "Modified", "Unmapped"];
+const BOOKING_FILTERS: BookingWorkspaceFilter[] = [
+  "All",
+  "Famlo Direct",
+  "OTA",
+  "Pending approval",
+  "Confirmed",
+  "Cancelled",
+  "Modified / Review needed",
+  "Action needed",
+];
 const MEAL_PLAN_OPTIONS = [
   { value: "room_only", label: "Room Only" },
   { value: "breakfast", label: "Breakfast" },
@@ -618,6 +637,128 @@ function isStaleByHours(value: string | null, referenceNow: number, hours: numbe
 function labelizeToken(value: string | null | undefined, fallback: string): string {
   if (!value) return fallback;
   return value.replaceAll("_", " ");
+}
+
+function normalizeToken(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function isPendingApprovalBooking(booking: ProBookingSummary): boolean {
+  const status = normalizeToken(booking.status);
+  return !booking.isOta && (status === "pending" || status === "pending_host_approval");
+}
+
+function isCancelledBooking(booking: ProBookingSummary): boolean {
+  const status = normalizeToken(booking.status);
+  const importStatus = normalizeToken(booking.importStatus);
+  return (
+    status.startsWith("cancel") ||
+    status === "rejected" ||
+    importStatus.startsWith("cancel") ||
+    importStatus.includes("cancelled")
+  );
+}
+
+function isConfirmedBooking(booking: ProBookingSummary): boolean {
+  const status = normalizeToken(booking.status);
+  return status === "accepted" || status === "confirmed" || status === "checked_in" || status === "completed";
+}
+
+function isModifiedReviewBooking(booking: ProBookingSummary): boolean {
+  const status = normalizeToken(booking.status);
+  const importStatus = normalizeToken(booking.importStatus);
+  return (
+    status.includes("modified") ||
+    importStatus.includes("modified") ||
+    importStatus.includes("manual_review") ||
+    importStatus.includes("pending_review")
+  );
+}
+
+function hasPaymentAttention(booking: ProBookingSummary): boolean {
+  const paymentStatus = normalizeToken(booking.paymentStatus);
+  return paymentStatus === "failed" || paymentStatus === "requires_action" || paymentStatus === "unpaid";
+}
+
+function isActionNeededBooking(booking: ProBookingSummary): boolean {
+  const importStatus = normalizeToken(booking.importStatus);
+  const ackStatus = normalizeToken(booking.ackStatus);
+
+  if (isPendingApprovalBooking(booking) || hasPaymentAttention(booking)) return true;
+  if (isModifiedReviewBooking(booking) || isCancelledBooking(booking)) return true;
+  if (!booking.isOta) return false;
+
+  return (
+    importStatus === "preview" ||
+    importStatus.includes("failed") ||
+    importStatus.includes("missing") ||
+    importStatus.includes("manual_review") ||
+    importStatus.includes("pending_review") ||
+    (ackStatus !== "acknowledged" &&
+      importStatus !== "not_applicable" &&
+      importStatus !== "imported" &&
+      importStatus !== "modified_applied")
+  );
+}
+
+function matchesBookingFilter(booking: ProBookingSummary, filter: BookingWorkspaceFilter): boolean {
+  switch (filter) {
+    case "All":
+      return true;
+    case "Famlo Direct":
+      return !booking.isOta;
+    case "OTA":
+      return booking.isOta;
+    case "Pending approval":
+      return isPendingApprovalBooking(booking);
+    case "Confirmed":
+      return isConfirmedBooking(booking);
+    case "Cancelled":
+      return isCancelledBooking(booking);
+    case "Modified / Review needed":
+      return isModifiedReviewBooking(booking);
+    case "Action needed":
+      return isActionNeededBooking(booking);
+    default:
+      return true;
+  }
+}
+
+function bookingHealthLabel(booking: ProBookingSummary): string {
+  if (isPendingApprovalBooking(booking)) return "Pending approval";
+  if (isModifiedReviewBooking(booking)) return "Review needed";
+  if (isCancelledBooking(booking)) return "Cancelled";
+  if (hasPaymentAttention(booking)) return "Payment issue";
+  if (booking.isOta) {
+    const importStatus = normalizeToken(booking.importStatus);
+    if (importStatus.includes("failed")) return "Import issue";
+    if (normalizeToken(booking.ackStatus) !== "acknowledged" && importStatus === "preview") return "Awaiting import";
+    return "Synced";
+  }
+  if (isConfirmedBooking(booking)) return "Confirmed";
+  return labelizeToken(booking.status, "unknown");
+}
+
+function bookingNextAction(booking: ProBookingSummary): string {
+  if (isPendingApprovalBooking(booking)) {
+    return "Handle this in the current Famlo direct-booking flow.";
+  }
+  if (isModifiedReviewBooking(booking)) {
+    return "Review the OTA change before acknowledging it.";
+  }
+  if (isCancelledBooking(booking) && booking.isOta) {
+    return "Check whether the OTA cancellation was applied cleanly.";
+  }
+  if (hasPaymentAttention(booking)) {
+    return "Review the booking payment state before arrival.";
+  }
+  if (booking.isOta) {
+    const importStatus = normalizeToken(booking.importStatus);
+    if (importStatus === "preview") return "Review the OTA import state below.";
+    if (normalizeToken(booking.ackStatus) !== "acknowledged") return "Review OTA acknowledgement details below.";
+    return "No immediate OTA action needed.";
+  }
+  return "No immediate action needed.";
 }
 
 function asStringOrNull(value: unknown): string | null {
@@ -1234,6 +1375,8 @@ export default function FamloProDashboardShell({
   const [propertyContentSaving, startPropertyContentSaving] = useTransition();
   const [propertyContentFeedback, setPropertyContentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
+  const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
+  const [selectedBooking, setSelectedBooking] = useState<ProBookingSummary | null>(null);
   const [timeAnchor] = useState(() => Date.now());
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
@@ -1244,6 +1387,8 @@ export default function FamloProDashboardShell({
     setPropertyContent(initialPropertyContent);
     setPropertyGallery(propertyPhotos);
     setPropertyContentFeedback(null);
+    setBookingFilter("All");
+    setSelectedBooking(null);
   }, [familyId, initialPropertyContent, propertyPhotos]);
 
   const handleSavePropertyContent = async (options: {
@@ -1315,6 +1460,15 @@ export default function FamloProDashboardShell({
   const connectedPropertyCount = channelFoundation.properties.filter(
     (property) => property.syncStatus === "connected"
   ).length;
+  const totalBookingsCount = proBookings.length;
+  const famloDirectBookingsCount = proBookings.filter((booking) => !booking.isOta).length;
+  const otaBookingsCount = proBookings.filter((booking) => booking.isOta).length;
+  const pendingApprovalBookingsCount = proBookings.filter(isPendingApprovalBooking).length;
+  const cancelledBookingsCount = proBookings.filter(isCancelledBooking).length;
+  const modifiedReviewBookingsCount = proBookings.filter(isModifiedReviewBooking).length;
+  const actionNeededBookingsCount = proBookings.filter(isActionNeededBooking).length;
+  const confirmedBookingsCount = proBookings.filter(isConfirmedBooking).length;
+  const filteredProBookings = proBookings.filter((booking) => matchesBookingFilter(booking, bookingFilter));
   const propertyContentChecks = [
     { label: "OTA title", ready: Boolean(initialSettings.otaTitle) && initialSettings.exists },
     { label: "Property description", ready: Boolean(initialSettings.propertyDescription) },
@@ -4116,11 +4270,339 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Bookings</h3>
                   <p className={styles.cardCopy}>
-                    Source-aware booking workspace shell. Existing `bookings_v2` and booking APIs remain untouched.
+                    Bookings for this property. Manage Famlo and OTA reservations from one place.
                   </p>
                 </div>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Total bookings</div>
+                    <div className={styles.metricValue}>{totalBookingsCount}</div>
+                    <div className={styles.metricHint}>All Famlo direct and OTA reservations scoped to this property.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Famlo direct</div>
+                    <div className={styles.metricValue}>{famloDirectBookingsCount}</div>
+                    <div className={styles.metricHint}>Existing direct reservations and pending host approvals.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>OTA bookings</div>
+                    <div className={styles.metricValue}>{otaBookingsCount}</div>
+                    <div className={styles.metricHint}>Booking.com and other OTA reservations already linked to this property.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Pending approval</div>
+                    <div className={styles.metricValue}>{pendingApprovalBookingsCount}</div>
+                    <div className={styles.metricHint}>Direct booking requests that still need a host decision.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Cancelled</div>
+                    <div className={styles.metricValue}>{cancelledBookingsCount}</div>
+                    <div className={styles.metricHint}>Reservations already cancelled or carrying OTA cancellation state.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Action needed</div>
+                    <div className={styles.metricValue}>{actionNeededBookingsCount}</div>
+                    <div className={styles.metricHint}>Bookings that need approval, OTA review, payment attention, or sync follow-up.</div>
+                  </article>
+                </div>
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Unified bookings workspace</div>
+                    <div className={styles.feedCopy}>
+                      Use this table to review guest, room, date, payment, and source details in one place. Technical OTA import and acknowledgement details remain available below.
+                    </div>
+                    <div className={styles.roomReadinessRow}>
+                      <span className={styles.readinessPill}>Confirmed: {confirmedBookingsCount}</span>
+                      <span className={styles.readinessPill}>Modified / review needed: {modifiedReviewBookingsCount}</span>
+                      <span className={styles.readinessPill}>Property scope: {familyId}</span>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>How to use this workspace</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Famlo direct stays keep their current host flow</div>
+                        <div className={styles.feedCopy}>Pending approvals, guest check-in, checkout, and chat continue to use the existing Famlo booking actions.</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>OTA bookings stay operationally safe</div>
+                        <div className={styles.feedCopy}>Import, cancellation, modification, and acknowledgement workflows remain unchanged and visible below.</div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
+                <div className={styles.filterRow}>
+                  {BOOKING_FILTERS.map((filter) => {
+                    const active = bookingFilter === filter;
+                    return (
+                      <button
+                        key={filter}
+                        type="button"
+                        className={`${styles.propertyTabLinkButton} ${active ? styles.propertyTabLinkButtonActive : ""}`}
+                        onClick={() => setBookingFilter(filter)}
+                      >
+                        <span className={styles.propertyTabText}>
+                          <span className={styles.propertyTabTitle}>{filter}</span>
+                          <span className={styles.propertyTabHint}>
+                            {filter === "All"
+                              ? "See every reservation"
+                              : filter === "Famlo Direct"
+                                ? "Direct Famlo stays only"
+                                : filter === "OTA"
+                                  ? "Booking.com and OTA stays"
+                                  : filter === "Pending approval"
+                                    ? "Host decision still pending"
+                                    : filter === "Confirmed"
+                                      ? "Confirmed or active stays"
+                                      : filter === "Cancelled"
+                                        ? "Cancelled reservations"
+                                        : filter === "Modified / Review needed"
+                                          ? "Changes that need review"
+                                          : "Bookings that need attention"}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {proBookings.length > 0 ? (
+                  <>
+                    <div className={styles.mappingTable}>
+                      <div className={styles.mappingHeader}>Reservation</div>
+                      <div className={styles.mappingHeader}>Source</div>
+                      <div className={styles.mappingHeader}>Stay dates</div>
+                      <div className={styles.mappingHeader}>Guest / Room</div>
+                      <div className={styles.mappingHeader}>Status / next action</div>
+                      <div className={styles.mappingHeader}>Amount / payment</div>
+                      {filteredProBookings.map((booking) => (
+                        <Fragment key={booking.bookingId}>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
+                            <div className={styles.mappingSubcopy}>
+                              {booking.isOta ? `OTA ref ${booking.externalBookingId ?? "pending"}` : `Famlo booking ${booking.bookingId}`}
+                            </div>
+                            <div className={styles.roomReadinessRow} style={{ marginTop: 10 }}>
+                              <span className={`${styles.badge} ${isActionNeededBooking(booking) ? styles.badgeMuted : ""}`}>
+                                {bookingHealthLabel(booking)}
+                              </span>
+                              <button
+                                type="button"
+                                className={styles.secondaryActionButton}
+                                onClick={() => setSelectedBooking(booking)}
+                              >
+                                View details
+                              </button>
+                            </div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{booking.sourceLabel}</div>
+                            <div className={styles.mappingSubcopy}>
+                              {booking.isOta ? "OTA reservation" : "Famlo direct reservation"}
+                            </div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{booking.startDate} → {booking.endDate}</div>
+                            <div className={styles.mappingSubcopy}>Created {formatDateTime(booking.createdAt)}</div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{booking.roomName}</div>
+                            <div className={styles.mappingSubcopy}>
+                              {booking.isOta ? "Linked through current OTA flow" : "Direct stay inventory"}
+                            </div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{labelizeToken(booking.status, "unknown")}</div>
+                            <div className={styles.mappingSubcopy}>{bookingNextAction(booking)}</div>
+                            {booking.isOta ? (
+                              <div className={styles.roomReadinessRow} style={{ marginTop: 10 }}>
+                                <span className={styles.readinessPill}>
+                                  Import: {labelizeToken(booking.importStatus, "preview")}
+                                </span>
+                                <span className={styles.readinessPill}>
+                                  Ack: {labelizeToken(booking.ackStatus, "not_acknowledged")}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
+                            <div className={styles.mappingSubcopy}>
+                              Payment {labelizeToken(booking.paymentStatus, "unknown")}
+                            </div>
+                          </div>
+                        </Fragment>
+                      ))}
+                    </div>
+
+                    {filteredProBookings.length === 0 ? (
+                      <div className={styles.emptyState}>
+                        <div className={styles.emptyTitle}>No bookings match this filter</div>
+                        <div className={styles.emptyCopy}>
+                          Try a different filter to review direct bookings, OTA reservations, pending approvals, or bookings that need attention.
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className={styles.emptyState}>
+                    <div className={styles.emptyTitle}>No bookings surfaced yet</div>
+                    <div className={styles.emptyCopy}>
+                      Direct Famlo reservations and OTA-linked bookings will appear here once this property starts receiving stays.
+                    </div>
+                  </div>
+                )}
+
+                {selectedBooking ? (
+                  <div className={styles.calendarDrawerOverlay} onClick={() => setSelectedBooking(null)}>
+                    <aside
+                      className={styles.calendarDrawer}
+                      onClick={(event) => event.stopPropagation()}
+                      aria-label="Booking details"
+                    >
+                      <div className={styles.calendarDrawerHeader}>
+                        <div>
+                          <div className={styles.listTitle}>Booking details</div>
+                          <div className={styles.cardCopy}>
+                            {selectedBooking.isOta
+                              ? "Review the source, stay, and OTA state for this reservation."
+                              : "Review the direct-booking summary for this reservation."}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.drawerCloseButton}
+                          onClick={() => setSelectedBooking(null)}
+                          aria-label="Close booking details"
+                        >
+                          <X className={styles.drawerCloseIcon} />
+                        </button>
+                      </div>
+
+                      <div className={styles.drawerSummaryGrid}>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>Guest</div>
+                          <div className={styles.placeholderValue}>{selectedBooking.guestDisplayName}</div>
+                        </div>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>Source</div>
+                          <div className={styles.placeholderValue}>{selectedBooking.sourceLabel}</div>
+                        </div>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>Room</div>
+                          <div className={styles.placeholderValue}>{selectedBooking.roomName}</div>
+                        </div>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>Stay dates</div>
+                          <div className={styles.placeholderValue}>{selectedBooking.startDate} → {selectedBooking.endDate}</div>
+                        </div>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>Amount</div>
+                          <div className={styles.placeholderValue}>{selectedBooking.amount ?? "Not available"}</div>
+                        </div>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>Payment</div>
+                          <div className={styles.placeholderValue}>{labelizeToken(selectedBooking.paymentStatus, "unknown")}</div>
+                        </div>
+                      </div>
+
+                      <div className={styles.drawerDetailTable}>
+                        <div className={styles.mappingHeader}>Field</div>
+                        <div className={styles.mappingHeader}>Value</div>
+
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>Booking status</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{labelizeToken(selectedBooking.status, "unknown")}</div>
+                        </div>
+
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>Recommended next step</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{bookingNextAction(selectedBooking)}</div>
+                        </div>
+
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>Linked Famlo booking</div>
+                        </div>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{selectedBooking.linkedBookingId ?? selectedBooking.bookingId}</div>
+                        </div>
+
+                        {selectedBooking.isOta ? (
+                          <>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>External booking ID</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{selectedBooking.externalBookingId ?? "Not available"}</div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Import state</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{labelizeToken(selectedBooking.importStatus, "preview")}</div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Acknowledgement state</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{labelizeToken(selectedBooking.ackStatus, "not_acknowledged")}</div>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Direct booking flow</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Existing host approval, check-in, checkout, and chat actions remain unchanged.</div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className={styles.inlineActionRow}>
+                        {selectedBooking.isOta ? (
+                          <>
+                            <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("connected-channels")}>
+                              Check channels
+                            </button>
+                            <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("conflicts")}>
+                              View conflicts
+                            </button>
+                            <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("sync-logs")}>
+                              View sync logs
+                            </button>
+                          </>
+                        ) : (
+                          <span className={styles.filterChip}>
+                            Direct-booking host actions stay in the existing Famlo booking flow.
+                          </span>
+                        )}
+                      </div>
+                    </aside>
+                  </div>
+                ) : null}
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Advanced booking diagnostics</div>
+                    <div className={styles.feedCopy}>
+                      Technical OTA import and acknowledgement details remain available below for operator review without changing the host-friendly bookings list above.
+                    </div>
+                  </article>
+                </div>
+
                 <ChannexBookingFeedCard
                   familyId={familyId}
                   propertyCreated={canCreateRoomTypes}
@@ -4142,69 +4624,6 @@ export default function FamloProDashboardShell({
                   lastFeedLog={lastBookingFeedLog}
                   storedRevisions={channelFoundation.bookingRevisions}
                 />
-                <div className={styles.filterRow}>
-                  {BOOKING_FILTERS.map((filter) => (
-                    <span key={filter} className={styles.filterChip}>{filter}</span>
-                  ))}
-                </div>
-                {proBookings.length > 0 ? (
-                  <div className={styles.mappingTable}>
-                    <div className={styles.mappingHeader}>Booking</div>
-                    <div className={styles.mappingHeader}>Source</div>
-                    <div className={styles.mappingHeader}>Dates</div>
-                    <div className={styles.mappingHeader}>Guest / Room</div>
-                    <div className={styles.mappingHeader}>Import / Ack</div>
-                    <div className={styles.mappingHeader}>Amount / payment</div>
-                    {proBookings.map((booking) => (
-                      <Fragment key={booking.bookingId}>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.externalBookingId ?? booking.bookingId}</div>
-                          <div className={styles.mappingSubcopy}>
-                            {labelizeToken(booking.status, "unknown")} · {booking.linkedBookingId ?? booking.bookingId}
-                          </div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.sourceLabel}</div>
-                          <div className={styles.mappingSubcopy}>
-                            {booking.isOta ? `Feed ${booking.externalRevisionId ?? "missing"}` : "Famlo direct"}
-                          </div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.startDate} → {booking.endDate}</div>
-                          <div className={styles.mappingSubcopy}>Created {formatDateTime(booking.createdAt)}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
-                          <div className={styles.mappingSubcopy}>{booking.roomName}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>
-                            {booking.isOta
-                              ? `${labelizeToken(booking.importStatus, "preview")} · ${labelizeToken(booking.ackStatus, "not_acknowledged")}`
-                              : "Direct booking"}
-                          </div>
-                          <div className={styles.mappingSubcopy}>
-                            {booking.isOta ? "Scoped to this property" : "Existing Famlo flow"}
-                          </div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
-                          <div className={styles.mappingSubcopy}>
-                            Payment {labelizeToken(booking.paymentStatus, "unknown")}
-                          </div>
-                        </div>
-                      </Fragment>
-                    ))}
-                  </div>
-                ) : (
-                  <div className={styles.emptyState}>
-                    <div className={styles.emptyTitle}>No provider bookings connected yet</div>
-                    <div className={styles.emptyCopy}>
-                      Future OTA imports, modifications, cancellations, and unmapped reservations will surface here once
-                      providers are connected. Famlo direct bookings continue to live in existing booking flows today.
-                    </div>
-                  </div>
-                )}
               </div>
             </section>
           )}
