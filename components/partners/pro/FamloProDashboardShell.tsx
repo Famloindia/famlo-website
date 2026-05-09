@@ -1456,6 +1456,9 @@ export default function FamloProDashboardShell({
   const firstMappedRatePlan = rateMappingRows.find((row) => Boolean(row.ratePlan?.externalRatePlanId)) ?? null;
   const roomMappingsReadyCount = roomMappingRows.filter((row) => Boolean(row.mapping?.externalRoomTypeId)).length;
   const rateMappingsReadyCount = rateMappingRows.filter((row) => Boolean(row.ratePlan?.externalRatePlanId)).length;
+  const roomMappingsMissingCount = Math.max(activeRoomsCount - roomMappingsReadyCount, 0);
+  const rateMappingsMissingCount = Math.max(activeRoomsCount - rateMappingsReadyCount, 0);
+  const bookingFeedHealthy = Boolean(channelFeedHealth?.lastSuccessfulPollAt) && !channelFeedHealth?.lastError;
   const bookingComManualChecklist = [
     {
       label: "Channex property id",
@@ -1496,6 +1499,90 @@ export default function FamloProDashboardShell({
   const lastAri365SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_365_day") ?? null;
   const lastAriSyncLog = lastAri365SyncLog ?? lastAri30SyncLog;
   const ariHealth = computeAriHealthSnapshot(channelFoundation.syncLogs, timeAnchor, channelAriHealth);
+  const ariSyncHealthy = ariHealth.statusLabel === "Synced";
+  const cancellationFlowAvailable = (channelFeedHealth?.autoCancelledCount ?? 0) > 0;
+  const modificationReviewAvailable = (channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 || (channelFeedHealth?.lastAutoApplyState === "waiting_for_manual_review");
+  const connectedChannelCards = channelFoundation.providers.length > 0
+    ? channelFoundation.providers.map((provider) => {
+        const providerProperty = channelFoundation.properties.find((property) => property.providerCode === provider.code) ?? null;
+        const isConnected = providerProperty?.syncStatus === "connected" || Boolean(providerProperty?.externalPropertyId);
+        const providerCodeMatches = (value: string | null | undefined) => value === provider.code;
+        const mappedRoomsCount = channelFoundation.roomMappings.filter((mapping) => providerCodeMatches(mapping.providerCode) && mapping.externalRoomTypeId).length;
+        const mappedRatesCount = channelFoundation.ratePlans.filter((plan) => providerCodeMatches(plan.providerCode) && plan.externalRatePlanId).length;
+        const recommendedAction =
+          !isConnected
+            ? "Needs setup"
+            : mappedRoomsCount < activeRoomsCount
+              ? "Finish room mapping"
+              : mappedRatesCount < activeRoomsCount
+                ? "Finish rate mapping"
+                : channelHealthNeedsAttention
+                  ? "Famlo team may need to review"
+                  : "Ready";
+
+        return {
+          key: provider.code,
+          name: provider.name,
+          statusLabel: isConnected ? "Connected" : "Not connected",
+          mappedRoomsCount,
+          mappedRatesCount,
+          lastFeedSuccess: formatDateTime(channelFeedHealth?.lastSuccessfulPollAt ?? null),
+          ariStatus: ariHealth.statusLabel,
+          recommendedAction,
+        };
+      })
+    : [];
+  const channelReadinessChecklist = [
+    {
+      label: "Property connected to channel",
+      ready: channelAriHealth
+        ? channelAriHealth.channelAttached && channelAriHealth.channelActive
+        : (channelFeedHealth?.channelAttached ?? false) && (channelFeedHealth?.channelActive ?? false),
+      value:
+        channelAriHealth
+          ? channelAriHealth.channelAttached && channelAriHealth.channelActive
+            ? "Connected"
+            : "Not connected"
+          : (channelFeedHealth?.channelAttached ?? false) && (channelFeedHealth?.channelActive ?? false)
+            ? "Connected"
+            : "Not connected",
+    },
+    {
+      label: "At least one active room exists",
+      ready: activeRoomsCount > 0,
+      value: activeRoomsCount > 0 ? `${activeRoomsCount} active` : "No active rooms",
+    },
+    {
+      label: "Room mapping ready",
+      ready: activeRoomsCount > 0 && roomMappingsReadyCount >= activeRoomsCount,
+      value: `${roomMappingsReadyCount}/${activeRoomsCount || 0} mapped`,
+    },
+    {
+      label: "Rate mapping ready",
+      ready: activeRoomsCount > 0 && rateMappingsReadyCount >= activeRoomsCount,
+      value: `${rateMappingsReadyCount}/${activeRoomsCount || 0} mapped`,
+    },
+    {
+      label: "ARI sync checked",
+      ready: Boolean(channelAriHealth?.lastAriSyncAt || ariHealth.lastAriSyncAt),
+      value: ariSyncHealthy ? "Healthy" : ariHealth.statusLabel,
+    },
+    {
+      label: "Booking feed checked",
+      ready: Boolean(channelFeedHealth?.lastPollAt),
+      value: bookingFeedHealthy ? "Healthy" : (channelFeedHealth?.lastPollAt ? "Action needed" : "Not checked"),
+    },
+    {
+      label: "Cancellation flow proof",
+      ready: cancellationFlowAvailable,
+      value: cancellationFlowAvailable ? "Available" : "Not proven here yet",
+    },
+    {
+      label: "Modification review available",
+      ready: modificationReviewAvailable,
+      value: modificationReviewAvailable ? "Available" : "Not visible yet",
+    },
+  ];
   channelHealthSummaryBadges.push(`ARI: ${ariHealth.statusLabel}`);
   const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
   const groupedSyncLogs = SYNC_LOG_GROUPS.map((group) => ({
@@ -3298,7 +3385,7 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Channels</h3>
                   <p className={styles.cardCopy}>
-                    See whether this property is connected, healthy, or still needs setup. Technical mapping and debug tools stay under Advanced.
+                    Channels for this property. Use this page to understand whether this property is ready to sell on connected OTAs. Technical mapping and logs remain available under Advanced.
                   </p>
                 </div>
                 <span className={`${styles.badge} ${primaryProperty?.externalPropertyId ? "" : styles.badgeMuted}`.trim()}>
@@ -3338,6 +3425,15 @@ export default function FamloProDashboardShell({
                         ARI: {ariHealth.statusLabel}
                       </span>
                     </div>
+                    <div className={styles.feedCopy} style={{ marginTop: 12 }}>
+                      {connectedChannelCards.length === 0
+                        ? "No connected channel data is available yet for this property."
+                        : roomMappingsMissingCount > 0 || rateMappingsMissingCount > 0
+                          ? `Setup is still needed: ${roomMappingsMissingCount} active rooms still need room mapping and ${rateMappingsMissingCount} still need rate mapping.`
+                          : channelHealthNeedsAttention
+                            ? "A sync or review issue is visible for this property, so Famlo team may need to review."
+                            : "This property looks healthy enough to move through connected OTA setup with the current foundation."}
+                    </div>
                   </article>
 
                   <article className={styles.listCard}>
@@ -3363,6 +3459,61 @@ export default function FamloProDashboardShell({
                   </article>
                 </div>
 
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Channel readiness checklist</div>
+                    <div className={styles.stack}>
+                      {channelReadinessChecklist.map((item) => (
+                        <div key={item.label} className={styles.feedItem}>
+                          <div className={styles.feedTitle}>{item.label}</div>
+                          <div className={styles.roomReadinessRow}>
+                            <span className={`${styles.readinessPill} ${item.ready ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                              {item.ready ? "Ready" : "Needs setup"}
+                            </span>
+                            <span className={styles.readinessPill}>{item.value}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Connected channel actions</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 12 }}>
+                      These are the safest next actions using the data already loaded for this property.
+                    </div>
+                    {connectedChannelCards.length > 0 ? (
+                      <div className={styles.stack}>
+                        {connectedChannelCards.map((channel) => (
+                          <div key={channel.key} className={styles.feedItem}>
+                            <div className={styles.feedTitle}>{channel.name}</div>
+                            <div className={styles.roomReadinessRow}>
+                              <span className={`${styles.readinessPill} ${channel.statusLabel === "Connected" ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                                {channel.statusLabel}
+                              </span>
+                              <span className={styles.readinessPill}>Rooms mapped: {channel.mappedRoomsCount}/{activeRoomsCount || 0}</span>
+                              <span className={styles.readinessPill}>Rates mapped: {channel.mappedRatesCount}/{activeRoomsCount || 0}</span>
+                              <span className={`${styles.readinessPill} ${channel.ariStatus === "Synced" ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                                ARI: {channel.ariStatus}
+                              </span>
+                            </div>
+                            <div className={styles.feedCopy}>
+                              Feed health: {channel.lastFeedSuccess !== "Not checked" ? `last success ${channel.lastFeedSuccess}` : "not checked yet"}. Recommended next action: {channel.recommendedAction}.
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className={styles.emptyState}>
+                        <div className={styles.emptyTitle}>No channel connected</div>
+                        <div className={styles.emptyCopy}>
+                          Channel data is unavailable for this property right now. Once a provider foundation is attached, this space will show host-safe readiness and next actions.
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                </div>
+
                 <div className={styles.providerCard}>
                   <div className={styles.providerCardHeader}>
                     <div>
@@ -3378,7 +3529,7 @@ export default function FamloProDashboardShell({
                   <div className={styles.providerMetaRow}>
                     <span className={styles.filterChip}>Environment: {formatChannexEnvironmentLabel(channexConfig.environment)}</span>
                     <span className={styles.filterChip}>Foundation: {providerFoundationReady ? "Ready" : "Missing"}</span>
-                    <span className={styles.filterChip}>Property id: {primaryProperty?.externalPropertyId ?? "Missing"}</span>
+                    <span className={styles.filterChip}>Property connection: {primaryProperty?.externalPropertyId ? "Connected" : "Needs setup"}</span>
                     <span className={styles.filterChip}>Last sync: {formatDateTime(primaryProperty?.lastSyncedAt ?? null)}</span>
                   </div>
                   <div className={styles.providerMetaRow}>
