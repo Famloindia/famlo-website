@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, useMemo, useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import {
   Activity,
   ArrowRightLeft,
@@ -27,7 +27,6 @@ import {
   Settings2,
   ShieldAlert,
   Sparkles,
-  Users,
   WalletCards,
   X,
 } from "lucide-react";
@@ -282,8 +281,19 @@ type GoLiveChecklistItem = {
   targetSection: ProSectionId;
 };
 
+type PropertySwitcherOption = {
+  familyId: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  locality: string | null;
+  famloPlusStatus: string | null;
+  isActive: boolean;
+};
+
 interface FamloProDashboardShellProps {
   familyId: string;
+  propertyOptions: PropertySwitcherOption[];
   propertyName: string;
   hostCode: string | null;
   locationLabel: string;
@@ -322,39 +332,170 @@ interface FamloProDashboardShellProps {
 }
 
 type NavItem = {
+  id: ProTopLevelId;
+  title: string;
+  hint: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+type PropertyTabItem = {
   id: ProSectionId;
   title: string;
   hint: string;
   icon: React.ComponentType<{ className?: string }>;
-  group: string;
-  child?: boolean;
 };
 
-const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", title: "Dashboard", hint: "Action center", icon: Activity, group: "Core" },
-  { id: "setup-guide", title: "Setup Guide", hint: "Go-live readiness", icon: ClipboardList, group: "Core" },
-  { id: "rooms-units", title: "Rooms & Units", hint: "Inventory structure", icon: Hotel, group: "Inventory", child: true },
-  { id: "rates-restrictions", title: "Rates & Restrictions", hint: "Base pricing shell", icon: BadgeIndianRupee, group: "Inventory", child: true },
-  { id: "inventory-calendar", title: "Calendar", hint: "Availability view", icon: CalendarDays, group: "Inventory", child: true },
-  { id: "availability-rules", title: "Availability Rules", hint: "Stay controls", icon: Flag, group: "Inventory", child: true },
-  { id: "check-times", title: "Check-in / Check-out Time", hint: "Arrival windows", icon: Clock3, group: "Inventory", child: true },
-  { id: "connected-channels", title: "Connected Channels", hint: "Provider-neutral", icon: Link2, group: "Channel Manager", child: true },
-  { id: "room-mapping", title: "Room Mapping", hint: "Room type links", icon: Layers3, group: "Channel Manager", child: true },
-  { id: "rate-mapping", title: "Rate Mapping", hint: "Rate plan links", icon: ArrowRightLeft, group: "Channel Manager", child: true },
-  { id: "sync-logs", title: "Sync Logs", hint: "ARI job history", icon: RefreshCcw, group: "Channel Manager", child: true },
-  { id: "conflicts", title: "Conflicts", hint: "Mismatch review", icon: ShieldAlert, group: "Channel Manager", child: true },
-  { id: "bookings", title: "Bookings", hint: "Source-aware queue", icon: BookCheck, group: "Operations" },
-  { id: "messages-reviews", title: "Messages & Reviews", hint: "Inbox shell", icon: MessageSquareMore, group: "Operations" },
-  { id: "revenue", title: "Revenue", hint: "Commercial summary", icon: WalletCards, group: "Insights" },
-  { id: "reports", title: "Reports", hint: "Exports later", icon: FileBarChart2, group: "Insights" },
-  { id: "property", title: "Property", hint: "Identity & structure", icon: Building2, group: "Admin" },
-  { id: "ota-content", title: "OTA Content", hint: "Listing readiness", icon: ClipboardList, group: "Admin" },
-  { id: "team-groups", title: "Team & Groups", hint: "Role placeholders", icon: Users, group: "Admin" },
-  { id: "settings", title: "Settings", hint: "Provider env", icon: Settings2, group: "Admin" },
-  { id: "support", title: "Support", hint: "Pilot help", icon: BellRing, group: "Admin" },
+type ProTopLevelId =
+  | "dashboard"
+  | "properties"
+  | "bookings"
+  | "calendar"
+  | "messages"
+  | "revenue"
+  | "reports"
+  | "support"
+  | "settings";
+
+type PropertyCenterTabId =
+  | "overview"
+  | "rooms"
+  | "content"
+  | "pricing"
+  | "channels"
+  | "sync-health"
+  | "advanced";
+
+const TOP_LEVEL_NAV_ITEMS: NavItem[] = [
+  { id: "dashboard", title: "Dashboard", hint: "Action center", icon: Activity },
+  { id: "properties", title: "Properties", hint: "Rooms, channels, and content", icon: Building2 },
+  { id: "bookings", title: "Bookings", hint: "Reservations and OTA flow", icon: BookCheck },
+  { id: "calendar", title: "Calendar", hint: "Availability and stays", icon: CalendarDays },
+  { id: "messages", title: "Messages", hint: "Guest conversations", icon: MessageSquareMore },
+  { id: "revenue", title: "Revenue", hint: "Performance snapshot", icon: WalletCards },
+  { id: "reports", title: "Reports", hint: "Exports and summaries", icon: FileBarChart2 },
+  { id: "support", title: "Support", hint: "Pilot help", icon: BellRing },
+  { id: "settings", title: "Settings", hint: "Workspace controls", icon: Settings2 },
 ];
 
-const GROUP_ORDER = ["Core", "Inventory", "Channel Manager", "Operations", "Insights", "Admin"];
+const PROPERTY_TABS: Array<{
+  id: PropertyCenterTabId;
+  title: string;
+  hint: string;
+  icon: React.ComponentType<{ className?: string }>;
+  defaultSection: ProSectionId;
+  sections: ProSectionId[];
+}> = [
+  { id: "overview", title: "Overview", hint: "Identity, setup, and arrival basics", icon: Building2, defaultSection: "property", sections: ["property", "setup-guide"] },
+  { id: "rooms", title: "Rooms", hint: "Inventory and unit structure", icon: Hotel, defaultSection: "rooms-units", sections: ["rooms-units"] },
+  { id: "content", title: "Content & Photos", hint: "Story, gallery, and OTA content", icon: ClipboardList, defaultSection: "ota-content", sections: ["ota-content"] },
+  { id: "pricing", title: "Pricing & Rules", hint: "Rates, stay rules, and check times", icon: BadgeIndianRupee, defaultSection: "rates-restrictions", sections: ["rates-restrictions", "availability-rules", "check-times"] },
+  { id: "channels", title: "Channels", hint: "Distribution connections", icon: Link2, defaultSection: "connected-channels", sections: ["connected-channels"] },
+  { id: "sync-health", title: "Sync Health", hint: "Conflicts and polling health", icon: ShieldAlert, defaultSection: "conflicts", sections: ["conflicts"] },
+  { id: "advanced", title: "Advanced", hint: "Mappings and logs", icon: Layers3, defaultSection: "room-mapping", sections: ["room-mapping", "rate-mapping", "sync-logs"] },
+];
+
+const PROPERTY_TAB_BY_SECTION = new Map<ProSectionId, PropertyCenterTabId>(
+  PROPERTY_TABS.flatMap((tab) => tab.sections.map((section) => [section, tab.id] as const))
+);
+
+const TOP_LEVEL_BY_SECTION = new Map<ProSectionId, ProTopLevelId>([
+  ["dashboard", "dashboard"],
+  ["setup-guide", "properties"],
+  ["rooms-units", "properties"],
+  ["rates-restrictions", "properties"],
+  ["availability-rules", "properties"],
+  ["check-times", "properties"],
+  ["connected-channels", "properties"],
+  ["room-mapping", "properties"],
+  ["rate-mapping", "properties"],
+  ["sync-logs", "properties"],
+  ["conflicts", "properties"],
+  ["property", "properties"],
+  ["ota-content", "properties"],
+  ["bookings", "bookings"],
+  ["inventory-calendar", "calendar"],
+  ["messages-reviews", "messages"],
+  ["revenue", "revenue"],
+  ["reports", "reports"],
+  ["support", "support"],
+  ["settings", "settings"],
+  ["team-groups", "settings"],
+]);
+
+const PROPERTY_TAB_SECTION_LINKS: Record<PropertyCenterTabId, PropertyTabItem[]> = {
+  overview: [
+    { id: "property", title: "Property overview", hint: "Identity, location, and setup copy", icon: Building2 },
+    { id: "setup-guide", title: "Setup guide", hint: "Go-live readiness checklist", icon: ClipboardList },
+  ],
+  rooms: [
+    { id: "rooms-units", title: "Rooms & Units", hint: "Current room inventory", icon: Hotel },
+  ],
+  content: [
+    { id: "ota-content", title: "Content & Photos", hint: "Listing readiness for channels", icon: ClipboardList },
+  ],
+  pricing: [
+    { id: "rates-restrictions", title: "Rates & Restrictions", hint: "Base pricing shell", icon: BadgeIndianRupee },
+    { id: "availability-rules", title: "Availability Rules", hint: "Stay controls", icon: Flag },
+    { id: "check-times", title: "Check-in / Check-out Time", hint: "Arrival windows", icon: Clock3 },
+  ],
+  channels: [
+    { id: "connected-channels", title: "Connected Channels", hint: "Channel status and provider links", icon: Link2 },
+  ],
+  "sync-health": [
+    { id: "conflicts", title: "Conflicts", hint: "Needs-attention queue", icon: ShieldAlert },
+  ],
+  advanced: [
+    { id: "room-mapping", title: "Room Mapping", hint: "Map Famlo rooms to provider rooms", icon: Layers3 },
+    { id: "rate-mapping", title: "Rate Mapping", hint: "Map Famlo pricing to provider plans", icon: ArrowRightLeft },
+    { id: "sync-logs", title: "Sync Logs", hint: "Operational audit history", icon: RefreshCcw },
+  ],
+};
+
+function resolveTopLevelSection(section: ProSectionId): ProTopLevelId {
+  return TOP_LEVEL_BY_SECTION.get(section) ?? "dashboard";
+}
+
+function resolvePropertyTab(section: ProSectionId): PropertyCenterTabId {
+  return PROPERTY_TAB_BY_SECTION.get(section) ?? "overview";
+}
+
+function isPropertyCenterSection(section: ProSectionId): boolean {
+  return resolveTopLevelSection(section) === "properties";
+}
+
+function isPropertyTabActive(tabId: PropertyCenterTabId, section: ProSectionId): boolean {
+  return resolvePropertyTab(section) === tabId;
+}
+
+function resolveTopLevelDefaultSection(target: ProTopLevelId, currentSection: ProSectionId): ProSectionId {
+  if (target === "dashboard") return "dashboard";
+  if (target === "properties") {
+    return isPropertyCenterSection(currentSection) ? currentSection : "property";
+  }
+  if (target === "bookings") return "bookings";
+  if (target === "calendar") return "inventory-calendar";
+  if (target === "messages") return "messages-reviews";
+  if (target === "revenue") return "revenue";
+  if (target === "reports") return "reports";
+  if (target === "support") return "support";
+  return currentSection === "team-groups" ? "team-groups" : "settings";
+}
+
+function propertyCenterStatusLabel(tabId: PropertyCenterTabId, activeSection: ProSectionId): string {
+  const links = PROPERTY_TAB_SECTION_LINKS[tabId];
+  if (links.length <= 1) return "Focused view";
+  const current = links.find((link) => link.id === activeSection);
+  return current ? current.title : `${links.length} tools`;
+}
+
+function formatPropertySwitcherStatusLabel(value: string | null): string {
+  if (!value) return "Status pending";
+  if (value === "active") return "Famlo Pro active";
+  if (value === "grace") return "Famlo Pro grace";
+  if (value === "expired") return "Famlo Pro expired";
+  if (value === "cancelled") return "Famlo Pro cancelled";
+  return `Famlo Pro ${value}`;
+}
 
 const CHANNEL_CARDS = [
   "Airbnb",
@@ -822,27 +963,27 @@ function buildSectionDescriptor(
 } {
   if (section === "setup-guide") {
     return {
-      eyebrow: "Core setup",
+      eyebrow: "Property Center",
       title: "Setup Guide",
-      copy: "Readiness view for property identity, inventory quality, and future PMS go-live requirements.",
+      copy: "Go-live readiness for this property, including content quality, room setup, channel preparation, and launch safety checks.",
       status: `${setupProgressPercent}% ready`,
     };
   }
 
   if (section === "rooms-units") {
     return {
-      eyebrow: "Inventory",
+      eyebrow: "Property Center",
       title: "Rooms & Units",
-      copy: "Read-only stay-unit inventory sourced from current Famlo data without creating duplicate room records.",
+      copy: "Manage the room inventory structure that powers this property across Famlo and future OTA distribution.",
       status: `${roomsCount} units`,
     };
   }
 
   if (section === "rates-restrictions") {
     return {
-      eyebrow: "Inventory",
+      eyebrow: "Property Center",
       title: "Rates & Restrictions",
-      copy: "Professional pricing shell for future rate plans and restriction controls. No push or sync is active.",
+      copy: "Review pricing controls for this property. This stays connected to current Famlo data without changing sync behavior.",
       status: "Shell only",
     };
   }
@@ -858,63 +999,63 @@ function buildSectionDescriptor(
 
   if (section === "availability-rules") {
     return {
-      eyebrow: "Inventory",
+      eyebrow: "Property Center",
       title: "Availability Rules",
-      copy: "Placeholder for future stay controls, stop-sell logic, and seasonal restriction patterns.",
+      copy: "Stay controls for minimum nights, maximum nights, and future availability logic for this property.",
       status: "Coming soon",
     };
   }
 
   if (section === "check-times") {
     return {
-      eyebrow: "Inventory",
+      eyebrow: "Property Center",
       title: "Check-in / Check-out Time",
-      copy: "Operating-time shell for future distribution mirroring and arrival policy management.",
+      copy: "Arrival and departure timing for this property. Keep these rules aligned before distributing to channels.",
       status: missingSetupCount === 0 ? "Ready to map" : "Read-only",
     };
   }
 
   if (section === "connected-channels") {
     return {
-      eyebrow: "Channel manager",
+      eyebrow: "Property Center",
       title: "Connected Channels",
-      copy: "Provider-neutral channel overview. Channex remains the first planned provider, but nothing is connected yet.",
-      status: "Not connected",
+      copy: "Choose where this property is distributed and review the current channel connection without changing any live sync logic.",
+      status: "Channel overview",
     };
   }
 
   if (section === "room-mapping") {
     return {
-      eyebrow: "Channel manager",
+      eyebrow: "Advanced",
       title: "Room Mapping",
-      copy: "Future workspace for matching Famlo stay units with external provider room types and sellable units.",
+      copy: "Advanced mapping workspace for matching Famlo rooms with external channel room types.",
       status: "Mapping pending",
     };
   }
 
   if (section === "rate-mapping") {
     return {
-      eyebrow: "Channel manager",
+      eyebrow: "Advanced",
       title: "Rate Mapping",
-      copy: "Future workspace for connecting Famlo base pricing to external provider rate plans.",
+      copy: "Advanced mapping workspace for connecting Famlo pricing with external provider rate plans.",
       status: "Mapping pending",
     };
   }
 
   if (section === "sync-logs") {
     return {
-      eyebrow: "Channel manager",
+      eyebrow: "Advanced",
       title: "Sync Logs",
-      copy: "Operational history for future ARI jobs, webhook runs, and booking acknowledgements.",
+      copy: "Detailed sync history for operators who need to inspect ARI runs, booking feed checks, and acknowledgement events.",
       status: syncLogCount > 0 ? "History available" : "No sync activity",
     };
   }
 
   if (section === "conflicts") {
     return {
-      eyebrow: "Channel manager",
+      eyebrow: "Property Center",
       title: "Conflicts",
-      copy: "Future review queue for inventory mismatches, booking import exceptions, and mapping gaps.",
+      copy: "Needs-attention queue for this property, including import issues, missing mappings, and channel health blockers.",
       status: conflictCount > 0 ? `${conflictCount} issue${conflictCount === 1 ? "" : "s"}` : "No conflicts",
     };
   }
@@ -957,18 +1098,18 @@ function buildSectionDescriptor(
 
   if (section === "property") {
     return {
-      eyebrow: "Admin",
+      eyebrow: "Property Center",
       title: "Property",
-      copy: "Read-only property identity shell backed by existing Famlo source-of-truth records.",
+      copy: "Manage the core identity of this property using the existing Famlo source-of-truth records.",
       status: "Read-only",
     };
   }
 
   if (section === "ota-content") {
     return {
-      eyebrow: "Admin",
+      eyebrow: "Property Center",
       title: "OTA Content",
-      copy: "Basic Famlo listing can stay simple. OTA channels need extra structured fields before sync can begin.",
+      copy: "Prepare the property story, structured content, and gallery details needed before distributing to OTA channels.",
       status: "Readiness layer",
     };
   }
@@ -1010,6 +1151,7 @@ function buildSectionDescriptor(
 
 export default function FamloProDashboardShell({
   familyId,
+  propertyOptions,
   propertyName,
   hostCode,
   locationLabel,
@@ -1036,15 +1178,10 @@ export default function FamloProDashboardShell({
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
   const [timeAnchor] = useState(() => Date.now());
-
-  const groupedNavItems = useMemo(
-    () =>
-      GROUP_ORDER.map((group) => ({
-        group,
-        items: NAV_ITEMS.filter((item) => item.group === group),
-      })),
-    []
-  );
+  const activeTopLevel = resolveTopLevelSection(activeSection);
+  const activePropertyTab = resolvePropertyTab(activeSection);
+  const activePropertyTabLinks = PROPERTY_TAB_SECTION_LINKS[activePropertyTab];
+  const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
 
   const completedSetupCount = setupItems.filter((item) => item.complete).length;
   const missingSetupItems = setupItems.filter((item) => !item.complete);
@@ -1123,6 +1260,7 @@ export default function FamloProDashboardShell({
     readyRooms: rooms.filter((room) => room.photosCount > 0).length,
     missingRooms: rooms.filter((room) => room.photosCount <= 0).length,
   };
+  const activeRoomsCount = rooms.filter((room) => room.isActive).length;
   const roomMappingRows = (rooms.length > 0
     ? rooms
     : [{
@@ -1815,12 +1953,28 @@ export default function FamloProDashboardShell({
             label: "Ready for staging test",
             toneClass: styles.readinessPillOk,
             explanation: "This property looks healthy for staging proof, but production launch controls are not fully open yet.",
-          }
-        : {
-            label: "Not ready",
-            toneClass: styles.readinessPillReview,
-            explanation: `Core blockers are cleared, but ${needsActionChecklistCount} launch action${needsActionChecklistCount === 1 ? "" : "s"} and ${warningConflictCount} warning-level conflict${warningConflictCount === 1 ? "" : "s"} still need review before a safe pilot decision.`,
-          };
+        }
+      : {
+          label: "Not ready",
+          toneClass: styles.readinessPillReview,
+          explanation: `Core blockers are cleared, but ${needsActionChecklistCount} launch action${needsActionChecklistCount === 1 ? "" : "s"} and ${warningConflictCount} warning-level conflict${warningConflictCount === 1 ? "" : "s"} still need review before a safe pilot decision.`,
+        };
+  const selectedPropertyLocation = [
+    currentPropertyOption?.locality ?? null,
+    currentPropertyOption?.city ?? null,
+    currentPropertyOption?.state ?? null,
+  ]
+    .filter(Boolean)
+    .join(", ") || locationLabel;
+  const selectedPropertyChannelStatus = channelFeedHealth
+    ? channelFeedHealth.channelAttached
+      ? channelFeedHealth.channelActive
+        ? "Channel active"
+        : "Channel inactive"
+      : "Channel disconnected"
+    : primaryProperty?.syncStatus === "connected"
+      ? "Channel active"
+      : "Channel not connected";
   const sectionDescriptor = buildSectionDescriptor(
     activeSection,
     setupProgressPercent,
@@ -1835,38 +1989,42 @@ export default function FamloProDashboardShell({
       <aside className={styles.sidebar}>
         <div className={styles.brandBlock}>
           <div className={styles.brandEyebrow}>Famlo Pro</div>
-          <div className={styles.brandTitle}>Professional Dashboard</div>
+          <div className={styles.brandTitle}>Property OS</div>
           <p className={styles.brandCopy}>
-            Advanced PMS + Channel Manager shell for serious homestay operations. Provider sync remains disconnected
-            until future integrations go live.
+            Multi-property workspace for rooms, pricing, content, channels, and sync health. Existing provider logic
+            stays exactly as it is underneath.
           </p>
         </div>
 
-        {groupedNavItems.map((group) => (
-          <div key={group.group} className={styles.navGroup}>
-            <div className={styles.navGroupLabel}>{group.group}</div>
-            {group.items.map((item) => {
-              const Icon = item.icon;
-              const active = activeSection === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`${styles.navButton} ${active ? styles.navButtonActive : ""} ${item.child ? styles.navChild : ""}`}
-                  onClick={() => setActiveSection(item.id)}
-                >
-                  <Icon className={styles.navIcon} />
-                  <span className={styles.navText}>
-                    <span className={styles.navTitle}>{item.title}</span>
-                    <span className={styles.navHint}>{item.hint}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        ))}
+        <div className={styles.navGroup}>
+          <div className={styles.navGroupLabel}>Workspace</div>
+          {TOP_LEVEL_NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const active = activeTopLevel === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`${styles.navButton} ${active ? styles.navButtonActive : ""}`}
+                onClick={() => setActiveSection(resolveTopLevelDefaultSection(item.id, activeSection))}
+              >
+                <Icon className={styles.navIcon} />
+                <span className={styles.navText}>
+                  <span className={styles.navTitle}>{item.title}</span>
+                  <span className={styles.navHint}>{item.hint}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
         <div className={styles.sidebarFooter}>
+          <div className={styles.brandEyebrow}>Current property</div>
+          <div style={{ fontSize: 16, fontWeight: 900, color: "white" }}>{propertyName}</div>
+          <p className={styles.brandCopy}>
+            This Pro shell still scopes all actions to the current `familyId`, so existing Booking.com and Channex
+            workflows stay safe.
+          </p>
           <div className={styles.brandEyebrow}>Go-live</div>
           <div style={{ fontSize: 20, fontWeight: 900, color: "white" }}>
             {setupProgressPercent}%
@@ -1882,7 +2040,7 @@ export default function FamloProDashboardShell({
           <div>
             <h1 className={styles.headerTitle}>{propertyName}</h1>
             <p className={styles.headerCopy}>
-              {locationLabel} · Famlo Pro professional dashboard shell
+              {locationLabel} · Famlo Pro property workspace
             </p>
           </div>
 
@@ -1902,19 +2060,106 @@ export default function FamloProDashboardShell({
         </header>
 
         <div className={styles.content}>
+          {activeTopLevel === "properties" && (
+            <section className={styles.propertyCenterShell}>
+              <div className={styles.propertyCenterHeader}>
+                <div>
+                  <div className={styles.sectionEyebrow}>Selected property</div>
+                  <h2 className={styles.propertyCenterTitle}>{currentPropertyOption?.name ?? propertyName}</h2>
+                  <p className={styles.propertyCenterCopy}>
+                    Manage this property's rooms, content, pricing, channels, and sync health. Advanced technical screens
+                    stay available under Advanced without changing any current sync logic.
+                  </p>
+                  <div className={styles.propertyHeaderMeta}>
+                    <span className={styles.propertyHeaderMetaItem}>{selectedPropertyLocation}</span>
+                    <span className={styles.propertyHeaderMetaItem}>Family scope: {familyId}</span>
+                  </div>
+                </div>
+                <div className={styles.propertyCenterStatus}>
+                  <span className={styles.sectionStatus}>{selectedPropertyChannelStatus}</span>
+                  <span className={styles.sectionStatus}>{activeRoomsCount} active rooms</span>
+                  <span className={styles.sectionStatus}>{goLiveSummary.label}</span>
+                  <span className={styles.sectionStatus}>{formatPropertySwitcherStatusLabel(currentPropertyOption?.famloPlusStatus ?? famloPlusStatus)}</span>
+                </div>
+              </div>
+
+              <PropertySwitcherControl
+                propertyOptions={propertyOptions}
+                currentFamilyId={familyId}
+                activeSection={activeSection}
+              />
+
+              <div className={styles.propertyTabGrid}>
+                {PROPERTY_TABS.map((tab) => {
+                  const Icon = tab.icon;
+                  const active = isPropertyTabActive(tab.id, activeSection);
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      className={`${styles.propertyTabButton} ${active ? styles.propertyTabButtonActive : ""}`}
+                      onClick={() => setActiveSection(active ? activeSection : tab.defaultSection)}
+                    >
+                      <div className={styles.propertyTabIconWrap}>
+                        <Icon className={styles.propertyTabIcon} />
+                      </div>
+                      <div className={styles.propertyTabText}>
+                        <span className={styles.propertyTabTitle}>{tab.title}</span>
+                        <span className={styles.propertyTabHint}>{tab.hint}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className={styles.propertySubSectionBar}>
+                <div>
+                  <div className={styles.propertySubSectionTitle}>
+                    {PROPERTY_TABS.find((tab) => tab.id === activePropertyTab)?.title ?? "Overview"}
+                  </div>
+                  <div className={styles.propertySubSectionCopy}>
+                    {PROPERTY_TABS.find((tab) => tab.id === activePropertyTab)?.hint ?? "Property workspace"}
+                  </div>
+                </div>
+                <span className={styles.sectionStatus}>{propertyCenterStatusLabel(activePropertyTab, activeSection)}</span>
+              </div>
+
+              <div className={styles.propertyTabLinks}>
+                {activePropertyTabLinks.map((item) => {
+                  const Icon = item.icon;
+                  const active = activeSection === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`${styles.propertyTabLinkButton} ${active ? styles.propertyTabLinkButtonActive : ""}`}
+                      onClick={() => setActiveSection(item.id)}
+                    >
+                      <Icon className={styles.propertyTabLinkIcon} />
+                      <span className={styles.propertyTabLinkText}>
+                        <span className={styles.propertyTabLinkTitle}>{item.title}</span>
+                        <span className={styles.propertyTabLinkHint}>{item.hint}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {activeSection === "dashboard" && (
             <>
               <section className={styles.heroCard}>
                 <div className={styles.heroGrid}>
                   <div>
-                    <div className={styles.eyebrow}>Provider-neutral foundation</div>
+                    <div className={styles.eyebrow}>Famlo Pro</div>
                     <h2 className={styles.heroTitle}>
-                      PMS + Channel Manager shell for operational teams
+                      Multi-property control for serious homestay operations
                     </h2>
                     <p className={styles.heroText}>
-                      This Pro workspace is designed around Famlo as the source of truth for property identity, rooms,
-                      bookings, and availability. Future providers like Channex can plug in as distribution mirrors without
-                      replacing Famlo data ownership.
+                      This Pro workspace keeps Famlo as the source of truth for property identity, rooms, bookings,
+                      and availability. Use Property Center for host-facing management while the existing channel engine
+                      continues to run safely underneath.
                     </p>
                     <div className={styles.heroMeta}>
                       <div className={styles.heroMetaItem}>
@@ -3615,6 +3860,75 @@ export default function FamloProDashboardShell({
         </div>
       </main>
     </div>
+  );
+}
+
+function PropertySwitcherControl({
+  propertyOptions,
+  currentFamilyId,
+  activeSection,
+}: Readonly<{
+  propertyOptions: PropertySwitcherOption[];
+  currentFamilyId: string;
+  activeSection: ProSectionId;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  const switchProperty = (nextFamilyId: string) => {
+    if (!nextFamilyId || nextFamilyId === currentFamilyId) return;
+    startTransition(() => {
+      router.push(
+        `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(nextFamilyId)}&section=${encodeURIComponent(activeSection)}`
+      );
+    });
+  };
+
+  const currentOption = propertyOptions.find((option) => option.familyId === currentFamilyId) ?? null;
+
+  return (
+    <section className={styles.propertySwitcherCard}>
+      <div className={styles.propertySwitcherInfo}>
+        <div className={styles.propertySwitcherLabel}>Switch property</div>
+        <div className={styles.propertySwitcherCopy}>
+          {propertyOptions.length > 1
+            ? "Move between your properties without changing any sync, mapping, or booking logic."
+            : "This Pro workspace is currently focused on a single property. More properties will appear here when available."}
+        </div>
+      </div>
+
+      <div className={styles.propertySwitcherControls}>
+        <label className={styles.propertySwitcherField}>
+          <span className={styles.propertySwitcherFieldLabel}>Selected property</span>
+          <select
+            className={styles.propertySwitcherSelect}
+            value={currentFamilyId}
+            onChange={(event) => switchProperty(event.target.value)}
+            disabled={propertyOptions.length <= 1 || isPending}
+          >
+            {propertyOptions.map((option) => {
+              const location = [option.locality, option.city, option.state].filter(Boolean).join(", ");
+              return (
+                <option key={option.familyId} value={option.familyId}>
+                  {option.name}
+                  {location ? ` · ${location}` : ""}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+
+        <div className={styles.propertySwitcherStatusRow}>
+          <span className={styles.propertySwitcherStatusPill}>
+            {currentOption ? formatPropertySwitcherStatusLabel(currentOption.famloPlusStatus) : "Famlo Pro"}
+          </span>
+          <span className={styles.propertySwitcherStatusPill}>
+            {currentOption?.isActive === false ? "Inactive listing" : "Active listing"}
+          </span>
+          {isPending ? <span className={styles.propertySwitcherStatusPill}>Switching…</span> : null}
+        </div>
+      </div>
+    </section>
   );
 }
 

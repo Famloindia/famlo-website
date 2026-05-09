@@ -8,7 +8,7 @@ import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { loadCanonicalCalendar } from "@/lib/calendar";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
-import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
+import { isFamloProDashboardEnabled, loadHostProAccess, loadHostProAccessMap } from "@/lib/host-pro-access";
 import { loadHostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
 import { loadHostProSettings } from "@/lib/host-pro-settings";
 import { buildHostProSetupReadiness } from "@/lib/host-pro-setup-readiness";
@@ -270,6 +270,16 @@ type CalendarVerificationSummary = {
   checkoutDateBlocked: boolean;
 };
 
+type PropertySwitcherOption = {
+  familyId: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  locality: string | null;
+  famloPlusStatus: string | null;
+  isActive: boolean;
+};
+
 function formatCalendarDayLabel(date: string): string {
   const value = new Date(`${date}T12:00:00+05:30`);
   return new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(value);
@@ -371,6 +381,99 @@ export default async function FamloProDashboardPage({
       .eq("legacy_family_id", familyId)
       .maybeSingle(),
   ]);
+
+  const hostSession = await resolveAuthorizedHostSession(supabase);
+  let propertyOptions: PropertySwitcherOption[] = [];
+
+  if (hostSession?.hostUserId) {
+    const [{ data: familyRows }, { data: hostRows }] = await Promise.all([
+      supabase
+        .from("families")
+        .select("id,name,property_name,city,state,admin_notes,is_active,user_id")
+        .eq("user_id", hostSession.hostUserId),
+      supabase
+        .from("hosts")
+        .select("legacy_family_id,display_name,user_id,status")
+        .eq("user_id", hostSession.hostUserId),
+    ]);
+
+    const currentFamilyRecord = family
+      ? [{
+          id: asString(family.id) ?? familyId,
+          name: asString(family.name),
+          property_name: asString(family.property_name),
+          city: asString(family.city),
+          state: asString(family.state),
+          admin_notes: asString(family.admin_notes),
+          is_active: family.is_active !== false,
+          user_id: hostSession.hostUserId,
+        }]
+      : [];
+
+    const familyRowsCombined = [...((familyRows ?? []) as Array<Record<string, unknown>>), ...currentFamilyRecord];
+    const familyById = new Map<string, Record<string, unknown>>();
+    for (const row of familyRowsCombined) {
+      const id = asString(row.id);
+      if (!id) continue;
+      if (!familyById.has(id)) {
+        familyById.set(id, row);
+      }
+    }
+
+    const hostByFamilyId = new Map(
+      ((hostRows ?? []) as Array<Record<string, unknown>>)
+        .map((row) => [asString(row.legacy_family_id), row] as const)
+        .filter((entry): entry is [string, Record<string, unknown>] => Boolean(entry[0]))
+    );
+
+    const familyIds = Array.from(familyById.keys());
+    const accessMap = await loadHostProAccessMap(supabase, familyIds);
+
+    propertyOptions = familyIds
+      .map((id) => {
+        const row = familyById.get(id) ?? {};
+        const hostRow = hostByFamilyId.get(id) ?? null;
+        const meta = parseHostListingMeta(asString(row.admin_notes));
+        return {
+          familyId: id,
+          name:
+            asString(row.property_name) ??
+            asString(row.name) ??
+            asString(hostRow?.display_name) ??
+            "Famlo Property",
+          city: asString(row.city),
+          state: asString(row.state),
+          locality: asString(meta.neighbourhood) ?? asString(meta.neighborhoodDesc),
+          famloPlusStatus: accessMap[id]?.status ?? null,
+          isActive: row.is_active !== false,
+        } satisfies PropertySwitcherOption;
+      })
+      .sort((left, right) => {
+        if (left.familyId === familyId) return -1;
+        if (right.familyId === familyId) return 1;
+        return left.name.localeCompare(right.name);
+      });
+  }
+
+  if (!propertyOptions.some((option) => option.familyId === familyId)) {
+    const currentMeta = parseHostListingMeta(asString(family?.admin_notes));
+    propertyOptions = [
+      {
+        familyId,
+        name:
+          asString(family?.property_name) ??
+          asString(family?.name) ??
+          asString(host?.display_name) ??
+          "Famlo Property",
+        city: asString(family?.city),
+        state: asString(family?.state),
+        locality: asString(currentMeta.neighbourhood) ?? asString(currentMeta.neighborhoodDesc),
+        famloPlusStatus: access.status,
+        isActive: family?.is_active !== false,
+      },
+      ...propertyOptions,
+    ];
+  }
 
   const propertyName =
     asString(family?.property_name) ??
@@ -968,6 +1071,7 @@ export default async function FamloProDashboardPage({
       basicDashboardUrl={basicDashboardUrl}
       basicRoomUrl={basicRoomUrl}
       familyId={familyId}
+      propertyOptions={propertyOptions}
       initialSettings={proSettings}
       channelFoundation={channelFoundation}
       channexConfig={channexConfig}
