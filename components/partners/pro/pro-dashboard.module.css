@@ -1285,6 +1285,11 @@
   flex-wrap: wrap;
 }
 
+.filterRow > button {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
 .filterChip {
   border-radius: 999px;
   padding: 8px 12px;
@@ -1723,5 +1728,18 @@
 
   .sectionTitle {
     font-size: 24px;
+  }
+
+  .filterRow > button {
+    flex-basis: 100%;
+  }
+
+  .calendarDrawerOverlay {
+    padding: 10px;
+  }
+
+  .calendarDrawer {
+    padding: 18px;
+    border-radius: 18px;
   }
 }

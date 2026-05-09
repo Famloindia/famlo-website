@@ -4284,17 +4284,29 @@ export default function FamloProDashboardShell({
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Famlo direct</div>
                     <div className={styles.metricValue}>{famloDirectBookingsCount}</div>
-                    <div className={styles.metricHint}>Existing direct reservations and pending host approvals.</div>
+                    <div className={styles.metricHint}>
+                      {famloDirectBookingsCount > 0
+                        ? "Existing direct reservations and pending host approvals."
+                        : "No direct Famlo reservations are linked to this property yet."}
+                    </div>
                   </article>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>OTA bookings</div>
                     <div className={styles.metricValue}>{otaBookingsCount}</div>
-                    <div className={styles.metricHint}>Booking.com and other OTA reservations already linked to this property.</div>
+                    <div className={styles.metricHint}>
+                      {otaBookingsCount > 0
+                        ? "Booking.com and other OTA reservations already linked to this property."
+                        : "No OTA reservations have been imported for this property yet."}
+                    </div>
                   </article>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Pending approval</div>
                     <div className={styles.metricValue}>{pendingApprovalBookingsCount}</div>
-                    <div className={styles.metricHint}>Direct booking requests that still need a host decision.</div>
+                    <div className={styles.metricHint}>
+                      {pendingApprovalBookingsCount > 0
+                        ? "Direct booking requests that still need a host decision."
+                        : "There are no pending approval requests right now."}
+                    </div>
                   </article>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Cancelled</div>
@@ -4304,7 +4316,11 @@ export default function FamloProDashboardShell({
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Action needed</div>
                     <div className={styles.metricValue}>{actionNeededBookingsCount}</div>
-                    <div className={styles.metricHint}>Bookings that need approval, OTA review, payment attention, or sync follow-up.</div>
+                    <div className={styles.metricHint}>
+                      {actionNeededBookingsCount > 0
+                        ? "Bookings that need approval, OTA review, payment attention, or sync follow-up."
+                        : "No bookings currently need host or operational follow-up."}
+                    </div>
                   </article>
                 </div>
 
@@ -4312,7 +4328,7 @@ export default function FamloProDashboardShell({
                   <article className={styles.listCard}>
                     <div className={styles.listTitle}>Unified bookings workspace</div>
                     <div className={styles.feedCopy}>
-                      Use this table to review guest, room, date, payment, and source details in one place. Technical OTA import and acknowledgement details remain available below.
+                      Manage Famlo and OTA reservations from one place. Advanced OTA diagnostics are shown below for operational review.
                     </div>
                     <div className={styles.roomReadinessRow}>
                       <span className={styles.readinessPill}>Confirmed: {confirmedBookingsCount}</span>
@@ -4444,7 +4460,19 @@ export default function FamloProDashboardShell({
                       <div className={styles.emptyState}>
                         <div className={styles.emptyTitle}>No bookings match this filter</div>
                         <div className={styles.emptyCopy}>
-                          Try a different filter to review direct bookings, OTA reservations, pending approvals, or bookings that need attention.
+                          {bookingFilter === "Famlo Direct"
+                            ? "This property does not have any direct Famlo reservations in the current list."
+                            : bookingFilter === "OTA"
+                              ? "No OTA reservations are available in the current property-scoped list."
+                              : bookingFilter === "Pending approval"
+                                ? "There are no direct booking requests waiting for host approval right now."
+                                : bookingFilter === "Cancelled"
+                                  ? "No cancelled reservations are surfaced for this property right now."
+                                  : bookingFilter === "Modified / Review needed"
+                                    ? "There are no OTA modifications or review-needed bookings in the current list."
+                                    : bookingFilter === "Action needed"
+                                      ? "No bookings currently need approval, OTA review, payment attention, or sync follow-up."
+                                      : "Try a different filter to review direct bookings, OTA reservations, pending approvals, or bookings that need attention."}
                         </div>
                       </div>
                     ) : null}
@@ -4492,6 +4520,11 @@ export default function FamloProDashboardShell({
                         <div className={styles.placeholderRow}>
                           <div className={styles.placeholderTitle}>Source</div>
                           <div className={styles.placeholderValue}>{selectedBooking.sourceLabel}</div>
+                          <div className={styles.placeholderCopy}>
+                            {selectedBooking.isOta
+                              ? "OTA operational details stay secondary to the guest and stay summary."
+                              : "Direct booking host actions continue to use the current Famlo flow."}
+                          </div>
                         </div>
                         <div className={styles.placeholderRow}>
                           <div className={styles.placeholderTitle}>Room</div>
@@ -4557,6 +4590,13 @@ export default function FamloProDashboardShell({
                             </div>
                             <div className={styles.mappingCell}>
                               <div className={styles.mappingTitle}>{labelizeToken(selectedBooking.ackStatus, "not_acknowledged")}</div>
+                            </div>
+
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>Operational review</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{bookingHealthLabel(selectedBooking)}</div>
                             </div>
                           </>
                         ) : (
