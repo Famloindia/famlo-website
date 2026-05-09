@@ -306,6 +306,7 @@ type PropertySwitcherOption = {
   name: string;
   city: string | null;
   state: string | null;
+  country: string | null;
   locality: string | null;
   famloPlusStatus: string | null;
   isActive: boolean;
@@ -2474,6 +2475,7 @@ export default function FamloProDashboardShell({
     currentPropertyOption?.locality ?? null,
     currentPropertyOption?.city ?? null,
     currentPropertyOption?.state ?? null,
+    currentPropertyOption?.country ?? null,
   ]
     .filter(Boolean)
     .join(", ") || locationLabel || "Location details pending";
@@ -2488,7 +2490,7 @@ export default function FamloProDashboardShell({
       : "Channel health unavailable";
   const propertyCardRows = propertyOptions.map((option) => {
     const isSelected = option.familyId === familyId;
-    const optionLocation = [option.locality, option.city, option.state].filter(Boolean).join(", ") || "Location details pending";
+    const optionLocation = [option.locality, option.city, option.state, option.country].filter(Boolean).join(", ") || "Location details pending";
     return {
       option,
       isSelected,
@@ -2506,6 +2508,16 @@ export default function FamloProDashboardShell({
   const roomCards = rooms.map((room) => {
     const roomMapping = roomMappingsByRoomId.get(room.id) ?? null;
     const roomRatePlan = ratePlansByRoomId.get(room.id) ?? null;
+    const hasRoomMapping = Boolean(roomMapping?.externalRoomTypeId);
+    const hasRateMapping = Boolean(roomRatePlan?.externalRatePlanId);
+    const providerMappingLabel =
+      hasRoomMapping && hasRateMapping
+        ? "Mapped"
+        : hasRoomMapping || hasRateMapping
+          ? "Needs review"
+          : roomMapping || roomRatePlan
+            ? "Check Channels"
+            : "Check Channels";
     return {
       room,
       selected: room.id === selectedRoom?.id,
@@ -2522,7 +2534,8 @@ export default function FamloProDashboardShell({
           ? "Missing photos"
           : room.priceFullday <= 0
             ? "Missing price"
-        : null,
+            : null,
+      providerMappingLabel,
     };
   });
   const selectedRoomCard = roomCards.find((item) => item.room.id === selectedRoom?.id) ?? null;
@@ -3695,6 +3708,14 @@ export default function FamloProDashboardShell({
                       {rooms.map((room) => {
                         const readiness = roomReadinessChecklist(room);
                         const completedReadiness = readiness.filter((item) => item.complete).length;
+                        const roomMapping = roomMappingsByRoomId.get(room.id) ?? null;
+                        const roomRatePlan = ratePlansByRoomId.get(room.id) ?? null;
+                        const providerMappingLabel =
+                          roomMapping?.externalRoomTypeId && roomRatePlan?.externalRatePlanId
+                            ? "Mapped"
+                            : roomMapping?.externalRoomTypeId || roomRatePlan?.externalRatePlanId
+                              ? "Needs review"
+                              : "Check Channels";
                         return (
                           <article key={room.id} className={styles.roomCard}>
                             <div className={styles.roomHeader}>
@@ -3735,7 +3756,7 @@ export default function FamloProDashboardShell({
                               </div>
                               <div className={styles.roomMetaItem}>
                                 <span className={styles.roomMetaLabel}>Provider mapping</span>
-                                <strong>Not mapped</strong>
+                                <strong>{providerMappingLabel}</strong>
                               </div>
                             </div>
                             <div className={styles.roomReadinessRow}>
@@ -5430,16 +5451,86 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "messages-reviews" && (
-            <PlaceholderSection
-              title="Messages & Reviews"
-              copy="Placeholder inbox for future OTA guest threads, review ingestion, and response workflows."
-              items={[
-                "Unified guest inbox placeholder",
-                "Review feed placeholder",
-                "Unanswered review queue placeholder",
-                "Internal notes placeholder",
-              ]}
-            />
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Messages</h3>
+                  <p className={styles.cardCopy}>
+                    Messages are being upgraded in Famlo Pro. Use the existing working Famlo inbox for guest conversations while
+                    OTA threads and review workflows stay in a later phase.
+                  </p>
+                </div>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Current safest path</div>
+                    <div className={styles.metricValue}>Open working inbox</div>
+                    <div className={styles.metricHint}>
+                      Guest messaging already works through the current Famlo host inbox and existing conversation APIs.
+                    </div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>What stays for later</div>
+                    <div className={styles.metricValue}>OTA threads later</div>
+                    <div className={styles.metricHint}>
+                      OTA guest threads, review ingestion, and response queues are not being introduced in this safe pilot phase.
+                    </div>
+                  </article>
+                </div>
+
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Open Messages</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Use the existing Famlo host inbox</div>
+                        <div className={styles.feedCopy}>
+                          Open the current working messages experience for this property. This keeps conversation access, auth
+                          scoping, and live message behavior on the already-safe path.
+                        </div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Urgent guest communication</div>
+                        <div className={styles.feedCopy}>
+                          If a host needs something immediately, use booking details and the current Famlo inbox instead of waiting
+                          for a Pro-only inbox.
+                        </div>
+                      </div>
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <Link
+                        href={`/partnerslogin/home/dashboard?tab=messages&family=${encodeURIComponent(familyId)}`}
+                        className={styles.primaryActionLink}
+                      >
+                        Open Messages
+                      </Link>
+                      <Link href={basicDashboardUrl} className={styles.secondaryActionLink}>
+                        Open Basic Dashboard
+                      </Link>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Why this is safer</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>No new messaging backend</div>
+                        <div className={styles.feedCopy}>
+                          Pro now avoids pretending a separate inbox exists when the live, working conversation UI is still the Basic host inbox.
+                        </div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>No broken host trust</div>
+                        <div className={styles.feedCopy}>
+                          Hosts see one clear path for guest communication instead of a placeholder that looks like a broken feature.
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </section>
           )}
 
           {activeSection === "revenue" && (
@@ -6064,7 +6155,7 @@ function PropertySwitcherControl({
             disabled={propertyOptions.length <= 1 || isPending}
           >
             {propertyOptions.map((option) => {
-              const location = [option.locality, option.city, option.state].filter(Boolean).join(", ");
+              const location = [option.locality, option.city, option.state, option.country].filter(Boolean).join(", ");
               return (
                 <option key={option.familyId} value={option.familyId}>
                   {option.name || "Selected property"}
