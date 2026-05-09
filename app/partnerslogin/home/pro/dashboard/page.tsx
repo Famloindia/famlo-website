@@ -372,7 +372,7 @@ export default async function FamloProDashboardPage({
   const [{ data: family }, { data: host }] = await Promise.all([
     supabase
       .from("families")
-      .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting")
+      .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng")
       .eq("id", familyId)
       .maybeSingle(),
     supabase
@@ -480,10 +480,11 @@ export default async function FamloProDashboardPage({
     asString(family?.name) ??
     asString(host?.display_name) ??
     "Famlo Property";
-  const locationLabel =
-    [asString(family?.city), asString(family?.state)].filter(Boolean).join(", ") || "Location pending";
   const hostCode = asString(family?.host_id);
   const meta = parseHostListingMeta(asString(family?.admin_notes));
+  const propertyLocalityLabel = asString(meta.neighbourhood) ?? asString(meta.neighborhoodDesc);
+  const locationLabel =
+    [propertyLocalityLabel, asString(family?.city), asString(family?.state)].filter(Boolean).join(", ") || "Location pending";
   const storedProSettings = await loadHostProSettings(supabase, familyId);
   const channelFoundation = await loadHostProChannelFoundation(supabase, familyId);
   const channexConfig = getChannexConfigSummary();
@@ -1053,6 +1054,9 @@ export default async function FamloProDashboardPage({
   return (
     <FamloProDashboardShell
       propertyName={propertyName}
+      propertyLocalityLabel={propertyLocalityLabel}
+      propertyHomeLat={typeof family?.lat === "number" ? family.lat : null}
+      propertyHomeLng={typeof family?.lng === "number" ? family.lng : null}
       hostCode={hostCode}
       locationLabel={locationLabel}
       famloPlusStatus={access.status}

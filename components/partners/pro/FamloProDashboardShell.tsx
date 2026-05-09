@@ -31,6 +31,7 @@ import {
   X,
 } from "lucide-react";
 
+import HostRoomsManager from "@/components/partners/rooms/HostRoomsManager";
 import {
   PRO_PROPERTY_MODEL_OPTIONS,
   PRO_PROPERTY_TYPE_OPTIONS,
@@ -295,6 +296,9 @@ interface FamloProDashboardShellProps {
   familyId: string;
   propertyOptions: PropertySwitcherOption[];
   propertyName: string;
+  propertyLocalityLabel: string | null;
+  propertyHomeLat?: number | null;
+  propertyHomeLng?: number | null;
   hostCode: string | null;
   locationLabel: string;
   famloPlusStatus: string;
@@ -1153,6 +1157,9 @@ export default function FamloProDashboardShell({
   familyId,
   propertyOptions,
   propertyName,
+  propertyLocalityLabel,
+  propertyHomeLat,
+  propertyHomeLng,
   hostCode,
   locationLabel,
   famloPlusStatus,
@@ -2498,19 +2505,32 @@ export default function FamloProDashboardShell({
             <section className={styles.card}>
               <div className={styles.cardHeader}>
                 <div>
-                  <h3 className={styles.cardTitle}>Rooms & Units</h3>
+                  <h3 className={styles.cardTitle}>Rooms</h3>
                   <p className={styles.cardCopy}>
-                    Read-only inventory preview from existing `stay_units_v2` data. No room editing is enabled in this phase.
+                    Manage rooms for this selected property. Changes here update the Famlo property inventory.
                   </p>
                 </div>
                 <span className={styles.badge}>{rooms.length} units</span>
               </div>
               <div className={styles.cardBody}>
+                <HostRoomsManager
+                  familyId={familyId}
+                  homeLat={propertyHomeLat ?? undefined}
+                  homeLng={propertyHomeLng ?? undefined}
+                  title="Rooms"
+                  description="Manage rooms for this selected property."
+                  propertyLabel={propertyLocalityLabel ?? locationLabel}
+                  showChannelManager={false}
+                  viewRoomPage
+                  emptyTitle="No rooms yet"
+                  emptyCopy="Create the first room for this property to start building your Famlo inventory."
+                />
+
                 {rooms.length > 0 ? (
                   <>
                     <div className={styles.inlineActionRow}>
                       <Link href={basicRoomUrl} className={styles.secondaryActionLink}>
-                        Manage room in Basic Dashboard
+                        Open the same room tools in Basic Dashboard
                       </Link>
                     </div>
                     <div className={styles.roomGrid}>
