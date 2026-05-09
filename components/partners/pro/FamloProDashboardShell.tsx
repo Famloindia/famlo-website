@@ -428,26 +428,26 @@ const PROPERTY_TAB_SECTION_LINKS: Record<PropertyCenterTabId, PropertyTabItem[]>
     { id: "setup-guide", title: "Setup guide", hint: "Go-live readiness checklist", icon: ClipboardList },
   ],
   rooms: [
-    { id: "rooms-units", title: "Rooms & Units", hint: "Current room inventory", icon: Hotel },
+    { id: "rooms-units", title: "Rooms", hint: "Current room inventory", icon: Hotel },
   ],
   content: [
-    { id: "ota-content", title: "Content & Photos", hint: "Listing readiness for channels", icon: ClipboardList },
+    { id: "ota-content", title: "Content & Photos", hint: "Story, gallery, and channel-ready content", icon: ClipboardList },
   ],
   pricing: [
-    { id: "rates-restrictions", title: "Rates & Restrictions", hint: "Base pricing shell", icon: BadgeIndianRupee },
-    { id: "availability-rules", title: "Availability Rules", hint: "Stay controls", icon: Flag },
-    { id: "check-times", title: "Check-in / Check-out Time", hint: "Arrival windows", icon: Clock3 },
+    { id: "rates-restrictions", title: "Pricing", hint: "Base pricing shell", icon: BadgeIndianRupee },
+    { id: "availability-rules", title: "Stay rules", hint: "Minimum and maximum stay controls", icon: Flag },
+    { id: "check-times", title: "Check-in / Check-out", hint: "Arrival and departure windows", icon: Clock3 },
   ],
   channels: [
-    { id: "connected-channels", title: "Connected Channels", hint: "Channel status and provider links", icon: Link2 },
+    { id: "connected-channels", title: "Channels", hint: "Channel status and provider links", icon: Link2 },
   ],
   "sync-health": [
-    { id: "conflicts", title: "Conflicts", hint: "Needs-attention queue", icon: ShieldAlert },
+    { id: "conflicts", title: "Sync Health", hint: "Needs-attention queue", icon: ShieldAlert },
   ],
   advanced: [
-    { id: "room-mapping", title: "Room Mapping", hint: "Map Famlo rooms to provider rooms", icon: Layers3 },
-    { id: "rate-mapping", title: "Rate Mapping", hint: "Map Famlo pricing to provider plans", icon: ArrowRightLeft },
-    { id: "sync-logs", title: "Sync Logs", hint: "Operational audit history", icon: RefreshCcw },
+    { id: "room-mapping", title: "Advanced room mapping", hint: "Map Famlo rooms to provider rooms", icon: Layers3 },
+    { id: "rate-mapping", title: "Advanced rate mapping", hint: "Map Famlo pricing to provider plans", icon: ArrowRightLeft },
+    { id: "sync-logs", title: "Advanced sync logs", hint: "Operational audit history", icon: RefreshCcw },
   ],
 };
 
@@ -485,7 +485,7 @@ function propertyCenterStatusLabel(tabId: PropertyCenterTabId, activeSection: Pr
   const links = PROPERTY_TAB_SECTION_LINKS[tabId];
   if (links.length <= 1) return "Focused view";
   const current = links.find((link) => link.id === activeSection);
-  return current ? current.title : `${links.length} tools`;
+  return current ? `Current view: ${current.title}` : `${links.length} tools`;
 }
 
 function formatPropertySwitcherStatusLabel(value: string | null): string {
@@ -973,7 +973,7 @@ function buildSectionDescriptor(
   if (section === "rooms-units") {
     return {
       eyebrow: "Property Center",
-      title: "Rooms & Units",
+      title: "Rooms",
       copy: "Manage the room inventory structure that powers this property across Famlo and future OTA distribution.",
       status: `${roomsCount} units`,
     };
@@ -982,7 +982,7 @@ function buildSectionDescriptor(
   if (section === "rates-restrictions") {
     return {
       eyebrow: "Property Center",
-      title: "Rates & Restrictions",
+      title: "Pricing & Rules",
       copy: "Review pricing controls for this property. This stays connected to current Famlo data without changing sync behavior.",
       status: "Shell only",
     };
@@ -1000,7 +1000,7 @@ function buildSectionDescriptor(
   if (section === "availability-rules") {
     return {
       eyebrow: "Property Center",
-      title: "Availability Rules",
+      title: "Pricing & Rules",
       copy: "Stay controls for minimum nights, maximum nights, and future availability logic for this property.",
       status: "Coming soon",
     };
@@ -1009,7 +1009,7 @@ function buildSectionDescriptor(
   if (section === "check-times") {
     return {
       eyebrow: "Property Center",
-      title: "Check-in / Check-out Time",
+      title: "Pricing & Rules",
       copy: "Arrival and departure timing for this property. Keep these rules aligned before distributing to channels.",
       status: missingSetupCount === 0 ? "Ready to map" : "Read-only",
     };
@@ -1018,7 +1018,7 @@ function buildSectionDescriptor(
   if (section === "connected-channels") {
     return {
       eyebrow: "Property Center",
-      title: "Connected Channels",
+      title: "Channels",
       copy: "Choose where this property is distributed and review the current channel connection without changing any live sync logic.",
       status: "Channel overview",
     };
@@ -1054,7 +1054,7 @@ function buildSectionDescriptor(
   if (section === "conflicts") {
     return {
       eyebrow: "Property Center",
-      title: "Conflicts",
+      title: "Sync Health",
       copy: "Needs-attention queue for this property, including import issues, missing mappings, and channel health blockers.",
       status: conflictCount > 0 ? `${conflictCount} issue${conflictCount === 1 ? "" : "s"}` : "No conflicts",
     };
@@ -1108,7 +1108,7 @@ function buildSectionDescriptor(
   if (section === "ota-content") {
     return {
       eyebrow: "Property Center",
-      title: "OTA Content",
+      title: "Content & Photos",
       copy: "Prepare the property story, structured content, and gallery details needed before distributing to OTA channels.",
       status: "Readiness layer",
     };
@@ -1965,7 +1965,7 @@ export default function FamloProDashboardShell({
     currentPropertyOption?.state ?? null,
   ]
     .filter(Boolean)
-    .join(", ") || locationLabel;
+    .join(", ") || locationLabel || "Location details pending";
   const selectedPropertyChannelStatus = channelFeedHealth
     ? channelFeedHealth.channelAttached
       ? channelFeedHealth.channelActive
@@ -1974,7 +1974,7 @@ export default function FamloProDashboardShell({
       : "Channel disconnected"
     : primaryProperty?.syncStatus === "connected"
       ? "Channel active"
-      : "Channel not connected";
+      : "Channel health unavailable";
   const sectionDescriptor = buildSectionDescriptor(
     activeSection,
     setupProgressPercent,
@@ -2065,7 +2065,7 @@ export default function FamloProDashboardShell({
               <div className={styles.propertyCenterHeader}>
                 <div>
                   <div className={styles.sectionEyebrow}>Selected property</div>
-                  <h2 className={styles.propertyCenterTitle}>{currentPropertyOption?.name ?? propertyName}</h2>
+                  <h2 className={styles.propertyCenterTitle}>{currentPropertyOption?.name ?? propertyName ?? "Selected property"}</h2>
                   <p className={styles.propertyCenterCopy}>
                     Manage this property's rooms, content, pricing, channels, and sync health. Advanced technical screens
                     stay available under Advanced without changing any current sync logic.
@@ -3893,7 +3893,7 @@ function PropertySwitcherControl({
         <div className={styles.propertySwitcherCopy}>
           {propertyOptions.length > 1
             ? "Move between your properties without changing any sync, mapping, or booking logic."
-            : "This Pro workspace is currently focused on a single property. More properties will appear here when available."}
+            : "No other properties were found for this host yet. More properties will appear here when available."}
         </div>
       </div>
 
@@ -3910,8 +3910,8 @@ function PropertySwitcherControl({
               const location = [option.locality, option.city, option.state].filter(Boolean).join(", ");
               return (
                 <option key={option.familyId} value={option.familyId}>
-                  {option.name}
-                  {location ? ` · ${location}` : ""}
+                  {option.name || "Selected property"}
+                  {location ? ` · ${location}` : " · Location pending"}
                 </option>
               );
             })}
