@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import type { CSSProperties } from "react";
+import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
 
 import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardShell";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
@@ -121,6 +122,16 @@ async function canCurrentHostAccessFamily(
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function joinList(values: unknown): string {
+  if (Array.isArray(values)) {
+    return values
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean)
+      .join(", ");
+  }
+  return typeof values === "string" ? values : "";
 }
 
 function resolveInitialSection(value: string | undefined): ProSectionId {
@@ -372,7 +383,7 @@ export default async function FamloProDashboardPage({
   const [{ data: family }, { data: host }] = await Promise.all([
     supabase
       .from("families")
-      .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng")
+      .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type")
       .eq("id", familyId)
       .maybeSingle(),
     supabase
@@ -482,6 +493,11 @@ export default async function FamloProDashboardPage({
     "Famlo Property";
   const hostCode = asString(family?.host_id);
   const meta = parseHostListingMeta(asString(family?.admin_notes));
+  const { data: propertyPhotosRows } = await supabase
+    .from("family_photos")
+    .select("id,url,is_primary,family_id")
+    .eq("family_id", familyId)
+    .order("is_primary", { ascending: false });
   const propertyLocalityLabel = asString(meta.neighbourhood) ?? asString(meta.neighborhoodDesc);
   const locationLabel =
     [propertyLocalityLabel, asString(family?.city), asString(family?.state)].filter(Boolean).join(", ") || "Location pending";
@@ -494,6 +510,31 @@ export default async function FamloProDashboardPage({
     state: storedProSettings.state ?? asString(family?.state),
     city: storedProSettings.city ?? asString(family?.city),
     addressLine: storedProSettings.addressLine ?? asString(meta.propertyAddress),
+  };
+  const propertyPhotos: PhotoItem[] = ((propertyPhotosRows ?? []) as Array<Record<string, unknown>>).map((photo) => ({
+    id: asString(photo.id) ?? `photo-${Math.random()}`,
+    url: asString(photo.url) ?? "",
+    isPrimary: photo.is_primary === true,
+    family_id: asString(photo.family_id) ?? familyId,
+  })).filter((photo) => photo.url.length > 0);
+  const propertyContent = {
+    propertyName,
+    listingTitle: asString(meta.listingTitle) ?? "",
+    journeyStory: asString(meta.journeyStory) ?? "",
+    specialExperience: asString(meta.specialExperience) ?? "",
+    localExperience: asString(meta.localExperience) ?? "",
+    houseType: asString(meta.houseType) ?? "",
+    interactionType: asString(meta.interactionType) ?? "",
+    bathroomType: asString(family?.bathroom_type) ?? asString(meta.bathroomType) ?? "",
+    propertyAddress: asString(meta.propertyAddress) ?? "",
+    commonAreas: joinList(meta.commonAreas ?? family?.common_areas),
+    amenities: joinList(meta.amenities ?? family?.amenities),
+    includedItems: joinList(meta.includedItems),
+    houseRules: joinList(meta.houseRules ?? storedProSettings.houseRules ?? family?.house_rules),
+    googleMapsLink: asString(meta.googleMapsLink) ?? asString(family?.google_maps_link) ?? "",
+    foodType: joinList(meta.foodType ?? family?.food_type),
+    checkInTime: asString(meta.checkInTime) ?? storedProSettings.checkInTime ?? "",
+    checkOutTime: asString(meta.checkOutTime) ?? storedProSettings.checkOutTime ?? "",
   };
   const rooms = (
     await loadStayUnitsForSelector(supabase, {
@@ -1077,6 +1118,8 @@ export default async function FamloProDashboardPage({
       basicRoomUrl={basicRoomUrl}
       familyId={familyId}
       propertyOptions={propertyOptions}
+      initialPropertyContent={propertyContent}
+      propertyPhotos={propertyPhotos}
       initialSettings={proSettings}
       channelFoundation={channelFoundation}
       channexConfig={channexConfig}

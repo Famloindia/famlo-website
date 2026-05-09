@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import {
   Activity,
   ArrowRightLeft,
@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 
 import HostRoomsManager from "@/components/partners/rooms/HostRoomsManager";
+import PropertyContentManager from "@/components/partners/property/PropertyContentManager";
+import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
 import {
   PRO_PROPERTY_MODEL_OPTIONS,
   PRO_PROPERTY_TYPE_OPTIONS,
@@ -293,6 +295,26 @@ type PropertySwitcherOption = {
   isActive: boolean;
 };
 
+type PropertyContentDraft = {
+  propertyName: string;
+  listingTitle: string;
+  journeyStory: string;
+  specialExperience: string;
+  localExperience: string;
+  houseType: string;
+  interactionType: string;
+  bathroomType: string;
+  propertyAddress: string;
+  commonAreas: string;
+  amenities: string;
+  includedItems: string;
+  houseRules: string;
+  googleMapsLink: string;
+  foodType: string;
+  checkInTime: string;
+  checkOutTime: string;
+};
+
 interface FamloProDashboardShellProps {
   familyId: string;
   propertyOptions: PropertySwitcherOption[];
@@ -313,6 +335,8 @@ interface FamloProDashboardShellProps {
   feedItems: FeedItem[];
   basicDashboardUrl: string;
   basicRoomUrl: string;
+  initialPropertyContent: PropertyContentDraft;
+  propertyPhotos: PhotoItem[];
   initialSettings: HostProSettings;
   channelFoundation: HostProChannelFoundation;
   channexConfig: ChannexSummary;
@@ -1186,6 +1210,8 @@ export default function FamloProDashboardShell({
   feedItems,
   basicDashboardUrl,
   basicRoomUrl,
+  initialPropertyContent,
+  propertyPhotos,
   initialSettings,
   channelFoundation,
   channexConfig,
@@ -1195,13 +1221,66 @@ export default function FamloProDashboardShell({
   calendarWindow,
   calendarVerification,
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
+  const router = useRouter();
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
+  const [propertyContent, setPropertyContent] = useState<PropertyContentDraft>(initialPropertyContent);
+  const [propertyGallery, setPropertyGallery] = useState<PhotoItem[]>(propertyPhotos);
+  const [propertyContentSaving, startPropertyContentSaving] = useTransition();
+  const [propertyContentFeedback, setPropertyContentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
   const [timeAnchor] = useState(() => Date.now());
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
   const activePropertyTabLinks = PROPERTY_TAB_SECTION_LINKS[activePropertyTab];
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
+
+  useEffect(() => {
+    setPropertyContent(initialPropertyContent);
+    setPropertyGallery(propertyPhotos);
+    setPropertyContentFeedback(null);
+  }, [familyId, initialPropertyContent, propertyPhotos]);
+
+  const handleSavePropertyContent = async (options: {
+    updatedListing: PropertyContentDraft;
+    updatedPhotos: PhotoItem[];
+  }): Promise<void> => {
+    setPropertyContentFeedback(null);
+    startPropertyContentSaving(async () => {
+      try {
+        const response = await fetch("/api/onboarding/home/dashboard-save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            familyId,
+            listing: options.updatedListing,
+            photos: [
+              ...options.updatedPhotos.filter((photo) => photo.isPrimary),
+              ...options.updatedPhotos.filter((photo) => !photo.isPrimary),
+            ].map((photo) => ({
+              url: photo.url,
+              isPrimary: photo.isPrimary,
+            })),
+          }),
+        });
+
+        const payload = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to save property content.");
+        }
+
+        setPropertyContentFeedback({
+          type: "success",
+          text: "Property content saved for this listing. Refreshing the latest Famlo property view now.",
+        });
+        router.refresh();
+      } catch (error) {
+        setPropertyContentFeedback({
+          type: "error",
+          text: error instanceof Error ? error.message : "Failed to save property content.",
+        });
+      }
+    });
+  };
 
   const completedSetupCount = setupItems.filter((item) => item.complete).length;
   const missingSetupItems = setupItems.filter((item) => !item.complete);
@@ -3891,6 +3970,35 @@ export default function FamloProDashboardShell({
                     </div>
                   </article>
                 </div>
+
+                <section className={styles.cardInset}>
+                  <div className={styles.listTitle}>Content &amp; Photos for this property</div>
+                  <div className={styles.feedCopy} style={{ marginBottom: "16px" }}>
+                    Use this to shape how this property appears on Famlo. For multi-property hosts, each property can have its own story, vibe, and gallery.
+                  </div>
+
+                  {familyId ? (
+                    <PropertyContentManager
+                      familyId={familyId}
+                      listing={propertyContent}
+                      setListing={setPropertyContent}
+                      photos={propertyGallery}
+                      setPhotos={setPropertyGallery}
+                      onSave={handleSavePropertyContent}
+                      saving={propertyContentSaving}
+                    />
+                  ) : (
+                    <div className={styles.feedbackBox}>
+                      No selected property was found, so property content editing is unavailable right now.
+                    </div>
+                  )}
+
+                  {propertyContentFeedback ? (
+                    <div className={`${styles.feedbackBox} ${propertyContentFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}>
+                      {propertyContentFeedback.text}
+                    </div>
+                  ) : null}
+                </section>
 
                 <div className={styles.mappingPreviewGrid}>
                   <div className={styles.placeholderRow}>
