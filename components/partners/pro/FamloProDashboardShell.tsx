@@ -1281,6 +1281,15 @@ export default function FamloProDashboardShell({
     missingRooms: rooms.filter((room) => room.photosCount <= 0).length,
   };
   const activeRoomsCount = rooms.filter((room) => room.isActive).length;
+  const inactiveRoomsCount = Math.max(rooms.length - activeRoomsCount, 0);
+  const pricedRooms = rooms.filter((room) => room.priceFullday > 0);
+  const roomsMissingPrice = rooms.filter((room) => room.priceFullday <= 0).length;
+  const lowestRoomPrice = pricedRooms.length > 0 ? Math.min(...pricedRooms.map((room) => room.priceFullday)) : null;
+  const highestRoomPrice = pricedRooms.length > 0 ? Math.max(...pricedRooms.map((room) => room.priceFullday)) : null;
+  const propertyContentReadyCount = propertyContentChecks.filter((item) => item.ready).length;
+  const contactReadyCount = contactChecks.filter((item) => item.ready).length;
+  const locationReadyCount = locationChecks.filter((item) => item.ready).length;
+  const policyReadyCount = policyChecks.filter((item) => item.ready).length;
   const roomMappingRows = (rooms.length > 0
     ? rooms
     : [{
@@ -1366,6 +1375,8 @@ export default function FamloProDashboardShell({
   ];
   const firstMappedRoom = roomMappingRows.find((row) => Boolean(row.mapping?.externalRoomTypeId)) ?? null;
   const firstMappedRatePlan = rateMappingRows.find((row) => Boolean(row.ratePlan?.externalRatePlanId)) ?? null;
+  const roomMappingsReadyCount = roomMappingRows.filter((row) => Boolean(row.mapping?.externalRoomTypeId)).length;
+  const rateMappingsReadyCount = rateMappingRows.filter((row) => Boolean(row.ratePlan?.externalRatePlanId)).length;
   const bookingComManualChecklist = [
     {
       label: "Channex property id",
@@ -2678,14 +2689,64 @@ export default function FamloProDashboardShell({
             <section className={styles.card}>
               <div className={styles.cardHeader}>
                 <div>
-                  <h3 className={styles.cardTitle}>Rates & Restrictions</h3>
+                  <h3 className={styles.cardTitle}>Pricing & Rules</h3>
                   <p className={styles.cardCopy}>
-                    Manual staging ARI push is available here. Automated sync, scheduling, and production rollout are still intentionally disabled.
+                    Room-level pricing stays simple here. Channel-wise pricing will come later, and OTA/channel controls stay under Channels and Advanced.
                   </p>
                 </div>
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>Manual only</span>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Pricing summary</div>
+                    <div className={styles.roomStats}>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Total rooms</div>
+                        <div className={styles.miniValue}>{rooms.length}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Rooms with price</div>
+                        <div className={styles.miniValue}>{pricedRooms.length}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Missing price</div>
+                        <div className={styles.miniValue}>{roomsMissingPrice}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Active / inactive</div>
+                        <div className={styles.miniValue}>{activeRoomsCount} / {inactiveRoomsCount}</div>
+                      </div>
+                    </div>
+                    <div className={styles.roomReadinessRow}>
+                      <span className={styles.readinessPill}>
+                        Lowest room price: {lowestRoomPrice != null ? formatCurrency(lowestRoomPrice) : "Missing"}
+                      </span>
+                      <span className={styles.readinessPill}>
+                        Highest room price: {highestRoomPrice != null ? formatCurrency(highestRoomPrice) : "Missing"}
+                      </span>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>How pricing works today</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Room prices stay room-level</div>
+                        <div className={styles.feedCopy}>Room-level prices can be edited from Rooms and continue to use the current Famlo price fields.</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Rules stay lightweight</div>
+                        <div className={styles.feedCopy}>Minimum stay, maximum stay, and check-in timing tools remain available below without changing pricing semantics.</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Channel pricing comes later</div>
+                        <div className={styles.feedCopy}>No channel-wise pricing backend is added in this phase.</div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
                 <ChannexAriSyncCard
                   familyId={familyId}
                   eligibleRooms={ariSyncEligibleRooms}
@@ -3082,22 +3143,79 @@ export default function FamloProDashboardShell({
             <section className={styles.card}>
               <div className={styles.cardHeader}>
                 <div>
-                  <h3 className={styles.cardTitle}>Connected Channels</h3>
+                  <h3 className={styles.cardTitle}>Channels</h3>
                   <p className={styles.cardCopy}>
-                    Provider-neutral shell. Use this panel as the safe handoff checklist before you connect the Booking.com staging channel inside Channex.
+                    See whether this property is connected, healthy, or still needs setup. Technical mapping and debug tools stay under Advanced.
                   </p>
                 </div>
                 <span className={`${styles.badge} ${primaryProperty?.externalPropertyId ? "" : styles.badgeMuted}`.trim()}>
-                  {primaryProperty?.externalPropertyId ? "Property ready" : "Not connected"}
+                  {primaryProperty?.externalPropertyId ? "Connected foundation" : "Needs setup"}
                 </span>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Channel summary</div>
+                    <div className={styles.roomStats}>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Connected channels</div>
+                        <div className={styles.miniValue}>{currentChannelAttached ? 1 : 0}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Booking.com / Channex</div>
+                        <div className={styles.miniValue}>{currentChannelAttached ? (currentChannelAttached ? ((channelFeedHealth?.channelActive ?? false) ? "Connected" : "Attached") : "Needs setup") : "Needs setup"}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Room mapping</div>
+                        <div className={styles.miniValue}>{roomMappingsReadyCount}/{rooms.length || 0}</div>
+                      </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Rate mapping</div>
+                        <div className={styles.miniValue}>{rateMappingsReadyCount}/{rooms.length || 0}</div>
+                      </div>
+                    </div>
+                    <div className={styles.roomReadinessRow}>
+                      <span className={`${styles.readinessPill} ${channelHealthNeedsAttention ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                        {channelHealthNeedsAttention ? "Action needed" : "Sync healthy"}
+                      </span>
+                      <span className={`${styles.readinessPill} ${(channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                        Famlo team review: {(channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 ? "Needed" : "Not needed"}
+                      </span>
+                      <span className={`${styles.readinessPill} ${ariHealth.statusLabel === "Synced" ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                        ARI: {ariHealth.statusLabel}
+                      </span>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>What stays here</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Host-safe channel status</div>
+                        <div className={styles.feedCopy}>Use this tab to understand if the property is connected, healthy, and ready for OTA flow.</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Technical tools stay separate</div>
+                        <div className={styles.feedCopy}>Room mapping, rate mapping, and sync logs remain available under Advanced so this tab stays simple.</div>
+                      </div>
+                      <div className={styles.inlineActionRow}>
+                        <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("room-mapping")}>
+                          Open Advanced tools
+                        </button>
+                        <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("conflicts")}>
+                          Open Sync Health
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
                 <div className={styles.providerCard}>
                   <div className={styles.providerCardHeader}>
                     <div>
                       <div className={styles.cardTitle}>{primaryProvider?.name ?? "Channex"}</div>
                       <div className={styles.cardCopy}>
-                        First planned provider inside a provider-neutral Famlo foundation.
+                        Current provider connection for this property.
                       </div>
                     </div>
                     <span className={`${styles.badge} ${primaryProperty?.externalPropertyId ? "" : styles.badgeMuted}`.trim()}>
@@ -3127,8 +3245,8 @@ export default function FamloProDashboardShell({
                 </div>
                 <div className={`${styles.feedbackBox} ${channelHealthNeedsAttention ? styles.feedbackError : styles.feedbackSuccess}`}>
                   {channelHealthNeedsAttention
-                    ? "Needs attention: Channex channel health shows a detached channel, poll error, pending apply work, or unacknowledged revisions."
-                    : "Channel health looks stable: attached, active, and recently polled without pending feed work."}
+                    ? "Action needed: this property has a channel health issue, pending revision work, or a disconnected channel."
+                    : "Sync healthy: the current channel health looks stable for this property."}
                   <div className={styles.inlineBadgeRow}>
                     <span className={`${styles.readinessPill} ${currentChannelAttached ? styles.readinessPillOk : styles.readinessPillMissing}`}>
                       Attached: {currentChannelAttached ? "Yes" : "No"}
@@ -3229,6 +3347,15 @@ export default function FamloProDashboardShell({
                           ? `${ariHealth.lastAriSyncError} · failures in a row ${ariHealth.consecutiveAriFailures}`
                           : "No daily ARI sync error recorded."}
                       </div>
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.placeholderGrid}>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Host-facing note</div>
+                    <div className={styles.placeholderValue}>No OTA listing buttons yet</div>
+                    <div className={styles.placeholderCopy}>
+                      Famlo Pro is showing channel status only in this phase. OTA room creation and listing controls will come later.
                     </div>
                   </div>
                 </div>
@@ -3711,14 +3838,60 @@ export default function FamloProDashboardShell({
             <section className={styles.card}>
               <div className={styles.cardHeader}>
                 <div>
-                  <h3 className={styles.cardTitle}>OTA Content Readiness</h3>
+                  <h3 className={styles.cardTitle}>Content & Photos</h3>
                   <p className={styles.cardCopy}>
-                    Basic Famlo listing can stay simple. OTA channels need extra structured fields before sync can begin.
+                    This content shapes how this property appears on Famlo and prepares it for OTA channels.
                   </p>
                 </div>
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>No provider sync yet</span>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Property content summary</div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Property title</div>
+                        <div className={styles.placeholderValue}>{propertyName}</div>
+                        <div className={styles.placeholderCopy}>{propertyLocalityLabel ?? locationLabel}</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Story / vibe</div>
+                        <div className={styles.placeholderValue}>{initialSettings.propertyDescription ? "Available" : "Needs review"}</div>
+                        <div className={styles.placeholderCopy}>
+                          {initialSettings.propertyDescription
+                            ? initialSettings.propertyDescription
+                            : "Add a strong property description so this property feels complete on Famlo and OTA channels."}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Readiness snapshot</div>
+                    <div className={styles.roomReadinessRow}>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(propertyContentReadyCount, propertyContentChecks.length)}`}>
+                        Property content: {propertyContentReadyCount}/{propertyContentChecks.length}
+                      </span>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(contactReadyCount, contactChecks.length)}`}>
+                        Contact details: {contactReadyCount}/{contactChecks.length}
+                      </span>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(locationReadyCount, locationChecks.length)}`}>
+                        Location: {locationReadyCount}/{locationChecks.length}
+                      </span>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(policyReadyCount, policyChecks.length)}`}>
+                        Policies: {policyReadyCount}/{policyChecks.length}
+                      </span>
+                      <span className={`${styles.readinessPill} ${contentStatusClass(photosReadiness.readyRooms, Math.max(rooms.length, 1))}`}>
+                        Photos ready: {photosReadiness.readyRooms}/{rooms.length || 0}
+                      </span>
+                    </div>
+                    <div className={styles.feedCopy}>
+                      Use this tab for property content and OTA-ready details. Room-level photos and prices continue to come from Rooms.
+                    </div>
+                  </article>
+                </div>
+
                 <div className={styles.mappingPreviewGrid}>
                   <div className={styles.placeholderRow}>
                     <div className={styles.placeholderTitle}>Famlo Property → Provider Property</div>
