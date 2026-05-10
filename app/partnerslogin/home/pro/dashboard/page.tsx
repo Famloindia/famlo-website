@@ -16,12 +16,16 @@ import { buildHostProSetupReadiness } from "@/lib/host-pro-setup-readiness";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
-interface FamloProDashboardPageProps {
+export interface FamloProDashboardPageProps {
   searchParams?: Promise<{
     family?: string;
     section?: string;
     calendarStart?: string;
   }>;
+  roomRouteState?: {
+    mode: "edit" | "create";
+    roomId?: string;
+  } | null;
 }
 
 export const dynamic = "force-dynamic";
@@ -314,6 +318,7 @@ function isIsoDate(value: string | undefined): value is string {
 
 export default async function FamloProDashboardPage({
   searchParams,
+  roomRouteState = null,
 }: Readonly<FamloProDashboardPageProps>): Promise<React.JSX.Element> {
   const params = await searchParams;
   const cookieStore = await cookies();
@@ -1114,6 +1119,7 @@ export default async function FamloProDashboardPage({
 
   return (
     <FamloProDashboardShell
+      roomRouteState={roomRouteState}
       hostUserId={hostSession?.hostUserId ?? null}
       propertyName={propertyName}
       propertyLocalityLabel={propertyLocalityLabel}

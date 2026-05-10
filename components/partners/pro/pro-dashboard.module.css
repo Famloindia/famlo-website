@@ -29,6 +29,18 @@
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+.brandLogoWrap {
+  display: flex;
+  align-items: center;
+}
+
+.brandLogoImage {
+  display: block;
+  width: 184px;
+  max-width: 100%;
+  height: auto;
+}
+
 .brandEyebrow {
   font-size: 11px;
   font-weight: 900;
@@ -450,6 +462,21 @@
   opacity: 0.72;
 }
 
+.addPropertyControlLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: white;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
 .addPropertyIconWrap {
   width: 34px;
   height: 34px;
@@ -511,6 +538,8 @@
   cursor: pointer;
   overflow: hidden;
   min-width: 0;
+  text-decoration: none;
+  color: inherit;
 }
 
 .propertyRoomShowcaseCard {
@@ -734,6 +763,20 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.roomControlBackLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  border-radius: 999px;
+  padding: 11px 16px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: white;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .roomControlTabRow {

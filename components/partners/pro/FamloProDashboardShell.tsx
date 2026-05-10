@@ -346,6 +346,10 @@ type PropertyContentDraft = {
 interface FamloProDashboardShellProps {
   familyId: string;
   hostUserId: string | null;
+  roomRouteState?: {
+    mode: "edit" | "create";
+    roomId?: string;
+  } | null;
   propertyOptions: PropertySwitcherOption[];
   propertyName: string;
   propertyLocalityLabel: string | null;
@@ -540,9 +544,7 @@ function isPropertyTabActive(tabId: PropertyCenterTabId, section: ProSectionId):
 
 function resolveTopLevelDefaultSection(target: ProTopLevelId, currentSection: ProSectionId): ProSectionId {
   if (target === "dashboard") return "dashboard";
-  if (target === "properties") {
-    return isPropertyCenterSection(currentSection) ? currentSection : "property";
-  }
+  if (target === "properties") return "property";
   if (target === "bookings") return "bookings";
   if (target === "calendar") return "inventory-calendar";
   if (target === "messages") return "messages-reviews";
@@ -1384,6 +1386,7 @@ function buildSectionDescriptor(
 export default function FamloProDashboardShell({
   familyId,
   hostUserId,
+  roomRouteState = null,
   propertyOptions,
   propertyName,
   propertyLocalityLabel,
@@ -1415,8 +1418,7 @@ export default function FamloProDashboardShell({
 }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(rooms[0]?.id ?? null);
-  const [roomEditorMode, setRoomEditorMode] = useState<"edit" | "create" | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(roomRouteState?.roomId ?? rooms[0]?.id ?? null);
   const [roomEditorTab, setRoomEditorTab] = useState<RoomEditorTabId>("details");
   const [propertyContent, setPropertyContent] = useState<PropertyContentDraft>(initialPropertyContent);
   const [propertyGallery, setPropertyGallery] = useState<PhotoItem[]>(propertyPhotos);
@@ -1441,13 +1443,15 @@ export default function FamloProDashboardShell({
     setBookingFilter("All");
     setSelectedBooking(null);
     setActiveMessageConversationId(null);
-    setRoomEditorMode(null);
     setRoomEditorTab("details");
     setSelectedRoomId((current) => {
+      if (roomRouteState?.mode === "edit" && roomRouteState.roomId && rooms.some((room) => room.id === roomRouteState.roomId)) {
+        return roomRouteState.roomId;
+      }
       if (current && rooms.some((room) => room.id === current)) return current;
       return rooms[0]?.id ?? null;
     });
-  }, [familyId, initialPropertyContent, propertyPhotos, rooms]);
+  }, [familyId, initialPropertyContent, propertyPhotos, roomRouteState, rooms]);
 
   const handleSavePropertyContent = async (options: {
     updatedListing: PropertyContentDraft;
@@ -2577,23 +2581,8 @@ export default function FamloProDashboardShell({
   const selectedRoomConflictCount = selectedRoom
     ? conflictItems.filter((item) => item.relatedLabel === selectedRoom.name).length
     : 0;
-  const selectedRoomDetailsReady = Boolean(
-    selectedRoom &&
-    selectedRoom.name.trim().length > 0 &&
-    selectedRoom.maxGuests > 0 &&
-    selectedRoom.bathroomType &&
-    selectedRoom.bedInfo
-  );
-  const selectedRoomPhotosReady = Boolean(selectedRoom && selectedRoom.photosCount > 0);
-  const selectedRoomPricingReady = Boolean(selectedRoom && selectedRoom.priceFullday > 0);
-  const selectedRoomChannelReady = selectedRoomCard?.channelStatus === "Booking.com ready";
-  const selectedRoomMappingReady = Boolean(
-    selectedRoom &&
-    roomMappingsByRoomId.get(selectedRoom.id)?.externalRoomTypeId &&
-    ratePlansByRoomId.get(selectedRoom.id)?.externalRatePlanId
-  );
   const selectedRoomCalendarHealthy = Boolean(selectedRoom && selectedRoomCalendarRow);
-  const roomEditorOpen = roomEditorMode !== null;
+  const roomEditorMode = roomRouteState?.mode ?? null;
   const roomEditorRoom = roomEditorMode === "edit" ? selectedRoom : null;
   const roomEditorDisplayName =
     roomEditorMode === "create" ? "Create room" : roomEditorRoom?.name ?? "Select a room";
@@ -2629,112 +2618,6 @@ export default function FamloProDashboardShell({
   const selectedPropertyDisplayLabel = currentPropertyOption
     ? `${currentPropertyOption.name || propertyName}${selectedPropertyLocation ? ` · ${selectedPropertyLocation}` : ""}`
     : `${propertyName}${selectedPropertyLocation ? ` · ${selectedPropertyLocation}` : ""}`;
-  const selectedRoomStatusCards = [
-    {
-      label: "Room details",
-      value: selectedRoom ? (selectedRoomDetailsReady ? "Ready" : "Needs review") : "Choose a room",
-      hint: selectedRoom
-        ? `${selectedRoom.maxGuests} guests · ${selectedRoom.bathroomType ?? "Bathroom pending"}`
-        : "Select a room card above first.",
-      statusClass: selectedRoomDetailsReady ? styles.readinessPillOk : styles.readinessPillReview,
-    },
-    {
-      label: "Photos",
-      value: selectedRoom ? `${selectedRoom.photosCount} added` : "Choose a room",
-      hint: selectedRoomPhotosReady ? "Photo coverage is available." : "Add room photos for better quality and distribution readiness.",
-      statusClass: selectedRoomPhotosReady ? styles.readinessPillOk : styles.readinessPillReview,
-    },
-    {
-      label: "Pricing",
-      value: selectedRoom && selectedRoom.priceFullday > 0 ? formatCurrency(selectedRoom.priceFullday) : "Price missing",
-      hint: selectedRoomPricingReady ? "Base room price is set." : "Finish room pricing before expecting clean sellability.",
-      statusClass: selectedRoomPricingReady ? styles.readinessPillOk : styles.readinessPillReview,
-    },
-    {
-      label: "Calendar",
-      value: selectedRoomCalendarHealthy ? "Visible" : "Needs review",
-      hint: selectedRoomCalendarHealthy ? "This room appears in the property calendar." : "Room calendar row is not visible yet for this property window.",
-      statusClass: selectedRoomCalendarHealthy ? styles.readinessPillOk : styles.readinessPillReview,
-    },
-    {
-      label: "Channels",
-      value: selectedRoomCard?.channelStatus ?? "Choose a room",
-      hint: currentChannelAttached ? "Channel readiness uses current connected room and rate setup." : "Connect and review channels before expecting OTA-ready behavior.",
-      statusClass: selectedRoomChannelReady ? styles.readinessPillOk : styles.readinessPillReview,
-    },
-    {
-      label: "Mapping",
-      value: selectedRoomMappingReady ? "Ready" : "Needs review",
-      hint: selectedRoomMappingReady ? "Room and rate mapping are available." : "Room mapping or rate mapping still needs attention.",
-      statusClass: selectedRoomMappingReady ? styles.readinessPillOk : styles.readinessPillReview,
-    },
-    {
-      label: "Sync Health",
-      value: selectedRoom ? `${selectedRoomConflictCount} issue${selectedRoomConflictCount === 1 ? "" : "s"}` : "Choose a room",
-      hint: selectedRoomConflictCount === 0 ? "No room-specific issue is surfaced right now." : "Open Sync Health or Mapping to review room-specific issues.",
-      statusClass: selectedRoomConflictCount === 0 ? styles.readinessPillOk : styles.readinessPillReview,
-    },
-  ];
-  const roomControlCenterSections = [
-    {
-      title: "Details",
-      hint: "Update room information, occupancy, and Famlo basics.",
-      targetSection: "rooms-units" as const,
-      status: selectedRoomDetailsReady ? "Ready" : "Needs review",
-      statusClass: selectedRoomDetailsReady ? styles.readinessPillOk : styles.readinessPillReview,
-      actionLabel: "Open room details",
-    },
-    {
-      title: "Photos",
-      hint: "Review room photos and image coverage for this room.",
-      targetSection: "rooms-units" as const,
-      status: selectedRoomPhotosReady ? `${selectedRoom?.photosCount ?? 0} added` : "Needs photos",
-      statusClass: selectedRoomPhotosReady ? styles.readinessPillOk : styles.readinessPillReview,
-      actionLabel: "Open room photos",
-    },
-    {
-      title: "Pricing",
-      hint: "Check room price coverage and pricing readiness.",
-      targetSection: "rates-restrictions" as const,
-      status: selectedRoomPricingReady ? "Price ready" : "Price missing",
-      statusClass: selectedRoomPricingReady ? styles.readinessPillOk : styles.readinessPillReview,
-      actionLabel: "Open pricing",
-    },
-    {
-      title: "Calendar",
-      hint: "Review booking coverage and availability for this room.",
-      targetSection: "inventory-calendar" as const,
-      status: selectedRoomCalendarHealthy ? "Visible" : "Needs review",
-      statusClass: selectedRoomCalendarHealthy ? styles.readinessPillOk : styles.readinessPillReview,
-      actionLabel: "Open calendar",
-    },
-    {
-      title: "Channels",
-      hint: "See connected channel readiness for this room.",
-      targetSection: "connected-channels" as const,
-      status: selectedRoomCard?.channelStatus ?? "Choose a room",
-      statusClass: selectedRoomChannelReady ? styles.readinessPillOk : styles.readinessPillReview,
-      actionLabel: "Open channels",
-    },
-    {
-      title: "Mapping",
-      hint: "Open room and rate mapping for this room.",
-      targetSection: roomCards.find((item) => item.room.id === selectedRoom?.id)?.channelStatus === "Rate mapping needed"
-        ? ("rate-mapping" as const)
-        : ("room-mapping" as const),
-      status: selectedRoomMappingReady ? "Ready" : "Needs review",
-      statusClass: selectedRoomMappingReady ? styles.readinessPillOk : styles.readinessPillReview,
-      actionLabel: "Open mapping",
-    },
-    {
-      title: "Sync Health",
-      hint: "Review sync issues that could affect this room.",
-      targetSection: criticalConflictCount > 0 ? ("conflicts" as const) : ("sync-logs" as const),
-      status: selectedRoom ? (selectedRoomConflictCount === 0 ? "Healthy" : `${selectedRoomConflictCount} open`) : "Choose a room",
-      statusClass: selectedRoom && selectedRoomConflictCount === 0 ? styles.readinessPillOk : styles.readinessPillReview,
-      actionLabel: "Open sync health",
-    },
-  ];
   const pilotHomeCards = [
     {
       label: "Selected property",
@@ -2955,8 +2838,9 @@ export default function FamloProDashboardShell({
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
         <div className={styles.brandBlock}>
-          <div className={styles.brandEyebrow}>Famlo Pro</div>
-          <div className={styles.brandTitle}>Property OS</div>
+          <div className={styles.brandLogoWrap}>
+            <img src="/famlo-pro-logo.png" alt="Famlo Pro" className={styles.brandLogoImage} />
+          </div>
           <p className={styles.brandCopy}>
             Multi-property workspace for rooms, pricing, content, channels, and sync health. Existing provider logic
             stays exactly as it is underneath.
@@ -3027,7 +2911,7 @@ export default function FamloProDashboardShell({
         </header>
 
         <div className={styles.content}>
-          {activeTopLevel === "properties" && (
+          {activeTopLevel === "properties" && !roomRouteState && (
             <section className={styles.propertyCenterShell}>
               <div className={styles.propertyCenterHeader}>
                 <div>
@@ -3048,12 +2932,12 @@ export default function FamloProDashboardShell({
               <div className={styles.propertySelectorBar}>
                 <div className={styles.propertySelectorHeadline}>SELECT PROPERTY</div>
                 <div className={styles.propertySelectorControls}>
-                  <button type="button" className={styles.addPropertyControl} disabled>
+                  <Link href="/partners/home" className={styles.addPropertyControlLink}>
                     <span className={styles.addPropertyIconWrap}>
                       <Plus size={18} />
                     </span>
                     <span>Add Property</span>
-                  </button>
+                  </Link>
 
                   <label className={styles.propertySelectorField}>
                     <span className={styles.srOnly}>Select property</span>
@@ -3098,15 +2982,10 @@ export default function FamloProDashboardShell({
 
               <div className={styles.propertiesRoomShowcaseGrid}>
                 {roomCards.map((item) => (
-                  <button
+                  <Link
                     key={item.room.id}
-                    type="button"
+                    href={`/partnerslogin/home/pro/properties/${encodeURIComponent(familyId)}/rooms/${encodeURIComponent(item.room.id)}`}
                     className={`${styles.propertyRoomShowcaseCard} ${item.selected && roomEditorMode === "edit" ? styles.propertyRoomShowcaseCardActive : ""}`}
-                    onClick={() => {
-                      setSelectedRoomId(item.room.id);
-                      setRoomEditorMode("edit");
-                      setRoomEditorTab("details");
-                    }}
                   >
                     <div
                       className={styles.propertyRoomShowcaseMedia}
@@ -3156,246 +3035,28 @@ export default function FamloProDashboardShell({
                         <span className={styles.propertyRoomManageLabel}>Edit Room</span>
                       </div>
                     </div>
-                  </button>
+                  </Link>
                 ))}
 
-                <button
-                  type="button"
+                <Link
+                  href={`/partnerslogin/home/pro/properties/${encodeURIComponent(familyId)}/rooms/new`}
                   className={styles.addRoomShowcaseCard}
-                  onClick={() => {
-                    setRoomEditorMode("create");
-                    setRoomEditorTab("details");
-                  }}
                 >
                   <span className={styles.addRoomShowcaseIcon}>
                     <Plus size={36} />
                   </span>
                   <span className={styles.addRoomShowcaseTitle}>Add Room</span>
                   <span className={styles.addRoomShowcaseCopy}>Create a new room inside the selected property.</span>
-                </button>
+                </Link>
               </div>
 
-              {roomEditorOpen ? (
-                <section className={styles.roomControlCenterShell}>
-                  <div className={styles.roomControlCenterHeader}>
-                    <div>
-                      <div className={styles.sectionEyebrow}>{roomEditorPrimaryActionLabel}</div>
-                      <h3 className={styles.roomControlCenterTitle}>{roomEditorDisplayName}</h3>
-                      <p className={styles.roomControlCenterCopy}>
-                        Manage this room&apos;s details, photos, pricing, calendar, channels, and sync health from one
-                        place. Advanced channel setup remains under Mapping and Sync Health.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      className={styles.roomControlCenterClose}
-                      onClick={() => {
-                        setRoomEditorMode(null);
-                        setRoomEditorTab("details");
-                      }}
-                      aria-label="Close room editor"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-
-                  <div className={styles.roomControlMetaRow}>
-                    <span className={styles.propertySelectorMetaPill}>Property: {currentPropertyOption?.name ?? propertyName}</span>
-                    <span className={styles.propertySelectorMetaPill}>Status: {roomEditorDisplayStatus}</span>
-                    <span className={styles.propertySelectorMetaPill}>Base price: {roomEditorBasePriceLabel}</span>
-                    <span className={styles.propertySelectorMetaPill}>Photos: {roomEditorPhotoStatusLabel}</span>
-                    <span className={styles.propertySelectorMetaPill}>Channels: {roomEditorChannelStatusLabel}</span>
-                    <span className={styles.propertySelectorMetaPill}>Sync Health: {roomEditorSyncStatusLabel}</span>
-                  </div>
-
-                  <div className={styles.roomControlTabRow}>
-                    {ROOM_EDITOR_TABS.map((tab) => (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        className={`${styles.roomControlTabButton} ${roomEditorTab === tab.id ? styles.roomControlTabButtonActive : ""}`}
-                        onClick={() => setRoomEditorTab(tab.id)}
-                      >
-                        <span className={styles.roomControlTabTitle}>{tab.title}</span>
-                        <span className={styles.roomControlTabHint}>{tab.description}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className={styles.roomControlPanel}>
-                    {roomEditorTab === "details" ? (
-                      <HostRoomsManager
-                        familyId={familyId}
-                        homeLat={propertyHomeLat ?? undefined}
-                        homeLng={propertyHomeLng ?? undefined}
-                        title={roomEditorMode === "create" ? "Create Room" : "Edit Room"}
-                        description={
-                          roomEditorMode === "create"
-                            ? "Create a room for this selected property. Save the room before expecting pricing, channel, or sync workflows."
-                            : "Edit this room using the existing Famlo room inventory flow."
-                        }
-                        propertyLabel={propertyLocalityLabel ?? locationLabel}
-                        showChannelManager={false}
-                        viewRoomPage
-                        emptyTitle="No rooms yet"
-                        emptyCopy="Create the first room for this property to start building your Famlo inventory."
-                        selectedRoomId={roomEditorMode === "edit" ? selectedRoomId : null}
-                        createMode={roomEditorMode === "create"}
-                        compactMode
-                      />
-                    ) : null}
-
-                    {roomEditorTab === "pricing" ? (
-                      <article className={styles.roomControlPlaceholder}>
-                        <div className={styles.placeholderTitle}>Pricing</div>
-                        <div className={styles.placeholderCopy}>
-                          {roomEditorMode === "create"
-                            ? "Finish the room draft in Details first. The existing pricing workspace will become useful once the room exists."
-                            : "Room-level pricing already lives in the existing Famlo room flow. Channel-wise pricing is not connected here yet."}
-                        </div>
-                        <div className={styles.placeholderGrid}>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Base price</div>
-                            <div className={styles.placeholderValue}>{roomEditorBasePriceLabel}</div>
-                          </div>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Smart pricing</div>
-                            <div className={styles.placeholderValue}>
-                              {roomEditorRoom?.quarterEnabled ? "Enabled" : roomEditorMode === "create" ? "Set after save" : "Disabled"}
-                            </div>
-                          </div>
-                        </div>
-                        <div className={styles.inlineActionRow}>
-                          <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("rates-restrictions")}>
-                            Open Pricing Workspace
-                          </button>
-                          <button type="button" className={styles.secondaryActionButton} onClick={() => setRoomEditorTab("details")}>
-                            Back to Details
-                          </button>
-                        </div>
-                      </article>
-                    ) : null}
-
-                    {roomEditorTab === "calendar" ? (
-                      <article className={styles.roomControlPlaceholder}>
-                        <div className={styles.placeholderTitle}>Calendar</div>
-                        <div className={styles.placeholderCopy}>
-                          View this room&apos;s availability through the existing calendar workspace. Checkout-day logic stays unchanged.
-                        </div>
-                        <div className={styles.placeholderGrid}>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Calendar status</div>
-                            <div className={styles.placeholderValue}>{selectedRoomCalendarHealthy ? "Visible in property calendar" : "Needs review"}</div>
-                          </div>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Selected room</div>
-                            <div className={styles.placeholderValue}>{roomEditorRoom?.name ?? "Save room first"}</div>
-                          </div>
-                        </div>
-                        <div className={styles.inlineActionRow}>
-                          <button type="button" className={styles.primaryActionButton} onClick={() => router.push(`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=inventory-calendar`)}>
-                            Open Calendar
-                          </button>
-                        </div>
-                      </article>
-                    ) : null}
-
-                    {roomEditorTab === "channels" ? (
-                      <article className={styles.roomControlPlaceholder}>
-                        <div className={styles.placeholderTitle}>Channels</div>
-                        <div className={styles.placeholderCopy}>
-                          Review connected channel readiness for this room. Existing integrations remain connected only through the current channel workspaces.
-                        </div>
-                        <div className={styles.placeholderGrid}>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Room status</div>
-                            <div className={styles.placeholderValue}>{selectedRoomCard?.channelStatus ?? "Save room first"}</div>
-                          </div>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Provider mapping</div>
-                            <div className={styles.placeholderValue}>{selectedRoomCard?.providerMappingLabel ?? "Check Channels"}</div>
-                          </div>
-                        </div>
-                        <div className={styles.inlineActionRow}>
-                          <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("connected-channels")}>
-                            Open Channels
-                          </button>
-                        </div>
-                      </article>
-                    ) : null}
-
-                    {roomEditorTab === "mapping" ? (
-                      <article className={styles.roomControlPlaceholder}>
-                        <div className={styles.placeholderTitle}>Mapping</div>
-                        <div className={styles.placeholderCopy}>
-                          Use the existing mapping tools for room and rate connections. This panel stays honest and does not create new mapping logic.
-                        </div>
-                        <div className={styles.placeholderGrid}>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Room mapping</div>
-                            <div className={styles.placeholderValue}>
-                              {roomEditorRoom && roomMappingsByRoomId.get(roomEditorRoom.id)?.externalRoomTypeId ? "Mapped" : "Needs review"}
-                            </div>
-                          </div>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Rate mapping</div>
-                            <div className={styles.placeholderValue}>
-                              {roomEditorRoom && ratePlansByRoomId.get(roomEditorRoom.id)?.externalRatePlanId ? "Mapped" : "Needs review"}
-                            </div>
-                          </div>
-                        </div>
-                        <div className={styles.inlineActionRow}>
-                          <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("room-mapping")}>
-                            Open Room Mapping
-                          </button>
-                          <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("rate-mapping")}>
-                            Open Rate Mapping
-                          </button>
-                        </div>
-                      </article>
-                    ) : null}
-
-                    {roomEditorTab === "sync-health" ? (
-                      <article className={styles.roomControlPlaceholder}>
-                        <div className={styles.placeholderTitle}>Sync Health</div>
-                        <div className={styles.placeholderCopy}>
-                          Review room-specific issues using the existing Sync Health and logs sections. No new sync behavior is introduced here.
-                        </div>
-                        <div className={styles.placeholderGrid}>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Open issues</div>
-                            <div className={styles.placeholderValue}>{roomEditorSyncStatusLabel}</div>
-                          </div>
-                          <div className={styles.placeholderRow}>
-                            <div className={styles.placeholderLabel}>Next review</div>
-                            <div className={styles.placeholderValue}>
-                              {selectedRoomConflictCount === 0 ? "Sync logs" : "Conflicts"}
-                            </div>
-                          </div>
-                        </div>
-                        <div className={styles.inlineActionRow}>
-                          <button
-                            type="button"
-                            className={styles.primaryActionButton}
-                            onClick={() => setActiveSection(selectedRoomConflictCount > 0 ? "conflicts" : "sync-logs")}
-                          >
-                            Open Sync Health
-                          </button>
-                        </div>
-                      </article>
-                    ) : null}
-                  </div>
-                </section>
-              ) : (
-                <article className={styles.propertyCenterHintCard}>
-                  <div className={styles.listTitle}>Choose a room to manage</div>
-                  <div className={styles.cardCopy}>
-                    Click a room card to open the Edit Room experience, or use Add Room to open a Create Room flow with
-                    tabs for Details, Pricing, Calendar, Channels, Mapping, and Sync Health.
-                  </div>
-                </article>
-              )}
+              <article className={styles.propertyCenterHintCard}>
+                <div className={styles.listTitle}>Choose a room to manage</div>
+                <div className={styles.cardCopy}>
+                  Click a room card to open a separate Pro room page. The room page contains Details, Pricing, Calendar,
+                  Channels, Mapping, and Sync Health so the main Properties screen stays clean.
+                </div>
+              </article>
 
               <div className={styles.propertySubSectionBar}>
                 <div>
@@ -3430,7 +3091,213 @@ export default function FamloProDashboardShell({
             </section>
           )}
 
-          {activeSection === "dashboard" && (
+          {roomRouteState && activeSection === "rooms-units" && (
+            <section className={styles.roomControlCenterShell}>
+              <div className={styles.roomControlCenterHeader}>
+                <div>
+                  <div className={styles.sectionEyebrow}>{roomEditorPrimaryActionLabel}</div>
+                  <h2 className={styles.roomControlCenterTitle}>{roomEditorDisplayName}</h2>
+                  <p className={styles.roomControlCenterCopy}>
+                    Manage this room&apos;s details, photos, pricing, calendar, channels, and sync health from one
+                    place. Advanced channel setup remains under Mapping and Sync Health.
+                  </p>
+                </div>
+
+                <Link
+                  href={`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=property`}
+                  className={styles.roomControlBackLink}
+                >
+                  Back to Properties
+                </Link>
+              </div>
+
+              <div className={styles.roomControlMetaRow}>
+                <span className={styles.propertySelectorMetaPill}>Property: {currentPropertyOption?.name ?? propertyName}</span>
+                <span className={styles.propertySelectorMetaPill}>Status: {roomEditorDisplayStatus}</span>
+                <span className={styles.propertySelectorMetaPill}>Base price: {roomEditorBasePriceLabel}</span>
+                <span className={styles.propertySelectorMetaPill}>Photos: {roomEditorPhotoStatusLabel}</span>
+                <span className={styles.propertySelectorMetaPill}>Channels: {roomEditorChannelStatusLabel}</span>
+                <span className={styles.propertySelectorMetaPill}>Sync Health: {roomEditorSyncStatusLabel}</span>
+              </div>
+
+              <div className={styles.roomControlTabRow}>
+                {ROOM_EDITOR_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`${styles.roomControlTabButton} ${roomEditorTab === tab.id ? styles.roomControlTabButtonActive : ""}`}
+                    onClick={() => setRoomEditorTab(tab.id)}
+                  >
+                    <span className={styles.roomControlTabTitle}>{tab.title}</span>
+                    <span className={styles.roomControlTabHint}>{tab.description}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className={styles.roomControlPanel}>
+                {roomEditorTab === "details" ? (
+                  <HostRoomsManager
+                    familyId={familyId}
+                    homeLat={propertyHomeLat ?? undefined}
+                    homeLng={propertyHomeLng ?? undefined}
+                    title={roomEditorMode === "create" ? "Create Room" : "Edit Room"}
+                    description={
+                      roomEditorMode === "create"
+                        ? "Create a room for this selected property. Save the room before expecting pricing, channel, or sync workflows."
+                        : "Edit this room using the existing Famlo room inventory flow."
+                    }
+                    propertyLabel={propertyLocalityLabel ?? locationLabel}
+                    showChannelManager={false}
+                    viewRoomPage
+                    emptyTitle="No rooms yet"
+                    emptyCopy="Create the first room for this property to start building your Famlo inventory."
+                    selectedRoomId={roomEditorMode === "edit" ? selectedRoomId : null}
+                    createMode={roomEditorMode === "create"}
+                    compactMode
+                  />
+                ) : null}
+
+                {roomEditorTab === "pricing" ? (
+                  <article className={styles.roomControlPlaceholder}>
+                    <div className={styles.placeholderTitle}>Pricing</div>
+                    <div className={styles.placeholderCopy}>
+                      {roomEditorMode === "create"
+                        ? "Finish the room draft in Details first. The existing pricing workspace will become useful once the room exists."
+                        : "Room-level pricing already lives in the existing Famlo room flow. Channel-wise pricing is not connected here yet."}
+                    </div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Base price</div>
+                        <div className={styles.placeholderValue}>{roomEditorBasePriceLabel}</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Smart pricing</div>
+                        <div className={styles.placeholderValue}>
+                          {roomEditorRoom?.quarterEnabled ? "Enabled" : roomEditorMode === "create" ? "Set after save" : "Disabled"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("rates-restrictions")}>
+                        Open Pricing Workspace
+                      </button>
+                    </div>
+                  </article>
+                ) : null}
+
+                {roomEditorTab === "calendar" ? (
+                  <article className={styles.roomControlPlaceholder}>
+                    <div className={styles.placeholderTitle}>Calendar</div>
+                    <div className={styles.placeholderCopy}>
+                      View this room&apos;s availability through the existing calendar workspace. Checkout-day logic stays unchanged.
+                    </div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Calendar status</div>
+                        <div className={styles.placeholderValue}>{selectedRoomCalendarHealthy ? "Visible in property calendar" : "Needs review"}</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Selected room</div>
+                        <div className={styles.placeholderValue}>{roomEditorRoom?.name ?? "Save room first"}</div>
+                      </div>
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <button type="button" className={styles.primaryActionButton} onClick={() => router.push(`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=inventory-calendar`)}>
+                        Open Calendar
+                      </button>
+                    </div>
+                  </article>
+                ) : null}
+
+                {roomEditorTab === "channels" ? (
+                  <article className={styles.roomControlPlaceholder}>
+                    <div className={styles.placeholderTitle}>Channels</div>
+                    <div className={styles.placeholderCopy}>
+                      Review connected channel readiness for this room. Existing integrations remain connected only through the current channel workspaces.
+                    </div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Room status</div>
+                        <div className={styles.placeholderValue}>{selectedRoomCard?.channelStatus ?? "Save room first"}</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Provider mapping</div>
+                        <div className={styles.placeholderValue}>{selectedRoomCard?.providerMappingLabel ?? "Check Channels"}</div>
+                      </div>
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("connected-channels")}>
+                        Open Channels
+                      </button>
+                    </div>
+                  </article>
+                ) : null}
+
+                {roomEditorTab === "mapping" ? (
+                  <article className={styles.roomControlPlaceholder}>
+                    <div className={styles.placeholderTitle}>Mapping</div>
+                    <div className={styles.placeholderCopy}>
+                      Use the existing mapping tools for room and rate connections. This panel stays honest and does not create new mapping logic.
+                    </div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Room mapping</div>
+                        <div className={styles.placeholderValue}>
+                          {roomEditorRoom && roomMappingsByRoomId.get(roomEditorRoom.id)?.externalRoomTypeId ? "Mapped" : "Needs review"}
+                        </div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Rate mapping</div>
+                        <div className={styles.placeholderValue}>
+                          {roomEditorRoom && ratePlansByRoomId.get(roomEditorRoom.id)?.externalRatePlanId ? "Mapped" : "Needs review"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("room-mapping")}>
+                        Open Room Mapping
+                      </button>
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("rate-mapping")}>
+                        Open Rate Mapping
+                      </button>
+                    </div>
+                  </article>
+                ) : null}
+
+                {roomEditorTab === "sync-health" ? (
+                  <article className={styles.roomControlPlaceholder}>
+                    <div className={styles.placeholderTitle}>Sync Health</div>
+                    <div className={styles.placeholderCopy}>
+                      Review room-specific issues using the existing Sync Health and logs sections. No new sync behavior is introduced here.
+                    </div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Open issues</div>
+                        <div className={styles.placeholderValue}>{roomEditorSyncStatusLabel}</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderLabel}>Next review</div>
+                        <div className={styles.placeholderValue}>
+                          {selectedRoomConflictCount === 0 ? "Sync logs" : "Conflicts"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <button
+                        type="button"
+                        className={styles.primaryActionButton}
+                        onClick={() => setActiveSection(selectedRoomConflictCount > 0 ? "conflicts" : "sync-logs")}
+                      >
+                        Open Sync Health
+                      </button>
+                    </div>
+                  </article>
+                ) : null}
+              </div>
+            </section>
+          )}
+
+          {activeSection === "dashboard" && !roomRouteState && (
             <>
               <section className={styles.heroCard}>
                 <div className={styles.heroGrid}>
@@ -3795,7 +3662,7 @@ export default function FamloProDashboardShell({
             </section>
           )}
 
-          {activeSection === "rooms-units" && (
+          {activeSection === "rooms-units" && !roomRouteState && (
             <section className={styles.card}>
               <div className={styles.cardHeader}>
                 <div>
