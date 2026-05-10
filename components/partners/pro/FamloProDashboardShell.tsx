@@ -52,6 +52,7 @@ import styles from "./pro-dashboard.module.css";
 
 type ProSectionId =
   | "dashboard"
+  | "properties-home"
   | "setup-guide"
   | "rooms-units"
   | "rates-restrictions"
@@ -462,6 +463,7 @@ const PROPERTY_TAB_BY_SECTION = new Map<ProSectionId, PropertyCenterTabId>(
 
 const TOP_LEVEL_BY_SECTION = new Map<ProSectionId, ProTopLevelId>([
   ["dashboard", "dashboard"],
+  ["properties-home", "properties"],
   ["setup-guide", "properties"],
   ["rooms-units", "properties"],
   ["rates-restrictions", "properties"],
@@ -544,7 +546,7 @@ function isPropertyTabActive(tabId: PropertyCenterTabId, section: ProSectionId):
 
 function resolveTopLevelDefaultSection(target: ProTopLevelId, currentSection: ProSectionId): ProSectionId {
   if (target === "dashboard") return "dashboard";
-  if (target === "properties") return "property";
+  if (target === "properties") return "properties-home";
   if (target === "bookings") return "bookings";
   if (target === "calendar") return "inventory-calendar";
   if (target === "messages") return "messages-reviews";
@@ -1424,6 +1426,7 @@ export default function FamloProDashboardShell({
   const [propertyGallery, setPropertyGallery] = useState<PhotoItem[]>(propertyPhotos);
   const [propertyContentSaving, startPropertyContentSaving] = useTransition();
   const [isPropertySwitchPending, startPropertySwitchTransition] = useTransition();
+  const [isSidebarLogoBroken, setIsSidebarLogoBroken] = useState(false);
   const [propertyContentFeedback, setPropertyContentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
@@ -1435,6 +1438,7 @@ export default function FamloProDashboardShell({
   const activePropertyTabLinks = PROPERTY_TAB_SECTION_LINKS[activePropertyTab];
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
+  const simplePropertiesHref = `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=properties-home`;
 
   useEffect(() => {
     setPropertyContent(initialPropertyContent);
@@ -2839,7 +2843,16 @@ export default function FamloProDashboardShell({
       <aside className={styles.sidebar}>
         <div className={styles.brandBlock}>
           <div className={styles.brandLogoWrap}>
-            <img src="/famlo-pro-logo.png" alt="Famlo Pro" className={styles.brandLogoImage} />
+            {isSidebarLogoBroken ? (
+              <span className={styles.brandLogoFallback}>Famlo Pro</span>
+            ) : (
+              <img
+                src="/famlo-pro-logo.png"
+                alt="Famlo Pro"
+                className={styles.brandLogoImage}
+                onError={() => setIsSidebarLogoBroken(true)}
+              />
+            )}
           </div>
           <p className={styles.brandCopy}>
             Multi-property workspace for rooms, pricing, content, channels, and sync health. Existing provider logic
@@ -2857,7 +2870,13 @@ export default function FamloProDashboardShell({
                 key={item.id}
                 type="button"
                 className={`${styles.navButton} ${active ? styles.navButtonActive : ""}`}
-                onClick={() => setActiveSection(resolveTopLevelDefaultSection(item.id, activeSection))}
+                onClick={() => {
+                  if (item.id === "properties") {
+                    router.push(simplePropertiesHref);
+                    return;
+                  }
+                  setActiveSection(resolveTopLevelDefaultSection(item.id, activeSection));
+                }}
               >
                 <Icon className={styles.navIcon} />
                 <span className={styles.navText}>
@@ -3104,7 +3123,7 @@ export default function FamloProDashboardShell({
                 </div>
 
                 <Link
-                  href={`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=property`}
+                  href={simplePropertiesHref}
                   className={styles.roomControlBackLink}
                 >
                   Back to Properties
@@ -3490,7 +3509,7 @@ export default function FamloProDashboardShell({
             </>
           )}
 
-          {activeSection !== "dashboard" && (
+          {activeSection !== "dashboard" && activeSection !== "properties-home" && (
             <section className={styles.sectionIntro}>
               <div>
                 <div className={styles.sectionEyebrow}>{sectionDescriptor.eyebrow}</div>

@@ -32,6 +32,7 @@ export const dynamic = "force-dynamic";
 
 type ProSectionId =
   | "dashboard"
+  | "properties-home"
   | "setup-guide"
   | "rooms-units"
   | "rates-restrictions"
@@ -55,6 +56,7 @@ type ProSectionId =
 
 const PRO_SECTION_IDS = new Set([
   "dashboard",
+  "properties-home",
   "setup-guide",
   "rooms-units",
   "rates-restrictions",

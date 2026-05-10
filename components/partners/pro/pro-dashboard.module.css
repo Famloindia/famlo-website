@@ -32,13 +32,21 @@
 .brandLogoWrap {
   display: flex;
   align-items: center;
+  min-height: 44px;
 }
 
 .brandLogoImage {
   display: block;
-  width: 184px;
+  width: 188px;
   max-width: 100%;
   height: auto;
+}
+
+.brandLogoFallback {
+  font-size: 24px;
+  font-weight: 900;
+  color: white;
+  letter-spacing: -0.03em;
 }
 
 .brandEyebrow {
