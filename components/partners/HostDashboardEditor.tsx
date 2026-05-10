@@ -93,6 +93,10 @@ function normalizeDashboardTab(value: unknown): string {
   return ALLOWED_DASHBOARD_TABS.has(normalized) ? normalized : "dashboard";
 }
 
+function normalizeFamilyId(value: unknown): string {
+  return typeof value === "string" ? value.trim() : String(value ?? "").trim();
+}
+
 function getActiveRealtimeHostId(family: Record<string, unknown>): string | null {
   return typeof family.v2_host_id === "string" ? family.v2_host_id : null;
 }
@@ -314,12 +318,35 @@ export function HostDashboardEditor({
   proAccessByFamilyId = {},
 }: Readonly<HostDashboardEditorProps>): React.JSX.Element {
   const supabaseClient = useMemo(() => createBrowserSupabaseClient(), []);
+  const workspaceFamilies = useMemo(
+    () =>
+      allFamilies.filter((family): family is Record<string, unknown> => normalizeFamilyId(family.id).length > 0),
+    [allFamilies]
+  );
+  const initialFamilyId = useMemo(() => normalizeFamilyId(initialFamily.id), [initialFamily.id]);
+  const fallbackFamilyId = useMemo(
+    () => workspaceFamilies.map((family) => normalizeFamilyId(family.id)).find(Boolean) ?? initialFamilyId,
+    [initialFamilyId, workspaceFamilies]
+  );
+  const resolveAccessibleFamilyId = useCallback(
+    (candidate: unknown): string => {
+      const normalizedCandidate = normalizeFamilyId(candidate);
+      if (normalizedCandidate && workspaceFamilies.some((family) => normalizeFamilyId(family.id) === normalizedCandidate)) {
+        return normalizedCandidate;
+      }
+      return fallbackFamilyId;
+    },
+    [fallbackFamilyId, workspaceFamilies]
+  );
 
-  const [activeFamilyId, setActiveFamilyId] = useState(String(initialFamily.id));
+  const [activeFamilyId, setActiveFamilyId] = useState(() => resolveAccessibleFamilyId(initialFamily.id));
 
   const activeFamily = useMemo(
-    () => allFamilies.find((f) => String(f.id) === activeFamilyId) ?? initialFamily,
-    [allFamilies, activeFamilyId, initialFamily]
+    () =>
+      workspaceFamilies.find((family) => normalizeFamilyId(family.id) === activeFamilyId) ??
+      workspaceFamilies[0] ??
+      initialFamily,
+    [workspaceFamilies, activeFamilyId, initialFamily]
   );
 
   const meta = useMemo(
@@ -376,6 +403,13 @@ export function HostDashboardEditor({
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
+    const nextFamilyId = resolveAccessibleFamilyId(activeFamilyId || initialFamily.id);
+    if (nextFamilyId !== activeFamilyId) {
+      setActiveFamilyId(nextFamilyId);
+    }
+  }, [activeFamilyId, initialFamily.id, resolveAccessibleFamilyId]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const searchParams = new URLSearchParams(window.location.search);
     const tabFromUrl = searchParams.get("tab");
@@ -384,11 +418,23 @@ export function HostDashboardEditor({
 
   const syncDashboardUrl = useCallback((nextTab: string, nextFamilyId?: string) => {
     if (typeof window === "undefined") return;
+    const resolvedFamilyId = resolveAccessibleFamilyId(nextFamilyId ?? activeFamilyId);
+    if (!resolvedFamilyId) return;
     const url = new URL(window.location.href);
     url.searchParams.set("tab", normalizeDashboardTab(nextTab));
-    url.searchParams.set("family", nextFamilyId ?? activeFamilyId);
+    url.searchParams.set("family", resolvedFamilyId);
     window.history.replaceState({}, "", url.toString());
-  }, [activeFamilyId]);
+  }, [activeFamilyId, resolveAccessibleFamilyId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !activeFamilyId) return;
+    const url = new URL(window.location.href);
+    const urlFamilyId = normalizeFamilyId(url.searchParams.get("family"));
+    const urlTab = normalizeDashboardTab(url.searchParams.get("tab") || initialTab);
+    if (urlFamilyId !== activeFamilyId || urlTab !== activeTab) {
+      syncDashboardUrl(activeTab, activeFamilyId);
+    }
+  }, [activeFamilyId, activeTab, initialTab, syncDashboardUrl]);
 
   const needsDetailedBookingRows = useMemo(
     () => new Set(["bookings", "calendar", "earnings"]).has(activeTab),
@@ -686,13 +732,15 @@ export function HostDashboardEditor({
   };
 
   const handleListingSwitch = (nextId: string) => {
-    setActiveFamilyId(nextId);
+    const resolvedFamilyId = resolveAccessibleFamilyId(nextId);
+    if (!resolvedFamilyId) return;
+    setActiveFamilyId(resolvedFamilyId);
     setLocalBookingRows([]);
     setBookingRowsRequestedForFamilyId(null);
     setBookingSummary(null);
     setBookingLoadError(null);
-    document.cookie = `famlo_host_family_id=${nextId}; path=/; max-age=${60 * 60 * 24 * 30}`;
-    syncDashboardUrl(activeTab, nextId);
+    document.cookie = `famlo_host_family_id=${resolvedFamilyId}; path=/; max-age=${60 * 60 * 24 * 30}`;
+    syncDashboardUrl(activeTab, resolvedFamilyId);
   };
 
   return (
@@ -707,8 +755,8 @@ export function HostDashboardEditor({
               value={activeFamilyId}
               onChange={(e) => handleListingSwitch(e.target.value)}
             >
-              {allFamilies.map((f: any) => (
-                <option key={String(f.id)} value={String(f.id)}>
+              {workspaceFamilies.map((f: any) => (
+                <option key={normalizeFamilyId(f.id)} value={normalizeFamilyId(f.id)}>
                   {f.property_name || f.name || `Listing ${f.id}`}
                 </option>
               ))}
@@ -727,7 +775,7 @@ export function HostDashboardEditor({
             { id: "profile",    label: "Profile",       icon: <UserCircle2 size={20} /> },
             { id: "compliance", label: "Documents",     icon: <ShieldCheck size={20} /> },
             ...(famloPlusEnabled
-              ? [{ id: "famlo-plus", label: "Famlo+", icon: <Sparkles size={20} /> }]
+              ? [{ id: "famlo-plus", label: "Famlo Pro", icon: <Sparkles size={20} /> }]
               : []),
             { id: "support",    label: "Contact Famlo", icon: <MessagesSquare size={20} /> },
           ].map((tab) => (
@@ -753,7 +801,7 @@ export function HostDashboardEditor({
                 : activeTab === "rooms"
                   ? "Rooms"
                   : activeTab === "famlo-plus"
-                    ? "Famlo+"
+                    ? "Famlo Pro"
                     : activeTab}
             </h1>
           </div>

@@ -17,6 +17,12 @@ interface HostDashboardPageProps {
 
 export const dynamic = "force-dynamic";
 
+function normalizeFamilyId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function isSchemaCompatibilityError(message: string): boolean {
   const lower = message.toLowerCase();
   return lower.includes("column") || lower.includes("schema cache") || lower.includes("does not exist") || lower.includes("relation");
@@ -101,7 +107,9 @@ export default async function HostDashboardPage({
     userId: hostUserId ?? primaryFamilyUserId,
     hostCode: typeof hostCode === "string" ? hostCode : null,
   });
-  const familyIds = familyRowsBase.map(f => String(f.id));
+  const familyIds = familyRowsBase
+    .map((family) => normalizeFamilyId(family.id))
+    .filter((value): value is string => Boolean(value));
   const { data: latestDraftRows } =
     familyIds.length > 0
       ? await supabase
@@ -159,23 +167,31 @@ export default async function HostDashboardPage({
       })
       .filter((entry): entry is [string, string] => Boolean(entry))
   );
-  const familyRows: Array<Record<string, unknown> & { v2_host_id: string | null }> = familyRowsBase.map((family) => ({
-    ...family,
-    booking_requires_host_approval:
-      typeof hostRowByFamilyId.get(String(family.id))?.booking_requires_host_approval === "boolean"
-        ? hostRowByFamilyId.get(String(family.id))?.booking_requires_host_approval
-        : typeof family.booking_requires_host_approval === "boolean"
-          ? family.booking_requires_host_approval
-          : undefined,
-    is_accepting:
-      typeof hostRowByFamilyId.get(String(family.id))?.is_accepting === "boolean"
-        ? hostRowByFamilyId.get(String(family.id))?.is_accepting
-        : typeof family.is_accepting === "boolean"
-          ? family.is_accepting
-          : true,
-    latest_onboarding_payload: latestDraftByFamilyId.get(String(family.id)) ?? null,
-    v2_host_id: hostIdByFamilyId.get(String(family.id)) ?? null,
-  }));
+  const familyRows = familyRowsBase
+    .map((family): (Record<string, unknown> & { v2_host_id: string | null }) | null => {
+      const normalizedId = normalizeFamilyId(family.id);
+      if (!normalizedId) return null;
+
+      return {
+        ...family,
+        id: normalizedId,
+        booking_requires_host_approval:
+          typeof hostRowByFamilyId.get(normalizedId)?.booking_requires_host_approval === "boolean"
+            ? hostRowByFamilyId.get(normalizedId)?.booking_requires_host_approval
+            : typeof family.booking_requires_host_approval === "boolean"
+              ? family.booking_requires_host_approval
+              : undefined,
+        is_accepting:
+          typeof hostRowByFamilyId.get(normalizedId)?.is_accepting === "boolean"
+            ? hostRowByFamilyId.get(normalizedId)?.is_accepting
+            : typeof family.is_accepting === "boolean"
+              ? family.is_accepting
+              : true,
+        latest_onboarding_payload: latestDraftByFamilyId.get(normalizedId) ?? null,
+        v2_host_id: hostIdByFamilyId.get(normalizedId) ?? null,
+      };
+    })
+    .filter((family): family is Record<string, unknown> & { v2_host_id: string | null } => family !== null);
   const { data: photoRows } =
     familyIds.length > 0
       ? await supabase
@@ -188,8 +204,9 @@ export default async function HostDashboardPage({
   const proAccessByFamilyId = await loadHostProAccessMap(supabase, familyIds);
   const enrichedBookingRows: Array<Record<string, unknown>> = [];
 
+  const requestedFamilyId = normalizeFamilyId(familyId);
   const currentFamily: (Record<string, unknown> & { v2_host_id: string | null }) | undefined =
-    familyRows.find((f) => String(f.id) === familyId) || familyRows[0];
+    familyRows.find((f) => normalizeFamilyId(f.id) === requestedFamilyId) || familyRows[0];
 
   return (
     <main style={{ width: "100%", minHeight: "100vh" }}>
