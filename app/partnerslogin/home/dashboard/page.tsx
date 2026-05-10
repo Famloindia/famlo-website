@@ -32,6 +32,41 @@ export default async function HostDashboardPage({
   const initialTab = params?.tab ?? "dashboard";
   const supabase = createAdminSupabaseClient();
 
+  async function loadFamiliesForWorkspace(params: {
+    userId: string | null;
+    hostCode: string | null;
+  }): Promise<Array<Record<string, unknown>>> {
+    const normalizedUserId = typeof params.userId === "string" && params.userId.trim().length > 0
+      ? params.userId.trim()
+      : null;
+    const normalizedHostCode = typeof params.hostCode === "string" && params.hostCode.trim().length > 0
+      ? params.hostCode.trim()
+      : null;
+
+    if (normalizedUserId) {
+      const { data: byUserId, error: byUserIdError } = await supabase
+        .from("families")
+        .select("*")
+        .eq("user_id", normalizedUserId)
+        .order("updated_at", { ascending: false });
+
+      if (!byUserIdError && Array.isArray(byUserId) && byUserId.length > 0) {
+        return byUserId as Array<Record<string, unknown>>;
+      }
+    }
+
+    if (normalizedHostCode) {
+      const { data: byHostCode } = await supabase
+        .from("families")
+        .select("*")
+        .ilike("host_id", normalizedHostCode);
+
+      return (byHostCode ?? []) as Array<Record<string, unknown>>;
+    }
+
+    return [];
+  }
+
   // First, find the primary family to identify the Host (Partner Code)
   // FALLBACK: If cookie/family param is missing, we try the ?hostCode= parameter
   const { data: primaryFamily } = familyId
@@ -41,10 +76,14 @@ export default async function HostDashboardPage({
       : { data: null };
 
   const hostCode = primaryFamily?.host_id;
+  const primaryFamilyUserId =
+    typeof primaryFamily?.user_id === "string" && primaryFamily.user_id.trim().length > 0
+      ? primaryFamily.user_id
+      : null;
 
   // IMPORTANT FIX: Get the real User UUID for this host to fix the messaging identity mismatch
-  const { data: hostUser } = primaryFamily?.user_id
-    ? await supabase.from("users").select("id").eq("id", primaryFamily.user_id).maybeSingle()
+  const { data: hostUser } = primaryFamilyUserId
+    ? await supabase.from("users").select("id").eq("id", primaryFamilyUserId).maybeSingle()
     : { data: null };
   const hostUserId = hostUser?.id;
 
@@ -55,12 +94,13 @@ export default async function HostDashboardPage({
     .maybeSingle();
   const globalCommission = platformSettings?.global_family_commission_pct ?? 18;
 
-  // MASTER SYNC: Fetch ALL families by Partner Code (Case-Insensitive)
-  const { data: allFamilies } = hostCode
-    ? await supabase.from("families").select("*").ilike("host_id", hostCode)
-    : { data: [] };
-
-  const familyRowsBase = (allFamilies ?? []) as Array<Record<string, unknown>>;
+  // MASTER SYNC: Fetch ALL families for the same host workspace.
+  // Prefer the shared owner user_id so one host can manage multiple properties.
+  // Fall back to legacy partner-code grouping only when user linkage is missing.
+  const familyRowsBase = await loadFamiliesForWorkspace({
+    userId: hostUserId ?? primaryFamilyUserId,
+    hostCode: typeof hostCode === "string" ? hostCode : null,
+  });
   const familyIds = familyRowsBase.map(f => String(f.id));
   const { data: latestDraftRows } =
     familyIds.length > 0
