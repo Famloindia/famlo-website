@@ -28,6 +28,7 @@ import {
   Settings2,
   ShieldAlert,
   Sparkles,
+  UserRound,
   WalletCards,
   X,
 } from "lucide-react";
@@ -52,6 +53,7 @@ import styles from "./pro-dashboard.module.css";
 
 type ProSectionId =
   | "dashboard"
+  | "host-profile"
   | "properties-home"
   | "setup-guide"
   | "rooms-units"
@@ -322,6 +324,17 @@ type PropertySwitcherOption = {
   locality: string | null;
   famloPlusStatus: string | null;
   isActive: boolean;
+  activeRoomCount: number;
+};
+
+type HostProfileSummary = {
+  hostName: string;
+  accountLabel: string | null;
+  email: string | null;
+  phone: string | null;
+  photoUrl: string | null;
+  sharedIdentityNote: string;
+  selectedPropertyName: string;
 };
 
 type PropertyContentDraft = {
@@ -347,6 +360,7 @@ type PropertyContentDraft = {
 interface FamloProDashboardShellProps {
   familyId: string;
   hostUserId: string | null;
+  hostProfile: HostProfileSummary;
   roomRouteState?: {
     mode: "edit" | "create";
     roomId?: string;
@@ -410,6 +424,7 @@ type PropertyTabItem = {
 
 type ProTopLevelId =
   | "dashboard"
+  | "host-profile"
   | "properties"
   | "bookings"
   | "calendar"
@@ -430,6 +445,7 @@ type PropertyCenterTabId =
 
 const TOP_LEVEL_NAV_ITEMS: NavItem[] = [
   { id: "dashboard", title: "Dashboard", hint: "Action center", icon: Activity },
+  { id: "host-profile", title: "Host Profile", hint: "Shared host identity", icon: UserRound },
   { id: "properties", title: "Properties", hint: "Rooms, channels, and content", icon: Building2 },
   { id: "bookings", title: "Bookings", hint: "Reservations and OTA flow", icon: BookCheck },
   { id: "calendar", title: "Calendar", hint: "Availability and stays", icon: CalendarDays },
@@ -463,6 +479,7 @@ const PROPERTY_TAB_BY_SECTION = new Map<ProSectionId, PropertyCenterTabId>(
 
 const TOP_LEVEL_BY_SECTION = new Map<ProSectionId, ProTopLevelId>([
   ["dashboard", "dashboard"],
+  ["host-profile", "host-profile"],
   ["properties-home", "properties"],
   ["setup-guide", "properties"],
   ["rooms-units", "properties"],
@@ -546,6 +563,7 @@ function isPropertyTabActive(tabId: PropertyCenterTabId, section: ProSectionId):
 
 function resolveTopLevelDefaultSection(target: ProTopLevelId, currentSection: ProSectionId): ProSectionId {
   if (target === "dashboard") return "dashboard";
+  if (target === "host-profile") return "host-profile";
   if (target === "properties") return "properties-home";
   if (target === "bookings") return "bookings";
   if (target === "calendar") return "inventory-calendar";
@@ -1332,6 +1350,15 @@ function buildSectionDescriptor(
     };
   }
 
+  if (section === "host-profile") {
+    return {
+      eyebrow: "Workspace",
+      title: "Host Profile",
+      copy: "Shared host identity for the Famlo Pro workspace across all properties owned by this host.",
+      status: "View only",
+    };
+  }
+
   if (section === "property") {
     return {
       eyebrow: "Property Center",
@@ -1388,6 +1415,7 @@ function buildSectionDescriptor(
 export default function FamloProDashboardShell({
   familyId,
   hostUserId,
+  hostProfile,
   roomRouteState = null,
   propertyOptions,
   propertyName,
@@ -1441,6 +1469,9 @@ export default function FamloProDashboardShell({
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
   const simplePropertiesHref = `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=properties-home`;
+  const hostWorkspacePropertyCount = propertyOptions.length;
+  const hostProfilePhotoUrl = hostProfile.photoUrl;
+  const sharedHostContactLabel = hostProfile.email ?? hostProfile.phone ?? "Saved in the current host account";
 
   const switchPropertyContext = (nextFamilyId: string, options?: { section?: ProSectionId }): void => {
     const normalizedFamilyId = nextFamilyId.trim();
@@ -5624,6 +5655,127 @@ export default function FamloProDashboardShell({
             </section>
           )}
 
+          {activeSection === "host-profile" && (
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h3 className={styles.cardTitle}>Host Profile</h3>
+                  <p className={styles.cardCopy}>
+                    This is the shared host identity for this Famlo Pro workspace. Each property can still have its own story, vibe, photos, rooms, pricing, and channels.
+                  </p>
+                </div>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>View only</span>
+              </div>
+              <div className={styles.cardBody}>
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Shared host identity</div>
+                    <div className={styles.heroMeta}>
+                      {hostProfilePhotoUrl ? (
+                        <div className={styles.heroMetaItem}>
+                          <span className={styles.heroMetaLabel}>Host photo</span>
+                          <img src={hostProfilePhotoUrl} alt={hostProfile.hostName} style={{ width: 72, height: 72, borderRadius: 18, objectFit: "cover", marginTop: 8 }} />
+                        </div>
+                      ) : null}
+                      <div className={styles.heroMetaItem}>
+                        <span className={styles.heroMetaLabel}>Host name</span>
+                        <span className={styles.heroMetaValue}>{hostProfile.hostName}</span>
+                      </div>
+                      <div className={styles.heroMetaItem}>
+                        <span className={styles.heroMetaLabel}>Host account</span>
+                        <span className={styles.heroMetaValue}>{hostProfile.accountLabel ?? "Same Famlo host workspace"}</span>
+                      </div>
+                      <div className={styles.heroMetaItem}>
+                        <span className={styles.heroMetaLabel}>Contact</span>
+                        <span className={styles.heroMetaValue}>{sharedHostContactLabel}</span>
+                      </div>
+                      <div className={styles.heroMetaItem}>
+                        <span className={styles.heroMetaLabel}>Properties owned</span>
+                        <span className={styles.heroMetaValue}>{hostWorkspacePropertyCount}</span>
+                      </div>
+                      <div className={styles.heroMetaItem}>
+                        <span className={styles.heroMetaLabel}>Selected property</span>
+                        <span className={styles.heroMetaValue}>{hostProfile.selectedPropertyName}</span>
+                      </div>
+                    </div>
+                    <div className={styles.feedCopy} style={{ marginTop: 16 }}>
+                      {hostProfile.sharedIdentityNote} Edit shared host profile coming soon.
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Shared identity note</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>One host, multiple properties</div>
+                        <div className={styles.feedCopy}>
+                          The same host account can own multiple properties inside one Famlo Pro workspace, while each property keeps its own local story, gallery, rooms, pricing, and channels.
+                        </div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Property-specific presence stays separate</div>
+                        <div className={styles.feedCopy}>
+                          Use each property’s Content &amp; Photos area to shape that property’s vibe and presentation without changing the shared host identity above.
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
+                <div className={styles.listCard}>
+                  <div className={styles.listTitle}>Properties in this host workspace</div>
+                  <div className={styles.feedCopy} style={{ marginBottom: 12 }}>
+                    Open any property below to manage its rooms, content, pricing, and channels in the same Famlo Pro workspace.
+                  </div>
+                  <div className={styles.mappingTable}>
+                    <div className={styles.mappingHeader}>Property</div>
+                    <div className={styles.mappingHeader}>Location</div>
+                    <div className={styles.mappingHeader}>Status</div>
+                    <div className={styles.mappingHeader}>Active rooms</div>
+                    <div className={styles.mappingHeader}>Famlo Pro</div>
+                    <div className={styles.mappingHeader}>Action</div>
+                    {propertyOptions.map((option) => {
+                      const optionLocation = [option.locality, option.city, option.state, option.country].filter(Boolean).join(", ") || "Location pending";
+                      const isSelected = option.familyId === familyId;
+                      return (
+                        <Fragment key={`host-profile-${option.familyId}`}>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{option.name}</div>
+                            <div className={styles.mappingSubcopy}>{isSelected ? "Currently selected" : "Same host workspace"}</div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{optionLocation}</div>
+                            <div className={styles.mappingSubcopy}>{isSelected ? "Selected property" : "Property context"}</div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{option.isActive ? "Active" : "Inactive"}</div>
+                            <div className={styles.mappingSubcopy}>{option.isActive ? "Visible in workspace" : "Needs activation review"}</div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{option.activeRoomCount}</div>
+                            <div className={styles.mappingSubcopy}>Active room{option.activeRoomCount === 1 ? "" : "s"}</div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{formatPropertySwitcherStatusLabel(option.famloPlusStatus)}</div>
+                            <div className={styles.mappingSubcopy}>{isSelected ? "Current Pro context" : "Shared Pro workspace"}</div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <Link
+                              href={`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(option.familyId)}&section=properties-home`}
+                              className={isSelected ? styles.secondaryActionLink : styles.primaryActionLink}
+                            >
+                              {isSelected ? "Current property" : "Open in Pro"}
+                            </Link>
+                          </div>
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
           {activeSection === "revenue" && (
             <section className={styles.card}>
               <div className={styles.cardHeader}>
@@ -5892,7 +6044,7 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Content & Photos</h3>
                   <p className={styles.cardCopy}>
-                    This content shapes how this property appears on Famlo and prepares it for OTA channels.
+                    Property story and host presence for this property. This can be different from the shared Host Profile.
                   </p>
                 </div>
                 <span className={`${styles.badge} ${styles.badgeMuted}`}>No provider sync yet</span>
@@ -5947,7 +6099,7 @@ export default function FamloProDashboardShell({
                 <section className={styles.cardInset}>
                   <div className={styles.listTitle}>Content &amp; Photos for this property</div>
                   <div className={styles.feedCopy} style={{ marginBottom: "16px" }}>
-                    Use this to shape how this property appears on Famlo. For multi-property hosts, each property can have its own story, vibe, and gallery.
+                    Use this to shape how this property appears on Famlo. For multi-property hosts, each property can have its own story, vibe, gallery, and host presence without changing the shared Host Profile.
                   </div>
 
                   {familyId ? (

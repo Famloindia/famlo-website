@@ -34,6 +34,7 @@ export const dynamic = "force-dynamic";
 
 type ProSectionId =
   | "dashboard"
+  | "host-profile"
   | "properties-home"
   | "setup-guide"
   | "rooms-units"
@@ -58,6 +59,7 @@ type ProSectionId =
 
 const PRO_SECTION_IDS = new Set([
   "dashboard",
+  "host-profile",
   "properties-home",
   "setup-guide",
   "rooms-units",
@@ -307,6 +309,17 @@ type PropertySwitcherOption = {
   locality: string | null;
   famloPlusStatus: string | null;
   isActive: boolean;
+  activeRoomCount: number;
+};
+
+type HostProfileSummary = {
+  hostName: string;
+  accountLabel: string | null;
+  email: string | null;
+  phone: string | null;
+  photoUrl: string | null;
+  sharedIdentityNote: string;
+  selectedPropertyName: string;
 };
 
 function formatCalendarDayLabel(date: string): string {
@@ -371,6 +384,19 @@ export default async function FamloProDashboardPage({
       : [];
   const workspaceAccessMap = await loadHostProAccessMap(supabase, workspaceFamilyIds);
   const proAccessibleFamilyIds = workspaceFamilyIds.filter((id) => workspaceAccessMap[id]?.allowed);
+  const { data: workspaceRoomRows } =
+    workspaceFamilyIds.length > 0
+      ? await supabase
+          .from("stay_units_v2")
+          .select("legacy_family_id,is_active")
+          .in("legacy_family_id", workspaceFamilyIds)
+      : { data: [] };
+  const activeRoomCountByFamilyId = new Map<string, number>();
+  for (const row of (workspaceRoomRows ?? []) as Array<Record<string, unknown>>) {
+    const nextFamilyId = asString(row.legacy_family_id);
+    if (!nextFamilyId || row.is_active === false) continue;
+    activeRoomCountByFamilyId.set(nextFamilyId, (activeRoomCountByFamilyId.get(nextFamilyId) ?? 0) + 1);
+  }
   const validRequestedFamilyId =
     requestedFamilyId && workspaceFamilyIds.includes(requestedFamilyId) ? requestedFamilyId : "";
   const fallbackFamilyId =
@@ -556,6 +582,7 @@ export default async function FamloProDashboardPage({
             asString(meta.neighborhoodDesc),
           famloPlusStatus: accessMap[id]?.status ?? null,
           isActive: row.is_active !== false,
+          activeRoomCount: activeRoomCountByFamilyId.get(id) ?? 0,
         } satisfies PropertySwitcherOption;
       })
       .sort((left, right) => {
@@ -584,6 +611,7 @@ export default async function FamloProDashboardPage({
           asString(currentMeta.neighborhoodDesc),
         famloPlusStatus: access.status,
         isActive: family?.is_active !== false,
+        activeRoomCount: activeRoomCountByFamilyId.get(familyId) ?? 0,
       },
       ...propertyOptions,
     ];
@@ -603,6 +631,15 @@ export default async function FamloProDashboardPage({
   const locationLabel =
     [propertyLocalityLabel, resolvedPropertyCity, resolvedPropertyState, resolvedPropertyCountry].filter(Boolean).join(", ") ||
     "Location pending";
+  const hostProfile: HostProfileSummary = {
+    hostName: asString(host?.display_name) ?? propertyName,
+    accountLabel: hostCode ?? effectiveHostUserId ?? null,
+    email: authUser?.email ?? null,
+    phone: authUser?.phone ?? null,
+    photoUrl: null,
+    sharedIdentityNote: "This is the shared host identity for this Famlo Pro workspace.",
+    selectedPropertyName: propertyName,
+  };
   const channelFoundation = await loadHostProChannelFoundation(supabase, familyId);
   const channexConfig = getChannexConfigSummary();
   const proSettings = {
@@ -1203,6 +1240,7 @@ export default async function FamloProDashboardPage({
     <FamloProDashboardShell
       roomRouteState={roomRouteState}
       hostUserId={hostSession?.hostUserId ?? null}
+      hostProfile={hostProfile}
       propertyName={propertyName}
       propertyLocalityLabel={propertyLocalityLabel}
       propertyHomeLat={typeof family?.lat === "number" ? family.lat : null}
