@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import type { CSSProperties } from "react";
 import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
 
@@ -128,6 +129,10 @@ async function canCurrentHostAccessFamily(
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeFamilyId(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function joinList(values: unknown): string {
@@ -324,11 +329,41 @@ export default async function FamloProDashboardPage({
 }: Readonly<FamloProDashboardPageProps>): Promise<React.JSX.Element> {
   const params = await searchParams;
   const cookieStore = await cookies();
-  const familyId = params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "";
+  const requestedFamilyId = normalizeFamilyId(params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "");
   const initialSection = resolveInitialSection(params?.section);
   const requestedCalendarStart = isIsoDate(params?.calendarStart) ? params?.calendarStart : null;
+  const supabase = createAdminSupabaseClient();
+  const hostSession = await resolveAuthorizedHostSession(supabase);
+  const workspaceFamilyIds =
+    hostSession?.hostUserId
+      ? (
+          await supabase
+            .from("families")
+            .select("id")
+            .eq("user_id", hostSession.hostUserId)
+            .order("updated_at", { ascending: false })
+        ).data?.map((row) => normalizeFamilyId(row.id)).filter(Boolean) ?? []
+      : [];
+  const fallbackFamilyId =
+    (hostSession?.familyId && workspaceFamilyIds.includes(hostSession.familyId) ? hostSession.familyId : "") ||
+    workspaceFamilyIds[0] ||
+    requestedFamilyId;
+  const familyId =
+    requestedFamilyId && workspaceFamilyIds.includes(requestedFamilyId)
+      ? requestedFamilyId
+      : fallbackFamilyId;
   const basicDashboardUrl = buildBasicFamloPlusUrl(familyId);
   const basicRoomUrl = buildBasicRoomUrl(familyId);
+
+  if (familyId && familyId !== requestedFamilyId) {
+    const nextParams = new URLSearchParams();
+    nextParams.set("family", familyId);
+    nextParams.set("section", initialSection);
+    if (requestedCalendarStart) {
+      nextParams.set("calendarStart", requestedCalendarStart);
+    }
+    redirect(`/partnerslogin/home/pro/dashboard?${nextParams.toString()}`);
+  }
 
   if (!familyId) {
     return (
@@ -364,7 +399,6 @@ export default async function FamloProDashboardPage({
     );
   }
 
-  const supabase = createAdminSupabaseClient();
   const access = await loadHostProAccess(supabase, familyId);
 
   if (!famloProEnabled || !access.allowed) {
@@ -401,7 +435,6 @@ export default async function FamloProDashboardPage({
       .maybeSingle(),
   ]);
 
-  const hostSession = await resolveAuthorizedHostSession(supabase);
   const meta = parseHostListingMeta(asString(family?.admin_notes));
   const storedProSettings = await loadHostProSettings(supabase, familyId);
   const propertyLocalityLabel =

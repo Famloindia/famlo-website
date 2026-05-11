@@ -1427,6 +1427,7 @@ export default function FamloProDashboardShell({
   const [propertyContentSaving, startPropertyContentSaving] = useTransition();
   const [isPropertySwitchPending, startPropertySwitchTransition] = useTransition();
   const [isSidebarLogoBroken, setIsSidebarLogoBroken] = useState(false);
+  const [pendingPropertyLabel, setPendingPropertyLabel] = useState<string | null>(null);
   const [propertyContentFeedback, setPropertyContentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
@@ -1436,9 +1437,24 @@ export default function FamloProDashboardShell({
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
   const activePropertyTabLinks = PROPERTY_TAB_SECTION_LINKS[activePropertyTab];
+  const isPropertiesHomeView = activeSection === "properties-home" && !roomRouteState;
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
   const simplePropertiesHref = `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=properties-home`;
+
+  const switchPropertyContext = (nextFamilyId: string, options?: { section?: ProSectionId }): void => {
+    const normalizedFamilyId = nextFamilyId.trim();
+    if (!normalizedFamilyId || normalizedFamilyId === familyId) return;
+    const nextOption = propertyOptions.find((option) => option.familyId === normalizedFamilyId) ?? null;
+    setPendingPropertyLabel(nextOption?.name ?? "Selected property");
+    startPropertySwitchTransition(() => {
+      router.push(
+        `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(normalizedFamilyId)}&section=${encodeURIComponent(
+          options?.section ?? "properties-home"
+        )}`
+      );
+    });
+  };
 
   useEffect(() => {
     setPropertyContent(initialPropertyContent);
@@ -1455,6 +1471,7 @@ export default function FamloProDashboardShell({
       if (current && rooms.some((room) => room.id === current)) return current;
       return rooms[0]?.id ?? null;
     });
+    setPendingPropertyLabel(null);
   }, [familyId, initialPropertyContent, propertyPhotos, roomRouteState, rooms]);
 
   const handleSavePropertyContent = async (options: {
@@ -2929,9 +2946,11 @@ export default function FamloProDashboardShell({
           </div>
         </header>
 
-        <div className={styles.content}>
+        <div className={`${styles.content} ${isPropertiesHomeView ? styles.propertiesHomeContent : ""}`}>
           {activeTopLevel === "properties" && !roomRouteState && (
-            <section className={styles.propertyCenterShell}>
+            <section
+              className={`${styles.propertyCenterShell} ${isPropertiesHomeView ? styles.propertyCenterShellLuxury : ""}`}
+            >
               <div className={styles.propertyCenterHeader}>
                 <div>
                   <div className={styles.sectionEyebrow}>Famlo Pro</div>
@@ -2949,9 +2968,9 @@ export default function FamloProDashboardShell({
               </div>
 
               <div className={styles.propertySelectorBar}>
-                <div className={styles.propertySelectorHeadline}>SELECT PROPERTY</div>
+                <div className={styles.propertySelectorHeadline}>Select Property</div>
                 <div className={styles.propertySelectorControls}>
-                  <Link href="/partners/home" className={styles.addPropertyControlLink}>
+                  <Link href="/partnerslogin/home/pro/properties/new" className={styles.addPropertyControlLink}>
                     <span className={styles.addPropertyIconWrap}>
                       <Plus size={18} />
                     </span>
@@ -2964,13 +2983,7 @@ export default function FamloProDashboardShell({
                       className={styles.propertySelectorSelect}
                       value={familyId}
                       onChange={(event) => {
-                        const nextFamilyId = event.target.value;
-                        if (!nextFamilyId || nextFamilyId === familyId) return;
-                        startPropertySwitchTransition(() => {
-                          router.push(
-                            `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(nextFamilyId)}&section=${encodeURIComponent(activeSection)}`
-                          );
-                        });
+                        switchPropertyContext(event.target.value, { section: "properties-home" });
                       }}
                       disabled={propertyOptions.length <= 1 || isPropertySwitchPending}
                     >
@@ -2991,12 +3004,11 @@ export default function FamloProDashboardShell({
               </div>
 
               <div className={styles.propertySelectorMetaRow}>
-                <span className={styles.propertySelectorMetaPill}>{selectedPropertyDisplayLabel}</span>
-                <span className={styles.propertySelectorMetaPill}>
-                  Property story and host presence can be different for each property.
-                </span>
-                <span className={styles.propertySelectorMetaPill}>Account and legal identity stay separate.</span>
-                {isPropertySwitchPending ? <span className={styles.propertySelectorMetaPill}>Switching property…</span> : null}
+                {isPropertySwitchPending ? (
+                  <span className={styles.propertySelectorMetaPill}>
+                    Opening {pendingPropertyLabel ?? "selected property"}…
+                  </span>
+                ) : null}
               </div>
 
               <div className={styles.propertiesRoomShowcaseGrid}>
@@ -3051,7 +3063,7 @@ export default function FamloProDashboardShell({
                           <span className={styles.readinessPill}>{item.providerMappingLabel}</span>
                           {item.room.isPrimary ? <span className={styles.readinessPill}>Primary room</span> : null}
                         </div>
-                        <span className={styles.propertyRoomManageLabel}>Edit Room</span>
+
                       </div>
                     </div>
                   </Link>
@@ -6193,7 +6205,6 @@ export default function FamloProDashboardShell({
 function PropertySwitcherControl({
   propertyOptions,
   currentFamilyId,
-  activeSection,
 }: Readonly<{
   propertyOptions: PropertySwitcherOption[];
   currentFamilyId: string;
@@ -6206,7 +6217,7 @@ function PropertySwitcherControl({
     if (!nextFamilyId || nextFamilyId === currentFamilyId) return;
     startTransition(() => {
       router.push(
-        `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(nextFamilyId)}&section=${encodeURIComponent(activeSection)}`
+        `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(nextFamilyId)}&section=properties-home`
       );
     });
   };
