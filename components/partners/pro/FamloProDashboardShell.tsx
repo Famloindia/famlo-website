@@ -5661,45 +5661,59 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Host Profile</h3>
                   <p className={styles.cardCopy}>
-                    This is the shared host identity for this Famlo Pro workspace. Each property can still have its own story, vibe, photos, rooms, pricing, and channels.
+                    This is the shared host identity used across your Famlo Pro workspace. Each property can still customize its local story, vibe, photos, and host presence.
                   </p>
                 </div>
-                <span className={`${styles.badge} ${styles.badgeMuted}`}>View only</span>
+                <span className={`${styles.badge} ${styles.badgeMuted}`}>Shared host identity</span>
               </div>
               <div className={styles.cardBody}>
                 <div className={styles.listGrid}>
-                  <article className={styles.listCard}>
+                  <article className={`${styles.listCard} ${styles.hostProfileIdentityCard}`}>
                     <div className={styles.listTitle}>Shared host identity</div>
-                    <div className={styles.heroMeta}>
+                    <div className={styles.hostProfileMetaGrid}>
                       {hostProfilePhotoUrl ? (
-                        <div className={styles.heroMetaItem}>
-                          <span className={styles.heroMetaLabel}>Host photo</span>
+                        <div className={styles.hostProfileMetaItem}>
+                          <span className={styles.hostProfileMetaLabel}>Host photo</span>
                           <img src={hostProfilePhotoUrl} alt={hostProfile.hostName} style={{ width: 72, height: 72, borderRadius: 18, objectFit: "cover", marginTop: 8 }} />
                         </div>
                       ) : null}
-                      <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Host name</span>
-                        <span className={styles.heroMetaValue}>{hostProfile.hostName}</span>
+                      <div className={styles.hostProfileMetaItem}>
+                        <span className={styles.hostProfileMetaLabel}>Host name</span>
+                        <span className={styles.hostProfileMetaValue}>{hostProfile.hostName}</span>
                       </div>
-                      <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Host account</span>
-                        <span className={styles.heroMetaValue}>{hostProfile.accountLabel ?? "Same Famlo host workspace"}</span>
+                      <div className={styles.hostProfileMetaItem}>
+                        <span className={styles.hostProfileMetaLabel}>Host account</span>
+                        <span className={styles.hostProfileMetaValue}>{hostProfile.accountLabel ?? "Same Famlo host workspace"}</span>
                       </div>
-                      <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Contact</span>
-                        <span className={styles.heroMetaValue}>{sharedHostContactLabel}</span>
+                      <div className={styles.hostProfileMetaItem}>
+                        <span className={styles.hostProfileMetaLabel}>Contact</span>
+                        <span className={styles.hostProfileMetaValue}>{sharedHostContactLabel}</span>
                       </div>
-                      <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Properties owned</span>
-                        <span className={styles.heroMetaValue}>{hostWorkspacePropertyCount}</span>
+                      <div className={styles.hostProfileMetaItem}>
+                        <span className={styles.hostProfileMetaLabel}>Properties owned</span>
+                        <span className={styles.hostProfileMetaValue}>{hostWorkspacePropertyCount}</span>
                       </div>
-                      <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Selected property</span>
-                        <span className={styles.heroMetaValue}>{hostProfile.selectedPropertyName}</span>
+                      <div className={styles.hostProfileMetaItem}>
+                        <span className={styles.hostProfileMetaLabel}>Selected property</span>
+                        <span className={styles.hostProfileMetaValue}>{hostProfile.selectedPropertyName}</span>
                       </div>
                     </div>
                     <div className={styles.feedCopy} style={{ marginTop: 16 }}>
-                      {hostProfile.sharedIdentityNote} Edit shared host profile coming soon.
+                      {hostProfile.sharedIdentityNote} New properties should start with this host identity as the default.
+                    </div>
+                    <div className={styles.inlineActionRow}>
+                      <Link
+                        href={`/partnerslogin/home/dashboard?tab=profile&family=${encodeURIComponent(familyId)}`}
+                        className={styles.primaryActionLink}
+                      >
+                        Edit Shared Host Profile
+                      </Link>
+                      <Link
+                        href={`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=ota-content`}
+                        className={styles.secondaryActionLink}
+                      >
+                        Edit This Property’s Host Presence
+                      </Link>
                     </div>
                   </article>
 
@@ -5733,7 +5747,7 @@ export default function FamloProDashboardShell({
                     <div className={styles.mappingHeader}>Status</div>
                     <div className={styles.mappingHeader}>Active rooms</div>
                     <div className={styles.mappingHeader}>Famlo Pro</div>
-                    <div className={styles.mappingHeader}>Action</div>
+                    <div className={styles.mappingHeader}>Actions</div>
                     {propertyOptions.map((option) => {
                       const optionLocation = [option.locality, option.city, option.state, option.country].filter(Boolean).join(", ") || "Location pending";
                       const isSelected = option.familyId === familyId;
@@ -5760,12 +5774,20 @@ export default function FamloProDashboardShell({
                             <div className={styles.mappingSubcopy}>{isSelected ? "Current Pro context" : "Shared Pro workspace"}</div>
                           </div>
                           <div className={styles.mappingCell}>
-                            <Link
-                              href={`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(option.familyId)}&section=properties-home`}
-                              className={isSelected ? styles.secondaryActionLink : styles.primaryActionLink}
-                            >
-                              {isSelected ? "Current property" : "Open in Pro"}
-                            </Link>
+                            <div className={styles.inlineActionRow} style={{ marginTop: 0 }}>
+                              <Link
+                                href={`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(option.familyId)}&section=properties-home`}
+                                className={isSelected ? styles.secondaryActionLink : styles.primaryActionLink}
+                              >
+                                {isSelected ? "Current property" : "Open in Pro"}
+                              </Link>
+                              <Link
+                                href={`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(option.familyId)}&section=ota-content`}
+                                className={styles.secondaryActionLink}
+                              >
+                                Edit property presence
+                              </Link>
+                            </div>
                           </div>
                         </Fragment>
                       );
