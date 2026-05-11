@@ -14,6 +14,7 @@ import { isFamloProDashboardEnabled, loadHostProAccess, loadHostProAccessMap } f
 import { loadHostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
 import { loadHostProSettings } from "@/lib/host-pro-settings";
 import { buildHostProSetupReadiness } from "@/lib/host-pro-setup-readiness";
+import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -133,6 +134,11 @@ function asString(value: unknown): string | null {
 
 function normalizeFamilyId(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isSchemaCompatibilityError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes("column") || lower.includes("schema cache") || lower.includes("does not exist") || lower.includes("relation");
 }
 
 function joinList(values: unknown): string {
@@ -334,24 +340,46 @@ export default async function FamloProDashboardPage({
   const requestedCalendarStart = isIsoDate(params?.calendarStart) ? params?.calendarStart : null;
   const supabase = createAdminSupabaseClient();
   const hostSession = await resolveAuthorizedHostSession(supabase);
+  const authUser = await resolveAuthenticatedUser(supabase);
+  const { data: requestedFamilyRecord } = requestedFamilyId
+    ? await supabase
+        .from("families")
+        .select("id,user_id")
+        .eq("id", requestedFamilyId)
+        .maybeSingle()
+    : { data: null };
+  const fallbackHostUserId =
+    typeof requestedFamilyRecord?.user_id === "string" &&
+    requestedFamilyRecord.user_id.trim().length > 0 &&
+    authUser?.id &&
+    requestedFamilyRecord.user_id === authUser.id
+      ? requestedFamilyRecord.user_id
+      : null;
+  const effectiveHostUserId = hostSession?.hostUserId ?? fallbackHostUserId;
+  const effectiveSessionFamilyId =
+    hostSession?.familyId ??
+    (fallbackHostUserId && requestedFamilyId ? requestedFamilyId : null);
   const workspaceFamilyIds =
-    hostSession?.hostUserId
+    effectiveHostUserId
       ? (
           await supabase
             .from("families")
             .select("id")
-            .eq("user_id", hostSession.hostUserId)
+            .eq("user_id", effectiveHostUserId)
             .order("updated_at", { ascending: false })
         ).data?.map((row) => normalizeFamilyId(row.id)).filter(Boolean) ?? []
       : [];
+  const workspaceAccessMap = await loadHostProAccessMap(supabase, workspaceFamilyIds);
+  const proAccessibleFamilyIds = workspaceFamilyIds.filter((id) => workspaceAccessMap[id]?.allowed);
+  const validRequestedFamilyId =
+    requestedFamilyId && workspaceFamilyIds.includes(requestedFamilyId) ? requestedFamilyId : "";
   const fallbackFamilyId =
-    (hostSession?.familyId && workspaceFamilyIds.includes(hostSession.familyId) ? hostSession.familyId : "") ||
+    (effectiveSessionFamilyId && proAccessibleFamilyIds.includes(effectiveSessionFamilyId) ? effectiveSessionFamilyId : "") ||
+    proAccessibleFamilyIds[0] ||
+    (effectiveSessionFamilyId && workspaceFamilyIds.includes(effectiveSessionFamilyId) ? effectiveSessionFamilyId : "") ||
     workspaceFamilyIds[0] ||
     requestedFamilyId;
-  const familyId =
-    requestedFamilyId && workspaceFamilyIds.includes(requestedFamilyId)
-      ? requestedFamilyId
-      : fallbackFamilyId;
+  const familyId = validRequestedFamilyId || fallbackFamilyId;
   const basicDashboardUrl = buildBasicFamloPlusUrl(familyId);
   const basicRoomUrl = buildBasicRoomUrl(familyId);
 
@@ -380,7 +408,7 @@ export default async function FamloProDashboardPage({
   }
 
   const famloProEnabled = isFamloProDashboardEnabled();
-  const authorized = await canCurrentHostAccessFamily(familyId);
+  const authorized = workspaceFamilyIds.includes(familyId);
 
   if (!authorized) {
     return (
@@ -422,12 +450,22 @@ export default async function FamloProDashboardPage({
     );
   }
 
+  const familyRecordResult = await supabase
+    .from("families")
+    .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type")
+    .eq("id", familyId)
+    .maybeSingle();
+  const familyRecord =
+    familyRecordResult.error && isSchemaCompatibilityError(familyRecordResult.error.message)
+      ? await supabase
+          .from("families")
+          .select("id,name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type")
+          .eq("id", familyId)
+          .maybeSingle()
+      : familyRecordResult;
+
   const [{ data: family }, { data: host }] = await Promise.all([
-    supabase
-      .from("families")
-      .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type")
-      .eq("id", familyId)
-      .maybeSingle(),
+    Promise.resolve({ data: familyRecord.data }),
     supabase
       .from("hosts")
       .select("id,legacy_family_id,display_name,status")
@@ -445,28 +483,37 @@ export default async function FamloProDashboardPage({
   const resolvedPropertyCountry = storedProSettings.country ?? null;
   let propertyOptions: PropertySwitcherOption[] = [];
 
-  if (hostSession?.hostUserId) {
+  if (effectiveHostUserId) {
+    const familyRowsResult = await supabase
+      .from("families")
+      .select("id,name,property_name,city,state,admin_notes,is_active,user_id")
+      .eq("user_id", effectiveHostUserId);
+    const familyRowsSafe =
+      familyRowsResult.error && isSchemaCompatibilityError(familyRowsResult.error.message)
+        ? await supabase
+            .from("families")
+            .select("id,name,city,state,admin_notes,is_active,user_id")
+            .eq("user_id", effectiveHostUserId)
+        : familyRowsResult;
+
     const [{ data: familyRows }, { data: hostRows }] = await Promise.all([
-      supabase
-        .from("families")
-        .select("id,name,property_name,city,state,admin_notes,is_active,user_id")
-        .eq("user_id", hostSession.hostUserId),
+      Promise.resolve({ data: familyRowsSafe.data }),
       supabase
         .from("hosts")
         .select("legacy_family_id,display_name,user_id,status")
-        .eq("user_id", hostSession.hostUserId),
+        .eq("user_id", effectiveHostUserId),
     ]);
 
     const currentFamilyRecord = family
       ? [{
           id: asString(family.id) ?? familyId,
           name: asString(family.name),
-          property_name: asString(family.property_name),
+          property_name: asString((family as Record<string, unknown>).property_name),
           city: asString(family.city),
           state: asString(family.state),
           admin_notes: asString(family.admin_notes),
           is_active: family.is_active !== false,
-          user_id: hostSession.hostUserId,
+          user_id: effectiveHostUserId,
         }]
       : [];
 
@@ -524,7 +571,7 @@ export default async function FamloProDashboardPage({
       {
         familyId,
         name:
-          asString(family?.property_name) ??
+          asString((family as Record<string, unknown> | null)?.property_name) ??
           asString(family?.name) ??
           asString(host?.display_name) ??
           "Famlo Property",
@@ -543,7 +590,7 @@ export default async function FamloProDashboardPage({
   }
 
   const propertyName =
-    asString(family?.property_name) ??
+    asString((family as Record<string, unknown> | null)?.property_name) ??
     asString(family?.name) ??
     asString(host?.display_name) ??
     "Famlo Property";
