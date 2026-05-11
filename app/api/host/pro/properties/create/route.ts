@@ -10,6 +10,7 @@ import {
   PRO_DEFAULT_TIMEZONE,
   sanitizeHostProSettingsInput,
 } from "@/lib/host-pro-settings";
+import { parseHostListingMeta, serializeHostListingMeta, type HostListingMeta } from "@/lib/host-listing-meta";
 import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -199,6 +200,34 @@ function sanitizeInheritedSubscriptionMetadata(
   return nextMetadata;
 }
 
+function buildInheritedHostMeta(
+  sourceMeta: HostListingMeta
+): HostListingMeta | null {
+  const inheritedMeta: HostListingMeta = {};
+
+  if (asString(sourceMeta.hostDisplayName)) {
+    inheritedMeta.hostDisplayName = asString(sourceMeta.hostDisplayName);
+  }
+
+  if (asString(sourceMeta.hostSelfieUrl)) {
+    inheritedMeta.hostSelfieUrl = asString(sourceMeta.hostSelfieUrl);
+  }
+
+  if (asString(sourceMeta.hostHobbies)) {
+    inheritedMeta.hostHobbies = asString(sourceMeta.hostHobbies);
+  }
+
+  if (asString(sourceMeta.hostCatchphrase)) {
+    inheritedMeta.hostCatchphrase = asString(sourceMeta.hostCatchphrase);
+  }
+
+  if (asString(sourceMeta.familyComposition)) {
+    inheritedMeta.familyComposition = asString(sourceMeta.familyComposition);
+  }
+
+  return Object.keys(inheritedMeta).length > 0 ? inheritedMeta : null;
+}
+
 async function loadBestAllowedSubscriptionRow(
   supabase: ReturnType<typeof createAdminSupabaseClient>,
   familyId: string
@@ -352,10 +381,11 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const { data: sourceFamily, error: sourceFamilyError } = await supabase
       .from("families")
-      .select("id,user_id,host_id,email,host_phone,host_photo_url,password,host_password,languages,languages_spoken")
+      .select(
+        "id,user_id,host_id,email,host_phone,host_photo_url,password,host_password,languages,languages_spoken,admin_notes,family_composition"
+      )
+      .eq("id", hostSession.familyId)
       .eq("user_id", hostSession.hostUserId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
       .maybeSingle();
 
     if (sourceFamilyError) {
@@ -375,6 +405,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const familyCode = await generateUniqueFamilyCode(supabase);
     const nowIso = new Date().toISOString();
+    const sourceMeta = parseHostListingMeta(
+      typeof sourceFamily?.admin_notes === "string" ? sourceFamily.admin_notes : null
+    );
+    const inheritedHostMeta = buildInheritedHostMeta(sourceMeta);
     const insertedFamily = await insertSingleRowWithSchemaFallback(
       supabase,
       "families",
@@ -396,6 +430,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         host_password: asNullableString(sourceFamily?.host_password),
         languages: Array.isArray(sourceFamily?.languages) ? sourceFamily.languages : [],
         languages_spoken: Array.isArray(sourceFamily?.languages_spoken) ? sourceFamily.languages_spoken : [],
+        family_composition:
+          asNullableString(sourceFamily?.family_composition) ??
+          asNullableString(sourceMeta.familyComposition),
+        // Shared host defaults only. Property-specific content stays separate,
+        // and we intentionally do not copy any channel, booking, room, or
+        // property-level presentation data into the new family.
+        admin_notes: inheritedHostMeta ? serializeHostListingMeta(inheritedHostMeta) : null,
         is_active: false,
         is_accepting: false,
         created_at: nowIso,
