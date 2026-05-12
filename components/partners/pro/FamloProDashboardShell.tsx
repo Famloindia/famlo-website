@@ -514,6 +514,21 @@ type ChannelMatchingSnapshot = {
 type ChannelTestSyncSnapshot = ChannelTestSyncReadinessModel;
 type ChannelGoLiveSnapshot = ChannelGoLiveReadinessModel;
 
+type ChannelOperatorReviewRow = {
+  providerKey: ChannelProviderKey;
+  providerName: string;
+  propertyName: string;
+  setupStatus: string;
+  goLiveStatus: string;
+  reviewRequested: string;
+  requestedAt: string;
+  roomMatchingStatus: string;
+  priceMatchingStatus: string;
+  testSyncStatus: string;
+  blockers: string[];
+  nextAction: string;
+};
+
 const TOP_LEVEL_NAV_ITEMS: NavItem[] = [
   { id: "dashboard", title: "Dashboard", hint: "Action center", icon: Activity },
   { id: "host-profile", title: "Host Profile", hint: "Shared host identity", icon: UserRound },
@@ -2274,6 +2289,53 @@ export default function FamloProDashboardShell({
     });
     return acc;
   }, {} as Record<ChannelProviderKey, ChannelGoLiveSnapshot>);
+  const channelOperatorReviewRows: ChannelOperatorReviewRow[] = CHANNEL_PROVIDER_REGISTRY.map((provider) => {
+    const setupState = channelSetupStatesByKey[provider.key];
+    const readinessModel = channelReadinessModelsByKey[provider.key];
+    const testSyncModel = channelTestSyncReadinessByKey[provider.key];
+    const goLiveModel = channelGoLiveReadinessByKey[provider.key];
+    const reviewRequested = setupState.metadata.go_live_review_requested === true || setupState.status === "review_requested";
+    const requestedAt = setupState.metadata.go_live_review_requested_at ?? setupState.metadata.requested_at ?? setupState.updatedAt ?? setupState.metadata.updated_at ?? null;
+    const blockerLabels = [
+      goLiveModel.nextRequiredAction,
+      testSyncModel.nextRequiredAction,
+      readinessModel.warningLabel,
+    ].filter((item): item is string => Boolean(item));
+
+    return {
+      providerKey: provider.key,
+      providerName: provider.displayName,
+      propertyName: currentPropertyLabel,
+      setupStatus: getChannelSetupStatusLabel(setupState.status),
+      goLiveStatus: goLiveModel.statusLabel,
+      reviewRequested: reviewRequested ? "Yes" : "No",
+      requestedAt: requestedAt ? formatDateTime(requestedAt) : "Not requested",
+      roomMatchingStatus:
+        readinessModel.items[4]?.status === "ready"
+          ? "Ready"
+          : readinessModel.items[4]?.status === "blocked"
+            ? "Blocked"
+            : readinessModel.items[4]?.status === "in_progress"
+              ? "In progress"
+              : readinessModel.items[4]?.status === "needed"
+                ? "Needed"
+                : "Not available",
+      priceMatchingStatus:
+        readinessModel.items[5]?.status === "ready"
+          ? "Ready"
+          : readinessModel.items[5]?.status === "blocked"
+            ? "Blocked"
+            : readinessModel.items[5]?.status === "in_progress"
+              ? "In progress"
+              : readinessModel.items[5]?.status === "needed"
+                ? "Needed"
+                : "Not available",
+      testSyncStatus:
+        testSyncModel.statusLabel,
+      blockers: blockerLabels.length > 0 ? blockerLabels : ["No blockers recorded"],
+      nextAction: goLiveModel.nextRequiredAction,
+    };
+  });
   const channelSetupSummariesByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
     const setupState = channelSetupStatesByKey[provider.key];
     const readinessModel = channelReadinessModelsByKey[provider.key];
@@ -5286,6 +5348,52 @@ export default function FamloProDashboardShell({
                           <div key={note} className={styles.feedItem}>
                             <div className={styles.feedCopy}>{note}</div>
                           </div>
+                        ))}
+                      </div>
+                    </article>
+                  </div>
+
+                  <div className={styles.listGrid}>
+                    <article className={styles.listCard}>
+                      <div className={styles.listTitle}>Read-only operator review panel</div>
+                      <div className={styles.cardCopy}>
+                        Safe review queue for channel setup and go-live requests. This panel is read-only and does not approve or activate any channel.
+                      </div>
+                      <div className={styles.mappingTable} style={{ marginTop: 12 }}>
+                        <div className={styles.mappingHeader}>Provider</div>
+                        <div className={styles.mappingHeader}>Setup / Go-live</div>
+                        <div className={styles.mappingHeader}>Requested</div>
+                        <div className={styles.mappingHeader}>Matching / Test sync</div>
+                        <div className={styles.mappingHeader}>Blockers</div>
+                        <div className={styles.mappingHeader}>Next action</div>
+                        {channelOperatorReviewRows.map((row) => (
+                          <Fragment key={row.providerKey}>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{row.providerName}</div>
+                              <div className={styles.mappingSubcopy}>{row.propertyName}</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{row.setupStatus}</div>
+                              <div className={styles.mappingSubcopy}>{row.goLiveStatus}</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{row.reviewRequested}</div>
+                              <div className={styles.mappingSubcopy}>{row.requestedAt}</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{row.roomMatchingStatus}</div>
+                              <div className={styles.mappingSubcopy}>{row.priceMatchingStatus}</div>
+                              <div className={styles.mappingSubcopy} style={{ marginTop: 4 }}>
+                                {row.testSyncStatus}
+                              </div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingSubcopy}>{row.blockers.join(" · ")}</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{row.nextAction}</div>
+                            </div>
+                          </Fragment>
                         ))}
                       </div>
                     </article>
