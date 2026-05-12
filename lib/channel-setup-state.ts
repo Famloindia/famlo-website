@@ -1,4 +1,5 @@
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
 import type { ChannelPropertyRecord } from "@/lib/host-pro-channel-foundation";
 
 type JsonRecord = Record<string, unknown>;
@@ -10,6 +11,7 @@ export type ChannelSetupStatus =
   | "connection_requested"
   | "matching_needed"
   | "ready_for_test_sync"
+  | "review_requested"
   | "needs_review"
   | "live";
 
@@ -25,13 +27,23 @@ export type ChannelSetupStep =
   | "activate";
 
 export type ChannelSetupMetadata = {
-  has_existing_listing: boolean | null;
-  required_items_acknowledged: boolean | null;
-  hotel_id_entered: boolean | null;
+  existing_listing_confirmed: boolean | null;
+  listing_preparation_requested: boolean | null;
+  requirements_acknowledged: boolean | null;
+  hotel_id_available: boolean | null;
+  operator_setup_requested: boolean | null;
+  room_matching_reviewed: boolean | null;
+  price_matching_reviewed: boolean | null;
+  test_sync_review_requested: boolean | null;
+  go_live_review_requested: boolean | null;
+  go_live_review_requested_at: string | null;
   operator_notes: string | null;
   requested_at: string | null;
   setup_requested_at: string | null;
   updated_at: string | null;
+  has_existing_listing: boolean | null;
+  required_items_acknowledged: boolean | null;
+  hotel_id_entered: boolean | null;
 };
 
 export type ChannelSetupState = {
@@ -48,6 +60,113 @@ export type ChannelSetupState = {
   syncStatus: string;
 };
 
+export type ChannelReadinessItemKey =
+  | "ota_account_or_listing"
+  | "connection_details"
+  | "connection_verified"
+  | "rooms_available"
+  | "room_matching"
+  | "price_matching"
+  | "calendar_rate_sync"
+  | "test_sync"
+  | "activation";
+
+export type ChannelReadinessItemStatus =
+  | "not_started"
+  | "needed"
+  | "in_progress"
+  | "ready"
+  | "blocked"
+  | "not_available";
+
+export type ChannelReadinessItem = {
+  key: ChannelReadinessItemKey;
+  label: string;
+  status: ChannelReadinessItemStatus;
+  explanation: string;
+  operatorNote: string | null;
+};
+
+export type ChannelReadinessModel = {
+  items: ChannelReadinessItem[];
+  progressPercent: number;
+  nextRequiredAction: string;
+  warningLabel: string | null;
+  setupModeLabel: string;
+  setupRowExists: boolean;
+  actuallyConnected: boolean;
+};
+
+export type ChannelReadinessContext = {
+  activeRoomsCount: number;
+  roomMappingsReadyCount: number;
+  rateMappingsReadyCount: number;
+  hasRealConnection: boolean;
+  channelHealthNeedsAttention: boolean;
+  bookingReadyForActivation: boolean;
+};
+
+export type ChannelTestSyncReadinessStatus =
+  | "ready"
+  | "not_ready"
+  | "blocked"
+  | "assisted_only"
+  | "unavailable";
+
+export type ChannelTestSyncChecklistItem = {
+  key: string;
+  label: string;
+  status: ChannelTestSyncReadinessStatus;
+  explanation: string;
+  operatorNote: string | null;
+};
+
+export type ChannelTestSyncReadinessModel = {
+  status: ChannelTestSyncReadinessStatus;
+  statusLabel: string;
+  nextRequiredAction: string;
+  checklist: ChannelTestSyncChecklistItem[];
+  operatorNote: string | null;
+  readyForLimitedTestSync: boolean;
+};
+
+export type ChannelTestSyncReadinessContext = ChannelReadinessContext & {
+  bookingFeedHealthy: boolean;
+  ariSyncHealthy: boolean;
+};
+
+export type ChannelGoLiveReadinessStatus =
+  | "not_ready"
+  | "ready_for_review"
+  | "review_requested"
+  | "blocked"
+  | "assisted_only"
+  | "live";
+
+export type ChannelGoLiveChecklistStatus =
+  | "ready"
+  | "not_ready"
+  | "blocked"
+  | "assisted_only"
+  | "unavailable";
+
+export type ChannelGoLiveChecklistItem = {
+  key: string;
+  label: string;
+  status: ChannelGoLiveChecklistStatus;
+  explanation: string;
+  operatorNote: string | null;
+};
+
+export type ChannelGoLiveReadinessModel = {
+  status: ChannelGoLiveReadinessStatus;
+  statusLabel: string;
+  nextRequiredAction: string;
+  checklist: ChannelGoLiveChecklistItem[];
+  operatorNote: string | null;
+  reviewPending: boolean;
+};
+
 const CHANNEL_SETUP_STATUSES: readonly ChannelSetupStatus[] = [
   "not_started",
   "setup_started",
@@ -55,6 +174,7 @@ const CHANNEL_SETUP_STATUSES: readonly ChannelSetupStatus[] = [
   "connection_requested",
   "matching_needed",
   "ready_for_test_sync",
+  "review_requested",
   "needs_review",
   "live",
 ];
@@ -79,6 +199,10 @@ function asString(value: unknown): string | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function asNullableBoolean(value: unknown): boolean | null {
+  return value === true ? true : value === false ? false : null;
 }
 
 function asObject(value: unknown): JsonRecord {
@@ -125,6 +249,8 @@ export function getChannelSetupStatusLabel(status: ChannelSetupStatus): string {
       return "Matching needed";
     case "ready_for_test_sync":
       return "Ready for test sync";
+    case "review_requested":
+      return "Go-live review requested";
     case "needs_review":
       return "Needs review";
     case "live":
@@ -161,13 +287,23 @@ export function readChannelSetupMetadata(value: unknown): ChannelSetupMetadata {
   const setup = asObject(metadata.channel_setup ?? metadata.setup_state ?? metadata.channelSetup ?? {});
 
   return {
-    has_existing_listing: asBoolean(setup.has_existing_listing),
-    required_items_acknowledged: asBoolean(setup.required_items_acknowledged),
-    hotel_id_entered: asBoolean(setup.hotel_id_entered),
+    existing_listing_confirmed: asNullableBoolean(setup.existing_listing_confirmed) ?? asNullableBoolean(setup.has_existing_listing),
+    listing_preparation_requested: asNullableBoolean(setup.listing_preparation_requested),
+    requirements_acknowledged: asNullableBoolean(setup.requirements_acknowledged) ?? asNullableBoolean(setup.required_items_acknowledged),
+    hotel_id_available: asNullableBoolean(setup.hotel_id_available) ?? asNullableBoolean(setup.hotel_id_entered),
+    operator_setup_requested: asNullableBoolean(setup.operator_setup_requested),
+    room_matching_reviewed: asNullableBoolean(setup.room_matching_reviewed),
+    price_matching_reviewed: asNullableBoolean(setup.price_matching_reviewed),
+    test_sync_review_requested: asNullableBoolean(setup.test_sync_review_requested),
+    go_live_review_requested: asNullableBoolean(setup.go_live_review_requested),
+    go_live_review_requested_at: asString(setup.go_live_review_requested_at),
     operator_notes: asString(setup.operator_notes),
     requested_at: asString(setup.requested_at),
     setup_requested_at: asString(setup.setup_requested_at),
     updated_at: asString(setup.updated_at),
+    has_existing_listing: asNullableBoolean(setup.has_existing_listing) ?? asNullableBoolean(setup.existing_listing_confirmed),
+    required_items_acknowledged: asNullableBoolean(setup.required_items_acknowledged) ?? asNullableBoolean(setup.requirements_acknowledged),
+    hotel_id_entered: asNullableBoolean(setup.hotel_id_entered) ?? asNullableBoolean(setup.hotel_id_available),
   };
 }
 
@@ -201,13 +337,23 @@ export function createDefaultChannelSetupState(familyId: string, providerKey: Ch
     currentStep: "listing",
     lastError: null,
     metadata: {
-      has_existing_listing: null,
-      required_items_acknowledged: null,
-      hotel_id_entered: null,
+      existing_listing_confirmed: null,
+      listing_preparation_requested: null,
+      requirements_acknowledged: null,
+      hotel_id_available: null,
+      operator_setup_requested: null,
+      room_matching_reviewed: null,
+      price_matching_reviewed: null,
+      test_sync_review_requested: null,
+      go_live_review_requested: null,
+      go_live_review_requested_at: null,
       operator_notes: null,
       requested_at: null,
       setup_requested_at: null,
       updated_at: null,
+      has_existing_listing: null,
+      required_items_acknowledged: null,
+      hotel_id_entered: null,
     },
     createdAt: null,
     updatedAt: null,
@@ -233,15 +379,25 @@ export function mergeChannelSetupMetadata(
   const currentSetup = asObject(currentMetadata.channel_setup ?? currentMetadata.setup_state ?? currentMetadata.channelSetup ?? {});
   const patchMetadata = asObject(patch.metadataPatch);
   const safePatch = {
-    has_existing_listing: asBoolean(patchMetadata.has_existing_listing),
-    required_items_acknowledged: asBoolean(patchMetadata.required_items_acknowledged),
-    hotel_id_entered: asBoolean(patchMetadata.hotel_id_entered),
+    existing_listing_confirmed: asBoolean(patchMetadata.existing_listing_confirmed ?? patchMetadata.has_existing_listing),
+    listing_preparation_requested: asBoolean(patchMetadata.listing_preparation_requested),
+    requirements_acknowledged: asBoolean(patchMetadata.requirements_acknowledged ?? patchMetadata.required_items_acknowledged),
+    hotel_id_available: asBoolean(patchMetadata.hotel_id_available ?? patchMetadata.hotel_id_entered),
+    operator_setup_requested: asBoolean(patchMetadata.operator_setup_requested),
+    room_matching_reviewed: asBoolean(patchMetadata.room_matching_reviewed),
+    price_matching_reviewed: asBoolean(patchMetadata.price_matching_reviewed),
+    test_sync_review_requested: asBoolean(patchMetadata.test_sync_review_requested),
+    go_live_review_requested: asBoolean(patchMetadata.go_live_review_requested),
+    go_live_review_requested_at: asString(patchMetadata.go_live_review_requested_at),
     operator_notes: asString(patchMetadata.operator_notes),
   };
 
   const nextSetup: JsonRecord = {
     ...currentSetup,
     ...safePatch,
+    has_existing_listing: safePatch.existing_listing_confirmed ?? currentSetup.has_existing_listing ?? null,
+    required_items_acknowledged: safePatch.requirements_acknowledged ?? currentSetup.required_items_acknowledged ?? null,
+    hotel_id_entered: safePatch.hotel_id_available ?? currentSetup.hotel_id_entered ?? null,
     status: patch.status ?? currentSetup.status ?? "not_started",
     setup_mode: patch.setupMode ?? currentSetup.setup_mode ?? null,
     current_step: patch.currentStep ?? currentSetup.current_step ?? "listing",
@@ -257,3 +413,650 @@ export function mergeChannelSetupMetadata(
   };
 }
 
+function hasSafeSetupProgress(state: ChannelSetupState): boolean {
+  return Boolean(
+    state.status !== "not_started" ||
+      state.setupMode ||
+      state.metadata.existing_listing_confirmed ||
+      state.metadata.listing_preparation_requested ||
+      state.metadata.requirements_acknowledged ||
+      state.metadata.hotel_id_available ||
+      state.metadata.operator_setup_requested ||
+      state.metadata.room_matching_reviewed ||
+      state.metadata.price_matching_reviewed ||
+      state.metadata.test_sync_review_requested ||
+      state.metadata.go_live_review_requested
+  );
+}
+
+function buildItem(
+  key: ChannelReadinessItemKey,
+  label: string,
+  status: ChannelReadinessItemStatus,
+  explanation: string,
+  operatorNote: string | null = null
+): ChannelReadinessItem {
+  return { key, label, status, explanation, operatorNote };
+}
+
+function progressFromItems(items: ChannelReadinessItem[]): number {
+  const actionable = items.filter((item) => item.status !== "not_available");
+  if (actionable.length === 0) return 0;
+  const readyCount = actionable.filter((item) => item.status === "ready").length;
+  return Math.round((readyCount / actionable.length) * 100);
+}
+
+function setupModeLabel(state: ChannelSetupState): string {
+  if (state.setupMode === "existing_listing") return "Existing listing";
+  if (state.setupMode === "prepare_listing") return "Prepare listing";
+  return "Assisted setup";
+}
+
+function buildTestSyncChecklistItem(
+  key: string,
+  label: string,
+  status: ChannelTestSyncReadinessStatus,
+  explanation: string,
+  operatorNote: string | null = null
+): ChannelTestSyncChecklistItem {
+  return { key, label, status, explanation, operatorNote };
+}
+
+function testSyncStatusLabel(status: ChannelTestSyncReadinessStatus): string {
+  switch (status) {
+    case "ready":
+      return "Ready for limited test sync";
+    case "blocked":
+      return "Blocked";
+    case "assisted_only":
+      return "Assisted only";
+    case "unavailable":
+      return "Unavailable";
+    case "not_ready":
+    default:
+      return "Not ready";
+  }
+}
+
+function buildGoLiveChecklistItem(
+  key: string,
+  label: string,
+  status: ChannelGoLiveChecklistStatus,
+  explanation: string,
+  operatorNote: string | null = null
+): ChannelGoLiveChecklistItem {
+  return { key, label, status, explanation, operatorNote };
+}
+
+function goLiveStatusLabel(status: ChannelGoLiveReadinessStatus): string {
+  switch (status) {
+    case "ready_for_review":
+      return "Ready for review";
+    case "review_requested":
+      return "Review requested";
+    case "blocked":
+      return "Blocked";
+    case "assisted_only":
+      return "Assisted only";
+    case "live":
+      return "Live";
+    case "not_ready":
+    default:
+      return "Not ready";
+  }
+}
+
+export function buildChannelGoLiveReadinessModel(
+  providerKey: ChannelProviderKey,
+  state: ChannelSetupState,
+  context: ChannelTestSyncReadinessContext
+): ChannelGoLiveReadinessModel {
+  const hasRealConnection = context.hasRealConnection;
+  const hasSetupRow = hasSafeSetupProgress(state);
+  const readyForReview =
+    providerKey === "booking" &&
+    hasRealConnection &&
+    context.bookingFeedHealthy &&
+    context.ariSyncHealthy &&
+    !context.channelHealthNeedsAttention &&
+    context.bookingReadyForActivation;
+  const reviewRequested = state.status === "review_requested" || state.metadata.go_live_review_requested === true;
+  const live = providerKey === "booking" && hasRealConnection && state.status === "live";
+
+  if (providerKey !== "booking") {
+    return {
+      status: hasSetupRow ? "assisted_only" : "not_ready",
+      statusLabel: hasSetupRow ? "Go-live review unavailable until channel connection is completed." : "Go-live review unavailable.",
+      nextRequiredAction: hasSetupRow
+        ? "Request Famlo setup help and finish provider connection before go-live review."
+        : "Request Famlo setup help to begin the assisted setup flow.",
+      checklist: [
+        buildGoLiveChecklistItem("provider", "Provider connection", hasSetupRow ? "assisted_only" : "not_ready", "This provider stays assisted-only until real connection data exists.", "No live provider state exists yet."),
+        buildGoLiveChecklistItem("mapping", "Room and price matching", hasSetupRow ? "assisted_only" : "not_ready", "Go-live review remains unavailable until mapping can be verified.", "Provider data is not available."),
+        buildGoLiveChecklistItem("sync", "Test sync readiness", hasSetupRow ? "assisted_only" : "not_ready", "Test sync remains operator-controlled for assisted providers.", "No safe limited test sync can be inferred."),
+      ],
+      operatorNote: "Assisted providers need a real connection before go-live review can be requested.",
+      reviewPending: false,
+    };
+  }
+
+  const checklist = [
+    buildGoLiveChecklistItem(
+      "property",
+      "Property ready",
+      hasRealConnection ? "ready" : "blocked",
+      hasRealConnection ? "The Booking.com staging property is loaded." : "Load the real Booking.com property before requesting review.",
+      null
+    ),
+    buildGoLiveChecklistItem(
+      "mapping",
+      "Room and price matching",
+      context.bookingReadyForActivation ? "ready" : "blocked",
+      context.bookingReadyForActivation ? "Room and price matching are complete." : "Finish room and price matching before review.",
+      null
+    ),
+    buildGoLiveChecklistItem(
+      "sync",
+      "Test sync readiness",
+      context.bookingReadyForActivation ? "ready" : "blocked",
+      context.bookingReadyForActivation ? "Limited test sync is ready for operator review." : "Complete the safe test sync checks first.",
+      context.channelHealthNeedsAttention ? "A sync issue is still open." : null
+    ),
+  ];
+
+  if (live) {
+    return {
+      status: "live",
+      statusLabel: "Live",
+      nextRequiredAction: "Live channel state is already present from real data.",
+      checklist,
+      operatorNote: null,
+      reviewPending: false,
+    };
+  }
+
+  if (reviewRequested) {
+    return {
+      status: context.channelHealthNeedsAttention ? "blocked" : "review_requested",
+      statusLabel: context.channelHealthNeedsAttention ? "Blocked" : "Review requested",
+      nextRequiredAction: context.channelHealthNeedsAttention
+        ? "Review the open sync issue before a go-live review can proceed."
+        : "Famlo review has been requested. Await operator approval.",
+      checklist,
+      operatorNote: "Go-live review has been requested safely.",
+      reviewPending: true,
+    };
+  }
+
+  return {
+      status: readyForReview ? "ready_for_review" : context.channelHealthNeedsAttention ? "blocked" : "not_ready",
+      statusLabel: readyForReview ? "Ready for review" : context.channelHealthNeedsAttention ? "Blocked" : "Not ready",
+    nextRequiredAction: readyForReview
+      ? "Request Go Live Review."
+      : !hasRealConnection
+        ? "Complete the real Booking.com connection first."
+        : !context.bookingReadyForActivation
+          ? "Fix the remaining mapping or sync blockers."
+          : "Operator review required before go-live.",
+    checklist,
+    operatorNote: context.channelHealthNeedsAttention ? "A sync issue is still open." : null,
+    reviewPending: false,
+  };
+}
+
+export function buildChannelTestSyncReadinessModel(
+  providerKey: ChannelProviderKey,
+  state: ChannelSetupState,
+  context: ChannelTestSyncReadinessContext
+): ChannelTestSyncReadinessModel {
+  const hasRealConnection = context.hasRealConnection;
+  const hasSetupRow = hasSafeSetupProgress(state);
+  const activeRoomsCount = Math.max(0, context.activeRoomsCount);
+  const roomMappingsReadyCount = Math.max(0, context.roomMappingsReadyCount);
+  const rateMappingsReadyCount = Math.max(0, context.rateMappingsReadyCount);
+  const mappedRoomsReady = activeRoomsCount > 0 && roomMappingsReadyCount >= activeRoomsCount;
+  const mappedPricesReady = activeRoomsCount > 0 && rateMappingsReadyCount >= activeRoomsCount;
+  const propertyExists = activeRoomsCount > 0;
+  const hasCriticalSyncIssue = !context.bookingFeedHealthy || !context.ariSyncHealthy || context.channelHealthNeedsAttention;
+
+  if (providerKey !== "booking") {
+    const checklist = [
+      buildTestSyncChecklistItem(
+        "property_exists",
+        "Property exists",
+        propertyExists ? "not_ready" : "unavailable",
+        propertyExists ? "A Famlo property exists, but the provider is still assisted-only." : "Create or select a Famlo property first.",
+        null
+      ),
+      buildTestSyncChecklistItem(
+        "active_room",
+        "At least one active room",
+        activeRoomsCount > 0 ? "not_ready" : "unavailable",
+        activeRoomsCount > 0 ? `${activeRoomsCount} active room${activeRoomsCount === 1 ? "" : "s"} are available.` : "At least one active room is needed before readiness can be reviewed.",
+        null
+      ),
+      buildTestSyncChecklistItem(
+        "price",
+        "Room has price",
+        activeRoomsCount > 0 && rateMappingsReadyCount > 0 ? "not_ready" : "unavailable",
+        activeRoomsCount > 0 && rateMappingsReadyCount > 0 ? `${rateMappingsReadyCount}/${activeRoomsCount} active rooms have matching prices.` : "Add prices before any sync review can continue.",
+        null
+      ),
+      buildTestSyncChecklistItem(
+        "connection",
+        "Channel/provider connection",
+        hasSetupRow ? "assisted_only" : "unavailable",
+        "Test sync is unavailable until the channel connection is completed.",
+        hasSetupRow ? "Assisted setup stays on until the provider connection exists." : "Request Famlo setup help to continue the assisted flow."
+      ),
+      buildTestSyncChecklistItem(
+        "room_matching",
+        "Room matching",
+        mappedRoomsReady ? "not_ready" : activeRoomsCount > 0 ? "blocked" : "unavailable",
+        mappedRoomsReady ? "Room matching is ready, but the provider is still assisted-only." : "Room matching remains blocked until provider data exists.",
+        "Provider room data is not available yet."
+      ),
+      buildTestSyncChecklistItem(
+        "price_matching",
+        "Price matching",
+        mappedPricesReady ? "not_ready" : activeRoomsCount > 0 ? "blocked" : "unavailable",
+        mappedPricesReady ? "Price matching is ready, but the provider is still assisted-only." : "Price matching remains blocked until provider data exists.",
+        "Provider rate data is not available yet."
+      ),
+      buildTestSyncChecklistItem(
+        "calendar",
+        "Calendar / availability data",
+        "assisted_only",
+        "Calendar and availability readiness stays assisted until the provider connection exists.",
+        "No safe provider feed is available for this channel yet."
+      ),
+      buildTestSyncChecklistItem(
+        "sync_issue",
+        "No critical sync issue",
+        "assisted_only",
+        "Operator review is required before any test sync can be considered.",
+        "Test sync remains operator-controlled for this provider."
+      ),
+    ];
+
+    return {
+      status: hasSetupRow ? "assisted_only" : "unavailable",
+      statusLabel: hasSetupRow ? "Test sync unavailable until channel connection is completed." : "Test sync unavailable.",
+      nextRequiredAction: hasSetupRow
+        ? "Request Famlo setup help, then complete provider connection details before any test sync review."
+        : "Request Famlo setup help to begin the assisted setup flow.",
+      checklist,
+      operatorNote: "This provider remains assisted-only until real channel data exists.",
+      readyForLimitedTestSync: false,
+    };
+  }
+
+  const checklist = [
+    buildTestSyncChecklistItem(
+      "property_exists",
+      "Property exists",
+      propertyExists ? "ready" : "not_ready",
+      propertyExists ? "A Famlo property exists for this Booking.com setup." : "Select or create the property first.",
+      null
+    ),
+    buildTestSyncChecklistItem(
+      "active_room",
+      "At least one active room",
+      activeRoomsCount > 0 ? "ready" : "not_ready",
+      activeRoomsCount > 0 ? `${activeRoomsCount} active room${activeRoomsCount === 1 ? "" : "s"} are available.` : "Add at least one active room before test sync can run.",
+      null
+    ),
+    buildTestSyncChecklistItem(
+      "price",
+      "Room has price",
+      activeRoomsCount > 0 && rateMappingsReadyCount > 0 ? "ready" : "not_ready",
+      activeRoomsCount > 0 && rateMappingsReadyCount > 0 ? `${rateMappingsReadyCount}/${activeRoomsCount} active rooms have price mapping.` : "Set base prices and finish price matching.",
+      null
+    ),
+    buildTestSyncChecklistItem(
+      "connection",
+      "Channel/provider connection",
+      hasRealConnection ? "ready" : hasSetupRow ? "assisted_only" : "not_ready",
+      hasRealConnection ? "The Booking.com staging connection is loaded." : "The Booking.com connection still needs real provider readiness.",
+      hasSetupRow && !hasRealConnection ? "Setup progress exists, but it is not a live channel." : null
+    ),
+    buildTestSyncChecklistItem(
+      "room_matching",
+      "Room matching",
+      mappedRoomsReady ? "ready" : "not_ready",
+      mappedRoomsReady ? "All active rooms are matched." : "Finish room matching before a test sync can be considered.",
+      roomMappingsReadyCount > 0 && !mappedRoomsReady ? `${roomMappingsReadyCount}/${activeRoomsCount} active rooms are matched.` : null
+    ),
+    buildTestSyncChecklistItem(
+      "price_matching",
+      "Price matching",
+      mappedPricesReady ? "ready" : "not_ready",
+      mappedPricesReady ? "All active rooms are matched for pricing." : "Finish price matching before a test sync can be considered.",
+      rateMappingsReadyCount > 0 && !mappedPricesReady ? `${rateMappingsReadyCount}/${activeRoomsCount} active rooms are matched for pricing.` : null
+    ),
+    buildTestSyncChecklistItem(
+      "calendar",
+      "Calendar / availability data",
+      context.bookingFeedHealthy && context.ariSyncHealthy ? "ready" : hasCriticalSyncIssue ? "blocked" : "not_ready",
+      context.bookingFeedHealthy && context.ariSyncHealthy
+        ? "Availability and rate data look safe for a limited review."
+        : hasCriticalSyncIssue
+          ? "A sync issue still needs review before test sync can proceed."
+          : "Calendar and availability data are not ready yet.",
+      hasCriticalSyncIssue ? "Review the latest sync issue before proceeding." : null
+    ),
+    buildTestSyncChecklistItem(
+      "sync_issue",
+      "No critical sync issue",
+      context.bookingFeedHealthy && context.ariSyncHealthy && !context.channelHealthNeedsAttention ? "ready" : "blocked",
+      context.bookingFeedHealthy && context.ariSyncHealthy && !context.channelHealthNeedsAttention
+        ? "No critical sync issue is currently loaded."
+        : "A critical sync issue is still loaded.",
+      context.channelHealthNeedsAttention ? "Review the issue in the advanced sync tools." : null
+    ),
+  ];
+
+  const readyForLimitedTestSync =
+    hasRealConnection &&
+    mappedRoomsReady &&
+    mappedPricesReady &&
+    context.bookingFeedHealthy &&
+    context.ariSyncHealthy &&
+    !context.channelHealthNeedsAttention;
+
+  return {
+    status: readyForLimitedTestSync ? "ready" : hasCriticalSyncIssue ? "blocked" : hasSetupRow ? "not_ready" : "not_ready",
+    statusLabel: readyForLimitedTestSync
+      ? "Ready for limited test sync"
+      : hasCriticalSyncIssue
+        ? "Blocked by sync review"
+        : hasSetupRow
+          ? "Not ready for limited test sync"
+          : "Not ready",
+    nextRequiredAction: readyForLimitedTestSync
+      ? "Ready for limited test sync."
+      : !hasRealConnection
+        ? "Complete the Booking.com connection before test sync."
+        : !mappedRoomsReady
+          ? "Fix room matching before test sync."
+          : !mappedPricesReady
+            ? "Fix price matching before test sync."
+            : hasCriticalSyncIssue
+              ? "Review the latest sync issue before test sync."
+              : "Operator test sync required.",
+    checklist,
+    operatorNote: hasSetupRow && !hasRealConnection
+      ? "Setup progress exists, but it is not a live channel."
+      : hasCriticalSyncIssue
+        ? "A sync issue is still loaded and must be reviewed."
+        : null,
+    readyForLimitedTestSync,
+  };
+}
+
+export function buildChannelReadinessModel(
+  providerKey: ChannelProviderKey,
+  state: ChannelSetupState,
+  context: ChannelReadinessContext
+): ChannelReadinessModel {
+  const provider = getChannelProviderDefinition(providerKey);
+  const hasRealConnection = context.hasRealConnection;
+  const hasSetupRow = hasSafeSetupProgress(state);
+  const activeRoomsCount = Math.max(0, context.activeRoomsCount);
+  const roomMappingsReadyCount = Math.max(0, context.roomMappingsReadyCount);
+  const rateMappingsReadyCount = Math.max(0, context.rateMappingsReadyCount);
+  const mappedRoomsReady = activeRoomsCount > 0 && roomMappingsReadyCount >= activeRoomsCount;
+  const mappedPricesReady = activeRoomsCount > 0 && rateMappingsReadyCount >= activeRoomsCount;
+  const listingKnown =
+    state.metadata.existing_listing_confirmed === true ||
+    state.metadata.has_existing_listing === true ||
+    state.setupMode === "existing_listing" ||
+    hasRealConnection;
+  const listingPrepRequested =
+    state.metadata.listing_preparation_requested === true || state.setupMode === "prepare_listing";
+  const requirementsAcknowledged = state.metadata.requirements_acknowledged === true || state.metadata.required_items_acknowledged === true;
+  const hotelIdAvailable = state.metadata.hotel_id_available === true || state.metadata.hotel_id_entered === true;
+  const operatorSetupRequested = state.metadata.operator_setup_requested === true || state.status === "connection_requested";
+  const roomMatchingReviewed = state.metadata.room_matching_reviewed === true;
+  const priceMatchingReviewed = state.metadata.price_matching_reviewed === true;
+  const testSyncReviewRequested = state.metadata.test_sync_review_requested === true;
+  const connectionBlockedNote =
+    providerKey === "booking"
+      ? "Booking.com needs a real loaded connection before verification can turn ready."
+      : providerKey === "mmt"
+        ? "MakeMyTrip / Goibibo setup stays assisted until Hotel ID and connection details are confirmed."
+        : providerKey === "airbnb"
+          ? "Airbnb needs a real authorization flow before Famlo can mark the connection verified."
+          : providerKey === "agoda"
+            ? "Agoda setup stays assisted until the channel-manager path is approved."
+            : providerKey === "expedia"
+              ? "Expedia setup stays assisted until the property/channel setup is approved."
+              : "Google Hotel setup stays assisted until feed readiness is approved.";
+
+  const items: ChannelReadinessItem[] = [
+    buildItem(
+      "ota_account_or_listing",
+      "OTA account or listing",
+      hasRealConnection || listingKnown ? "ready" : listingPrepRequested ? "in_progress" : "needed",
+      hasRealConnection
+        ? `${provider.displayName} is already loaded in the real connection view.`
+        : providerKey === "mmt"
+          ? listingPrepRequested
+            ? "Prepare the existing listing or request Famlo help to continue."
+            : "Confirm whether the property already exists on MakeMyTrip / Goibibo."
+          : providerKey === "airbnb"
+            ? "Confirm the Airbnb account or listing that should be connected."
+            : providerKey === "google-hotel"
+              ? "Prepare the feed or visibility target before publishing to Google Hotel."
+              : providerKey === "agoda"
+                ? "Confirm the Agoda or YCS account / listing that should be connected."
+                : providerKey === "expedia"
+                  ? "Confirm the Expedia property or channel setup that should be connected."
+                  : "Confirm the Booking.com property or listing before continuing.",
+      providerKey === "mmt"
+        ? "A listed hotel code or prepared listing is required before assisted setup can continue."
+        : providerKey === "airbnb"
+          ? "Authorization still depends on the host-owned listing."
+          : null
+    ),
+    buildItem(
+      "connection_details",
+      "Connection details",
+      hasRealConnection
+        ? "ready"
+        : providerKey === "booking"
+          ? operatorSetupRequested || requirementsAcknowledged
+            ? "in_progress"
+            : "needed"
+          : providerKey === "mmt"
+            ? hotelIdAvailable
+              ? "in_progress"
+              : "needed"
+            : providerKey === "airbnb"
+              ? operatorSetupRequested
+                ? "in_progress"
+                : "needed"
+              : "needed",
+      hasRealConnection
+        ? "The real connection details are already loaded."
+        : providerKey === "mmt"
+          ? hotelIdAvailable
+            ? "Hotel ID / Hotel Code has been captured safely. Connection details are still assisted."
+            : "Provide the Hotel ID / Hotel Code and request Famlo setup help."
+          : providerKey === "airbnb"
+            ? "Authorization or listing access is required before the connection can move forward."
+            : providerKey === "google-hotel"
+              ? "Prepare the feed and visibility details before connection can proceed."
+              : providerKey === "agoda"
+                ? "Use the assisted channel-manager flow to collect the provider details."
+                : providerKey === "expedia"
+                  ? "Use the assisted Expedia setup flow to collect property/channel details."
+                  : "Collect the Booking.com connection details before test sync can begin.",
+      providerKey === "mmt"
+        ? "Do not store the token yet. Keep this assisted until secure credential flow exists."
+        : providerKey === "airbnb"
+          ? "No OAuth or password is stored in this phase."
+          : null
+    ),
+    buildItem(
+      "connection_verified",
+      "Connection verified",
+      hasRealConnection ? "ready" : hasSetupRow ? "blocked" : "needed",
+      hasRealConnection ? "A real channel connection is present." : connectionBlockedNote,
+      hasSetupRow && !hasRealConnection ? "Setup progress exists, but it must not be shown as a live channel." : null
+    ),
+    buildItem(
+      "rooms_available",
+      "Rooms available",
+      activeRoomsCount > 0 ? "ready" : "needed",
+      activeRoomsCount > 0 ? `${activeRoomsCount} active room${activeRoomsCount === 1 ? "" : "s"} are available.` : "At least one active room is needed before mapping can be completed.",
+      null
+    ),
+    buildItem(
+      "room_matching",
+      "Room matching",
+      !hasRealConnection && providerKey !== "booking"
+        ? roomMatchingReviewed
+          ? "in_progress"
+          : hasSetupRow
+            ? "blocked"
+            : "needed"
+        : mappedRoomsReady
+          ? "ready"
+          : roomMatchingReviewed || roomMappingsReadyCount > 0
+            ? "in_progress"
+            : activeRoomsCount > 0
+              ? "needed"
+              : "blocked",
+      mappedRoomsReady
+        ? "All active rooms are matched."
+        : activeRoomsCount > 0
+          ? roomMatchingReviewed
+            ? "Room matching was reviewed and still needs the real connection to complete."
+            : `${roomMappingsReadyCount}/${activeRoomsCount} active rooms are matched.`
+          : "Room matching waits until at least one active room exists.",
+      !hasRealConnection && providerKey !== "booking"
+        ? "Room matching is waiting on a verified connection."
+        : null
+    ),
+    buildItem(
+      "price_matching",
+      "Price matching",
+      !hasRealConnection && providerKey !== "booking"
+        ? priceMatchingReviewed
+          ? "in_progress"
+          : hasSetupRow
+            ? "blocked"
+            : "needed"
+        : mappedPricesReady
+          ? "ready"
+          : priceMatchingReviewed || rateMappingsReadyCount > 0
+            ? "in_progress"
+            : activeRoomsCount > 0
+              ? "needed"
+              : "blocked",
+      mappedPricesReady
+        ? "All active rooms have price mapping."
+        : activeRoomsCount > 0
+          ? priceMatchingReviewed
+            ? "Price matching was reviewed and still needs the real connection to complete."
+            : `${rateMappingsReadyCount}/${activeRoomsCount} active rooms have price mapping.`
+          : "Price matching waits until at least one active room exists.",
+      !hasRealConnection && providerKey !== "booking"
+        ? "Price matching is waiting on a verified connection."
+        : null
+    ),
+    buildItem(
+      "calendar_rate_sync",
+      "Calendar / rate sync",
+      provider.supportsCalendarRateSync
+        ? hasRealConnection
+          ? mappedRoomsReady && mappedPricesReady
+            ? "ready"
+            : "in_progress"
+          : hasSetupRow
+            ? "blocked"
+            : "needed"
+        : "not_available",
+      provider.supportsCalendarRateSync
+        ? hasRealConnection
+          ? mappedRoomsReady && mappedPricesReady
+            ? "Calendar and rate sync are ready for an operator review."
+            : "Sync waits until rooms and prices are matched."
+          : "Sync cannot start until a real connection exists."
+        : "This provider does not use calendar / rate sync in Famlo.",
+      providerKey === "booking" && hasSetupRow && !hasRealConnection
+        ? "Setup-only state must not be confused with a connected channel."
+        : null
+    ),
+    buildItem(
+      "test_sync",
+      "Test sync",
+      providerKey === "booking"
+        ? context.bookingReadyForActivation
+          ? "ready"
+          : hasRealConnection
+            ? context.channelHealthNeedsAttention
+              ? "blocked"
+              : "in_progress"
+            : hasSetupRow
+              ? "blocked"
+              : "needed"
+        : hasRealConnection
+          ? mappedRoomsReady && mappedPricesReady
+            ? "ready"
+            : "in_progress"
+          : hasSetupRow
+            ? "blocked"
+            : "needed",
+      providerKey === "booking"
+        ? context.bookingReadyForActivation
+          ? "The Booking.com staging property is ready for a test sync review."
+          : context.channelHealthNeedsAttention
+            ? "A sync issue still needs review."
+            : "Finish room and price matching before test sync."
+        : hasRealConnection
+          ? mappedRoomsReady && mappedPricesReady
+            ? "A test sync can be reviewed once the provider is fully mapped."
+            : "Test sync waits until room and price mapping are complete."
+          : "Test sync waits until a real connection exists.",
+      testSyncReviewRequested
+        ? "The host requested a test sync review."
+        : providerKey !== "booking" && !hasRealConnection
+          ? "This step remains assisted until connection verification exists."
+          : null
+    ),
+    buildItem(
+      "activation",
+      "Activation",
+      providerKey === "booking"
+        ? context.bookingReadyForActivation
+          ? "ready"
+          : "blocked"
+        : "blocked",
+      providerKey === "booking"
+        ? context.bookingReadyForActivation
+          ? "Activation is technically ready, but the actual activate action stays disabled in this phase."
+          : "Activation stays blocked until real readiness is complete."
+        : "Activation stays blocked in Famlo Pro until the provider is genuinely ready.",
+      providerKey === "booking" && !hasRealConnection
+        ? "A setup-only row is not enough to activate a channel."
+        : null
+    ),
+  ];
+
+  const nextBlockingItem = items.find((item) => item.status === "needed" || item.status === "blocked" || item.status === "in_progress") ?? items[0];
+  const warningLabel = hasSetupRow && !hasRealConnection
+    ? "Setup progress exists, but this row must not be treated as a live connected channel."
+    : null;
+
+  return {
+    items,
+    progressPercent: progressFromItems(items),
+    nextRequiredAction: nextBlockingItem ? `${nextBlockingItem.label}: ${nextBlockingItem.explanation}` : "All safe steps are complete.",
+    warningLabel,
+    setupModeLabel: setupModeLabel(state),
+    setupRowExists: hasSetupRow,
+    actuallyConnected: hasRealConnection,
+  };
+}

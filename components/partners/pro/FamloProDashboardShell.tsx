@@ -47,8 +47,14 @@ import {
 } from "@/lib/channel-providers/provider-registry";
 import {
   createDefaultChannelSetupState,
+  buildChannelReadinessModel,
+  buildChannelGoLiveReadinessModel,
+  buildChannelTestSyncReadinessModel,
   getChannelSetupStatusLabel,
   readChannelSetupState,
+  type ChannelReadinessModel,
+  type ChannelGoLiveReadinessModel,
+  type ChannelTestSyncReadinessModel,
   type ChannelSetupState,
 } from "@/lib/channel-setup-state";
 import {
@@ -464,12 +470,49 @@ type ChannelCardSummary = {
   roomStatus: string;
   priceStatus: string;
   calendarStatus: string;
+  testSyncStatus: string;
+  goLiveStatus: string;
+  goLiveNextStep: string;
   cta: string;
   setupModeLabel: string;
   roomSupportLabel: string;
   priceSupportLabel: string;
   calendarSupportLabel: string;
+  progressPercent: number;
+  warningLabel: string | null;
 };
+
+type ChannelMatchingRoomRow = {
+  famloRoomName: string;
+  famloRoomType: string;
+  isActive: boolean;
+  basePriceLabel: string;
+  photoReadinessLabel: string;
+  providerRoomLabel: string;
+  statusLabel: "matched" | "needs match" | "provider room unavailable" | "needs channel connection";
+  note: string | null;
+};
+
+type ChannelMatchingRateRow = {
+  famloRoomName: string;
+  famloRoomType: string;
+  isActive: boolean;
+  basePriceLabel: string;
+  providerRateLabel: string;
+  statusLabel: "matched" | "needs match" | "provider rate unavailable" | "needs channel connection";
+  note: string | null;
+};
+
+type ChannelMatchingSnapshot = {
+  providerDataAvailable: boolean;
+  providerDataLabel: string;
+  roomRows: ChannelMatchingRoomRow[];
+  rateRows: ChannelMatchingRateRow[];
+  reviewLabel: string;
+};
+
+type ChannelTestSyncSnapshot = ChannelTestSyncReadinessModel;
+type ChannelGoLiveSnapshot = ChannelGoLiveReadinessModel;
 
 const TOP_LEVEL_NAV_ITEMS: NavItem[] = [
   { id: "dashboard", title: "Dashboard", hint: "Action center", icon: Activity },
@@ -2194,8 +2237,48 @@ export default function FamloProDashboardShell({
           : primaryProperty?.externalPropertyId
             ? "Continue the existing Booking.com setup, then match rooms and prices."
             : "Confirm the Booking.com listing exists before starting setup.";
+  const channelReadinessModelsByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
+    acc[provider.key] = buildChannelReadinessModel(provider.key, channelSetupStatesByKey[provider.key], {
+      activeRoomsCount,
+      roomMappingsReadyCount,
+      rateMappingsReadyCount,
+      hasRealConnection: provider.key === "booking" ? currentChannelAttached : false,
+      channelHealthNeedsAttention,
+      bookingReadyForActivation: provider.key === "booking" ? bookingComReadyForActivation : false,
+    });
+    return acc;
+  }, {} as Record<ChannelProviderKey, ChannelReadinessModel>);
+  const channelTestSyncReadinessByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
+    acc[provider.key] = buildChannelTestSyncReadinessModel(provider.key, channelSetupStatesByKey[provider.key], {
+      activeRoomsCount,
+      roomMappingsReadyCount,
+      rateMappingsReadyCount,
+      hasRealConnection: provider.key === "booking" ? currentChannelAttached : false,
+      channelHealthNeedsAttention,
+      bookingReadyForActivation: provider.key === "booking" ? bookingComReadyForActivation : false,
+      bookingFeedHealthy,
+      ariSyncHealthy,
+    });
+    return acc;
+  }, {} as Record<ChannelProviderKey, ChannelTestSyncSnapshot>);
+  const channelGoLiveReadinessByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
+    acc[provider.key] = buildChannelGoLiveReadinessModel(provider.key, channelSetupStatesByKey[provider.key], {
+      activeRoomsCount,
+      roomMappingsReadyCount,
+      rateMappingsReadyCount,
+      hasRealConnection: provider.key === "booking" ? currentChannelAttached : false,
+      channelHealthNeedsAttention,
+      bookingReadyForActivation: provider.key === "booking" ? bookingComReadyForActivation : false,
+      bookingFeedHealthy,
+      ariSyncHealthy,
+    });
+    return acc;
+  }, {} as Record<ChannelProviderKey, ChannelGoLiveSnapshot>);
   const channelSetupSummariesByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
     const setupState = channelSetupStatesByKey[provider.key];
+    const readinessModel = channelReadinessModelsByKey[provider.key];
+    const testSyncModel = channelTestSyncReadinessByKey[provider.key];
+    const goLiveModel = channelGoLiveReadinessByKey[provider.key];
 
     if (provider.key === "booking") {
       acc.booking = {
@@ -2234,26 +2317,12 @@ export default function FamloProDashboardShell({
           : bookingSetupState.status === "matching_needed"
             ? "Price matching has been saved and still needs completion."
             : "Add pricing before price matching can begin.",
-        syncReadinessLabel: bookingComReadyForActivation
-          ? "Ready for an operator-approved test sync."
-          : channelHealthNeedsAttention
-            ? "A sync issue or review item is still open, so activation stays disabled."
-            : bookingSetupState.status === "ready_for_test_sync"
-              ? "Ready for test sync, but activation still stays disabled until the operator review is complete."
-              : "Keep activation disabled until rooms, prices, and sync checks are all clean.",
-        activationLabel: bookingComReadyForActivation
-          ? "The current Booking.com staging property is ready for an operator-approved activation review."
-          : "Booking.com activation remains blocked until the readiness checks pass.",
-        activationReady: bookingComReadyForActivation,
-        activationBlockedReason: bookingComReadyForActivation
-          ? "Ready for activation"
-          : "Still blocked by connection, mapping, or sync review",
-        readinessLines: [
-          `Property connected: ${currentChannelAttached ? "Yes" : "No"}`,
-          `Rooms matched: ${roomMappingsReadyCount}/${activeRoomsCount || 0}`,
-          `Prices matched: ${rateMappingsReadyCount}/${activeRoomsCount || 0}`,
-          `Sync review: ${channelHealthNeedsAttention ? "Needs review" : "Clear"}`,
-        ],
+        syncReadinessLabel: testSyncModel.statusLabel,
+        testSyncLabel: testSyncModel.statusLabel,
+        activationLabel: goLiveModel.statusLabel,
+        activationReady: goLiveModel.status === "ready_for_review" || goLiveModel.status === "review_requested" || goLiveModel.status === "live",
+        activationBlockedReason: goLiveModel.nextRequiredAction,
+        readinessLines: readinessModel.items.map((item) => `${item.label}: ${item.status === "ready" ? "Done" : item.status === "blocked" ? "Blocked" : item.status === "in_progress" ? "In progress" : item.status === "not_available" ? "Not available" : item.status === "needed" ? "Needed" : "Not started"}`),
       };
       return acc;
     }
@@ -2283,63 +2352,28 @@ export default function FamloProDashboardShell({
                   ? "Review the open issues before proceeding."
                   : setupState.setupMode === "existing_listing"
                     ? "Continue setup from the existing listing details."
-                    : setupState.setupMode === "prepare_listing"
-                      ? "Prepare the listing before starting provider setup."
-                      : provider.setupMode === "self-serve"
+            : setupState.setupMode === "prepare_listing"
+              ? "Prepare the listing before starting provider setup."
+              : provider.setupMode === "self-serve"
                         ? "Authorize the provider and confirm the listing before room matching."
                         : "Prepare the provider details before Famlo can continue setup.",
       listedOnOtaLabel:
-        setupState.setupMode === "existing_listing"
-          ? "Yes. The listing already exists on this OTA."
-          : setupState.setupMode === "prepare_listing"
-            ? "No. Famlo will help prepare the listing first."
-            : "Confirm whether the listing already exists before setup begins.",
+        readinessModel.items[0]?.explanation ?? "Confirm whether the listing already exists before setup begins.",
       requirementsLabel:
-        setupState.metadata.required_items_acknowledged === true
-          ? "The safe setup requirements were acknowledged and saved."
-          : "The provider still needs the safe requirements below before activation can proceed.",
+        readinessModel.items[1]?.explanation ?? "The provider still needs the safe requirements below before activation can proceed.",
       connectionLabel:
-        setupState.status === "connection_requested"
-          ? "Famlo setup help has been requested. No tokens or secrets are saved."
-          : provider.connectionMode,
+        readinessModel.items[2]?.explanation ?? provider.connectionMode,
       roomMatchingLabel:
-        provider.supportsRoomMatching
-          ? setupState.status === "matching_needed"
-            ? "Room matching is needed next."
-            : setupState.status === "ready_for_test_sync"
-              ? "Room matching is complete enough for readiness checks."
-              : "Room matching is supported after setup."
-          : "Room matching is not supported for this provider.",
+        readinessModel.items[4]?.explanation ?? "Room matching is supported after setup.",
       priceMatchingLabel:
-        provider.supportsPriceMatching
-          ? setupState.status === "matching_needed"
-            ? "Price matching is needed next."
-            : setupState.status === "ready_for_test_sync"
-              ? "Price matching is complete enough for readiness checks."
-              : "Price matching is supported after setup."
-          : "Price matching is not supported for this provider.",
+        readinessModel.items[5]?.explanation ?? "Price matching is supported after setup.",
       syncReadinessLabel:
-        provider.supportsCalendarRateSync
-          ? setupState.status === "ready_for_test_sync"
-            ? "Ready for an operator-led test sync."
-            : setupState.status === "needs_review"
-              ? "Needs review before any activation attempt."
-              : "Calendar / rate sync stays disabled until the provider is ready."
-          : "Calendar / rate sync is not supported for this provider.",
-      activationLabel:
-        setupState.status === "ready_for_test_sync"
-          ? "Activation stays disabled in this phase, even when the setup looks ready."
-          : "Activation is blocked until the safe setup workflow is finished.",
-      activationReady: false,
-      activationBlockedReason:
-        setupState.status === "connection_requested"
-          ? "Assisted setup requested"
-          : getChannelSetupStatusLabel(setupState.status),
-      readinessLines: [
-        `Setup mode: ${setupModeLabel}`,
-        `Current step: ${setupState.currentStep ?? "listing"}`,
-        setupState.metadata.requested_at ? `Help requested: ${setupState.metadata.requested_at}` : "Help requested: No",
-      ],
+        testSyncModel.statusLabel,
+      testSyncLabel: testSyncModel.statusLabel,
+      activationLabel: goLiveModel.statusLabel,
+      activationReady: goLiveModel.status === "ready_for_review" || goLiveModel.status === "review_requested" || goLiveModel.status === "live",
+      activationBlockedReason: goLiveModel.nextRequiredAction,
+      readinessLines: readinessModel.items.map((item) => `${item.label}: ${item.status}`),
     };
 
     return acc;
@@ -2347,12 +2381,42 @@ export default function FamloProDashboardShell({
   const channelProviderCards: ChannelCardSummary[] = CHANNEL_PROVIDER_REGISTRY.map((provider) => {
     const summary = channelSetupSummariesByKey[provider.key];
     const setupState = channelSetupStatesByKey[provider.key];
+    const readinessModel = channelReadinessModelsByKey[provider.key];
+    const testSyncModel = channelTestSyncReadinessByKey[provider.key];
+    const goLiveModel = channelGoLiveReadinessByKey[provider.key];
     const isInProgress = setupState.status !== "not_started";
+    const testSyncStatusLabel =
+      testSyncModel.status === "ready"
+        ? "Ready"
+        : testSyncModel.status === "assisted_only"
+          ? "Assisted"
+          : testSyncModel.status === "blocked"
+            ? "Blocked"
+            : testSyncModel.status === "unavailable"
+              ? "Unavailable"
+              : "Not ready";
+    const goLiveStatusLabel =
+      goLiveModel.status === "ready_for_review"
+        ? "Ready for review"
+        : goLiveModel.status === "review_requested"
+          ? "Review requested"
+          : goLiveModel.status === "blocked"
+            ? "Blocked"
+            : goLiveModel.status === "assisted_only"
+              ? "Assisted"
+              : goLiveModel.status === "live"
+                ? "Live"
+                : "Not ready";
+    const providerStatusLabel = readinessModel.setupRowExists && !readinessModel.actuallyConnected
+      ? setupState.status === "not_started"
+        ? "Setup started"
+        : summary.statusLabel
+      : summary.statusLabel;
 
     return {
       key: provider.key,
-      status: summary.statusLabel,
-      nextStep: summary.nextStep,
+      status: providerStatusLabel,
+      nextStep: readinessModel.nextRequiredAction,
       roomStatus:
         provider.key === "booking"
           ? summary.roomMatchingLabel
@@ -2383,6 +2447,9 @@ export default function FamloProDashboardShell({
                 ? "Setup started"
                 : "Not started"
               : "Not supported",
+      testSyncStatus: testSyncStatusLabel,
+      goLiveStatus: goLiveStatusLabel,
+      goLiveNextStep: goLiveModel.nextRequiredAction,
       cta:
         provider.key === "booking"
           ? currentChannelAttached || Boolean(primaryProperty?.externalPropertyId) || roomMappingsReadyCount > 0 || rateMappingsReadyCount > 0 || isInProgress
@@ -2402,8 +2469,93 @@ export default function FamloProDashboardShell({
       roomSupportLabel: provider.supportsRoomMatching ? "Room matching: Supported" : "Room matching: Not available",
       priceSupportLabel: provider.supportsPriceMatching ? "Price matching: Supported" : "Price matching: Not available",
       calendarSupportLabel: provider.supportsCalendarRateSync ? "Calendar / rate sync: Supported" : "Calendar / rate sync: Not available",
+      progressPercent: readinessModel.progressPercent,
+      warningLabel: readinessModel.warningLabel,
     };
   });
+  const channelMatchingSnapshotsByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
+    const setupState = channelSetupStatesByKey[provider.key];
+    const hasRealProviderData = provider.key === "booking" ? currentChannelAttached : false;
+    const providerDataAvailable = hasRealProviderData && provider.key === "booking";
+    const providerDataLabel = provider.key === "booking"
+      ? hasRealProviderData
+        ? "Real Booking.com / Channex room and rate data is loaded."
+        : "Booking.com provider data is not connected yet."
+      : "Provider data unavailable. Assisted setup required.";
+    const roomRows: ChannelMatchingRoomRow[] = rooms.map((room) => {
+      const mapping = roomMappingsByRoomId.get(room.id) ?? null;
+      const hasPhotoReadiness = room.photosCount > 0;
+      const hasPriceReadiness = room.priceFullday > 0;
+      if (!providerDataAvailable) {
+        return {
+          famloRoomName: room.name,
+          famloRoomType: room.unitType || "Famlo room",
+          isActive: room.isActive,
+          basePriceLabel: room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing price",
+          photoReadinessLabel: hasPhotoReadiness ? "Photos ready" : "Needs photos",
+          providerRoomLabel: provider.key === "booking" ? "Needs channel connection" : "Provider room unavailable",
+          statusLabel: provider.key === "booking" && setupState.status !== "not_started" ? "needs channel connection" : provider.key === "booking" ? "needs channel connection" : "provider room unavailable",
+          note: provider.key === "booking"
+            ? "Connect the channel first to compare Famlo rooms with Booking.com room types."
+            : "Room matching remains assisted until provider data exists.",
+        };
+      }
+
+      const providerRoomLabel = mapping?.externalRoomTypeId ?? "Not mapped";
+      const statusLabel: ChannelMatchingRoomRow["statusLabel"] = mapping?.externalRoomTypeId ? "matched" : "needs match";
+      return {
+        famloRoomName: room.name,
+        famloRoomType: room.unitType || "Famlo room",
+        isActive: room.isActive,
+        basePriceLabel: room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing price",
+        photoReadinessLabel: hasPhotoReadiness ? "Photos ready" : "Needs photos",
+        providerRoomLabel,
+        statusLabel,
+        note: hasPriceReadiness ? null : "Set a base price in Famlo before price matching is considered complete.",
+      };
+    });
+    const rateRows: ChannelMatchingRateRow[] = rooms.map((room) => {
+      const ratePlan = ratePlansByRoomId.get(room.id) ?? null;
+      if (!providerDataAvailable) {
+        return {
+          famloRoomName: room.name,
+          famloRoomType: room.unitType || "Famlo room",
+          isActive: room.isActive,
+          basePriceLabel: room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing price",
+          providerRateLabel: provider.key === "booking" ? "Needs channel connection" : "Provider rate unavailable",
+          statusLabel: provider.key === "booking" && setupState.status !== "not_started" ? "needs channel connection" : provider.key === "booking" ? "needs channel connection" : "provider rate unavailable",
+          note: provider.key === "booking"
+            ? "Connect the channel first to compare Famlo prices with Booking.com rate plans."
+            : "Price matching remains assisted until provider data exists.",
+        };
+      }
+
+      const providerRateLabel = ratePlan?.externalRatePlanId ?? "Not mapped";
+      const statusLabel: ChannelMatchingRateRow["statusLabel"] = ratePlan?.externalRatePlanId ? "matched" : "needs match";
+      return {
+        famloRoomName: room.name,
+        famloRoomType: room.unitType || "Famlo room",
+        isActive: room.isActive,
+        basePriceLabel: room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing price",
+        providerRateLabel,
+        statusLabel,
+        note: room.priceFullday > 0 ? null : "Set a base price in Famlo before price matching is considered complete.",
+      };
+    });
+
+    acc[provider.key] = {
+      providerDataAvailable,
+      providerDataLabel,
+      roomRows,
+      rateRows,
+      reviewLabel: provider.key === "booking"
+        ? hasRealProviderData
+          ? "Review the real Booking.com / Channex room and rate mappings below."
+          : "Booking.com needs channel connection before real matching can be reviewed."
+        : "Matching stays assisted until provider data exists.",
+    };
+    return acc;
+  }, {} as Record<ChannelProviderKey, ChannelMatchingSnapshot>);
   const selectedChannelSetupSummary = activeChannelSetup ? channelSetupSummariesByKey[activeChannelSetup] : null;
   const criticalConflictCount = conflictItems.filter((item) => item.severity === "critical").length;
   const warningConflictCount = conflictItems.filter((item) => item.severity === "warning").length;
@@ -4902,6 +5054,10 @@ export default function FamloProDashboardShell({
                             {channel.status}
                           </span>
                         </div>
+                        <div className={styles.inlineBadgeRow}>
+                          <span className={styles.readinessPill}>{channel.progressPercent}% complete</span>
+                          {channel.warningLabel ? <span className={`${styles.readinessPill} ${styles.readinessPillReview}`}>{channel.warningLabel}</span> : null}
+                        </div>
                         <div className={styles.providerMetaRow}>
                           <span className={styles.filterChip}>{channel.setupModeLabel}</span>
                           <span className={styles.filterChip}>{channel.roomSupportLabel}</span>
@@ -4921,8 +5077,16 @@ export default function FamloProDashboardShell({
                             <div className={styles.placeholderLabel}>Calendar sync</div>
                             <div className={styles.placeholderValue}>{channel.calendarStatus}</div>
                           </div>
+                          <div className={styles.placeholderRow}>
+                            <div className={styles.placeholderLabel}>Test sync</div>
+                            <div className={styles.placeholderValue}>{channel.testSyncStatus}</div>
+                          </div>
+                          <div className={styles.placeholderRow}>
+                            <div className={styles.placeholderLabel}>Go-live</div>
+                            <div className={styles.placeholderValue}>{channel.goLiveStatus}</div>
+                          </div>
                         </div>
-                        <div className={styles.feedCopy}>{channel.nextStep}</div>
+                        <div className={styles.feedCopy}>{channel.goLiveNextStep ?? channel.nextStep}</div>
                         <div className={styles.inlineActionRow}>
                           <button type="button" className={styles.primaryActionButton} onClick={() => setActiveChannelSetup(channel.key)}>
                             {channel.cta}
@@ -4943,12 +5107,24 @@ export default function FamloProDashboardShell({
                     providerKey={activeChannelSetup}
                     familyId={familyId}
                     summary={selectedChannelSetupSummary ?? channelSetupSummariesByKey.booking}
+                    readinessModel={channelReadinessModelsByKey[activeChannelSetup]}
+                    testSyncReadiness={channelTestSyncReadinessByKey[activeChannelSetup]}
+                    goLiveReadiness={channelGoLiveReadinessByKey[activeChannelSetup]}
+                    matchingSnapshot={channelMatchingSnapshotsByKey[activeChannelSetup]}
                     initialState={channelSetupStatesByKey[activeChannelSetup] ?? null}
                     onSaved={(savedState) => {
                       setChannelSetupOverrides((current) => ({
                         ...current,
                         [savedState.providerKey]: savedState,
                       }));
+                    }}
+                    onOpenRoomMatching={() => {
+                      setActiveChannelSetup(null);
+                      setActiveSection("room-mapping");
+                    }}
+                    onOpenPriceMatching={() => {
+                      setActiveChannelSetup(null);
+                      setActiveSection("rate-mapping");
                     }}
                     onClose={() => setActiveChannelSetup(null)}
                   />
