@@ -6,8 +6,9 @@ import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
-type FeedBody = {
+type OperatorFeedBody = {
   familyId?: string;
+  providerKey?: string;
 };
 
 function asString(value: unknown): string {
@@ -16,11 +17,19 @@ function asString(value: unknown): string {
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const body = (await request.json()) as FeedBody;
+    const body = (await request.json()) as OperatorFeedBody;
     const familyId = asString(body.familyId);
+    const providerKey = asString(body.providerKey) || "booking";
 
     if (!familyId) {
       return NextResponse.json({ error: "familyId is required." }, { status: 400 });
+    }
+
+    if (providerKey !== "booking") {
+      return NextResponse.json(
+        { error: "Booking feed test is currently available only for Booking.com through Channex." },
+        { status: 400 }
+      );
     }
 
     const supabase = createAdminSupabaseClient();
@@ -59,14 +68,21 @@ export async function POST(request: Request): Promise<NextResponse> {
       action: "fetch_booking_feed",
     });
 
-    return NextResponse.json(result, { status: result.ok ? 200 : 502 });
+    return NextResponse.json(
+      {
+        ...result,
+        operatorOnly: true,
+        providerKey,
+      },
+      { status: result.ok ? 200 : 502 }
+    );
   } catch (error) {
-    console.error("[host.pro.channel.channex.bookings.feed] failed:", error);
+    console.error("[host.pro.channel.channex.operator.bookings.feed] failed:", error);
     return NextResponse.json(
       {
         ok: false,
         status: "failed",
-        message: error instanceof Error ? error.message : "Failed to fetch the Channex booking feed.",
+        message: error instanceof Error ? error.message : "Unable to poll selected-property booking feed.",
         revisions: [],
       },
       { status: 500 }

@@ -51,6 +51,8 @@ type AriChannelHealth = {
   hotelId: string | null;
 };
 
+type AriSyncAction = "push_ari_30_day" | "push_ari_365_day" | "push_ari_limited_test";
+
 export type ChannexAriHealthSnapshot = {
   lastAriSyncAt: string | null;
   lastSuccessfulAriSyncAt: string | null;
@@ -123,7 +125,7 @@ type SyncInput = {
   familyId: string;
   hostId?: string | null;
   windowDays: number;
-  action: "push_ari_30_day" | "push_ari_365_day";
+  action: AriSyncAction;
   route: string;
   requireActiveChannel: boolean;
 };
@@ -321,7 +323,7 @@ function resolveBlockingEndDate(event: CanonicalCalendarEvent): string | null {
 async function logAriPush(input: {
   supabase: SupabaseClient;
   familyId: string;
-  action: "push_ari_30_day" | "push_ari_365_day";
+  action: AriSyncAction;
   status: "success" | "warning" | "failed";
   message: string;
   payload: Record<string, unknown>;
@@ -440,7 +442,13 @@ export function shouldSkipChannexAriSync(metadata: JsonRecord | null, now: Date)
 export async function syncChannexAriForFamily(input: SyncInput): Promise<ChannexAriSyncResult> {
   const observedAt = new Date().toISOString();
   const config = getChannexConfigSummary();
-  const windowDays = input.windowDays === LONG_WINDOW_DAYS ? LONG_WINDOW_DAYS : DEFAULT_WINDOW_DAYS;
+  const normalizedWindowDays = Math.max(1, Math.floor(input.windowDays));
+  const windowDays =
+    input.action === "push_ari_limited_test"
+      ? Math.min(14, normalizedWindowDays)
+      : input.windowDays === LONG_WINDOW_DAYS
+        ? LONG_WINDOW_DAYS
+        : DEFAULT_WINDOW_DAYS;
 
   if (config.environment === "production" && !config.productionMutationsAllowed) {
     return {

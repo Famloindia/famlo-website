@@ -100,6 +100,9 @@ export default function ChannelSetupWizard({
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [bookingHotelIdInput, setBookingHotelIdInput] = useState("");
+  const [bookingPropertyCodeInput, setBookingPropertyCodeInput] = useState("");
+  const [bookingExtranetRequested, setBookingExtranetRequested] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +136,16 @@ export default function ChannelSetupWizard({
       cancelled = true;
     };
   }, [familyId, providerKey, initialState]);
+
+  useEffect(() => {
+    setBookingHotelIdInput(state.metadata.booking_hotel_id ?? "");
+    setBookingPropertyCodeInput(state.metadata.booking_property_code ?? "");
+    setBookingExtranetRequested(state.metadata.booking_extranet_request_acknowledged === true);
+  }, [
+    state.metadata.booking_extranet_request_acknowledged,
+    state.metadata.booking_hotel_id,
+    state.metadata.booking_property_code,
+  ]);
 
   const currentStepIndex = Math.max(0, STEP_ORDER.indexOf(state.currentStep ?? "listing"));
   const currentStepLabel = getChannelSetupStepLabel(state.currentStep);
@@ -207,6 +220,37 @@ export default function ChannelSetupWizard({
     });
   };
 
+  const requestBookingVerification = (): void => {
+    const normalizedHotelId = bookingHotelIdInput.trim();
+    const normalizedPropertyCode = bookingPropertyCodeInput.trim();
+
+    if (!normalizedHotelId && !normalizedPropertyCode) {
+      setFeedback("Add a Booking.com Hotel ID or Property Code before requesting verification.");
+      return;
+    }
+
+    if (!bookingExtranetRequested) {
+      setFeedback("Confirm that Channex or Famlo was requested as the connectivity provider in Booking.com extranet first.");
+      return;
+    }
+
+    void saveState({
+      status: "connection_requested",
+      currentStep: "connection",
+      metadataPatch: {
+        booking_hotel_id: normalizedHotelId,
+        booking_property_code: normalizedPropertyCode,
+        booking_extranet_request_acknowledged: true,
+        connectivity_provider_requested: true,
+        connectivity_provider_requested_at: new Date().toISOString(),
+        booking_connection_status: "verification_requested",
+        booking_connection_error: null,
+        hotel_id_available: Boolean(normalizedHotelId || normalizedPropertyCode),
+        operator_setup_requested: true,
+      },
+    });
+  };
+
   const markRequirementsReady = (): void => {
     void saveState({
       status: state.setupMode === "prepare_listing" ? "needs_details" : "setup_started",
@@ -276,6 +320,19 @@ export default function ChannelSetupWizard({
         test_sync_review_requested_at: state.metadata.test_sync_review_requested_at,
         go_live_review_requested: state.metadata.go_live_review_requested,
         go_live_review_requested_at: state.metadata.go_live_review_requested_at,
+        channel_ready_for_assisted_go_live: state.metadata.channel_ready_for_assisted_go_live,
+        ready_for_assisted_go_live_at: state.metadata.ready_for_assisted_go_live_at,
+        ready_for_assisted_go_live_by: state.metadata.ready_for_assisted_go_live_by,
+        assisted_go_live_blockers: state.metadata.assisted_go_live_blockers,
+        booking_hotel_id: state.metadata.booking_hotel_id,
+        booking_property_code: state.metadata.booking_property_code,
+        connectivity_provider_requested: state.metadata.connectivity_provider_requested,
+        connectivity_provider_requested_at: state.metadata.connectivity_provider_requested_at,
+        booking_extranet_request_acknowledged: state.metadata.booking_extranet_request_acknowledged,
+        booking_connection_status: state.metadata.booking_connection_status,
+        booking_connection_error: state.metadata.booking_connection_error,
+        operator_verified_booking_connection: state.metadata.operator_verified_booking_connection,
+        operator_verified_booking_connection_at: state.metadata.operator_verified_booking_connection_at,
         operator_notes: state.metadata.operator_notes,
       },
     });
@@ -438,10 +495,64 @@ export default function ChannelSetupWizard({
               </div>
             ))}
           </div>
+          {providerKey === "booking" ? (
+            <div className={styles.stack} style={{ marginTop: 12 }}>
+              <label>
+                <span className={styles.fieldLabel}>Booking.com Hotel ID</span>
+                <input
+                  className={styles.fieldInput}
+                  value={bookingHotelIdInput}
+                  onChange={(event) => setBookingHotelIdInput(event.target.value)}
+                  placeholder="Example: 1234567"
+                />
+              </label>
+              <label>
+                <span className={styles.fieldLabel}>Booking.com Property Code</span>
+                <input
+                  className={styles.fieldInput}
+                  value={bookingPropertyCodeInput}
+                  onChange={(event) => setBookingPropertyCodeInput(event.target.value)}
+                  placeholder="Optional property code"
+                />
+              </label>
+              <label className={styles.feedCopy} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={bookingExtranetRequested}
+                  onChange={(event) => setBookingExtranetRequested(event.target.checked)}
+                />
+                I have requested Channex or Famlo as the connectivity provider in Booking.com extranet.
+              </label>
+              <div className={styles.feedbackBox}>
+                This step does not activate Booking.com. A Famlo operator must verify the connection in Channex, and no sync will run from here.
+              </div>
+              <div className={styles.inlineActionRow}>
+                <button
+                  type="button"
+                  className={styles.primaryActionButton}
+                  disabled={isSaving}
+                  onClick={requestBookingVerification}
+                >
+                  Request Famlo verification
+                </button>
+              </div>
+              <div className={styles.feedCopy}>
+                Current verification state: {state.metadata.booking_connection_status ?? "Not requested"}
+                {state.metadata.operator_verified_booking_connection_at
+                  ? ` · Verified ${state.metadata.operator_verified_booking_connection_at}`
+                  : ""}
+              </div>
+              {state.metadata.booking_connection_error ? (
+                <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.booking_connection_error}</div>
+              ) : null}
+            </div>
+          ) : null}
           <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
-            <button type="button" className={styles.secondaryActionButton} disabled={isSaving} onClick={() => void saveState({ status: "matching_needed", currentStep: "room_matching", metadataPatch: { hotel_id_available: true, operator_setup_requested: true } })}>
-              Mark connection details collected
-            </button>
+            {providerKey === "booking" ? null : (
+              <button type="button" className={styles.secondaryActionButton} disabled={isSaving} onClick={() => void saveState({ status: "matching_needed", currentStep: "room_matching", metadataPatch: { hotel_id_available: true, operator_setup_requested: true } })}>
+                Mark connection details collected
+              </button>
+            )}
           </div>
           <div className={styles.feedbackBox}>No access tokens are stored in this phase. Setup stays guided and honest.</div>
         </section>

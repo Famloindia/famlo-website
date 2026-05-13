@@ -31,6 +31,15 @@ export type ChannelSetupMetadata = {
   listing_preparation_requested: boolean | null;
   requirements_acknowledged: boolean | null;
   hotel_id_available: boolean | null;
+  booking_hotel_id: string | null;
+  booking_property_code: string | null;
+  connectivity_provider_requested: boolean | null;
+  connectivity_provider_requested_at: string | null;
+  booking_extranet_request_acknowledged: boolean | null;
+  booking_connection_status: string | null;
+  booking_connection_error: string | null;
+  operator_verified_booking_connection: boolean | null;
+  operator_verified_booking_connection_at: string | null;
   operator_setup_requested: boolean | null;
   room_matching_reviewed: boolean | null;
   price_matching_reviewed: boolean | null;
@@ -38,6 +47,10 @@ export type ChannelSetupMetadata = {
   test_sync_review_requested_at: string | null;
   go_live_review_requested: boolean | null;
   go_live_review_requested_at: string | null;
+  channel_ready_for_assisted_go_live: boolean | null;
+  ready_for_assisted_go_live_at: string | null;
+  ready_for_assisted_go_live_by: string | null;
+  assisted_go_live_blockers: string[];
   operator_notes: string | null;
   requested_at: string | null;
   setup_requested_at: string | null;
@@ -210,6 +223,16 @@ function asObject(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
 
+function hasOwn(value: JsonRecord, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => asString(item)).filter((item): item is string => Boolean(item))
+    : [];
+}
+
 function normalizeStep(value: unknown): ChannelSetupStep | null {
   const candidate = asString(value);
   return candidate && (CHANNEL_SETUP_STEPS as readonly string[]).includes(candidate) ? (candidate as ChannelSetupStep) : null;
@@ -292,6 +315,15 @@ export function readChannelSetupMetadata(value: unknown): ChannelSetupMetadata {
     listing_preparation_requested: asNullableBoolean(setup.listing_preparation_requested),
     requirements_acknowledged: asNullableBoolean(setup.requirements_acknowledged) ?? asNullableBoolean(setup.required_items_acknowledged),
     hotel_id_available: asNullableBoolean(setup.hotel_id_available) ?? asNullableBoolean(setup.hotel_id_entered),
+    booking_hotel_id: asString(setup.booking_hotel_id),
+    booking_property_code: asString(setup.booking_property_code),
+    connectivity_provider_requested: asNullableBoolean(setup.connectivity_provider_requested),
+    connectivity_provider_requested_at: asString(setup.connectivity_provider_requested_at),
+    booking_extranet_request_acknowledged: asNullableBoolean(setup.booking_extranet_request_acknowledged),
+    booking_connection_status: asString(setup.booking_connection_status),
+    booking_connection_error: asString(setup.booking_connection_error),
+    operator_verified_booking_connection: asNullableBoolean(setup.operator_verified_booking_connection),
+    operator_verified_booking_connection_at: asString(setup.operator_verified_booking_connection_at),
     operator_setup_requested: asNullableBoolean(setup.operator_setup_requested),
     room_matching_reviewed: asNullableBoolean(setup.room_matching_reviewed),
     price_matching_reviewed: asNullableBoolean(setup.price_matching_reviewed),
@@ -299,6 +331,10 @@ export function readChannelSetupMetadata(value: unknown): ChannelSetupMetadata {
     test_sync_review_requested_at: asString(setup.test_sync_review_requested_at),
     go_live_review_requested: asNullableBoolean(setup.go_live_review_requested),
     go_live_review_requested_at: asString(setup.go_live_review_requested_at),
+    channel_ready_for_assisted_go_live: asNullableBoolean(setup.channel_ready_for_assisted_go_live),
+    ready_for_assisted_go_live_at: asString(setup.ready_for_assisted_go_live_at),
+    ready_for_assisted_go_live_by: asString(setup.ready_for_assisted_go_live_by),
+    assisted_go_live_blockers: asStringArray(setup.assisted_go_live_blockers),
     operator_notes: asString(setup.operator_notes),
     requested_at: asString(setup.requested_at),
     setup_requested_at: asString(setup.setup_requested_at),
@@ -343,6 +379,15 @@ export function createDefaultChannelSetupState(familyId: string, providerKey: Ch
       listing_preparation_requested: null,
       requirements_acknowledged: null,
       hotel_id_available: null,
+      booking_hotel_id: null,
+      booking_property_code: null,
+      connectivity_provider_requested: null,
+      connectivity_provider_requested_at: null,
+      booking_extranet_request_acknowledged: null,
+      booking_connection_status: null,
+      booking_connection_error: null,
+      operator_verified_booking_connection: null,
+      operator_verified_booking_connection_at: null,
       operator_setup_requested: null,
       room_matching_reviewed: null,
       price_matching_reviewed: null,
@@ -350,6 +395,10 @@ export function createDefaultChannelSetupState(familyId: string, providerKey: Ch
       test_sync_review_requested_at: null,
       go_live_review_requested: null,
       go_live_review_requested_at: null,
+      channel_ready_for_assisted_go_live: null,
+      ready_for_assisted_go_live_at: null,
+      ready_for_assisted_go_live_by: null,
+      assisted_go_live_blockers: [],
       operator_notes: null,
       requested_at: null,
       setup_requested_at: null,
@@ -382,26 +431,51 @@ export function mergeChannelSetupMetadata(
   const currentSetup = asObject(currentMetadata.channel_setup ?? currentMetadata.setup_state ?? currentMetadata.channelSetup ?? {});
   const patchMetadata = asObject(patch.metadataPatch);
   const safePatch = {
-    existing_listing_confirmed: asBoolean(patchMetadata.existing_listing_confirmed ?? patchMetadata.has_existing_listing),
-    listing_preparation_requested: asBoolean(patchMetadata.listing_preparation_requested),
-    requirements_acknowledged: asBoolean(patchMetadata.requirements_acknowledged ?? patchMetadata.required_items_acknowledged),
-    hotel_id_available: asBoolean(patchMetadata.hotel_id_available ?? patchMetadata.hotel_id_entered),
-    operator_setup_requested: asBoolean(patchMetadata.operator_setup_requested),
-    room_matching_reviewed: asBoolean(patchMetadata.room_matching_reviewed),
-    price_matching_reviewed: asBoolean(patchMetadata.price_matching_reviewed),
-    test_sync_review_requested: asBoolean(patchMetadata.test_sync_review_requested),
-    test_sync_review_requested_at: asString(patchMetadata.test_sync_review_requested_at),
-    go_live_review_requested: asBoolean(patchMetadata.go_live_review_requested),
-    go_live_review_requested_at: asString(patchMetadata.go_live_review_requested_at),
-    operator_notes: asString(patchMetadata.operator_notes),
+    existing_listing_confirmed: hasOwn(patchMetadata, "existing_listing_confirmed") || hasOwn(patchMetadata, "has_existing_listing")
+      ? asBoolean(patchMetadata.existing_listing_confirmed ?? patchMetadata.has_existing_listing)
+      : undefined,
+    listing_preparation_requested: hasOwn(patchMetadata, "listing_preparation_requested") ? asBoolean(patchMetadata.listing_preparation_requested) : undefined,
+    requirements_acknowledged: hasOwn(patchMetadata, "requirements_acknowledged") || hasOwn(patchMetadata, "required_items_acknowledged")
+      ? asBoolean(patchMetadata.requirements_acknowledged ?? patchMetadata.required_items_acknowledged)
+      : undefined,
+    hotel_id_available: hasOwn(patchMetadata, "hotel_id_available") || hasOwn(patchMetadata, "hotel_id_entered")
+      ? asBoolean(patchMetadata.hotel_id_available ?? patchMetadata.hotel_id_entered)
+      : undefined,
+    booking_hotel_id: hasOwn(patchMetadata, "booking_hotel_id") ? asString(patchMetadata.booking_hotel_id) : undefined,
+    booking_property_code: hasOwn(patchMetadata, "booking_property_code") ? asString(patchMetadata.booking_property_code) : undefined,
+    connectivity_provider_requested: hasOwn(patchMetadata, "connectivity_provider_requested") ? asBoolean(patchMetadata.connectivity_provider_requested) : undefined,
+    connectivity_provider_requested_at: hasOwn(patchMetadata, "connectivity_provider_requested_at") ? asString(patchMetadata.connectivity_provider_requested_at) : undefined,
+    booking_extranet_request_acknowledged: hasOwn(patchMetadata, "booking_extranet_request_acknowledged") ? asBoolean(patchMetadata.booking_extranet_request_acknowledged) : undefined,
+    booking_connection_status: hasOwn(patchMetadata, "booking_connection_status") ? asString(patchMetadata.booking_connection_status) : undefined,
+    booking_connection_error: hasOwn(patchMetadata, "booking_connection_error") ? asString(patchMetadata.booking_connection_error) : undefined,
+    operator_verified_booking_connection: hasOwn(patchMetadata, "operator_verified_booking_connection") ? asBoolean(patchMetadata.operator_verified_booking_connection) : undefined,
+    operator_verified_booking_connection_at: hasOwn(patchMetadata, "operator_verified_booking_connection_at") ? asString(patchMetadata.operator_verified_booking_connection_at) : undefined,
+    operator_setup_requested: hasOwn(patchMetadata, "operator_setup_requested") ? asBoolean(patchMetadata.operator_setup_requested) : undefined,
+    room_matching_reviewed: hasOwn(patchMetadata, "room_matching_reviewed") ? asBoolean(patchMetadata.room_matching_reviewed) : undefined,
+    price_matching_reviewed: hasOwn(patchMetadata, "price_matching_reviewed") ? asBoolean(patchMetadata.price_matching_reviewed) : undefined,
+    test_sync_review_requested: hasOwn(patchMetadata, "test_sync_review_requested") ? asBoolean(patchMetadata.test_sync_review_requested) : undefined,
+    test_sync_review_requested_at: hasOwn(patchMetadata, "test_sync_review_requested_at") ? asString(patchMetadata.test_sync_review_requested_at) : undefined,
+    go_live_review_requested: hasOwn(patchMetadata, "go_live_review_requested") ? asBoolean(patchMetadata.go_live_review_requested) : undefined,
+    go_live_review_requested_at: hasOwn(patchMetadata, "go_live_review_requested_at") ? asString(patchMetadata.go_live_review_requested_at) : undefined,
+    channel_ready_for_assisted_go_live: hasOwn(patchMetadata, "channel_ready_for_assisted_go_live") ? asBoolean(patchMetadata.channel_ready_for_assisted_go_live) : undefined,
+    ready_for_assisted_go_live_at: hasOwn(patchMetadata, "ready_for_assisted_go_live_at") ? asString(patchMetadata.ready_for_assisted_go_live_at) : undefined,
+    ready_for_assisted_go_live_by: hasOwn(patchMetadata, "ready_for_assisted_go_live_by") ? asString(patchMetadata.ready_for_assisted_go_live_by) : undefined,
+    assisted_go_live_blockers: Array.isArray(patchMetadata.assisted_go_live_blockers)
+      ? asStringArray(patchMetadata.assisted_go_live_blockers)
+      : undefined,
+    operator_notes: hasOwn(patchMetadata, "operator_notes") ? asString(patchMetadata.operator_notes) : undefined,
   };
+  const compactSafePatch = Object.fromEntries(
+    Object.entries(safePatch).filter(([, value]) => value !== undefined)
+  );
 
   const nextSetup: JsonRecord = {
     ...currentSetup,
-    ...safePatch,
+    ...compactSafePatch,
     has_existing_listing: safePatch.existing_listing_confirmed ?? currentSetup.has_existing_listing ?? null,
     required_items_acknowledged: safePatch.requirements_acknowledged ?? currentSetup.required_items_acknowledged ?? null,
     hotel_id_entered: safePatch.hotel_id_available ?? currentSetup.hotel_id_entered ?? null,
+    assisted_go_live_blockers: safePatch.assisted_go_live_blockers ?? asStringArray(currentSetup.assisted_go_live_blockers),
     status: patch.status ?? currentSetup.status ?? "not_started",
     setup_mode: patch.setupMode ?? currentSetup.setup_mode ?? null,
     current_step: patch.currentStep ?? currentSetup.current_step ?? "listing",
@@ -425,11 +499,18 @@ function hasSafeSetupProgress(state: ChannelSetupState): boolean {
       state.metadata.listing_preparation_requested ||
       state.metadata.requirements_acknowledged ||
       state.metadata.hotel_id_available ||
+      state.metadata.booking_hotel_id ||
+      state.metadata.booking_property_code ||
+      state.metadata.connectivity_provider_requested ||
+      state.metadata.booking_extranet_request_acknowledged ||
+      state.metadata.booking_connection_status ||
+      state.metadata.operator_verified_booking_connection ||
       state.metadata.operator_setup_requested ||
       state.metadata.room_matching_reviewed ||
       state.metadata.price_matching_reviewed ||
       state.metadata.test_sync_review_requested ||
-      state.metadata.go_live_review_requested
+      state.metadata.go_live_review_requested ||
+      state.metadata.channel_ready_for_assisted_go_live
   );
 }
 
@@ -520,8 +601,8 @@ export function buildChannelGoLiveReadinessModel(
   const readyForReview =
     providerKey === "booking" &&
     hasRealConnection &&
-    context.bookingFeedHealthy &&
-    context.ariSyncHealthy &&
+    (state.metadata.channel_ready_for_assisted_go_live === true ||
+      (context.bookingFeedHealthy && context.ariSyncHealthy && context.bookingReadyForActivation)) &&
     !context.channelHealthNeedsAttention &&
     context.bookingReadyForActivation;
   const reviewRequested = state.status === "review_requested" || state.metadata.go_live_review_requested === true;
@@ -587,7 +668,9 @@ export function buildChannelGoLiveReadinessModel(
         ? "Review the open sync issue before a go-live review can proceed."
         : "Famlo review has been requested. Await operator approval.",
       checklist,
-      operatorNote: "Go-live review has been requested safely.",
+      operatorNote: state.metadata.channel_ready_for_assisted_go_live
+        ? "Operator marked this channel ready for assisted go-live review. Activation is still disabled."
+        : "Go-live review has been requested safely.",
       reviewPending: true,
     };
   }

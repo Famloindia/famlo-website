@@ -37,6 +37,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if (!authorizedResource.isAdmin) {
+      return NextResponse.json({ error: "Operator access is required." }, { status: 403 });
+    }
+
     const access = await loadHostProAccess(supabase, familyId);
     if (!access.allowed) {
       return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
