@@ -9605,12 +9605,12 @@ function ChannexBookingFeedCard({
 }>): React.JSX.Element {
   const router = useRouter();
   const [isFetching, startFetching] = useTransition();
+  const [isPreviewingRevision, startPreviewingRevision] = useTransition();
   const [isImportingPreview, startImportingPreview] = useTransition();
-  const [isApplyingModification, startApplyingModification] = useTransition();
   const [isApplyingCancellation, startApplyingCancellation] = useTransition();
   const [isAcknowledgingPreview, startAcknowledgingPreview] = useTransition();
+  const [previewingRevisionId, setPreviewingRevisionId] = useState<string | null>(null);
   const [importingPreviewId, setImportingPreviewId] = useState<string | null>(null);
-  const [applyingModificationId, setApplyingModificationId] = useState<string | null>(null);
   const [applyingCancellationId, setApplyingCancellationId] = useState<string | null>(null);
   const [acknowledgingPreviewId, setAcknowledgingPreviewId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -9701,13 +9701,13 @@ function ChannexBookingFeedCard({
     <section className={styles.cardInset}>
       <div className={styles.cardHeaderCompact}>
         <div>
-          <div className={styles.listTitle}>Channex booking feed</div>
+          <div className={styles.listTitle}>Booking.com import test flow</div>
           <div className={styles.cardCopy}>
-            Preview of Channex staging booking revisions. New bookings and cancellations can sync automatically, while modification revisions stay operator-reviewed before acknowledgement.
+            Operator-only Booking.com/Channex booking previews for the selected property. Preview before apply, import before acknowledge, and no payment/refund logic runs here.
           </div>
         </div>
         <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
-          {blockedMessage ? "Blocked" : "Read-only"}
+          {blockedMessage ? "Blocked" : "Operator-only"}
         </span>
       </div>
 
@@ -9880,8 +9880,64 @@ function ChannexBookingFeedCard({
                           type="button"
                           className={styles.secondaryActionButton}
                           disabled={
+                            isPreviewingRevision ||
                             isImportingPreview ||
-                            isApplyingModification ||
+                            isApplyingCancellation ||
+                            Boolean(blockedMessage) ||
+                            !revision.externalRoomTypeId
+                          }
+                          onClick={() => {
+                            startPreviewingRevision(async () => {
+                              setPreviewingRevisionId(typeof revision.id === "string" ? revision.id : null);
+                              try {
+                                const response = await fetch("/api/host/pro/channel/channex/operator/bookings/preview", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    familyId,
+                                    providerKey: "booking",
+                                    channelBookingRevisionId: revision.id,
+                                  }),
+                                });
+
+                                const payload = (await response.json()) as {
+                                  ok?: boolean;
+                                  message?: string;
+                                  error?: string;
+                                  blockers?: string[];
+                                };
+
+                                if (!response.ok || !payload.ok) {
+                                  throw new Error(payload.error ?? payload.message ?? "Unable to preview this Booking.com revision.");
+                                }
+
+                                const blockers = Array.isArray(payload.blockers) && payload.blockers.length > 0
+                                  ? ` Blockers: ${payload.blockers.join(" · ")}`
+                                  : "";
+                                setFeedback({
+                                  ok: true,
+                                  message: `${payload.message ?? "Preview loaded for the selected property."}${blockers}`,
+                                });
+                              } catch (error) {
+                                setFeedback({
+                                  ok: false,
+                                  message: error instanceof Error ? error.message : "Unable to preview this Booking.com revision.",
+                                });
+                              } finally {
+                                setPreviewingRevisionId(null);
+                              }
+                            });
+                          }}
+                        >
+                          {isPreviewingRevision && previewingRevisionId === revision.id ? "Previewing..." : "Preview safety"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.secondaryActionButton}
+                          disabled={
+                            isImportingPreview ||
                             isApplyingCancellation ||
                             Boolean(blockedMessage) ||
                             revision.importStatus === "imported" ||
@@ -9894,13 +9950,14 @@ function ChannexBookingFeedCard({
                             startImportingPreview(async () => {
                                 setImportingPreviewId(typeof revision.id === "string" ? revision.id : null);
                               try {
-                                const response = await fetch("/api/host/pro/channel/channex/bookings/import-preview", {
+                                const response = await fetch("/api/host/pro/channel/channex/operator/bookings/apply", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
                                   body: JSON.stringify({
                                     familyId,
+                                    providerKey: "booking",
                                     channelBookingRevisionId: revision.id,
                                   }),
                                 });
@@ -9942,57 +9999,8 @@ function ChannexBookingFeedCard({
                               : "Import to Famlo"}
                         </button>
                         {revision.importStatus === "modified_pending_review" ? (
-                          <button
-                            type="button"
-                            className={styles.secondaryActionButton}
-                            disabled={isApplyingModification || Boolean(blockedMessage)}
-                            onClick={() => {
-                              startApplyingModification(async () => {
-                                setApplyingModificationId(typeof revision.id === "string" ? revision.id : null);
-                                try {
-                                  const response = await fetch("/api/host/pro/channel/channex/bookings/apply-modification", {
-                                    method: "POST",
-                                    headers: {
-                                      "Content-Type": "application/json",
-                                    },
-                                    body: JSON.stringify({
-                                      channelBookingRevisionId: revision.id,
-                                    }),
-                                  });
-
-                                  const payload = (await response.json()) as {
-                                    ok?: boolean;
-                                    message?: string;
-                                    error?: string;
-                                    status?: string;
-                                  };
-
-                                  if (!response.ok || !payload.ok) {
-                                    throw new Error(payload.error ?? payload.message ?? "Unable to apply this Channex booking modification.");
-                                  }
-
-                                  setFeedback({
-                                    ok: true,
-                                    message:
-                                      typeof payload.message === "string" && payload.message.trim().length > 0
-                                        ? payload.message
-                                        : "Modification applied to Famlo. Not acknowledged yet.",
-                                  });
-                                  router.refresh();
-                                } catch (error) {
-                                  setFeedback({
-                                    ok: false,
-                                    message: error instanceof Error ? error.message : "Unable to apply this Channex booking modification.",
-                                  });
-                                } finally {
-                                  setApplyingModificationId(null);
-                                }
-                              });
-                            }}
-                          >
-                            {isApplyingModification && applyingModificationId === revision.id
-                              ? "Applying..."
-                              : "Apply modification"}
+                          <button type="button" className={styles.secondaryActionButton} disabled>
+                            Modification manual only
                           </button>
                         ) : null}
                         {revision.importStatus === "modified_pending_review" ? (
@@ -10020,12 +10028,14 @@ function ChannexBookingFeedCard({
                               startApplyingCancellation(async () => {
                                 setApplyingCancellationId(typeof revision.id === "string" ? revision.id : null);
                                 try {
-                                  const response = await fetch("/api/host/pro/channel/channex/bookings/apply-cancellation", {
+                                  const response = await fetch("/api/host/pro/channel/channex/operator/bookings/cancel", {
                                     method: "POST",
                                     headers: {
                                       "Content-Type": "application/json",
                                     },
                                     body: JSON.stringify({
+                                      familyId,
+                                      providerKey: "booking",
                                       channelBookingRevisionId: revision.id,
                                     }),
                                   });
@@ -10083,12 +10093,14 @@ function ChannexBookingFeedCard({
                                 startAcknowledgingPreview(async () => {
                                   setAcknowledgingPreviewId(typeof revision.id === "string" ? revision.id : null);
                                   try {
-                                    const response = await fetch("/api/host/pro/channel/channex/bookings/acknowledge", {
+                                    const response = await fetch("/api/host/pro/channel/channex/operator/bookings/acknowledge", {
                                       method: "POST",
                                       headers: {
                                         "Content-Type": "application/json",
                                       },
                                       body: JSON.stringify({
+                                        familyId,
+                                        providerKey: "booking",
                                         channelBookingRevisionId: revision.id,
                                       }),
                                     });
