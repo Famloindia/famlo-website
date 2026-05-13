@@ -237,12 +237,13 @@ export default function ChannelSetupWizard({
     });
   };
 
-  const markTestSyncReady = (): void => {
+  const requestTestSyncReview = (): void => {
     void saveState({
-      status: "ready_for_test_sync",
+      status: "needs_review",
       currentStep: "test_sync",
       metadataPatch: {
         test_sync_review_requested: true,
+        test_sync_review_requested_at: new Date().toISOString(),
       },
     });
   };
@@ -272,6 +273,7 @@ export default function ChannelSetupWizard({
         room_matching_reviewed: state.metadata.room_matching_reviewed,
         price_matching_reviewed: state.metadata.price_matching_reviewed,
         test_sync_review_requested: state.metadata.test_sync_review_requested,
+        test_sync_review_requested_at: state.metadata.test_sync_review_requested_at,
         go_live_review_requested: state.metadata.go_live_review_requested,
         go_live_review_requested_at: state.metadata.go_live_review_requested_at,
         operator_notes: state.metadata.operator_notes,
@@ -566,8 +568,8 @@ export default function ChannelSetupWizard({
             {testSyncReadiness.readyForLimitedTestSync ? "Ready for limited test sync." : "Operator test sync required."}
           </div>
           <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
-            <button type="button" className={styles.primaryActionButton} disabled={isSaving} onClick={markTestSyncReady}>
-              Save test sync readiness
+            <button type="button" className={styles.primaryActionButton} disabled={isSaving} onClick={requestTestSyncReview}>
+              Request Test Sync Review
             </button>
           </div>
         </section>

@@ -522,6 +522,8 @@ type ChannelOperatorReviewRow = {
   goLiveStatus: string;
   reviewRequested: string;
   requestedAt: string;
+  testSyncRequested: string;
+  testSyncRequestedAt: string;
   roomMatchingStatus: string;
   priceMatchingStatus: string;
   testSyncStatus: string;
@@ -2295,7 +2297,9 @@ export default function FamloProDashboardShell({
     const testSyncModel = channelTestSyncReadinessByKey[provider.key];
     const goLiveModel = channelGoLiveReadinessByKey[provider.key];
     const reviewRequested = setupState.metadata.go_live_review_requested === true || setupState.status === "review_requested";
+    const testSyncRequested = setupState.metadata.test_sync_review_requested === true || setupState.status === "ready_for_test_sync" || setupState.status === "needs_review";
     const requestedAt = setupState.metadata.go_live_review_requested_at ?? setupState.metadata.requested_at ?? setupState.updatedAt ?? setupState.metadata.updated_at ?? null;
+    const testSyncRequestedAt = setupState.metadata.test_sync_review_requested_at ?? setupState.metadata.requested_at ?? setupState.updatedAt ?? setupState.metadata.updated_at ?? null;
     const blockerLabels = [
       goLiveModel.nextRequiredAction,
       testSyncModel.nextRequiredAction,
@@ -2310,6 +2314,8 @@ export default function FamloProDashboardShell({
       goLiveStatus: goLiveModel.statusLabel,
       reviewRequested: reviewRequested ? "Yes" : "No",
       requestedAt: requestedAt ? formatDateTime(requestedAt) : "Not requested",
+      testSyncRequested: testSyncRequested ? "Yes" : "No",
+      testSyncRequestedAt: testSyncRequestedAt ? formatDateTime(testSyncRequestedAt) : "Not requested",
       roomMatchingStatus:
         readinessModel.items[4]?.status === "ready"
           ? "Ready"
@@ -5362,7 +5368,8 @@ export default function FamloProDashboardShell({
                       <div className={styles.mappingTable} style={{ marginTop: 12 }}>
                         <div className={styles.mappingHeader}>Provider</div>
                         <div className={styles.mappingHeader}>Setup / Go-live</div>
-                        <div className={styles.mappingHeader}>Requested</div>
+                        <div className={styles.mappingHeader}>Go-live requested</div>
+                        <div className={styles.mappingHeader}>Test sync requested</div>
                         <div className={styles.mappingHeader}>Matching / Test sync</div>
                         <div className={styles.mappingHeader}>Blockers</div>
                         <div className={styles.mappingHeader}>Next action</div>
@@ -5379,6 +5386,10 @@ export default function FamloProDashboardShell({
                             <div className={styles.mappingCell}>
                               <div className={styles.mappingTitle}>{row.reviewRequested}</div>
                               <div className={styles.mappingSubcopy}>{row.requestedAt}</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{row.testSyncRequested}</div>
+                              <div className={styles.mappingSubcopy}>{row.testSyncRequestedAt}</div>
                             </div>
                             <div className={styles.mappingCell}>
                               <div className={styles.mappingTitle}>{row.roomMatchingStatus}</div>

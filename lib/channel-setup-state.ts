@@ -35,6 +35,7 @@ export type ChannelSetupMetadata = {
   room_matching_reviewed: boolean | null;
   price_matching_reviewed: boolean | null;
   test_sync_review_requested: boolean | null;
+  test_sync_review_requested_at: string | null;
   go_live_review_requested: boolean | null;
   go_live_review_requested_at: string | null;
   operator_notes: string | null;
@@ -295,6 +296,7 @@ export function readChannelSetupMetadata(value: unknown): ChannelSetupMetadata {
     room_matching_reviewed: asNullableBoolean(setup.room_matching_reviewed),
     price_matching_reviewed: asNullableBoolean(setup.price_matching_reviewed),
     test_sync_review_requested: asNullableBoolean(setup.test_sync_review_requested),
+    test_sync_review_requested_at: asString(setup.test_sync_review_requested_at),
     go_live_review_requested: asNullableBoolean(setup.go_live_review_requested),
     go_live_review_requested_at: asString(setup.go_live_review_requested_at),
     operator_notes: asString(setup.operator_notes),
@@ -345,6 +347,7 @@ export function createDefaultChannelSetupState(familyId: string, providerKey: Ch
       room_matching_reviewed: null,
       price_matching_reviewed: null,
       test_sync_review_requested: null,
+      test_sync_review_requested_at: null,
       go_live_review_requested: null,
       go_live_review_requested_at: null,
       operator_notes: null,
@@ -387,6 +390,7 @@ export function mergeChannelSetupMetadata(
     room_matching_reviewed: asBoolean(patchMetadata.room_matching_reviewed),
     price_matching_reviewed: asBoolean(patchMetadata.price_matching_reviewed),
     test_sync_review_requested: asBoolean(patchMetadata.test_sync_review_requested),
+    test_sync_review_requested_at: asString(patchMetadata.test_sync_review_requested_at),
     go_live_review_requested: asBoolean(patchMetadata.go_live_review_requested),
     go_live_review_requested_at: asString(patchMetadata.go_live_review_requested_at),
     operator_notes: asString(patchMetadata.operator_notes),
