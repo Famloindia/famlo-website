@@ -1,0 +1,2009 @@
+diff --git a/app/partnerslogin/home/pro/dashboard/page.tsx b/app/partnerslogin/home/pro/dashboard/page.tsx
+index 653d8bc4..ab308cab 100644
+--- a/app/partnerslogin/home/pro/dashboard/page.tsx
++++ b/app/partnerslogin/home/pro/dashboard/page.tsx
+@@ -1,1358 +1,9 @@
+-import Link from "next/link";
+-import { cookies } from "next/headers";
+-import { redirect } from "next/navigation";
+-import type { CSSProperties } from "react";
+-import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
+-
+-import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardShell";
+-import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+-import { resolveAuthorizedHostSession } from "@/lib/chat-access";
+-import { loadCanonicalCalendar } from "@/lib/calendar";
+-import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
+-import { parseHostListingMeta } from "@/lib/host-listing-meta";
+-import { isFamloProDashboardEnabled, loadHostProAccess, loadHostProAccessMap } from "@/lib/host-pro-access";
+-import { loadHostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
+-import { loadHostProSettings } from "@/lib/host-pro-settings";
+-import { buildHostProSetupReadiness } from "@/lib/host-pro-setup-readiness";
+-import { resolveAuthenticatedUser } from "@/lib/request-user";
+-import { loadStayUnitsForSelector } from "@/lib/stay-units";
+-import { createAdminSupabaseClient } from "@/lib/supabase";
+-
+-export interface FamloProDashboardPageProps {
+-  searchParams?: Promise<{
+-    family?: string;
+-    section?: string;
+-    calendarStart?: string;
+-  }>;
+-  roomRouteState?: {
+-    mode: "edit" | "create";
+-    roomId?: string;
+-  } | null;
+-}
++import { renderFamloProDashboardPage, type FamloProDashboardPageProps } from "./render-dashboard";
+ 
+ export const dynamic = "force-dynamic";
+ 
+-type ProSectionId =
+-  | "dashboard"
+-  | "host-profile"
+-  | "properties-home"
+-  | "setup-guide"
+-  | "rooms-units"
+-  | "rates-restrictions"
+-  | "inventory-calendar"
+-  | "availability-rules"
+-  | "check-times"
+-  | "connected-channels"
+-  | "room-mapping"
+-  | "rate-mapping"
+-  | "sync-logs"
+-  | "conflicts"
+-  | "bookings"
+-  | "messages-reviews"
+-  | "revenue"
+-  | "reports"
+-  | "property"
+-  | "ota-content"
+-  | "team-groups"
+-  | "settings"
+-  | "support";
+-
+-const PRO_SECTION_IDS = new Set([
+-  "dashboard",
+-  "host-profile",
+-  "properties-home",
+-  "setup-guide",
+-  "rooms-units",
+-  "rates-restrictions",
+-  "inventory-calendar",
+-  "availability-rules",
+-  "check-times",
+-  "connected-channels",
+-  "room-mapping",
+-  "rate-mapping",
+-  "sync-logs",
+-  "conflicts",
+-  "bookings",
+-  "messages-reviews",
+-  "revenue",
+-  "reports",
+-  "property",
+-  "ota-content",
+-  "team-groups",
+-  "settings",
+-  "support",
+-] as const satisfies readonly ProSectionId[]);
+-
+-function buildBasicFamloPlusUrl(familyId: string): string {
+-  const base = "/partnerslogin/home/dashboard?tab=famlo-plus";
+-  return familyId ? `${base}&family=${encodeURIComponent(familyId)}` : base;
+-}
+-
+-function buildBasicRoomUrl(familyId: string): string {
+-  const base = "/partnerslogin/home/dashboard?tab=room";
+-  return familyId ? `${base}&family=${encodeURIComponent(familyId)}` : base;
+-}
+-
+-async function canCurrentHostAccessFamily(
+-  familyId: string
+-): Promise<boolean> {
+-  const supabase = createAdminSupabaseClient();
+-  const hostSession = await resolveAuthorizedHostSession(supabase);
+-
+-  if (!hostSession) {
+-    return false;
+-  }
+-
+-  if (hostSession.familyId === familyId) {
+-    return true;
+-  }
+-
+-  const [{ data: host }, { data: family }] = await Promise.all([
+-    supabase
+-      .from("hosts")
+-      .select("user_id")
+-      .eq("legacy_family_id", familyId)
+-      .maybeSingle(),
+-    supabase
+-      .from("families")
+-      .select("user_id")
+-      .eq("id", familyId)
+-      .maybeSingle(),
+-  ]);
+-
+-  const familyHostUserId =
+-    typeof host?.user_id === "string" && host.user_id.trim().length > 0
+-      ? host.user_id
+-      : typeof family?.user_id === "string" && family.user_id.trim().length > 0
+-        ? family.user_id
+-        : null;
+-
+-  return Boolean(hostSession.hostUserId && familyHostUserId && hostSession.hostUserId === familyHostUserId);
+-}
+-
+-function asString(value: unknown): string | null {
+-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+-}
+-
+-function normalizeFamilyId(value: unknown): string {
+-  return typeof value === "string" ? value.trim() : "";
+-}
+-
+-function isSchemaCompatibilityError(message: string): boolean {
+-  const lower = message.toLowerCase();
+-  return lower.includes("column") || lower.includes("schema cache") || lower.includes("does not exist") || lower.includes("relation");
+-}
+-
+-function joinList(values: unknown): string {
+-  if (Array.isArray(values)) {
+-    return values
+-      .map((item) => (typeof item === "string" ? item.trim() : ""))
+-      .filter(Boolean)
+-      .join(", ");
+-  }
+-  return typeof values === "string" ? values : "";
+-}
+-
+-function resolveInitialSection(value: string | undefined): ProSectionId {
+-  if (value && PRO_SECTION_IDS.has(value as ProSectionId)) {
+-    return value as ProSectionId;
+-  }
+-  return "dashboard";
+-}
+-
+-function asNumber(value: unknown): number {
+-  if (typeof value === "number" && Number.isFinite(value)) return value;
+-  if (typeof value === "string" && value.trim().length > 0) {
+-    const parsed = Number(value);
+-    return Number.isFinite(parsed) ? parsed : 0;
+-  }
+-  return 0;
+-}
+-
+-function formatTimestampLabel(value: string | null | undefined): string {
+-  if (!value) return "No active end date";
+-  const date = new Date(value);
+-  if (Number.isNaN(date.getTime())) return "No active end date";
+-  return new Intl.DateTimeFormat("en-IN", {
+-    day: "numeric",
+-    month: "short",
+-    year: "numeric",
+-  }).format(date);
+-}
+-
+-function formatCurrency(value: number): string {
+-  return new Intl.NumberFormat("en-IN", {
+-    style: "currency",
+-    currency: "INR",
+-    maximumFractionDigits: 0,
+-  }).format(value);
+-}
+-
+-function formatCalendarAmount(value: number | null, currency: string | null): string | null {
+-  if (value == null || !Number.isFinite(value)) return null;
+-  const normalizedCurrency = typeof currency === "string" && currency.trim().length === 3 ? currency.trim().toUpperCase() : "INR";
+-  return new Intl.NumberFormat("en-IN", {
+-    style: "currency",
+-    currency: normalizedCurrency,
+-    minimumFractionDigits: 0,
+-    maximumFractionDigits: 2,
+-  }).format(value);
+-}
+-
+-function formatAccessReason(reason: string): string {
+-  if (reason === "active_period") return "Active access";
+-  if (reason === "grace_period") return "Grace access";
+-  if (reason === "subscription_cancelled") return "Cancelled";
+-  if (reason === "subscription_expired") return "Expired";
+-  return reason.replaceAll("_", " ");
+-}
+-
+-function isCurrentMonth(dateLike: string | null, now: Date): boolean {
+-  if (!dateLike) return false;
+-  const date = new Date(dateLike);
+-  if (Number.isNaN(date.getTime())) return false;
+-  return date.getUTCFullYear() === now.getUTCFullYear() && date.getUTCMonth() === now.getUTCMonth();
+-}
+-
+-type CalendarCellStatus = "available" | "famlo" | "ota" | "manual_block" | "pending" | "past";
+-
+-type CalendarColumn = {
+-  date: string;
+-  dayLabel: string;
+-  dateLabel: string;
+-  isPast: boolean;
+-};
+-
+-type CalendarBookingDetail = {
+-  bookingId: string;
+-  roomName: string;
+-  startDate: string;
+-  endDate: string;
+-  sourceLabel: string;
+-  externalBookingId: string | null;
+-  guestDisplayName: string;
+-  amount: string | null;
+-  currency: string | null;
+-  paymentStatus: string | null;
+-  importStatus: string | null;
+-  ackStatus: string | null;
+-  linkedBookingId: string | null;
+-  externalRevisionId: string | null;
+-  bookingListRevisionId: string | null;
+-  feedStatus: "found" | "empty" | "not_applicable";
+-  isCrsOnly: boolean;
+-  ackEligible: boolean;
+-  importedIntoFamlo: boolean;
+-  acknowledged: boolean;
+-  acknowledgementNote: string | null;
+-};
+-
+-type CalendarCell = {
+-  date: string;
+-  status: CalendarCellStatus;
+-  label: string;
+-  bookingDetail: CalendarBookingDetail | null;
+-};
+-
+-type CalendarRow = {
+-  roomId: string;
+-  roomName: string;
+-  unitType: string;
+-  rate: number;
+-  availabilityCells: CalendarCell[];
+-  rateCells: string[];
+-};
+-
+-type ProBookingSummary = {
+-  bookingId: string;
+-  roomId: string | null;
+-  roomName: string;
+-  startDate: string;
+-  endDate: string;
+-  createdAt: string | null;
+-  guestDisplayName: string;
+-  status: string;
+-  paymentStatus: string | null;
+-  amount: string | null;
+-  sourceLabel: string;
+-  externalBookingId: string | null;
+-  externalRevisionId: string | null;
+-  importStatus: string | null;
+-  ackStatus: string | null;
+-  linkedBookingId: string | null;
+-  isOta: boolean;
+-};
+-
+-type CalendarWindowSummary = {
+-  startDate: string;
+-  endDate: string;
+-  isCustomRange: boolean;
+-  verificationUrl: string | null;
+-  verificationTargetLabel: string | null;
+-};
+-
+-type CalendarVerificationSummary = {
+-  targetDate: string;
+-  checkoutDate: string;
+-  roomName: string;
+-  sourceLabel: string;
+-  targetDateBlocked: boolean;
+-  checkoutDateBlocked: boolean;
+-};
+-
+-type PropertySwitcherOption = {
+-  familyId: string;
+-  name: string;
+-  city: string | null;
+-  state: string | null;
+-  country: string | null;
+-  locality: string | null;
+-  famloPlusStatus: string | null;
+-  isActive: boolean;
+-  activeRoomCount: number;
+-};
+-
+-type HostProfileSummary = {
+-  hostName: string;
+-  accountLabel: string | null;
+-  email: string | null;
+-  phone: string | null;
+-  photoUrl: string | null;
+-  sharedIdentityNote: string;
+-  selectedPropertyName: string;
+-};
+-
+-function formatCalendarDayLabel(date: string): string {
+-  const value = new Date(`${date}T12:00:00+05:30`);
+-  return new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(value);
+-}
+-
+-function formatCalendarDateLabel(date: string): string {
+-  const value = new Date(`${date}T12:00:00+05:30`);
+-  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(value);
+-}
+-
+-function enumerateIndiaDates(from: string, days: number): string[] {
+-  return Array.from({ length: days }, (_, index) => addIndiaDays(from, index));
+-}
+-
+-function isIsoDate(value: string | undefined): value is string {
+-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+-  const parsed = new Date(`${value}T12:00:00+05:30`);
+-  return !Number.isNaN(parsed.getTime());
+-}
+-
+ export default async function FamloProDashboardPage({
+   searchParams,
+-  roomRouteState = null,
+ }: Readonly<FamloProDashboardPageProps>): Promise<React.JSX.Element> {
+-  const params = await searchParams;
+-  const cookieStore = await cookies();
+-  const requestedFamilyId = normalizeFamilyId(params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "");
+-  const initialSection = resolveInitialSection(params?.section);
+-  const requestedCalendarStart = isIsoDate(params?.calendarStart) ? params?.calendarStart : null;
+-  const supabase = createAdminSupabaseClient();
+-  const hostSession = await resolveAuthorizedHostSession(supabase);
+-  const authUser = await resolveAuthenticatedUser(supabase);
+-  const { data: requestedFamilyRecord } = requestedFamilyId
+-    ? await supabase
+-        .from("families")
+-        .select("id,user_id")
+-        .eq("id", requestedFamilyId)
+-        .maybeSingle()
+-    : { data: null };
+-  const fallbackHostUserId =
+-    typeof requestedFamilyRecord?.user_id === "string" &&
+-    requestedFamilyRecord.user_id.trim().length > 0 &&
+-    authUser?.id &&
+-    requestedFamilyRecord.user_id === authUser.id
+-      ? requestedFamilyRecord.user_id
+-      : null;
+-  const effectiveHostUserId = hostSession?.hostUserId ?? fallbackHostUserId;
+-  const effectiveSessionFamilyId =
+-    hostSession?.familyId ??
+-    (fallbackHostUserId && requestedFamilyId ? requestedFamilyId : null);
+-  const workspaceFamilyIds =
+-    effectiveHostUserId
+-      ? (
+-          await supabase
+-            .from("families")
+-            .select("id")
+-            .eq("user_id", effectiveHostUserId)
+-            .order("updated_at", { ascending: false })
+-        ).data?.map((row) => normalizeFamilyId(row.id)).filter(Boolean) ?? []
+-      : [];
+-  const workspaceAccessMap = await loadHostProAccessMap(supabase, workspaceFamilyIds);
+-  const proAccessibleFamilyIds = workspaceFamilyIds.filter((id) => workspaceAccessMap[id]?.allowed);
+-  const { data: workspaceRoomRows } =
+-    workspaceFamilyIds.length > 0
+-      ? await supabase
+-          .from("stay_units_v2")
+-          .select("legacy_family_id,is_active")
+-          .in("legacy_family_id", workspaceFamilyIds)
+-      : { data: [] };
+-  const activeRoomCountByFamilyId = new Map<string, number>();
+-  for (const row of (workspaceRoomRows ?? []) as Array<Record<string, unknown>>) {
+-    const nextFamilyId = asString(row.legacy_family_id);
+-    if (!nextFamilyId || row.is_active === false) continue;
+-    activeRoomCountByFamilyId.set(nextFamilyId, (activeRoomCountByFamilyId.get(nextFamilyId) ?? 0) + 1);
+-  }
+-  const validRequestedFamilyId =
+-    requestedFamilyId && workspaceFamilyIds.includes(requestedFamilyId) ? requestedFamilyId : "";
+-  const fallbackFamilyId =
+-    (effectiveSessionFamilyId && proAccessibleFamilyIds.includes(effectiveSessionFamilyId) ? effectiveSessionFamilyId : "") ||
+-    proAccessibleFamilyIds[0] ||
+-    (effectiveSessionFamilyId && workspaceFamilyIds.includes(effectiveSessionFamilyId) ? effectiveSessionFamilyId : "") ||
+-    workspaceFamilyIds[0] ||
+-    requestedFamilyId;
+-  const familyId = validRequestedFamilyId || fallbackFamilyId;
+-  const basicDashboardUrl = buildBasicFamloPlusUrl(familyId);
+-  const basicRoomUrl = buildBasicRoomUrl(familyId);
+-
+-  if (familyId && familyId !== requestedFamilyId) {
+-    const nextParams = new URLSearchParams();
+-    nextParams.set("family", familyId);
+-    nextParams.set("section", initialSection);
+-    if (requestedCalendarStart) {
+-      nextParams.set("calendarStart", requestedCalendarStart);
+-    }
+-    redirect(`/partnerslogin/home/pro/dashboard?${nextParams.toString()}`);
+-  }
+-
+-  if (!familyId) {
+-    return (
+-      <main style={pageStyle}>
+-        <section style={cardStyle}>
+-          <h1 style={titleStyle}>Famlo Pro is locked</h1>
+-          <p style={copyStyle}>Open the Basic Dashboard first to review Famlo+ and request activation.</p>
+-          <div style={buttonRowStyle}>
+-            <Link href="/partners/login" style={primaryLinkStyle}>Back to Partner Login</Link>
+-          </div>
+-        </section>
+-      </main>
+-    );
+-  }
+-
+-  const famloProEnabled = isFamloProDashboardEnabled();
+-  const authorized = workspaceFamilyIds.includes(familyId);
+-
+-  if (!authorized) {
+-    return (
+-      <main style={pageStyle}>
+-        <section style={cardStyle}>
+-          <div style={eyebrowStyle}>Famlo Pro</div>
+-          <h1 style={titleStyle}>Famlo Pro is locked</h1>
+-          <p style={copyStyle}>
+-            This host session is not authorized to access the requested property.
+-          </p>
+-          <div style={buttonRowStyle}>
+-            <Link href={basicDashboardUrl} style={primaryLinkStyle}>Back to Famlo+</Link>
+-          </div>
+-        </section>
+-      </main>
+-    );
+-  }
+-
+-  const access = await loadHostProAccess(supabase, familyId);
+-
+-  if (!famloProEnabled || !access.allowed) {
+-    return (
+-      <main style={pageStyle}>
+-        <section style={cardStyle}>
+-          <div style={eyebrowStyle}>Famlo Pro</div>
+-          <h1 style={titleStyle}>Famlo Pro is locked</h1>
+-          <p style={copyStyle}>
+-            Upgrade or renew Famlo+ to access PMS and Channel Manager features.
+-          </p>
+-          <div style={statusBoxStyle}>
+-            <strong style={{ color: "#0e2b57" }}>Status:</strong> <span style={{ textTransform: "capitalize" }}>{access.status}</span>
+-            <span style={{ color: "rgba(14,43,87,0.68)" }}>Reason: {famloProEnabled ? access.reason : "pro_dashboard_disabled"}</span>
+-          </div>
+-          <div style={buttonRowStyle}>
+-            <Link href={basicDashboardUrl} style={primaryLinkStyle}>Back to Famlo+</Link>
+-          </div>
+-        </section>
+-      </main>
+-    );
+-  }
+-
+-  const familyRecordResult = await supabase
+-    .from("families")
+-    .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type")
+-    .eq("id", familyId)
+-    .maybeSingle();
+-  const familyRecord =
+-    familyRecordResult.error && isSchemaCompatibilityError(familyRecordResult.error.message)
+-      ? await supabase
+-          .from("families")
+-          .select("id,name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type")
+-          .eq("id", familyId)
+-          .maybeSingle()
+-      : familyRecordResult;
+-
+-  const [{ data: family }, { data: host }] = await Promise.all([
+-    Promise.resolve({ data: familyRecord.data }),
+-    supabase
+-      .from("hosts")
+-      .select("id,legacy_family_id,display_name,status")
+-      .eq("legacy_family_id", familyId)
+-      .maybeSingle(),
+-  ]);
+-
+-  const meta = parseHostListingMeta(asString(family?.admin_notes));
+-  const storedProSettings = await loadHostProSettings(supabase, familyId);
+-  const propertyLocalityLabel =
+-    asString(meta.neighbourhood) ??
+-    asString(meta.neighborhoodDesc);
+-  const resolvedPropertyCity = storedProSettings.city ?? asString(family?.city);
+-  const resolvedPropertyState = storedProSettings.state ?? asString(family?.state);
+-  const resolvedPropertyCountry = storedProSettings.country ?? null;
+-  let propertyOptions: PropertySwitcherOption[] = [];
+-
+-  if (effectiveHostUserId) {
+-    const familyRowsResult = await supabase
+-      .from("families")
+-      .select("id,name,property_name,city,state,admin_notes,is_active,user_id")
+-      .eq("user_id", effectiveHostUserId);
+-    const familyRowsSafe =
+-      familyRowsResult.error && isSchemaCompatibilityError(familyRowsResult.error.message)
+-        ? await supabase
+-            .from("families")
+-            .select("id,name,city,state,admin_notes,is_active,user_id")
+-            .eq("user_id", effectiveHostUserId)
+-        : familyRowsResult;
+-
+-    const [{ data: familyRows }, { data: hostRows }] = await Promise.all([
+-      Promise.resolve({ data: familyRowsSafe.data }),
+-      supabase
+-        .from("hosts")
+-        .select("legacy_family_id,display_name,user_id,status")
+-        .eq("user_id", effectiveHostUserId),
+-    ]);
+-
+-    const currentFamilyRecord = family
+-      ? [{
+-          id: asString(family.id) ?? familyId,
+-          name: asString(family.name),
+-          property_name: asString((family as Record<string, unknown>).property_name),
+-          city: asString(family.city),
+-          state: asString(family.state),
+-          admin_notes: asString(family.admin_notes),
+-          is_active: family.is_active !== false,
+-          user_id: effectiveHostUserId,
+-        }]
+-      : [];
+-
+-    const familyRowsCombined = [...((familyRows ?? []) as Array<Record<string, unknown>>), ...currentFamilyRecord];
+-    const familyById = new Map<string, Record<string, unknown>>();
+-    for (const row of familyRowsCombined) {
+-      const id = asString(row.id);
+-      if (!id) continue;
+-      if (!familyById.has(id)) {
+-        familyById.set(id, row);
+-      }
+-    }
+-
+-    const hostByFamilyId = new Map(
+-      ((hostRows ?? []) as Array<Record<string, unknown>>)
+-        .map((row) => [asString(row.legacy_family_id), row] as const)
+-        .filter((entry): entry is [string, Record<string, unknown>] => Boolean(entry[0]))
+-    );
+-
+-    const familyIds = Array.from(familyById.keys());
+-    const accessMap = await loadHostProAccessMap(supabase, familyIds);
+-
+-    propertyOptions = familyIds
+-      .map((id) => {
+-        const row = familyById.get(id) ?? {};
+-        const hostRow = hostByFamilyId.get(id) ?? null;
+-        const meta = parseHostListingMeta(asString(row.admin_notes));
+-        return {
+-          familyId: id,
+-          name:
+-            asString(row.property_name) ??
+-            asString(row.name) ??
+-            asString(hostRow?.display_name) ??
+-            "Famlo Property",
+-          city: asString(row.city),
+-          state: asString(row.state),
+-          country: null,
+-          locality:
+-            asString(meta.neighbourhood) ??
+-            asString(meta.neighborhoodDesc),
+-          famloPlusStatus: accessMap[id]?.status ?? null,
+-          isActive: row.is_active !== false,
+-          activeRoomCount: activeRoomCountByFamilyId.get(id) ?? 0,
+-        } satisfies PropertySwitcherOption;
+-      })
+-      .sort((left, right) => {
+-        if (left.familyId === familyId) return -1;
+-        if (right.familyId === familyId) return 1;
+-        return left.name.localeCompare(right.name);
+-      });
+-  }
+-
+-  if (!propertyOptions.some((option) => option.familyId === familyId)) {
+-    const currentMeta = parseHostListingMeta(asString(family?.admin_notes));
+-    propertyOptions = [
+-      {
+-        familyId,
+-        name:
+-          asString((family as Record<string, unknown> | null)?.property_name) ??
+-          asString(family?.name) ??
+-          asString(host?.display_name) ??
+-          "Famlo Property",
+-        city: resolvedPropertyCity,
+-        state: resolvedPropertyState,
+-        country: resolvedPropertyCountry,
+-        locality:
+-          propertyLocalityLabel ??
+-          asString(currentMeta.neighbourhood) ??
+-          asString(currentMeta.neighborhoodDesc),
+-        famloPlusStatus: access.status,
+-        isActive: family?.is_active !== false,
+-        activeRoomCount: activeRoomCountByFamilyId.get(familyId) ?? 0,
+-      },
+-      ...propertyOptions,
+-    ];
+-  }
+-
+-  const propertyName =
+-    asString((family as Record<string, unknown> | null)?.property_name) ??
+-    asString(family?.name) ??
+-    asString(host?.display_name) ??
+-    "Famlo Property";
+-  const hostCode = asString(family?.host_id);
+-  const { data: propertyPhotosRows } = await supabase
+-    .from("family_photos")
+-    .select("id,url,is_primary,family_id")
+-    .eq("family_id", familyId)
+-    .order("is_primary", { ascending: false });
+-  const locationLabel =
+-    [propertyLocalityLabel, resolvedPropertyCity, resolvedPropertyState, resolvedPropertyCountry].filter(Boolean).join(", ") ||
+-    "Location pending";
+-  const hostProfile: HostProfileSummary = {
+-    hostName: asString(host?.display_name) ?? propertyName,
+-    accountLabel: hostCode ?? effectiveHostUserId ?? null,
+-    email: authUser?.email ?? null,
+-    phone: authUser?.phone ?? null,
+-    photoUrl: null,
+-    sharedIdentityNote: "This is the shared host identity for this Famlo Pro workspace.",
+-    selectedPropertyName: propertyName,
+-  };
+-  const channelFoundation = await loadHostProChannelFoundation(supabase, familyId);
+-  const channexConfig = getChannexConfigSummary();
+-  const proSettings = {
+-    ...storedProSettings,
+-    otaTitle: storedProSettings.otaTitle ?? propertyName,
+-    state: resolvedPropertyState,
+-    city: resolvedPropertyCity,
+-    addressLine: storedProSettings.addressLine ?? asString(meta.propertyAddress),
+-  };
+-  const propertyPhotos: PhotoItem[] = ((propertyPhotosRows ?? []) as Array<Record<string, unknown>>).map((photo) => ({
+-    id: asString(photo.id) ?? `photo-${Math.random()}`,
+-    url: asString(photo.url) ?? "",
+-    isPrimary: photo.is_primary === true,
+-    family_id: asString(photo.family_id) ?? familyId,
+-  })).filter((photo) => photo.url.length > 0);
+-  const propertyContent = {
+-    propertyName,
+-    listingTitle: asString(meta.listingTitle) ?? "",
+-    journeyStory: asString(meta.journeyStory) ?? "",
+-    specialExperience: asString(meta.specialExperience) ?? "",
+-    localExperience: asString(meta.localExperience) ?? "",
+-    houseType: asString(meta.houseType) ?? "",
+-    interactionType: asString(meta.interactionType) ?? "",
+-    bathroomType: asString(family?.bathroom_type) ?? asString(meta.bathroomType) ?? "",
+-    propertyAddress: asString(meta.propertyAddress) ?? "",
+-    commonAreas: joinList(meta.commonAreas ?? family?.common_areas),
+-    amenities: joinList(meta.amenities ?? family?.amenities),
+-    includedItems: joinList(meta.includedItems),
+-    houseRules: joinList(meta.houseRules ?? storedProSettings.houseRules ?? family?.house_rules),
+-    googleMapsLink: asString(meta.googleMapsLink) ?? asString(family?.google_maps_link) ?? "",
+-    foodType: joinList(meta.foodType ?? family?.food_type),
+-    checkInTime: asString(meta.checkInTime) ?? storedProSettings.checkInTime ?? "",
+-    checkOutTime: asString(meta.checkOutTime) ?? storedProSettings.checkOutTime ?? "",
+-  };
+-  const rooms = (
+-    await loadStayUnitsForSelector(supabase, {
+-      hostId: asString(host?.id),
+-      legacyFamilyId: familyId,
+-    })
+-  ).map((room) => ({
+-    id: room.id,
+-    name: room.name,
+-    unitType: room.unitType,
+-    description: room.description,
+-    maxGuests: room.maxGuests,
+-    bedInfo: room.bedInfo,
+-    bathroomType: room.bathroomType,
+-    priceMorning: room.priceMorning,
+-    priceAfternoon: room.priceAfternoon,
+-    priceEvening: room.priceEvening,
+-    priceFullday: room.priceFullday,
+-    quarterEnabled: room.quarterEnabled,
+-    isActive: room.isActive,
+-    isPrimary: room.isPrimary,
+-    amenitiesCount: room.amenities.length,
+-    photosCount: room.photos.length + room.localityPhotos.length,
+-    photoUrl: room.photos[0] ?? room.localityPhotos[0] ?? null,
+-  }));
+-  const activeRoomIds = rooms.filter((room) => room.isActive).map((room) => room.id);
+-  const roomMappingsByRoomId = new Map(
+-    channelFoundation.roomMappings.map((mapping) => [mapping.stayUnitId, mapping])
+-  );
+-  const providerRowsExist = channelFoundation.providers.length > 0;
+-  const propertyConnected = channelFoundation.properties.some(
+-    (property) => property.syncStatus === "connected"
+-  );
+-  const roomMappingsReady =
+-    activeRoomIds.length > 0 &&
+-    activeRoomIds.every((roomId) => Boolean(roomMappingsByRoomId.get(roomId)?.externalRoomTypeId));
+-  const ratePlansReady =
+-    channelFoundation.ratePlans.length > 0 &&
+-    channelFoundation.ratePlans.some((ratePlan) => Boolean(ratePlan.externalRatePlanId));
+-
+-  const { data: bookingRows } =
+-    host?.id
+-      ? await supabase
+-          .from("bookings_v2")
+-          .select("id,status,payment_status,total_price,start_date,created_at")
+-          .eq("host_id", host.id)
+-          .order("created_at", { ascending: false })
+-          .limit(120)
+-      : { data: [] };
+-
+-  const now = new Date();
+-  const openRooms = rooms.filter((room) => room.isActive).length;
+-  const closedRooms = rooms.length - openRooms;
+-  const nonCancelledBookings = ((bookingRows ?? []) as Array<Record<string, unknown>>).filter((row) => {
+-    const status = String(row.status ?? "").toLowerCase();
+-    return !status.startsWith("cancelled");
+-  });
+-  const revenueThisMonth = nonCancelledBookings
+-    .filter((row) => {
+-      const startDate = asString(row.start_date);
+-      const createdAt = asString(row.created_at);
+-      return isCurrentMonth(startDate, now) || isCurrentMonth(createdAt, now);
+-    })
+-    .reduce((sum, row) => sum + asNumber(row.total_price), 0);
+-
+-  const setupReadiness = buildHostProSetupReadiness({
+-    propertyName,
+-    locationLabel,
+-    familyExists: Boolean(family?.id),
+-    hostExists: Boolean(host?.id),
+-    settings: proSettings,
+-    legacyHouseTypeHint: asString(meta.houseType),
+-    rooms: rooms.map((room) => ({
+-      name: room.name,
+-      isActive: room.isActive,
+-      maxGuests: room.maxGuests,
+-      priceFullday: room.priceFullday,
+-      bedInfo: room.bedInfo,
+-      bathroomType: room.bathroomType,
+-      photosCount: room.photosCount,
+-    })),
+-    channelReadiness: {
+-      providerRowsExist,
+-      propertyConnected,
+-      roomMappingsReady,
+-      ratePlansReady,
+-    },
+-  });
+-  const setupItems = setupReadiness.items;
+-
+-  const metrics = [
+-    {
+-      label: "Setup Progress",
+-      value: `${setupReadiness.progressPercent}%`,
+-      hint: "Core readiness across property identity, inventory, and future channel setup.",
+-    },
+-    {
+-      label: "Sync Health",
+-      value: "Not connected",
+-      hint: "No provider or webhook traffic is active in this phase.",
+-    },
+-    {
+-      label: "Active Channels",
+-      value: String(
+-        channelFoundation.properties.filter((property) => property.syncStatus === "connected").length
+-      ),
+-      hint: providerRowsExist
+-        ? "Provider-neutral foundation is present, but providers remain disconnected unless a property row is marked connected."
+-        : "No provider rows are seeded yet, so channel readiness remains blocked.",
+-    },
+-    {
+-      label: "Rooms Open / Closed",
+-      value: `${openRooms}/${closedRooms}`,
+-      hint: rooms.length > 0 ? "Read-only room status from current Famlo inventory." : "No room inventory available yet.",
+-    },
+-    {
+-      label: "OTA Bookings",
+-      value: "0",
+-      hint: "OTA import stays disabled until future provider integration phases.",
+-    },
+-    {
+-      label: "Revenue This Month",
+-      value: formatCurrency(revenueThisMonth),
+-      hint: "Read-only view from current Famlo bookings this month. OTA revenue is not connected yet.",
+-    },
+-  ];
+-
+-  const actionItems = [
+-    {
+-      title: "Confirm room structure",
+-      body: rooms.length > 0
+-        ? "Review the stay units surfaced from existing Famlo inventory before channel mapping begins."
+-        : "No stay units were found through the safe inventory helper, so inventory review is still blocked.",
+-      badge: rooms.length > 0 ? "Ready" : "Blocked",
+-    },
+-    {
+-      title: "Set up operating rules",
+-      body: "Min stay, max stay, stop-sell, and arrival restrictions are visible as shells but not configured yet.",
+-      badge: "Next",
+-    },
+-    {
+-      title: "Prepare standard rate plan",
+-      body: setupReadiness.completedItems.some((item) => item.key === "room-base-price")
+-        ? "Base pricing exists across the surfaced rooms, but provider-neutral rate plans will be introduced in a later phase."
+-        : "One or more rooms still need base pricing before future rate mapping becomes viable.",
+-      badge: setupReadiness.completedItems.some((item) => item.key === "room-base-price") ? "Draft" : "Needed",
+-    },
+-    {
+-      title: "Wait for provider pilot",
+-      body: "Channel connections, mappings, sync jobs, and OTA booking import remain intentionally disabled.",
+-      badge: "Coming soon",
+-    },
+-    {
+-      title: "Prepare provider foundation",
+-      body: providerRowsExist
+-        ? "Provider seed rows exist. The next future step is mapping Famlo property, rooms, and rates without making the provider the source of truth."
+-        : "Provider foundation rows are missing, so future mapping cannot begin until the provider-neutral base is present.",
+-      badge: providerRowsExist ? "Foundation ready" : "Needed",
+-    },
+-  ];
+-
+-  const feedItems = [
+-    {
+-      title: "Famlo+ entitlement confirmed",
+-      body: `Pro access is open under ${formatAccessReason(access.reason)} and remains scoped to this authorized property only.`,
+-      tone: "success" as const,
+-    },
+-    {
+-      title: "Provider environment still disconnected",
+-      body: "Channex appears first in the future roadmap, but no provider API, webhook, or sync job is active yet.",
+-      tone: "info" as const,
+-    },
+-    {
+-      title: "Channel foundation loaded",
+-      body: `${channelFoundation.providers.length} provider rows, ${channelFoundation.roomMappings.length} room mappings, ${channelFoundation.ratePlans.length} rate plans, and ${channelFoundation.syncLogs.length} sync logs were loaded from the provider-neutral foundation.`,
+-      tone: channelFoundation.providers.length > 0 ? ("success" as const) : ("warning" as const),
+-    },
+-    {
+-      title: "Inventory foundation reviewed",
+-      body: rooms.length > 0
+-        ? `${rooms.length} stay units were loaded from the existing Famlo inventory path without writing any room changes.`
+-        : "No safe room inventory surfaced, so this dashboard falls back to an inventory placeholder state.",
+-      tone: rooms.length > 0 ? ("success" as const) : ("warning" as const),
+-    },
+-    {
+-      title: "Setup readiness scored",
+-      body: `${setupReadiness.completedCount} of ${setupReadiness.totalCount} setup signals are complete. Next action: ${setupReadiness.nextAction}`,
+-      tone: setupReadiness.missingItems.length === 0 ? ("success" as const) : ("info" as const),
+-    },
+-    {
+-      title: "Bookings remain source-of-truth in Famlo",
+-      body: `${nonCancelledBookings.length} read-only bookings were considered for dashboard context. OTA imports remain disabled.`,
+-      tone: "info" as const,
+-    },
+-  ];
+-
+-  const calendarFrom = requestedCalendarStart ?? getTodayInIndia();
+-  const calendarDates = enumerateIndiaDates(calendarFrom, 30);
+-  const calendarTo = calendarDates[calendarDates.length - 1] ?? calendarFrom;
+-  const calendarColumns: CalendarColumn[] = calendarDates.map((date) => ({
+-    date,
+-    dayLabel: formatCalendarDayLabel(date),
+-    dateLabel: formatCalendarDateLabel(date),
+-    isPast: date < calendarFrom,
+-  }));
+-
+-  let bookingRowsForCalendar: Array<Record<string, unknown>> = [];
+-  let bookingRowsForWorkspace: Array<Record<string, unknown>> = [];
+-  if (host?.id) {
+-    const selectWithStayUnit =
+-      "id,status,payment_status,total_price,start_date,end_date,stay_unit_id,pricing_snapshot,users!user_id(name)";
+-    const selectFallback =
+-      "id,status,payment_status,total_price,start_date,end_date,pricing_snapshot,users!user_id(name)";
+-
+-    const bookingCalendarInitialResult = await supabase
+-      .from("bookings_v2")
+-      .select(selectWithStayUnit)
+-      .eq("host_id", host.id)
+-      .lte("start_date", calendarTo)
+-      .gte("end_date", calendarFrom);
+-
+-    if (
+-      bookingCalendarInitialResult.error &&
+-      String(bookingCalendarInitialResult.error.message ?? "").includes("stay_unit_id")
+-    ) {
+-      const bookingCalendarFallbackResult = await supabase
+-        .from("bookings_v2")
+-        .select(selectFallback)
+-        .eq("host_id", host.id)
+-        .lte("start_date", calendarTo)
+-        .gte("end_date", calendarFrom);
+-
+-      if (!bookingCalendarFallbackResult.error) {
+-        bookingRowsForCalendar = (bookingCalendarFallbackResult.data ?? []) as Array<Record<string, unknown>>;
+-      }
+-    } else if (!bookingCalendarInitialResult.error) {
+-      bookingRowsForCalendar = (bookingCalendarInitialResult.data ?? []) as Array<Record<string, unknown>>;
+-    }
+-
+-    const workspaceSelectWithStayUnit =
+-      "id,status,payment_status,total_price,start_date,end_date,created_at,stay_unit_id,pricing_snapshot,users!user_id(name)";
+-    const workspaceSelectFallback =
+-      "id,status,payment_status,total_price,start_date,end_date,created_at,pricing_snapshot,users!user_id(name)";
+-
+-    const bookingWorkspaceInitialResult = await supabase
+-      .from("bookings_v2")
+-      .select(workspaceSelectWithStayUnit)
+-      .eq("host_id", host.id)
+-      .order("start_date", { ascending: false })
+-      .limit(120);
+-
+-    if (
+-      bookingWorkspaceInitialResult.error &&
+-      String(bookingWorkspaceInitialResult.error.message ?? "").includes("stay_unit_id")
+-    ) {
+-      const bookingWorkspaceFallbackResult = await supabase
+-        .from("bookings_v2")
+-        .select(workspaceSelectFallback)
+-        .eq("host_id", host.id)
+-        .order("start_date", { ascending: false })
+-        .limit(120);
+-
+-      if (!bookingWorkspaceFallbackResult.error) {
+-        bookingRowsForWorkspace = (bookingWorkspaceFallbackResult.data ?? []) as Array<Record<string, unknown>>;
+-      }
+-    } else if (!bookingWorkspaceInitialResult.error) {
+-      bookingRowsForWorkspace = (bookingWorkspaceInitialResult.data ?? []) as Array<Record<string, unknown>>;
+-    }
+-  }
+-
+-  const hostCalendarEvents =
+-    host?.id
+-      ? await loadCanonicalCalendar(supabase, {
+-          ownerType: "host",
+-          ownerId: host.id,
+-          from: calendarFrom,
+-          to: calendarTo,
+-        })
+-      : [];
+-
+-  const manualBlockDates = new Set(
+-    hostCalendarEvents
+-      .filter((event) => event.sourceType === "manual_block" && event.isBlocking)
+-      .flatMap((event) => {
+-        const dates: string[] = [];
+-        let cursor = event.startDate;
+-        while (cursor <= event.endDate) {
+-          dates.push(cursor);
+-          cursor = addIndiaDays(cursor, 1);
+-        }
+-        return dates;
+-      })
+-  );
+-
+-  const bookingStatusByRoomDate = new Map<string, CalendarCellStatus>();
+-  const bookingDetailByRoomDate = new Map<string, CalendarBookingDetail>();
+-  const roomNameById = new Map(rooms.map((room) => [room.id, room.name]));
+-  const bookingRevisionByLinkedBookingId = new Map(
+-    channelFoundation.bookingRevisions
+-      .filter((revision) => revision.linkedBookingId)
+-      .map((revision) => [revision.linkedBookingId as string, revision])
+-  );
+-  const bookingRevisionByExternalBookingId = new Map(
+-    channelFoundation.bookingRevisions
+-      .filter((revision) => revision.externalBookingId)
+-      .map((revision) => [revision.externalBookingId as string, revision])
+-  );
+-  const proBookings: ProBookingSummary[] = bookingRowsForWorkspace
+-    .flatMap((row) => {
+-      const pricingSnapshot =
+-        row.pricing_snapshot && typeof row.pricing_snapshot === "object" && !Array.isArray(row.pricing_snapshot)
+-          ? (row.pricing_snapshot as Record<string, unknown>)
+-          : {};
+-      const userRecord =
+-        row.users && typeof row.users === "object" && !Array.isArray(row.users)
+-          ? (row.users as Record<string, unknown>)
+-          : {};
+-      const bookingId = asString(row.id);
+-      const startDate = asString(row.start_date);
+-      const endDate = asString(row.end_date);
+-      const stayUnitId = asString(row.stay_unit_id) ?? asString(pricingSnapshot.stay_unit_id);
+-      if (!bookingId || !startDate || !endDate) return [];
+-
+-      const externalBookingId = asString(pricingSnapshot.channel_external_booking_id);
+-      const matchedRevision =
+-        bookingRevisionByLinkedBookingId.get(bookingId) ??
+-        (externalBookingId ? bookingRevisionByExternalBookingId.get(externalBookingId) : null) ??
+-        null;
+-      const channelProvider = asString(pricingSnapshot.channel_provider);
+-      const otaName = asString(pricingSnapshot.ota_name) ?? matchedRevision?.otaName ?? null;
+-      const isOta = channelProvider === "channex";
+-      const bookingCurrency = asString(pricingSnapshot.currency) ?? matchedRevision?.currency ?? "INR";
+-      const totalPrice = asNumber(row.total_price);
+-      return [{
+-        bookingId,
+-        roomId: stayUnitId,
+-        roomName: stayUnitId ? roomNameById.get(stayUnitId) ?? "Room" : "Room",
+-        startDate,
+-        endDate,
+-        createdAt: asString(row.created_at),
+-        guestDisplayName:
+-          asString(pricingSnapshot.channel_guest_display_name) ??
+-          asString(pricingSnapshot.channel_guest_name) ??
+-          asString(pricingSnapshot.guest_name) ??
+-          asString(userRecord.name) ??
+-          (isOta ? "OTA Guest" : "Famlo Guest"),
+-        status: String(row.status ?? "unknown"),
+-        paymentStatus: asString(row.payment_status),
+-        amount:
+-          totalPrice > 0
+-            ? formatCalendarAmount(totalPrice, bookingCurrency)
+-            : matchedRevision?.amount != null
+-              ? formatCalendarAmount(matchedRevision.amount, matchedRevision.currency ?? bookingCurrency)
+-              : null,
+-        sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : "Famlo Direct",
+-        externalBookingId: externalBookingId ?? matchedRevision?.externalBookingId ?? null,
+-        externalRevisionId:
+-          asString(pricingSnapshot.channel_external_revision_id) ?? matchedRevision?.externalRevisionId ?? null,
+-        importStatus: isOta ? matchedRevision?.importStatus ?? "preview" : "not_applicable",
+-        ackStatus: isOta ? matchedRevision?.ackStatus ?? "not_acknowledged" : "not_applicable",
+-        linkedBookingId: matchedRevision?.linkedBookingId ?? bookingId,
+-        isOta,
+-      } satisfies ProBookingSummary];
+-    })
+-    .sort((left, right) => {
+-      if (left.isOta !== right.isOta) return left.isOta ? -1 : 1;
+-      return right.startDate.localeCompare(left.startDate);
+-    });
+-  for (const row of bookingRowsForCalendar) {
+-    const pricingSnapshot =
+-      row.pricing_snapshot && typeof row.pricing_snapshot === "object" && !Array.isArray(row.pricing_snapshot)
+-        ? (row.pricing_snapshot as Record<string, unknown>)
+-        : {};
+-    const userRecord =
+-      row.users && typeof row.users === "object" && !Array.isArray(row.users)
+-        ? (row.users as Record<string, unknown>)
+-        : {};
+-    const stayUnitId = asString(row.stay_unit_id) ?? asString(pricingSnapshot.stay_unit_id);
+-    const startDate = asString(row.start_date);
+-    const endDate = asString(row.end_date) ?? startDate;
+-    const status = String(row.status ?? "").trim().toLowerCase();
+-    const channelProvider = asString(pricingSnapshot.channel_provider);
+-    const bookingId = asString(row.id);
+-    const externalBookingId = asString(pricingSnapshot.channel_external_booking_id);
+-    const matchedRevision =
+-      (bookingId ? bookingRevisionByLinkedBookingId.get(bookingId) : null) ??
+-      (externalBookingId ? bookingRevisionByExternalBookingId.get(externalBookingId) : null) ??
+-      null;
+-    const isOtaBooking = channelProvider === "channex";
+-    const guestDisplayName =
+-      asString(pricingSnapshot.channel_guest_display_name) ??
+-      asString(pricingSnapshot.channel_guest_name) ??
+-      asString(pricingSnapshot.guest_name) ??
+-      asString(pricingSnapshot.guest_display_name) ??
+-      asString(userRecord.name) ??
+-      (isOtaBooking ? "OTA Guest" : "Famlo Guest");
+-    const bookingCurrency = asString(pricingSnapshot.currency) ?? matchedRevision?.currency ?? "INR";
+-    const totalPrice = asNumber(row.total_price);
+-    const bookingAmount =
+-      totalPrice > 0
+-        ? formatCalendarAmount(totalPrice, bookingCurrency)
+-        : matchedRevision?.amount != null
+-          ? formatCalendarAmount(matchedRevision.amount, matchedRevision.currency ?? bookingCurrency)
+-          : null;
+-
+-    if (!stayUnitId || !startDate || !endDate) continue;
+-    if (status === "cancelled" || status === "cancelled_by_user" || status === "cancelled_by_partner" || status === "rejected") {
+-      continue;
+-    }
+-
+-    let cellStatus: CalendarCellStatus = "famlo";
+-    if (status === "pending" || status === "pending_host_approval" || status === "awaiting_payment") {
+-      cellStatus = "pending";
+-    } else if (channelProvider === "channex") {
+-      cellStatus = "ota";
+-    }
+-
+-    const externalRevisionId =
+-      asString(pricingSnapshot.channel_external_revision_id) ??
+-      matchedRevision?.externalRevisionId ??
+-      null;
+-    const rawPayload =
+-      matchedRevision?.rawPayload && typeof matchedRevision.rawPayload === "object" && !Array.isArray(matchedRevision.rawPayload)
+-        ? (matchedRevision.rawPayload as Record<string, unknown>)
+-        : {};
+-    const bookingListRevisionId =
+-      asString(pricingSnapshot.channel_booking_list_revision_id) ??
+-      asString(rawPayload.booking_list_revision_id) ??
+-      null;
+-    const isCrsOnly =
+-      isOtaBooking &&
+-      (rawPayload.is_crs_revision === true ||
+-        rawPayload.booking_list_is_crs_revision === true ||
+-        (Object.prototype.hasOwnProperty.call(rawPayload, "channel_id") && !asString(rawPayload.channel_id)) ||
+-        (Object.prototype.hasOwnProperty.call(rawPayload, "booking_list_channel_id") && !asString(rawPayload.booking_list_channel_id)));
+-    const ackEligible = isOtaBooking && Boolean(externalRevisionId);
+-    const resolvedLinkedBookingId = isOtaBooking
+-      ? matchedRevision?.linkedBookingId ?? bookingId ?? null
+-      : bookingId ?? null;
+-    const resolvedImportStatus =
+-      !isOtaBooking
+-        ? "not_applicable"
+-        : matchedRevision?.importStatus === "failed"
+-          ? "failed"
+-          : resolvedLinkedBookingId || matchedRevision?.importStatus === "imported"
+-            ? "imported"
+-            : matchedRevision?.importStatus ?? "preview";
+-    const bookingDetail: CalendarBookingDetail = {
+-      bookingId: bookingId ?? "",
+-      roomName: roomNameById.get(stayUnitId) ?? "Room",
+-      startDate,
+-      endDate,
+-      sourceLabel: isOtaBooking ? "Channex / OTA" : "Famlo Direct",
+-      externalBookingId: externalBookingId ?? matchedRevision?.externalBookingId ?? null,
+-      guestDisplayName,
+-      amount: bookingAmount,
+-      currency: bookingCurrency,
+-      paymentStatus: asString(row.payment_status),
+-      importStatus: resolvedImportStatus,
+-      ackStatus: isOtaBooking ? matchedRevision?.ackStatus ?? "not_acknowledged" : "not_applicable",
+-      linkedBookingId: resolvedLinkedBookingId,
+-      externalRevisionId,
+-      bookingListRevisionId,
+-      feedStatus: !isOtaBooking ? "not_applicable" : externalRevisionId ? "found" : "empty",
+-      isCrsOnly,
+-      ackEligible,
+-      importedIntoFamlo: !isOtaBooking || resolvedImportStatus === "imported",
+-      acknowledged: isOtaBooking ? matchedRevision?.ackStatus === "acknowledged" : false,
+-      acknowledgementNote:
+-        isOtaBooking && !externalRevisionId
+-          ? bookingListRevisionId
+-            ? "Booking List exposed a revision id, but acknowledgement stays blocked until a real Booking Revision Feed id is stored."
+-            : "Cannot acknowledge Booking List preview; requires Booking Revision Feed id."
+-          : null,
+-    };
+-
+-    const renderedEndDate =
+-      isOtaBooking && endDate > startDate
+-        ? addIndiaDays(endDate, -1)
+-        : endDate;
+-
+-    let cursor = startDate;
+-    while (cursor <= renderedEndDate && cursor <= calendarTo) {
+-      if (cursor >= calendarFrom) {
+-        bookingStatusByRoomDate.set(`${stayUnitId}:${cursor}`, cellStatus);
+-        bookingDetailByRoomDate.set(`${stayUnitId}:${cursor}`, bookingDetail);
+-      }
+-      cursor = addIndiaDays(cursor, 1);
+-    }
+-  }
+-
+-  const calendarRows: CalendarRow[] = rooms.map((room) => ({
+-    roomId: room.id,
+-    roomName: room.name,
+-    unitType: room.unitType,
+-    rate: room.priceFullday,
+-    availabilityCells: calendarColumns.map((column) => {
+-      const bookingStatus = bookingStatusByRoomDate.get(`${room.id}:${column.date}`);
+-      const status: CalendarCellStatus =
+-        column.isPast
+-          ? "past"
+-          : bookingStatus ?? (manualBlockDates.has(column.date) ? "manual_block" : "available");
+-
+-      return {
+-        date: column.date,
+-        status,
+-        label:
+-          status === "famlo"
+-            ? "Famlo booking"
+-            : status === "ota"
+-              ? "OTA booking"
+-              : status === "manual_block"
+-                ? "Manual block"
+-                : status === "pending"
+-                  ? "Pending approval"
+-                : status === "past"
+-                    ? "Past date"
+-                    : "Available",
+-        bookingDetail: bookingDetailByRoomDate.get(`${room.id}:${column.date}`) ?? null,
+-      };
+-    }),
+-    rateCells: calendarColumns.map((column) =>
+-      column.isPast ? "Past" : room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing"
+-    ),
+-  }));
+-
+-  const bookingComVerificationTarget =
+-    proBookings.find(
+-      (booking) =>
+-        booking.isOta &&
+-        booking.startDate === "2026-06-10" &&
+-        booking.endDate === "2026-06-11"
+-    ) ?? null;
+-  const juneVerificationWindowStart = bookingComVerificationTarget ? "2026-06-01" : null;
+-  const calendarWindow: CalendarWindowSummary = {
+-    startDate: calendarFrom,
+-    endDate: calendarTo,
+-    isCustomRange: Boolean(requestedCalendarStart),
+-    verificationUrl: juneVerificationWindowStart
+-      ? `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=inventory-calendar&calendarStart=${encodeURIComponent(juneVerificationWindowStart)}`
+-      : null,
+-    verificationTargetLabel: bookingComVerificationTarget
+-      ? `${bookingComVerificationTarget.startDate} → ${bookingComVerificationTarget.endDate}`
+-      : null,
+-  };
+-  const computedCalendarVerification: CalendarVerificationSummary | null =
+-    bookingComVerificationTarget &&
+-    bookingComVerificationTarget.roomId &&
+-    calendarDates.includes(bookingComVerificationTarget.startDate) &&
+-    calendarDates.includes(bookingComVerificationTarget.endDate)
+-      ? {
+-          targetDate: bookingComVerificationTarget.startDate,
+-          checkoutDate: bookingComVerificationTarget.endDate,
+-          roomName: bookingComVerificationTarget.roomName,
+-          sourceLabel: bookingComVerificationTarget.sourceLabel,
+-          targetDateBlocked:
+-            bookingStatusByRoomDate.get(`${bookingComVerificationTarget.roomId}:${bookingComVerificationTarget.startDate}`) === "ota",
+-          checkoutDateBlocked: Boolean(
+-            bookingStatusByRoomDate.get(`${bookingComVerificationTarget.roomId}:${bookingComVerificationTarget.endDate}`)
+-          ),
+-        }
+-      : null;
+-
+-  return (
+-    <FamloProDashboardShell
+-      roomRouteState={roomRouteState}
+-      hostUserId={hostSession?.hostUserId ?? null}
+-      hostProfile={hostProfile}
+-      propertyName={propertyName}
+-      propertyLocalityLabel={propertyLocalityLabel}
+-      propertyHomeLat={typeof family?.lat === "number" ? family.lat : null}
+-      propertyHomeLng={typeof family?.lng === "number" ? family.lng : null}
+-      hostCode={hostCode}
+-      locationLabel={locationLabel}
+-      famloPlusStatus={access.status}
+-      entitlementLabel={
+-        access.status === "grace"
+-          ? `Grace until ${formatTimestampLabel(access.grace_until)}`
+-          : `Active until ${formatTimestampLabel(access.current_period_end)}`
+-      }
+-      accessReason={formatAccessReason(access.reason)}
+-      initialSection={initialSection}
+-      rooms={rooms}
+-      metrics={metrics}
+-      setupItems={setupItems}
+-      actionItems={actionItems}
+-      feedItems={feedItems}
+-      basicDashboardUrl={basicDashboardUrl}
+-      basicRoomUrl={basicRoomUrl}
+-      familyId={familyId}
+-      propertyOptions={propertyOptions}
+-      initialPropertyContent={propertyContent}
+-      propertyPhotos={propertyPhotos}
+-      initialSettings={proSettings}
+-      channelFoundation={channelFoundation}
+-      channexConfig={channexConfig}
+-      proBookings={proBookings}
+-      calendarColumns={calendarColumns}
+-      calendarRows={calendarRows}
+-      calendarWindow={calendarWindow}
+-      calendarVerification={computedCalendarVerification}
+-    />
+-  );
++  return renderFamloProDashboardPage({ searchParams });
+ }
+-
+-const pageStyle: CSSProperties = {
+-  minHeight: "100vh",
+-  background: "#f8fafc",
+-  display: "flex",
+-  alignItems: "center",
+-  justifyContent: "center",
+-  padding: "32px 20px",
+-};
+-
+-const cardStyle: CSSProperties = {
+-  width: "100%",
+-  maxWidth: "720px",
+-  background: "white",
+-  borderRadius: "24px",
+-  padding: "32px",
+-  border: "1px solid rgba(14,43,87,0.08)",
+-  boxShadow: "0 20px 48px rgba(15, 23, 42, 0.06)",
+-  display: "grid",
+-  gap: "16px",
+-};
+-
+-const eyebrowStyle: CSSProperties = {
+-  fontSize: "11px",
+-  fontWeight: 900,
+-  letterSpacing: "0.14em",
+-  textTransform: "uppercase",
+-  color: "#165dcc",
+-};
+-
+-const titleStyle: CSSProperties = {
+-  margin: 0,
+-  fontSize: "36px",
+-  lineHeight: 1.05,
+-  fontWeight: 900,
+-  color: "#0e2b57",
+-};
+-
+-const copyStyle: CSSProperties = {
+-  margin: 0,
+-  color: "rgba(14,43,87,0.72)",
+-  lineHeight: 1.8,
+-  fontSize: "16px",
+-  fontWeight: 600,
+-};
+-
+-const statusBoxStyle: CSSProperties = {
+-  display: "grid",
+-  gap: "8px",
+-  padding: "18px",
+-  borderRadius: "18px",
+-  background: "#f8fafc",
+-  border: "1px solid rgba(14,43,87,0.06)",
+-};
+-
+-const buttonRowStyle: CSSProperties = {
+-  display: "flex",
+-  gap: "12px",
+-  flexWrap: "wrap",
+-  marginTop: "8px",
+-};
+-
+-const primaryLinkStyle: CSSProperties = {
+-  display: "inline-flex",
+-  alignItems: "center",
+-  justifyContent: "center",
+-  padding: "14px 20px",
+-  borderRadius: "14px",
+-  background: "#165dcc",
+-  color: "white",
+-  fontWeight: 800,
+-  textDecoration: "none",
+-};
+-
+-const secondaryLinkStyle: CSSProperties = {
+-  ...primaryLinkStyle,
+-  background: "#e0ebff",
+-  color: "#0e2b57",
+-};
+diff --git a/app/partnerslogin/home/pro/properties/[familyId]/rooms/[roomId]/page.tsx b/app/partnerslogin/home/pro/properties/[familyId]/rooms/[roomId]/page.tsx
+index 3e6ce40a..f9ec26b3 100644
+--- a/app/partnerslogin/home/pro/properties/[familyId]/rooms/[roomId]/page.tsx
++++ b/app/partnerslogin/home/pro/properties/[familyId]/rooms/[roomId]/page.tsx
+@@ -1,4 +1,4 @@
+-import FamloProDashboardPage from "@/app/partnerslogin/home/pro/dashboard/page";
++import { renderFamloProDashboardPage } from "@/app/partnerslogin/home/pro/dashboard/render-dashboard";
+ 
+ export const dynamic = "force-dynamic";
+ 
+@@ -12,7 +12,7 @@ export default async function ProPropertyRoomEditPage({
+ }>): Promise<React.JSX.Element> {
+   const { familyId, roomId } = await params;
+ 
+-  return FamloProDashboardPage({
++  return renderFamloProDashboardPage({
+     searchParams: Promise.resolve({
+       family: familyId,
+       section: "rooms-units",
+diff --git a/app/partnerslogin/home/pro/properties/[familyId]/rooms/new/page.tsx b/app/partnerslogin/home/pro/properties/[familyId]/rooms/new/page.tsx
+index c509cc97..32e185f5 100644
+--- a/app/partnerslogin/home/pro/properties/[familyId]/rooms/new/page.tsx
++++ b/app/partnerslogin/home/pro/properties/[familyId]/rooms/new/page.tsx
+@@ -1,4 +1,4 @@
+-import FamloProDashboardPage from "@/app/partnerslogin/home/pro/dashboard/page";
++import { renderFamloProDashboardPage } from "@/app/partnerslogin/home/pro/dashboard/render-dashboard";
+ 
+ export const dynamic = "force-dynamic";
+ 
+@@ -11,7 +11,7 @@ export default async function ProPropertyRoomCreatePage({
+ }>): Promise<React.JSX.Element> {
+   const { familyId } = await params;
+ 
+-  return FamloProDashboardPage({
++  return renderFamloProDashboardPage({
+     searchParams: Promise.resolve({
+       family: familyId,
+       section: "rooms-units",
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index 7dbfe5a5..ac4a5c55 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -537,12 +537,12 @@ const ROOM_EDITOR_TABS: Array<{
+   title: string;
+   description: string;
+ }> = [
+-  { id: "details", title: "Details", description: "Room name, photos, occupancy, and Famlo room settings." },
+-  { id: "pricing", title: "Pricing", description: "Base price readiness and the existing pricing workspace." },
++  { id: "details", title: "Details", description: "Room details, photos, occupancy, amenities, and Famlo room settings." },
++  { id: "pricing", title: "Pricing", description: "Editable Famlo room pricing using the existing room save flow." },
+   { id: "calendar", title: "Calendar", description: "Availability visibility for this room inside the property calendar." },
+   { id: "channels", title: "Channels", description: "Connected channel readiness for this room." },
+-  { id: "mapping", title: "Mapping", description: "Room and rate mapping status for connected providers." },
+-  { id: "sync-health", title: "Sync Health", description: "Room-specific issues, logs, and follow-up actions." },
++  { id: "mapping", title: "Room & Price Matching", description: "Room and price matching status for connected channels." },
++  { id: "sync-health", title: "Issues & Sync Status", description: "Room issues, channel readiness, and advanced sync links." },
+ ];
+ 
+ function resolveTopLevelSection(section: ProSectionId): ProTopLevelId {
+@@ -1453,7 +1453,7 @@ export default function FamloProDashboardShell({
+   const [propertyContent, setPropertyContent] = useState<PropertyContentDraft>(initialPropertyContent);
+   const [propertyGallery, setPropertyGallery] = useState<PhotoItem[]>(propertyPhotos);
+   const [propertyContentSaving, startPropertyContentSaving] = useTransition();
+-  const [isPropertySwitchPending, startPropertySwitchTransition] = useTransition();
++  const [isPropertySwitchPending, setIsPropertySwitchPending] = useState(false);
+   const [isSidebarLogoBroken, setIsSidebarLogoBroken] = useState(false);
+   const [pendingPropertyLabel, setPendingPropertyLabel] = useState<string | null>(null);
+   const [propertyContentFeedback, setPropertyContentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+@@ -1478,16 +1478,16 @@ export default function FamloProDashboardShell({
+     if (!normalizedFamilyId || normalizedFamilyId === familyId) return;
+     const nextOption = propertyOptions.find((option) => option.familyId === normalizedFamilyId) ?? null;
+     setPendingPropertyLabel(nextOption?.name ?? "Selected property");
+-    startPropertySwitchTransition(() => {
+-      router.push(
+-        `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(normalizedFamilyId)}&section=${encodeURIComponent(
+-          options?.section ?? "properties-home"
+-        )}`
+-      );
+-    });
++    setIsPropertySwitchPending(true);
++    router.push(
++      `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(normalizedFamilyId)}&section=${encodeURIComponent(
++        options?.section ?? "properties-home"
++      )}`
++    );
+   };
+ 
+   useEffect(() => {
++    setActiveSection(initialSection);
+     setPropertyContent(initialPropertyContent);
+     setPropertyGallery(propertyPhotos);
+     setPropertyContentFeedback(null);
+@@ -1502,8 +1502,9 @@ export default function FamloProDashboardShell({
+       if (current && rooms.some((room) => room.id === current)) return current;
+       return rooms[0]?.id ?? null;
+     });
++    setIsPropertySwitchPending(false);
+     setPendingPropertyLabel(null);
+-  }, [familyId, initialPropertyContent, propertyPhotos, roomRouteState, rooms]);
++  }, [familyId, initialSection, initialPropertyContent, propertyPhotos, roomRouteState, rooms]);
+ 
+   const handleSavePropertyContent = async (options: {
+     updatedListing: PropertyContentDraft;
+@@ -2667,6 +2668,95 @@ export default function FamloProDashboardShell({
+       ? "No sync checks yet"
+       : `${selectedRoomConflictCount} issue${selectedRoomConflictCount === 1 ? "" : "s"}`;
+   const roomEditorPrimaryActionLabel = roomEditorMode === "create" ? "Create room" : "Edit room";
++  const selectedRoomCalendarCounts = selectedRoomCalendarRow
++    ? selectedRoomCalendarRow.availabilityCells.reduce(
++        (acc, cell) => {
++          acc.total += 1;
++          if (cell.status === "available") acc.available += 1;
++          if (cell.status === "famlo" || cell.status === "ota") acc.booked += 1;
++          if (cell.status === "manual_block") acc.blocked += 1;
++          if (cell.status === "pending") acc.pending += 1;
++          if (cell.status === "past") acc.past += 1;
++          return acc;
++        },
++        { total: 0, available: 0, booked: 0, blocked: 0, pending: 0, past: 0 }
++      )
++    : { total: 0, available: 0, booked: 0, blocked: 0, pending: 0, past: 0 };
++  const selectedRoomMappingStatus = roomEditorRoom
++    ? roomMappingsByRoomId.get(roomEditorRoom.id)?.externalRoomTypeId
++      ? "Matched"
++      : "Needs review"
++    : "Save room first";
++  const selectedRoomRateMappingStatus = roomEditorRoom
++    ? ratePlansByRoomId.get(roomEditorRoom.id)?.externalRatePlanId
++      ? "Matched"
++      : "Needs review"
++    : "Save room first";
++  const selectedRoomHasRoomMapping = Boolean(
++    roomEditorRoom && roomMappingsByRoomId.get(roomEditorRoom.id)?.externalRoomTypeId
++  );
++  const selectedRoomHasRateMapping = Boolean(
++    roomEditorRoom && ratePlansByRoomId.get(roomEditorRoom.id)?.externalRatePlanId
++  );
++  const bookingComRoomStatus = currentChannelAttached
++    ? selectedRoomHasRoomMapping && selectedRoomHasRateMapping
++      ? "Ready"
++      : selectedRoomHasRoomMapping || selectedRoomHasRateMapping
++        ? "Needs matching review"
++        : "Needs setup"
++    : "Not connected";
++  const bookingComCalendarStatus =
++    currentChannelAttached && selectedRoomHasRoomMapping && selectedRoomHasRateMapping
++      ? "Ready after sync checks"
++      : "Not ready";
++  const makeMyTripStatus = "Not connected";
++  const roomEditorIssues =
++    roomEditorMode === "create"
++      ? []
++      : [
++          roomEditorRoom && !roomEditorRoom.isActive
++            ? {
++                title: "Room is inactive",
++                detail: "Turn this room on before expecting it to be available to guests.",
++              }
++            : null,
++          roomEditorRoom && roomEditorRoom.photosCount <= 0
++            ? {
++                title: "Photos missing",
++                detail: "Add room photos before relying on this room for host-facing presentation or channel setup.",
++              }
++            : null,
++          roomEditorRoom && roomEditorRoom.priceFullday <= 0
++            ? {
++                title: "Base price missing",
++                detail: "Set a full-day or base room price so this room is ready for booking and pricing review.",
++              }
++            : null,
++          roomEditorRoom && !roomMappingsByRoomId.get(roomEditorRoom.id)?.externalRoomTypeId
++            ? {
++                title: "Room is not matched",
++                detail: "Match this Famlo room to the channel room before expecting OTA readiness.",
++              }
++            : null,
++          roomEditorRoom && !ratePlansByRoomId.get(roomEditorRoom.id)?.externalRatePlanId
++            ? {
++                title: "Price is not matched",
++                detail: "Match this room price to a channel rate plan before expecting channel pricing readiness.",
++              }
++            : null,
++          !currentChannelAttached
++            ? {
++                title: "Channel is not connected",
++                detail: "Connect or review the channel setup before expecting OTA calendar or booking sync.",
++              }
++            : null,
++          selectedRoomConflictCount > 0
++            ? {
++                title: "Sync issues detected",
++                detail: `${selectedRoomConflictCount} room-specific sync issue${selectedRoomConflictCount === 1 ? "" : "s"} are currently open.`,
++              }
++            : null,
++        ].filter(Boolean) as Array<{ title: string; detail: string }>;
+   const selectedPropertyDisplayLabel = currentPropertyOption
+     ? `${currentPropertyOption.name || propertyName}${selectedPropertyLocation ? ` · ${selectedPropertyLocation}` : ""}`
+     : `${propertyName}${selectedPropertyLocation ? ` · ${selectedPropertyLocation}` : ""}`;
+@@ -2988,7 +3078,7 @@ export default function FamloProDashboardShell({
+                   <h2 className={styles.propertyCenterTitle}>Choose a property, then choose a room</h2>
+                   <p className={styles.propertyCenterCopy}>
+                     Keep the main Properties page simple. Pick a property, review the room cards, then open a room editor
+-                    with tabs for details, pricing, calendar, channels, mapping, and sync health.
++                    with tabs for details, pricing, calendar, channels, room and price matching, and issues.
+                   </p>
+                 </div>
+                 <div className={styles.propertyCenterStatus}>
+@@ -3161,7 +3251,7 @@ export default function FamloProDashboardShell({
+                   <h2 className={styles.roomControlCenterTitle}>{roomEditorDisplayName}</h2>
+                   <p className={styles.roomControlCenterCopy}>
+                     Manage this room&apos;s details, photos, pricing, calendar, channels, and sync health from one
+-                    place. Advanced channel setup remains under Mapping and Sync Health.
++                    place. Advanced channel setup remains under Room & Price Matching and Issues & Sync Status.
+                   </p>
+                 </div>
+ 
+@@ -3179,7 +3269,7 @@ export default function FamloProDashboardShell({
+                 <span className={styles.propertySelectorMetaPill}>Base price: {roomEditorBasePriceLabel}</span>
+                 <span className={styles.propertySelectorMetaPill}>Photos: {roomEditorPhotoStatusLabel}</span>
+                 <span className={styles.propertySelectorMetaPill}>Channels: {roomEditorChannelStatusLabel}</span>
+-                <span className={styles.propertySelectorMetaPill}>Sync Health: {roomEditorSyncStatusLabel}</span>
++                <span className={styles.propertySelectorMetaPill}>Issues: {roomEditorSyncStatusLabel}</span>
+               </div>
+ 
+               <div className={styles.roomControlTabRow}>
+@@ -3205,8 +3295,8 @@ export default function FamloProDashboardShell({
+                     title={roomEditorMode === "create" ? "Create Room" : "Edit Room"}
+                     description={
+                       roomEditorMode === "create"
+-                        ? "Create a room for this selected property. Save the room before expecting pricing, channel, or sync workflows."
+-                        : "Edit this room using the existing Famlo room inventory flow."
++                        ? "Create a room for this selected property. Details, photos, amenities, and room identity can all be managed here."
++                        : "Edit this room’s details and photos on the same page using the existing Famlo room save flow."
+                     }
+                     propertyLabel={propertyLocalityLabel ?? locationLabel}
+                     showChannelManager={false}
+@@ -3216,51 +3306,69 @@ export default function FamloProDashboardShell({
+                     selectedRoomId={roomEditorMode === "edit" ? selectedRoomId : null}
+                     createMode={roomEditorMode === "create"}
+                     compactMode
++                    focusSection="details"
+                   />
+                 ) : null}
+ 
+                 {roomEditorTab === "pricing" ? (
+-                  <article className={styles.roomControlPlaceholder}>
+-                    <div className={styles.placeholderTitle}>Pricing</div>
+-                    <div className={styles.placeholderCopy}>
+-                      {roomEditorMode === "create"
+-                        ? "Finish the room draft in Details first. The existing pricing workspace will become useful once the room exists."
+-                        : "Room-level pricing already lives in the existing Famlo room flow. Channel-wise pricing is not connected here yet."}
+-                    </div>
+-                    <div className={styles.placeholderGrid}>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Base price</div>
+-                        <div className={styles.placeholderValue}>{roomEditorBasePriceLabel}</div>
+-                      </div>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Smart pricing</div>
+-                        <div className={styles.placeholderValue}>
+-                          {roomEditorRoom?.quarterEnabled ? "Enabled" : roomEditorMode === "create" ? "Set after save" : "Disabled"}
+-                        </div>
+-                      </div>
+-                    </div>
+-                    <div className={styles.inlineActionRow}>
+-                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("rates-restrictions")}>
+-                        Open Pricing Workspace
+-                      </button>
+-                    </div>
+-                  </article>
++                  <HostRoomsManager
++                    familyId={familyId}
++                    homeLat={propertyHomeLat ?? undefined}
++                    homeLng={propertyHomeLng ?? undefined}
++                    title="Edit Room Pricing"
++                    description={
++                      roomEditorMode === "create"
++                        ? "Finish the room draft and set Famlo room pricing here. Currently this edits Famlo room price. OTA/channel-wise pricing will work only after that channel is connected and pricing sync is enabled."
++                        : "Edit Famlo room pricing on this page using the existing room save flow. Currently this edits Famlo room price. OTA/channel-wise pricing will work only after that channel is connected and pricing sync is enabled."
++                    }
++                    propertyLabel={propertyLocalityLabel ?? locationLabel}
++                    showChannelManager={false}
++                    viewRoomPage
++                    emptyTitle="No rooms yet"
++                    emptyCopy="Create the first room for this property before editing pricing."
++                    selectedRoomId={roomEditorMode === "edit" ? selectedRoomId : null}
++                    createMode={roomEditorMode === "create"}
++                    compactMode
++                    focusSection="pricing"
++                  />
+                 ) : null}
+ 
+                 {roomEditorTab === "calendar" ? (
+                   <article className={styles.roomControlPlaceholder}>
+                     <div className={styles.placeholderTitle}>Calendar</div>
+                     <div className={styles.placeholderCopy}>
+-                      View this room&apos;s availability through the existing calendar workspace. Checkout-day logic stays unchanged.
++                      Review this room&apos;s calendar status here first. Block/unblock dates are managed from the property calendar for now. OTA calendar sync depends on connected channels.
++                    </div>
++                    <div className={styles.roomInlineSummaryGrid}>
++                      <div className={styles.summaryCard}>
++                        <div className={styles.summaryLabel}>Visible room status</div>
++                        <div className={styles.summaryValue}>{selectedRoomCalendarHealthy ? "Visible" : "Needs review"}</div>
++                        <div className={styles.summaryCopy}>
++                          {selectedRoomCalendarHealthy ? "This room appears in the property calendar grid." : "Check the property calendar after saving or reviewing room setup."}
++                        </div>
++                      </div>
++                      <div className={styles.summaryCard}>
++                        <div className={styles.summaryLabel}>Calendar cells</div>
++                        <div className={styles.summaryValue}>{selectedRoomCalendarCounts.total}</div>
++                        <div className={styles.summaryCopy}>Current visible calendar window for this room.</div>
++                      </div>
+                     </div>
+                     <div className={styles.placeholderGrid}>
+                       <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Calendar status</div>
+-                        <div className={styles.placeholderValue}>{selectedRoomCalendarHealthy ? "Visible in property calendar" : "Needs review"}</div>
++                        <div className={styles.placeholderLabel}>Available</div>
++                        <div className={styles.placeholderValue}>{selectedRoomCalendarCounts.available}</div>
++                      </div>
++                      <div className={styles.placeholderRow}>
++                        <div className={styles.placeholderLabel}>Booked</div>
++                        <div className={styles.placeholderValue}>{selectedRoomCalendarCounts.booked}</div>
+                       </div>
+                       <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Selected room</div>
+-                        <div className={styles.placeholderValue}>{roomEditorRoom?.name ?? "Save room first"}</div>
++                        <div className={styles.placeholderLabel}>Manual blocks</div>
++                        <div className={styles.placeholderValue}>{selectedRoomCalendarCounts.blocked}</div>
++                      </div>
++                      <div className={styles.placeholderRow}>
++                        <div className={styles.placeholderLabel}>Pending approval</div>
++                        <div className={styles.placeholderValue}>{selectedRoomCalendarCounts.pending}</div>
+                       </div>
+                     </div>
+                     <div className={styles.inlineActionRow}>
+@@ -3275,16 +3383,24 @@ export default function FamloProDashboardShell({
+                   <article className={styles.roomControlPlaceholder}>
+                     <div className={styles.placeholderTitle}>Channels</div>
+                     <div className={styles.placeholderCopy}>
+-                      Review connected channel readiness for this room. Existing integrations remain connected only through the current channel workspaces.
++                      See whether this room is ready for each channel. This page does not create channel listings or pricing rules.
+                     </div>
+                     <div className={styles.placeholderGrid}>
+                       <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Room status</div>
+-                        <div className={styles.placeholderValue}>{selectedRoomCard?.channelStatus ?? "Save room first"}</div>
++                        <div className={styles.placeholderTitle}>Booking.com</div>
++                        <div className={styles.placeholderCopy}>
++                          Status: {currentChannelAttached ? "Connected" : "Not connected"} · Readiness: {bookingComRoomStatus} · Room: {selectedRoomMappingStatus} · Price: {selectedRoomRateMappingStatus} · Calendar sync: {bookingComCalendarStatus}
++                        </div>
+                       </div>
+                       <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Provider mapping</div>
+-                        <div className={styles.placeholderValue}>{selectedRoomCard?.providerMappingLabel ?? "Check Channels"}</div>
++                        <div className={styles.placeholderTitle}>MakeMyTrip / Goibibo</div>
++                        <div className={styles.placeholderCopy}>
++                          {makeMyTripStatus}. Connect MakeMyTrip setup coming next. Requires existing MMT/Goibibo listing or assisted onboarding.
++                        </div>
++                      </div>
++                      <div className={styles.placeholderRow}>
++                        <div className={styles.placeholderTitle}>Airbnb and other channels</div>
++                        <div className={styles.placeholderCopy}>Coming later. No channel controls are active here yet.</div>
+                       </div>
+                     </div>
+                     <div className={styles.inlineActionRow}>
+@@ -3297,30 +3413,43 @@ export default function FamloProDashboardShell({
+ 
+                 {roomEditorTab === "mapping" ? (
+                   <article className={styles.roomControlPlaceholder}>
+-                    <div className={styles.placeholderTitle}>Mapping</div>
++                    <div className={styles.placeholderTitle}>Room & Price Matching</div>
+                     <div className={styles.placeholderCopy}>
+-                      Use the existing mapping tools for room and rate connections. This panel stays honest and does not create new mapping logic.
++                      Match the Famlo room and Famlo price to the connected channel records. Advanced matching tools stay unchanged.
++                    </div>
++                    <div className={styles.roomInlineSummaryGrid}>
++                      <div className={styles.summaryCard}>
++                        <div className={styles.summaryLabel}>Famlo room</div>
++                        <div className={styles.summaryValue}>{roomEditorRoom?.name ?? "Save room first"}</div>
++                        <div className={styles.summaryCopy}>Room being managed in Famlo Pro.</div>
++                      </div>
++                      <div className={styles.summaryCard}>
++                        <div className={styles.summaryLabel}>OTA room match</div>
++                        <div className={styles.summaryValue}>{selectedRoomMappingStatus}</div>
++                        <div className={styles.summaryCopy}>Matched channel room, if available.</div>
++                      </div>
++                      <div className={styles.summaryCard}>
++                        <div className={styles.summaryLabel}>Price match</div>
++                        <div className={styles.summaryValue}>{selectedRoomRateMappingStatus}</div>
++                        <div className={styles.summaryCopy}>Matched channel rate plan, if available.</div>
++                      </div>
+                     </div>
+                     <div className={styles.placeholderGrid}>
+                       <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Room mapping</div>
+-                        <div className={styles.placeholderValue}>
+-                          {roomEditorRoom && roomMappingsByRoomId.get(roomEditorRoom.id)?.externalRoomTypeId ? "Mapped" : "Needs review"}
+-                        </div>
++                        <div className={styles.placeholderLabel}>Room match</div>
++                        <div className={styles.placeholderValue}>{selectedRoomMappingStatus}</div>
+                       </div>
+                       <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Rate mapping</div>
+-                        <div className={styles.placeholderValue}>
+-                          {roomEditorRoom && ratePlansByRoomId.get(roomEditorRoom.id)?.externalRatePlanId ? "Mapped" : "Needs review"}
+-                        </div>
++                        <div className={styles.placeholderLabel}>Price match</div>
++                        <div className={styles.placeholderValue}>{selectedRoomRateMappingStatus}</div>
+                       </div>
+                     </div>
+                     <div className={styles.inlineActionRow}>
+                       <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("room-mapping")}>
+-                        Open Room Mapping
++                        Open Room Matching
+                       </button>
+                       <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("rate-mapping")}>
+-                        Open Rate Mapping
++                        Open Price Matching
+                       </button>
+                     </div>
+                   </article>
+@@ -3328,9 +3457,23 @@ export default function FamloProDashboardShell({
+ 
+                 {roomEditorTab === "sync-health" ? (
+                   <article className={styles.roomControlPlaceholder}>
+-                    <div className={styles.placeholderTitle}>Sync Health</div>
++                    <div className={styles.placeholderTitle}>Issues & Sync Status</div>
+                     <div className={styles.placeholderCopy}>
+-                      Review room-specific issues using the existing Sync Health and logs sections. No new sync behavior is introduced here.
++                      Review the selected room&apos;s useful issues here first. Advanced sync logs remain available for operational review.
++                    </div>
++                    <div className={styles.roomInlineSummaryGrid}>
++                      <div className={styles.summaryCard}>
++                        <div className={styles.summaryLabel}>Open issues</div>
++                        <div className={styles.summaryValue}>{roomEditorSyncStatusLabel}</div>
++                        <div className={styles.summaryCopy}>
++                          {roomEditorIssues.length === 0 ? "No issues found for this room." : "Use the checklist below to review what still needs attention."}
++                        </div>
++                      </div>
++                      <div className={styles.summaryCard}>
++                        <div className={styles.summaryLabel}>Advanced review</div>
++                        <div className={styles.summaryValue}>{selectedRoomConflictCount === 0 ? "Sync logs" : "Open issues"}</div>
++                        <div className={styles.summaryCopy}>Advanced sync checks remain available in the existing Pro sections.</div>
++                      </div>
+                     </div>
+                     <div className={styles.placeholderGrid}>
+                       <div className={styles.placeholderRow}>
+@@ -3338,23 +3481,34 @@ export default function FamloProDashboardShell({
+                         <div className={styles.placeholderValue}>{roomEditorSyncStatusLabel}</div>
+                       </div>
+                       <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Next review</div>
++                        <div className={styles.placeholderLabel}>Advanced review</div>
+                         <div className={styles.placeholderValue}>
+-                          {selectedRoomConflictCount === 0 ? "Sync logs" : "Conflicts"}
++                          {selectedRoomConflictCount === 0 ? "Sync logs" : "Open issues"}
+                         </div>
+                       </div>
+                     </div>
++                    {roomEditorIssues.length > 0 ? (
++                      <div className={styles.stack}>
++                        {roomEditorIssues.map((issue) => (
++                          <div key={issue.title} className={styles.placeholderRow}>
++                            <div className={styles.placeholderTitle}>{issue.title}</div>
++                            <div className={styles.placeholderCopy}>{issue.detail}</div>
++                          </div>
++                        ))}
++                      </div>
++                    ) : null}
+                     <div className={styles.inlineActionRow}>
+                       <button
+                         type="button"
+-                        className={styles.primaryActionButton}
+-                        onClick={() => setActiveSection(selectedRoomConflictCount > 0 ? "conflicts" : "sync-logs")}
++                        className={styles.secondaryActionButton}
++                        onClick={() => setActiveSection("sync-logs")}
+                       >
+-                        Open Sync Health
++                        View Sync Logs
+                       </button>
+                     </div>
+                   </article>
+                 ) : null}
++
+               </div>
+             </section>
+           )}
+diff --git a/components/partners/pro/pro-dashboard.module.css b/components/partners/pro/pro-dashboard.module.css
+index df2fbded..41b692b1 100644
+--- a/components/partners/pro/pro-dashboard.module.css
++++ b/components/partners/pro/pro-dashboard.module.css
+@@ -890,6 +890,12 @@
+   gap: 14px;
+ }
+ 
++.roomInlineSummaryGrid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 14px;
++}
++
+ .roomControlPlaceholder,
+ .propertyCenterHintCard {
+   border-radius: 24px;
+@@ -898,6 +904,20 @@
+   padding: 18px;
+ }
+ 
++.roomInlinePhotoPreview {
++  border-radius: 20px;
++  overflow: hidden;
++  border: 1px solid rgba(255, 255, 255, 0.08);
++  background: rgba(255, 255, 255, 0.04);
++}
++
++.roomInlinePhotoImage {
++  display: block;
++  width: 100%;
++  max-height: 340px;
++  object-fit: cover;
++}
++
+ .propertyTabGrid {
+   display: grid;
+   grid-template-columns: repeat(4, minmax(0, 1fr));
+@@ -1722,6 +1742,14 @@
+   gap: 10px;
+ }
+ 
++.placeholderLabel {
++  font-size: 11px;
++  font-weight: 900;
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  color: rgba(15, 23, 42, 0.66);
++}
++
+ .placeholderValue {
+   font-size: 14px;
+   font-weight: 900;
+diff --git a/components/partners/rooms/HostRoomsManager.tsx b/components/partners/rooms/HostRoomsManager.tsx
+index 98bfff1f..c274a5a9 100644
+--- a/components/partners/rooms/HostRoomsManager.tsx
++++ b/components/partners/rooms/HostRoomsManager.tsx
+@@ -63,6 +63,7 @@ type HostRoomsManagerProps = {
+   selectedRoomId?: string | null;
+   createMode?: boolean;
+   compactMode?: boolean;
++  focusSection?: "all" | "details" | "pricing";
+ };
+ 
+ function parsePhotoList(value: string): string[] {
+@@ -177,6 +178,7 @@ export default function HostRoomsManager({
+   selectedRoomId = null,
+   createMode = false,
+   compactMode = false,
++  focusSection = "all",
+ }: HostRoomsManagerProps) {
+   const [roomDrafts, setRoomDrafts] = useState<RoomFormState[]>([]);
+   const [roomsLoading, setRoomsLoading] = useState(false);
+@@ -196,6 +198,8 @@ export default function HostRoomsManager({
+       .reduce((acc, room) => acc + Math.max(1, Number(room.maxGuests) || 0), 0);
+     return { activeRooms, totalCapacity, activeCapacity };
+   }, [roomDrafts]);
++  const showDetailsSections = focusSection === "all" || focusSection === "details";
++  const showPricingSection = focusSection === "all" || focusSection === "pricing";
+ 
+   useEffect(() => {
+     let cancelled = false;
+@@ -750,6 +754,7 @@ export default function HostRoomsManager({
+                     </span>
+                   </div>
+ 
++                  {showDetailsSections ? (
+                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
+                     <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Room identity</div>
+                     <div className={dashboardStyles.gridCols2} style={{ gap: "14px", minWidth: 0 }}>
+@@ -769,7 +774,9 @@ export default function HostRoomsManager({
+                       </label>
+                     </div>
+                   </div>
++                  ) : null}
+ 
++                  {showDetailsSections ? (
+                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
+                     <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Room details</div>
+                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "14px", minWidth: 0 }}>
+@@ -796,7 +803,9 @@ export default function HostRoomsManager({
+                       <textarea className={dashboardStyles.inputField} rows={3} value={room.description} onChange={(event) => updateRoomField(room.id, "description", event.target.value)} style={{ wordBreak: "break-word" }} />
+                     </label>
+                   </div>
++                  ) : null}
+ 
++                  {showDetailsSections ? (
+                   <div style={{ display: "grid", gap: "10px", minWidth: 0 }}>
+                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", minWidth: 0 }}>
+                       <MapPin size={14} color="#1d4ed8" />
+@@ -847,7 +856,9 @@ export default function HostRoomsManager({
+                       </button>
+                     </div>
+                   </div>
++                  ) : null}
+ 
++                  {showDetailsSections ? (
+                   <div style={{ display: "grid", gap: "10px", minWidth: 0 }}>
+                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", minWidth: 0 }}>
+                       <span style={{ fontSize: "11px", fontWeight: 900, color: "rgba(14,43,87,0.6)", textTransform: "uppercase" }}>Amenities</span>
+@@ -931,7 +942,9 @@ export default function HostRoomsManager({
+                       </button>
+                     </div>
+                   </div>
++                  ) : null}
+ 
++                  {showDetailsSections ? (
+                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
+                     <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Room photos</div>
+                     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", minWidth: 0 }}>
+@@ -1017,9 +1030,16 @@ export default function HostRoomsManager({
+                       </div>
+                     ) : null}
+                   </div>
++                  ) : null}
+ 
++                  {showPricingSection ? (
+                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
+                     <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Smart pricing</div>
++                    {focusSection === "pricing" ? (
++                      <div style={{ padding: "12px 14px", borderRadius: "14px", background: "#eff6ff", color: "#1d4ed8", fontSize: "13px", lineHeight: 1.65, fontWeight: 700 }}>
++                        Channel-wise pricing is not connected here yet. This edits the Famlo room price only.
++                      </div>
++                    ) : null}
+                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "14px", minWidth: 0 }}>
+                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
+                         <span style={{ fontSize: "11px", fontWeight: 900, color: "rgba(14,43,87,0.6)", textTransform: "uppercase" }}>Public room price</span>
+@@ -1058,6 +1078,7 @@ export default function HostRoomsManager({
+                       <div style={{ fontSize: "18px", fontWeight: 900, color: "#165dcc" }}>₹{smartPriceMidpoint}</div>
+                     </div>
+                   </div>
++                  ) : null}
+ 
+                   {showChannelManager ? (
+                     <div style={{ display: "grid", gap: "10px", minWidth: 0, marginTop: "12px" }}>

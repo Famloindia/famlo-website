@@ -1,0 +1,29 @@
+Manual DB change: unlocked existing Pro-created property
+
+Target property:
+- Manali House
+- family_id: 27849318-c83b-43f3-b049-34d855d8b27f
+- owner user_id: 4569dda3-02ee-4551-9b75-bfba8e920f55
+
+Source property:
+- Aryan Krishan's Home
+- family_id: a2f31723-1e03-418a-93ae-42cfcd8b4168
+
+Action:
+- Inserted host_pro_subscriptions row for target family
+- Copied safe entitlement fields from active source subscription
+- Added metadata:
+  inherited_from_family_id: a2f31723-1e03-418a-93ae-42cfcd8b4168
+  created_via: manual_existing_property_unlock
+
+Inserted subscription:
+- subscription_id: 89a18add-c0a4-42ab-a76d-2ad54760ed0d
+- status: active
+- current_period_end: 2026-06-03T16:01:48.363+00:00
+- grace_until: 2026-06-07T16:01:48.363+00:00
+
+Safety:
+- no schema change
+- no Channex records created
+- no room/rate mappings copied
+- no booking/payment/public logic changed

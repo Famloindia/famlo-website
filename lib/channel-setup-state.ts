@@ -33,6 +33,27 @@ export type ChannelSetupMetadata = {
   hotel_id_available: boolean | null;
   booking_hotel_id: string | null;
   booking_property_code: string | null;
+  provider_listing_id: string | null;
+  provider_property_code: string | null;
+  provider_listing_url: string | null;
+  provider_connection_status: string | null;
+  provider_connection_error: string | null;
+  provider_extranet_request_acknowledged: boolean | null;
+  provider_verification_requested_at: string | null;
+  provider_approval_verified_at: string | null;
+  provider_approval_verified_by: string | null;
+  provider_access_token_stored: boolean | null;
+  provider_access_token_last_four: string | null;
+  provider_access_token_stored_at: string | null;
+  provider_credential_store_status: string | null;
+  provider_discovered_hotel_id: string | null;
+  provider_discovered_channel_id: string | null;
+  provider_discovered_channel_title: string | null;
+  provider_channel_attached: boolean | null;
+  provider_channel_active: boolean | null;
+  provider_room_types_found_count: number | null;
+  provider_rate_plans_found_count: number | null;
+  provider_structure_refreshed_at: string | null;
   connectivity_provider_requested: boolean | null;
   connectivity_provider_requested_at: string | null;
   booking_extranet_request_acknowledged: boolean | null;
@@ -219,6 +240,15 @@ function asNullableBoolean(value: unknown): boolean | null {
   return value === true ? true : value === false ? false : null;
 }
 
+function asNumberOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function asObject(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
@@ -317,6 +347,27 @@ export function readChannelSetupMetadata(value: unknown): ChannelSetupMetadata {
     hotel_id_available: asNullableBoolean(setup.hotel_id_available) ?? asNullableBoolean(setup.hotel_id_entered),
     booking_hotel_id: asString(setup.booking_hotel_id),
     booking_property_code: asString(setup.booking_property_code),
+    provider_listing_id: asString(setup.provider_listing_id),
+    provider_property_code: asString(setup.provider_property_code),
+    provider_listing_url: asString(setup.provider_listing_url),
+    provider_connection_status: asString(setup.provider_connection_status),
+    provider_connection_error: asString(setup.provider_connection_error),
+    provider_extranet_request_acknowledged: asNullableBoolean(setup.provider_extranet_request_acknowledged),
+    provider_verification_requested_at: asString(setup.provider_verification_requested_at),
+    provider_approval_verified_at: asString(setup.provider_approval_verified_at),
+    provider_approval_verified_by: asString(setup.provider_approval_verified_by),
+    provider_access_token_stored: asNullableBoolean(setup.provider_access_token_stored),
+    provider_access_token_last_four: asString(setup.provider_access_token_last_four),
+    provider_access_token_stored_at: asString(setup.provider_access_token_stored_at),
+    provider_credential_store_status: asString(setup.provider_credential_store_status),
+    provider_discovered_hotel_id: asString(setup.provider_discovered_hotel_id),
+    provider_discovered_channel_id: asString(setup.provider_discovered_channel_id),
+    provider_discovered_channel_title: asString(setup.provider_discovered_channel_title),
+    provider_channel_attached: asNullableBoolean(setup.provider_channel_attached),
+    provider_channel_active: asNullableBoolean(setup.provider_channel_active),
+    provider_room_types_found_count: asNumberOrNull(setup.provider_room_types_found_count),
+    provider_rate_plans_found_count: asNumberOrNull(setup.provider_rate_plans_found_count),
+    provider_structure_refreshed_at: asString(setup.provider_structure_refreshed_at),
     connectivity_provider_requested: asNullableBoolean(setup.connectivity_provider_requested),
     connectivity_provider_requested_at: asString(setup.connectivity_provider_requested_at),
     booking_extranet_request_acknowledged: asNullableBoolean(setup.booking_extranet_request_acknowledged),
@@ -381,6 +432,27 @@ export function createDefaultChannelSetupState(familyId: string, providerKey: Ch
       hotel_id_available: null,
       booking_hotel_id: null,
       booking_property_code: null,
+      provider_listing_id: null,
+      provider_property_code: null,
+      provider_listing_url: null,
+      provider_connection_status: null,
+      provider_connection_error: null,
+      provider_extranet_request_acknowledged: null,
+      provider_verification_requested_at: null,
+      provider_approval_verified_at: null,
+      provider_approval_verified_by: null,
+      provider_access_token_stored: null,
+      provider_access_token_last_four: null,
+      provider_access_token_stored_at: null,
+      provider_credential_store_status: null,
+      provider_discovered_hotel_id: null,
+      provider_discovered_channel_id: null,
+      provider_discovered_channel_title: null,
+      provider_channel_attached: null,
+      provider_channel_active: null,
+      provider_room_types_found_count: null,
+      provider_rate_plans_found_count: null,
+      provider_structure_refreshed_at: null,
       connectivity_provider_requested: null,
       connectivity_provider_requested_at: null,
       booking_extranet_request_acknowledged: null,
@@ -443,6 +515,27 @@ export function mergeChannelSetupMetadata(
       : undefined,
     booking_hotel_id: hasOwn(patchMetadata, "booking_hotel_id") ? asString(patchMetadata.booking_hotel_id) : undefined,
     booking_property_code: hasOwn(patchMetadata, "booking_property_code") ? asString(patchMetadata.booking_property_code) : undefined,
+    provider_listing_id: hasOwn(patchMetadata, "provider_listing_id") ? asString(patchMetadata.provider_listing_id) : undefined,
+    provider_property_code: hasOwn(patchMetadata, "provider_property_code") ? asString(patchMetadata.provider_property_code) : undefined,
+    provider_listing_url: hasOwn(patchMetadata, "provider_listing_url") ? asString(patchMetadata.provider_listing_url) : undefined,
+    provider_connection_status: hasOwn(patchMetadata, "provider_connection_status") ? asString(patchMetadata.provider_connection_status) : undefined,
+    provider_connection_error: hasOwn(patchMetadata, "provider_connection_error") ? asString(patchMetadata.provider_connection_error) : undefined,
+    provider_extranet_request_acknowledged: hasOwn(patchMetadata, "provider_extranet_request_acknowledged") ? asBoolean(patchMetadata.provider_extranet_request_acknowledged) : undefined,
+    provider_verification_requested_at: hasOwn(patchMetadata, "provider_verification_requested_at") ? asString(patchMetadata.provider_verification_requested_at) : undefined,
+    provider_approval_verified_at: hasOwn(patchMetadata, "provider_approval_verified_at") ? asString(patchMetadata.provider_approval_verified_at) : undefined,
+    provider_approval_verified_by: hasOwn(patchMetadata, "provider_approval_verified_by") ? asString(patchMetadata.provider_approval_verified_by) : undefined,
+    provider_access_token_stored: hasOwn(patchMetadata, "provider_access_token_stored") ? asBoolean(patchMetadata.provider_access_token_stored) : undefined,
+    provider_access_token_last_four: hasOwn(patchMetadata, "provider_access_token_last_four") ? asString(patchMetadata.provider_access_token_last_four) : undefined,
+    provider_access_token_stored_at: hasOwn(patchMetadata, "provider_access_token_stored_at") ? asString(patchMetadata.provider_access_token_stored_at) : undefined,
+    provider_credential_store_status: hasOwn(patchMetadata, "provider_credential_store_status") ? asString(patchMetadata.provider_credential_store_status) : undefined,
+    provider_discovered_hotel_id: hasOwn(patchMetadata, "provider_discovered_hotel_id") ? asString(patchMetadata.provider_discovered_hotel_id) : undefined,
+    provider_discovered_channel_id: hasOwn(patchMetadata, "provider_discovered_channel_id") ? asString(patchMetadata.provider_discovered_channel_id) : undefined,
+    provider_discovered_channel_title: hasOwn(patchMetadata, "provider_discovered_channel_title") ? asString(patchMetadata.provider_discovered_channel_title) : undefined,
+    provider_channel_attached: hasOwn(patchMetadata, "provider_channel_attached") ? asBoolean(patchMetadata.provider_channel_attached) : undefined,
+    provider_channel_active: hasOwn(patchMetadata, "provider_channel_active") ? asBoolean(patchMetadata.provider_channel_active) : undefined,
+    provider_room_types_found_count: hasOwn(patchMetadata, "provider_room_types_found_count") ? asNumberOrNull(patchMetadata.provider_room_types_found_count) : undefined,
+    provider_rate_plans_found_count: hasOwn(patchMetadata, "provider_rate_plans_found_count") ? asNumberOrNull(patchMetadata.provider_rate_plans_found_count) : undefined,
+    provider_structure_refreshed_at: hasOwn(patchMetadata, "provider_structure_refreshed_at") ? asString(patchMetadata.provider_structure_refreshed_at) : undefined,
     connectivity_provider_requested: hasOwn(patchMetadata, "connectivity_provider_requested") ? asBoolean(patchMetadata.connectivity_provider_requested) : undefined,
     connectivity_provider_requested_at: hasOwn(patchMetadata, "connectivity_provider_requested_at") ? asString(patchMetadata.connectivity_provider_requested_at) : undefined,
     booking_extranet_request_acknowledged: hasOwn(patchMetadata, "booking_extranet_request_acknowledged") ? asBoolean(patchMetadata.booking_extranet_request_acknowledged) : undefined,
@@ -501,6 +594,15 @@ function hasSafeSetupProgress(state: ChannelSetupState): boolean {
       state.metadata.hotel_id_available ||
       state.metadata.booking_hotel_id ||
       state.metadata.booking_property_code ||
+      state.metadata.provider_listing_id ||
+      state.metadata.provider_property_code ||
+      state.metadata.provider_listing_url ||
+      state.metadata.provider_connection_status ||
+      state.metadata.provider_extranet_request_acknowledged ||
+      state.metadata.provider_approval_verified_at ||
+      state.metadata.provider_access_token_stored ||
+      state.metadata.provider_channel_attached ||
+      state.metadata.provider_discovered_channel_id ||
       state.metadata.connectivity_provider_requested ||
       state.metadata.booking_extranet_request_acknowledged ||
       state.metadata.booking_connection_status ||
@@ -902,7 +1004,18 @@ export function buildChannelReadinessModel(
   const listingPrepRequested =
     state.metadata.listing_preparation_requested === true || state.setupMode === "prepare_listing";
   const requirementsAcknowledged = state.metadata.requirements_acknowledged === true || state.metadata.required_items_acknowledged === true;
-  const hotelIdAvailable = state.metadata.hotel_id_available === true || state.metadata.hotel_id_entered === true;
+  const providerIdentifierAvailable = Boolean(
+    state.metadata.provider_listing_id ||
+      state.metadata.provider_property_code ||
+      state.metadata.provider_listing_url ||
+      state.metadata.provider_connection_status === "verification_requested" ||
+      state.metadata.provider_connection_status === "details_submitted" ||
+      state.metadata.provider_connection_status === "ota_approval_verified" ||
+      state.metadata.provider_extranet_request_acknowledged === true ||
+      state.metadata.provider_channel_attached === true ||
+      Boolean(state.metadata.provider_discovered_channel_id)
+  );
+  const hotelIdAvailable = state.metadata.hotel_id_available === true || state.metadata.hotel_id_entered === true || providerIdentifierAvailable;
   const operatorSetupRequested = state.metadata.operator_setup_requested === true || state.status === "connection_requested";
   const roomMatchingReviewed = state.metadata.room_matching_reviewed === true;
   const priceMatchingReviewed = state.metadata.price_matching_reviewed === true;
@@ -980,7 +1093,9 @@ export function buildChannelReadinessModel(
                   ? "Use the assisted Expedia setup flow to collect property/channel details."
                   : "Collect the Booking.com connection details before test sync can begin.",
       providerKey === "mmt"
-        ? "Do not store the token yet. Keep this assisted until secure credential flow exists."
+        ? state.metadata.provider_access_token_stored
+          ? "The MMT access token is stored encrypted on the server. Continue with Channex verification and mapping."
+          : "Store the MMT access token securely, then continue with Channex verification and mapping."
         : providerKey === "airbnb"
           ? "No OAuth or password is stored in this phase."
           : null

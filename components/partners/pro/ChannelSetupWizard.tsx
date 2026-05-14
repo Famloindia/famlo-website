@@ -33,9 +33,33 @@ export type ChannelSetupWizardSummary = {
   readinessLines: string[];
 };
 
+type ProviderMappingOption = {
+  id: string;
+  title: string | null;
+  roomTypeId?: string | null;
+};
+
+type ProviderMappingRoom = {
+  id: string;
+  name: string;
+  unitType: string;
+  isActive: boolean;
+  basePrice: number;
+  currentRoomTypeId: string | null;
+  currentRatePlanId: string | null;
+};
+
+type ProviderMappingWorkspace = {
+  refreshedAt: string | null;
+  roomTypes: ProviderMappingOption[];
+  ratePlans: ProviderMappingOption[];
+  rooms: ProviderMappingRoom[];
+};
+
 type ChannelSetupWizardProps = {
   providerKey: ChannelProviderKey;
   familyId: string;
+  channexPropertyId: string | null;
   summary: ChannelSetupWizardSummary;
   readinessModel: ChannelReadinessModel;
   testSyncReadiness: ChannelTestSyncReadinessModel;
@@ -81,9 +105,78 @@ const STEP_ORDER: ChannelSetupStep[] = [
   "activate",
 ];
 
+function getAssistedConnectionLabels(providerKey: ChannelProviderKey): {
+  listingIdLabel: string;
+  propertyCodeLabel: string;
+  listingUrlLabel: string;
+  placeholderId: string;
+  placeholderCode: string;
+  placeholderUrl: string;
+  instruction: string;
+} {
+  if (providerKey === "mmt") {
+    return {
+      listingIdLabel: "MMT / Goibibo Hotel ID",
+      propertyCodeLabel: "Hotel Code",
+      listingUrlLabel: "Listing / extranet reference URL",
+      placeholderId: "Example: MMT hotel id",
+      placeholderCode: "Example: GI hotel code",
+      placeholderUrl: "Optional listing or extranet URL",
+      instruction: "Enter the safe hotel identifiers. Do not paste access tokens, passwords, or private contract credentials.",
+    };
+  }
+
+  if (providerKey === "airbnb") {
+    return {
+      listingIdLabel: "Airbnb Listing ID",
+      propertyCodeLabel: "Airbnb account / host reference",
+      listingUrlLabel: "Airbnb listing URL",
+      placeholderId: "Example: listing id",
+      placeholderCode: "Optional host/account reference",
+      placeholderUrl: "https://www.airbnb.com/rooms/...",
+      instruction: "Add the listing reference only. OAuth/login authorization is still assisted and no password is stored here.",
+    };
+  }
+
+  if (providerKey === "agoda") {
+    return {
+      listingIdLabel: "Agoda / YCS Property ID",
+      propertyCodeLabel: "Agoda Hotel Code",
+      listingUrlLabel: "Agoda or YCS reference URL",
+      placeholderId: "Example: Agoda property id",
+      placeholderCode: "Optional hotel code",
+      placeholderUrl: "Optional Agoda/YCS URL",
+      instruction: "Collect the Agoda/YCS property reference so Famlo can verify channel-manager setup manually.",
+    };
+  }
+
+  if (providerKey === "expedia") {
+    return {
+      listingIdLabel: "Expedia Property ID",
+      propertyCodeLabel: "Expedia Hotel Code",
+      listingUrlLabel: "Expedia PartnerCentral reference URL",
+      placeholderId: "Example: Expedia property id",
+      placeholderCode: "Optional hotel code",
+      placeholderUrl: "Optional PartnerCentral URL",
+      instruction: "Collect the Expedia property reference only. Contract credentials and secure provider access are not stored here.",
+    };
+  }
+
+  return {
+    listingIdLabel: "Google Hotel / Place ID",
+    propertyCodeLabel: "Google Business Profile reference",
+    listingUrlLabel: "Google property / search URL",
+    placeholderId: "Example: Place ID or hotel feed id",
+    placeholderCode: "Optional GBP reference",
+    placeholderUrl: "Optional Google listing URL",
+    instruction: "Google Hotel is feed/readiness driven. Capture only safe identifiers for operator review.",
+  };
+}
+
 export default function ChannelSetupWizard({
   providerKey,
   familyId,
+  channexPropertyId,
   summary,
   readinessModel,
   testSyncReadiness,
@@ -103,6 +196,20 @@ export default function ChannelSetupWizard({
   const [bookingHotelIdInput, setBookingHotelIdInput] = useState("");
   const [bookingPropertyCodeInput, setBookingPropertyCodeInput] = useState("");
   const [bookingExtranetRequested, setBookingExtranetRequested] = useState(false);
+  const [providerListingIdInput, setProviderListingIdInput] = useState("");
+  const [providerPropertyCodeInput, setProviderPropertyCodeInput] = useState("");
+  const [providerListingUrlInput, setProviderListingUrlInput] = useState("");
+  const [providerAccessTokenInput, setProviderAccessTokenInput] = useState("");
+  const [providerExtranetRequested, setProviderExtranetRequested] = useState(false);
+  const [isOpeningChannexWorkspace, setIsOpeningChannexWorkspace] = useState(false);
+  const [isRefreshingFromChannex, setIsRefreshingFromChannex] = useState(false);
+  const [isLoadingMappingWorkspace, setIsLoadingMappingWorkspace] = useState(false);
+  const [isSavingMappingByRoomId, setIsSavingMappingByRoomId] = useState<Record<string, boolean>>({});
+  const [channexWorkspaceUrl, setChannexWorkspaceUrl] = useState<string | null>(null);
+  const [channexWorkspaceHint, setChannexWorkspaceHint] = useState<string | null>(null);
+  const [mappingWorkspace, setMappingWorkspace] = useState<ProviderMappingWorkspace | null>(null);
+  const [roomTypeDrafts, setRoomTypeDrafts] = useState<Record<string, string>>({});
+  const [ratePlanDrafts, setRatePlanDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -137,20 +244,110 @@ export default function ChannelSetupWizard({
     };
   }, [familyId, providerKey, initialState]);
 
+  const loadMappingWorkspace = async (): Promise<void> => {
+    setIsLoadingMappingWorkspace(true);
+    try {
+      const response = await fetch(
+        `/api/host/pro/channel/mappings?familyId=${encodeURIComponent(familyId)}&providerKey=${encodeURIComponent(providerKey)}`
+      );
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        catalog?: {
+          refreshedAt?: string | null;
+          roomTypes?: Array<{ id: string; title: string | null }>;
+          ratePlans?: Array<{ id: string; title: string | null; room_type_id?: string | null }>;
+        };
+        rooms?: Array<{
+          id: string;
+          name: string;
+          unitType: string;
+          isActive: boolean;
+          basePrice: number;
+          currentRoomTypeId: string | null;
+          currentRatePlanId: string | null;
+        }>;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load provider mapping workspace.");
+      }
+
+      const workspace: ProviderMappingWorkspace = {
+        refreshedAt: typeof payload.catalog?.refreshedAt === "string" ? payload.catalog.refreshedAt : null,
+        roomTypes: Array.isArray(payload.catalog?.roomTypes)
+          ? payload.catalog.roomTypes.map((item) => ({ id: item.id, title: item.title ?? null }))
+          : [],
+        ratePlans: Array.isArray(payload.catalog?.ratePlans)
+          ? payload.catalog.ratePlans.map((item) => ({ id: item.id, title: item.title ?? null, roomTypeId: item.room_type_id ?? null }))
+          : [],
+        rooms: Array.isArray(payload.rooms)
+          ? payload.rooms.map((room) => ({
+              id: room.id,
+              name: room.name,
+              unitType: room.unitType,
+              isActive: Boolean(room.isActive),
+              basePrice: typeof room.basePrice === "number" ? room.basePrice : 0,
+              currentRoomTypeId: room.currentRoomTypeId ?? null,
+              currentRatePlanId: room.currentRatePlanId ?? null,
+            }))
+          : [],
+      };
+
+      setMappingWorkspace(workspace);
+      setRoomTypeDrafts(
+        Object.fromEntries(workspace.rooms.map((room) => [room.id, room.currentRoomTypeId ?? ""]))
+      );
+      setRatePlanDrafts(
+        Object.fromEntries(workspace.rooms.map((room) => [room.id, room.currentRatePlanId ?? ""]))
+      );
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to load provider mapping workspace.");
+    } finally {
+      setIsLoadingMappingWorkspace(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadMappingWorkspace();
+  }, [familyId, providerKey]);
+
   useEffect(() => {
     setBookingHotelIdInput(state.metadata.booking_hotel_id ?? "");
     setBookingPropertyCodeInput(state.metadata.booking_property_code ?? "");
     setBookingExtranetRequested(state.metadata.booking_extranet_request_acknowledged === true);
+    setProviderListingIdInput(state.metadata.provider_listing_id ?? "");
+    setProviderPropertyCodeInput(state.metadata.provider_property_code ?? "");
+    setProviderListingUrlInput(state.metadata.provider_listing_url ?? "");
+    setProviderExtranetRequested(state.metadata.provider_extranet_request_acknowledged === true);
   }, [
     state.metadata.booking_extranet_request_acknowledged,
     state.metadata.booking_hotel_id,
     state.metadata.booking_property_code,
+    state.metadata.provider_listing_id,
+    state.metadata.provider_listing_url,
+    state.metadata.provider_property_code,
+    state.metadata.provider_extranet_request_acknowledged,
   ]);
 
   const currentStepIndex = Math.max(0, STEP_ORDER.indexOf(state.currentStep ?? "listing"));
   const currentStepLabel = getChannelSetupStepLabel(state.currentStep);
   const currentStatusLabel = getChannelSetupStatusLabel(state.status);
   const readinessItems = readinessModel.items;
+  const assistedConnectionLabels = providerKey === "booking" ? null : getAssistedConnectionLabels(providerKey);
+  const showAdvancedReadiness = false;
+  const providerConnectionStatusLabel =
+    state.metadata.provider_connection_status === "waiting_for_ota_approval"
+      ? "Waiting for OTA approval"
+      : state.metadata.provider_connection_status === "details_submitted"
+        ? "Details submitted, Famlo will verify"
+        : state.metadata.provider_connection_status === "ota_approval_verified"
+          ? "OTA approval verified"
+          : state.metadata.provider_connection_status === "channel_visible_in_channex"
+            ? "Channel visible in Channex"
+          : state.metadata.provider_connection_status === "verification_failed"
+            ? "Verification failed"
+            : state.metadata.provider_connection_status ?? "Not requested";
 
   const savedStateSummary = useMemo(
     () => [
@@ -190,10 +387,123 @@ export default function ChannelSetupWizard({
       setState(payload.state);
       onSaved?.(payload.state);
       setFeedback("Saved safely");
+      void loadMappingWorkspace();
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Failed to save channel setup state.");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const openRealChannexWorkspace = async (): Promise<void> => {
+    if (!channexPropertyId) {
+      setFeedback("Create the Channex property first, then open the real channel workspace.");
+      return;
+    }
+
+    setIsOpeningChannexWorkspace(true);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/host/pro/channel/channex/iframe", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          familyId,
+          providerKey,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        iframeUrl?: string;
+        providerHint?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.iframeUrl) {
+        throw new Error(payload.error ?? "Unable to open the real Channex workspace.");
+      }
+
+      setChannexWorkspaceUrl(payload.iframeUrl);
+      setChannexWorkspaceHint(payload.providerHint ?? null);
+      setFeedback("Opened the real Channex workspace for this property.");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to open the real Channex workspace.");
+    } finally {
+      setIsOpeningChannexWorkspace(false);
+    }
+  };
+
+  const refreshFromChannex = async (): Promise<void> => {
+    if (!channexPropertyId) {
+      setFeedback("Create the Channex property first, then refresh provider connection state.");
+      return;
+    }
+
+    setIsRefreshingFromChannex(true);
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/host/pro/channel/channex/provider-refresh", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          familyId,
+          providerKey,
+        }),
+      });
+
+      const payload = (await response.json()) as { state?: ChannelSetupState; message?: string; error?: string };
+      if (!response.ok || !payload.state) {
+        throw new Error(payload.error ?? "Unable to refresh provider state from Channex.");
+      }
+
+      setState(payload.state);
+      onSaved?.(payload.state);
+      setFeedback(payload.message ?? "Refreshed provider state from Channex.");
+      void loadMappingWorkspace();
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to refresh provider state from Channex.");
+    } finally {
+      setIsRefreshingFromChannex(false);
+    }
+  };
+
+  const saveMappingForRoom = async (roomId: string): Promise<void> => {
+    setIsSavingMappingByRoomId((current) => ({ ...current, [roomId]: true }));
+    setFeedback(null);
+
+    try {
+      const response = await fetch("/api/host/pro/channel/mappings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          familyId,
+          providerKey,
+          stayUnitId: roomId,
+          externalRoomTypeId: roomTypeDrafts[roomId] || null,
+          externalRatePlanId: ratePlanDrafts[roomId] || null,
+        }),
+      });
+
+      const payload = (await response.json()) as { ok?: boolean; error?: string; message?: string };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error ?? "Unable to save mapping.");
+      }
+
+      setFeedback(payload.message ?? "Mapping saved.");
+      await loadMappingWorkspace();
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to save mapping.");
+    } finally {
+      setIsSavingMappingByRoomId((current) => ({ ...current, [roomId]: false }));
     }
   };
 
@@ -249,6 +559,76 @@ export default function ChannelSetupWizard({
         operator_setup_requested: true,
       },
     });
+  };
+
+  const storeProviderCredential = async (credentialValue: string): Promise<ChannelSetupState | null> => {
+    const response = await fetch("/api/host/pro/channel/credentials", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        familyId,
+        providerKey,
+        credentialType: "access_token",
+        credentialValue,
+      }),
+    });
+
+    const payload = (await response.json()) as { state?: ChannelSetupState; error?: string; message?: string };
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Unable to store provider credential securely.");
+    }
+
+    if (payload.state) {
+      setState(payload.state);
+      onSaved?.(payload.state);
+    }
+
+    return payload.state ?? null;
+  };
+
+  const requestAssistedProviderVerification = (): void => {
+    const normalizedListingId = providerListingIdInput.trim();
+    const normalizedPropertyCode = providerPropertyCodeInput.trim();
+    const normalizedListingUrl = providerListingUrlInput.trim();
+    const normalizedAccessToken = providerAccessTokenInput.trim();
+
+    if (!normalizedListingId && !normalizedPropertyCode && !normalizedListingUrl) {
+      setFeedback("Add at least one safe provider identifier before requesting Famlo verification.");
+      return;
+    }
+
+    void (async () => {
+      setIsSaving(true);
+      setFeedback(null);
+      try {
+        if (providerKey === "mmt" && normalizedAccessToken) {
+          await storeProviderCredential(normalizedAccessToken);
+          setProviderAccessTokenInput("");
+        }
+
+        await saveState({
+          status: "connection_requested",
+          currentStep: "connection",
+          metadataPatch: {
+            provider_listing_id: normalizedListingId,
+            provider_property_code: normalizedPropertyCode,
+            provider_listing_url: normalizedListingUrl,
+            provider_extranet_request_acknowledged: providerExtranetRequested,
+            provider_connection_status: providerExtranetRequested ? "details_submitted" : "waiting_for_ota_approval",
+            provider_connection_error: null,
+            provider_verification_requested_at: new Date().toISOString(),
+            hotel_id_available: true,
+            operator_setup_requested: true,
+          },
+        });
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : "Unable to connect provider.");
+      } finally {
+        setIsSaving(false);
+      }
+    })();
   };
 
   const markRequirementsReady = (): void => {
@@ -331,6 +711,25 @@ export default function ChannelSetupWizard({
         booking_extranet_request_acknowledged: state.metadata.booking_extranet_request_acknowledged,
         booking_connection_status: state.metadata.booking_connection_status,
         booking_connection_error: state.metadata.booking_connection_error,
+        provider_listing_id: state.metadata.provider_listing_id,
+        provider_property_code: state.metadata.provider_property_code,
+        provider_listing_url: state.metadata.provider_listing_url,
+        provider_connection_status: state.metadata.provider_connection_status,
+        provider_connection_error: state.metadata.provider_connection_error,
+        provider_extranet_request_acknowledged: state.metadata.provider_extranet_request_acknowledged,
+        provider_verification_requested_at: state.metadata.provider_verification_requested_at,
+        provider_access_token_stored: state.metadata.provider_access_token_stored,
+        provider_access_token_last_four: state.metadata.provider_access_token_last_four,
+        provider_access_token_stored_at: state.metadata.provider_access_token_stored_at,
+        provider_credential_store_status: state.metadata.provider_credential_store_status,
+        provider_discovered_hotel_id: state.metadata.provider_discovered_hotel_id,
+        provider_discovered_channel_id: state.metadata.provider_discovered_channel_id,
+        provider_discovered_channel_title: state.metadata.provider_discovered_channel_title,
+        provider_channel_attached: state.metadata.provider_channel_attached,
+        provider_channel_active: state.metadata.provider_channel_active,
+        provider_room_types_found_count: state.metadata.provider_room_types_found_count,
+        provider_rate_plans_found_count: state.metadata.provider_rate_plans_found_count,
+        provider_structure_refreshed_at: state.metadata.provider_structure_refreshed_at,
         operator_verified_booking_connection: state.metadata.operator_verified_booking_connection,
         operator_verified_booking_connection_at: state.metadata.operator_verified_booking_connection_at,
         operator_notes: state.metadata.operator_notes,
@@ -371,6 +770,8 @@ export default function ChannelSetupWizard({
     if (status === "unavailable") return "Unavailable";
     return "Not ready";
   };
+
+  const hasProviderCatalog = Boolean(mappingWorkspace && (mappingWorkspace.roomTypes.length > 0 || mappingWorkspace.ratePlans.length > 0));
 
   return (
     <article className={styles.cardInset}>
@@ -414,6 +815,323 @@ export default function ChannelSetupWizard({
           {isLoading ? "Loading the latest safe setup state..." : feedback ?? readinessModel.nextRequiredAction}
         </div>
       </div>
+
+      <section className={styles.listCard} style={{ marginBottom: 16 }}>
+        <div className={styles.listTitle}>Connect {provider.displayName}</div>
+        <div className={styles.cardCopy}>
+          Enter the provider details and press Connect. Famlo will verify the channel safely before any sync or go-live action.
+        </div>
+        {providerKey === "booking" ? (
+          <div className={styles.stack} style={{ marginTop: 12 }}>
+            <label>
+              <span className={styles.fieldLabel}>Booking.com Hotel ID</span>
+              <input
+                className={styles.fieldInput}
+                value={bookingHotelIdInput}
+                onChange={(event) => setBookingHotelIdInput(event.target.value)}
+                placeholder="Example: 1234567"
+              />
+            </label>
+            <label>
+              <span className={styles.fieldLabel}>Booking.com Property Code</span>
+              <input
+                className={styles.fieldInput}
+                value={bookingPropertyCodeInput}
+                onChange={(event) => setBookingPropertyCodeInput(event.target.value)}
+                placeholder="Optional property code"
+              />
+            </label>
+            <label className={styles.feedCopy} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={bookingExtranetRequested}
+                onChange={(event) => setBookingExtranetRequested(event.target.checked)}
+              />
+              I have requested Channex or Famlo as the connectivity provider in Booking.com extranet.
+            </label>
+            <div className={styles.inlineActionRow}>
+              <button
+                type="button"
+                className={styles.primaryActionButton}
+                disabled={isSaving}
+                onClick={requestBookingVerification}
+              >
+                {isSaving ? "Connecting..." : "Connect Booking.com"}
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryActionButton}
+                disabled={isOpeningChannexWorkspace || !channexPropertyId}
+                onClick={() => {
+                  void openRealChannexWorkspace();
+                }}
+              >
+                {isOpeningChannexWorkspace ? "Opening real workspace..." : "Open real Channex setup"}
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryActionButton}
+                disabled={isRefreshingFromChannex || !channexPropertyId}
+                onClick={() => {
+                  void refreshFromChannex();
+                }}
+              >
+                {isRefreshingFromChannex ? "Refreshing..." : "Refresh from Channex"}
+              </button>
+            </div>
+            <div className={styles.feedbackBox}>
+              This sends the real Booking.com connection request to Famlo operators. It does not activate Booking.com or run sync until Channex verification passes.
+            </div>
+          </div>
+        ) : assistedConnectionLabels ? (
+          <div className={styles.stack} style={{ marginTop: 12 }}>
+            {providerKey === "mmt" ? (
+              <div className={styles.feedbackBox}>
+                Open the MMT / Goibibo extranet, go to property settings or channel manager settings, enable or request Channex as the channel manager, then copy the Hotel ID / Hotel Code. If MMT gives an access token, paste it here only if secure credential storage is configured. Famlo will encrypt it and never show it back.
+              </div>
+            ) : null}
+            <label>
+              <span className={styles.fieldLabel}>{assistedConnectionLabels.listingIdLabel}</span>
+              <input
+                className={styles.fieldInput}
+                value={providerListingIdInput}
+                onChange={(event) => setProviderListingIdInput(event.target.value)}
+                placeholder={assistedConnectionLabels.placeholderId}
+              />
+            </label>
+            <label>
+              <span className={styles.fieldLabel}>{assistedConnectionLabels.propertyCodeLabel}</span>
+              <input
+                className={styles.fieldInput}
+                value={providerPropertyCodeInput}
+                onChange={(event) => setProviderPropertyCodeInput(event.target.value)}
+                placeholder={assistedConnectionLabels.placeholderCode}
+              />
+            </label>
+            <label>
+              <span className={styles.fieldLabel}>{assistedConnectionLabels.listingUrlLabel}</span>
+              <input
+                className={styles.fieldInput}
+                value={providerListingUrlInput}
+                onChange={(event) => setProviderListingUrlInput(event.target.value)}
+                placeholder={assistedConnectionLabels.placeholderUrl}
+              />
+            </label>
+            {providerKey === "mmt" ? (
+              <>
+                <label>
+                  <span className={styles.fieldLabel}>Access token</span>
+                  <input
+                    className={styles.fieldInput}
+                    value={providerAccessTokenInput}
+                    onChange={(event) => setProviderAccessTokenInput(event.target.value)}
+                    placeholder={
+                      state.metadata.provider_access_token_stored
+                        ? `Stored securely ending ${state.metadata.provider_access_token_last_four ?? "****"}. Leave blank to keep.`
+                        : "Paste MMT access token only when secure storage is configured"
+                    }
+                  />
+                </label>
+                <label className={styles.feedCopy} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={providerExtranetRequested}
+                    onChange={(event) => setProviderExtranetRequested(event.target.checked)}
+                  />
+                  I have enabled or requested Channex as channel manager in MMT / Goibibo.
+                </label>
+              </>
+            ) : null}
+            <div className={styles.inlineActionRow}>
+              <button
+                type="button"
+                className={styles.primaryActionButton}
+                disabled={isSaving}
+                onClick={requestAssistedProviderVerification}
+              >
+                {isSaving ? "Connecting..." : `Connect ${provider.displayName}`}
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryActionButton}
+                disabled={isOpeningChannexWorkspace || !channexPropertyId}
+                onClick={() => {
+                  void openRealChannexWorkspace();
+                }}
+              >
+                {isOpeningChannexWorkspace ? "Opening real workspace..." : "Open real Channex setup"}
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryActionButton}
+                disabled={isRefreshingFromChannex || !channexPropertyId}
+                onClick={() => {
+                  void refreshFromChannex();
+                }}
+              >
+                {isRefreshingFromChannex ? "Refreshing..." : "Refresh from Channex"}
+              </button>
+            </div>
+            <div className={styles.feedbackBox}>
+              {assistedConnectionLabels.instruction} Famlo stores access tokens only through encrypted credential storage and never returns them to the browser after saving.
+            </div>
+          </div>
+        ) : null}
+        <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+          <span className={styles.readinessPill}>Connection state: {state.metadata.booking_connection_status ?? providerConnectionStatusLabel}</span>
+          <span className={styles.readinessPill}>Live status: {state.status === "live" ? "Live" : "Not live"}</span>
+          <span className={styles.readinessPill}>Channex property: {channexPropertyId ? "Ready" : "Missing"}</span>
+          {state.metadata.provider_channel_attached != null ? (
+            <span className={styles.readinessPill}>Channel in Channex: {state.metadata.provider_channel_attached ? "Visible" : "Not detected"}</span>
+          ) : null}
+        </div>
+        {(state.metadata.provider_discovered_channel_title ||
+          state.metadata.provider_room_types_found_count != null ||
+          state.metadata.provider_rate_plans_found_count != null) ? (
+          <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+            {state.metadata.provider_discovered_channel_title ? (
+              <span className={styles.readinessPill}>Channel title: {state.metadata.provider_discovered_channel_title}</span>
+            ) : null}
+            {state.metadata.provider_room_types_found_count != null ? (
+              <span className={styles.readinessPill}>Room types: {state.metadata.provider_room_types_found_count}</span>
+            ) : null}
+            {state.metadata.provider_rate_plans_found_count != null ? (
+              <span className={styles.readinessPill}>Rate plans: {state.metadata.provider_rate_plans_found_count}</span>
+            ) : null}
+            {state.metadata.provider_structure_refreshed_at ? (
+              <span className={styles.readinessPill}>Refreshed: {state.metadata.provider_structure_refreshed_at}</span>
+            ) : null}
+          </div>
+        ) : null}
+        {channexWorkspaceUrl ? (
+          <div className={styles.stack} style={{ marginTop: 16 }}>
+            <div className={styles.feedbackBox}>
+              {channexWorkspaceHint ??
+                "This is the real Channex property-scoped setup workspace. Any create/test/mapping action here affects the selected property only."}
+            </div>
+            <div className={styles.inlineActionRow}>
+              <a
+                className={styles.secondaryActionButton}
+                href={channexWorkspaceUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open in new tab
+              </a>
+            </div>
+            <iframe
+              src={channexWorkspaceUrl}
+              title={`${provider.displayName} Channex workspace`}
+              style={{
+                width: "100%",
+                minHeight: 860,
+                border: "1px solid rgba(148, 163, 184, 0.35)",
+                borderRadius: 24,
+                background: "#ffffff",
+              }}
+            />
+          </div>
+        ) : null}
+      </section>
+
+      <section className={styles.listCard} style={{ marginBottom: 16 }}>
+        <div className={styles.listTitle}>Provider mapping workspace</div>
+        <div className={styles.cardCopy}>
+          After refreshing from Channex, map each Famlo room to a real provider room and rate plan. This saves mapping only. It does not activate the channel or push inventory.
+        </div>
+        <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+          <span className={styles.readinessPill}>
+            Catalog: {hasProviderCatalog ? "Loaded" : "Missing"}
+          </span>
+          <span className={styles.readinessPill}>
+            Room types: {mappingWorkspace?.roomTypes.length ?? 0}
+          </span>
+          <span className={styles.readinessPill}>
+            Rate plans: {mappingWorkspace?.ratePlans.length ?? 0}
+          </span>
+          <span className={styles.readinessPill}>
+            Refreshed: {mappingWorkspace?.refreshedAt ?? "Not refreshed"}
+          </span>
+        </div>
+
+        {isLoadingMappingWorkspace ? (
+          <div className={styles.feedbackBox} style={{ marginTop: 12 }}>Loading mapping workspace...</div>
+        ) : !hasProviderCatalog ? (
+          <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
+            Refresh from Channex first so Famlo can load the real provider room types and rate plans for this property.
+          </div>
+        ) : (
+          <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+            <div className={styles.mappingHeader}>Famlo room</div>
+            <div className={styles.mappingHeader}>Provider room</div>
+            <div className={styles.mappingHeader}>Provider rate plan</div>
+            <div className={styles.mappingHeader}>Action</div>
+            {mappingWorkspace?.rooms.map((room) => {
+              const allowedRatePlans = mappingWorkspace.ratePlans.filter(
+                (ratePlan) => !roomTypeDrafts[room.id] || !ratePlan.roomTypeId || ratePlan.roomTypeId === roomTypeDrafts[room.id]
+              );
+              return (
+                <Fragment key={room.id}>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{room.name}</div>
+                    <div className={styles.mappingSubcopy}>
+                      {room.unitType || "Famlo room"} · {room.basePrice > 0 ? `Base price ${room.basePrice}` : "Missing price"}
+                    </div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <select
+                      className={styles.fieldInput}
+                      value={roomTypeDrafts[room.id] ?? ""}
+                      onChange={(event) =>
+                        setRoomTypeDrafts((current) => ({ ...current, [room.id]: event.target.value }))
+                      }
+                    >
+                      <option value="">Select provider room</option>
+                      {mappingWorkspace.roomTypes.map((roomType) => (
+                        <option key={roomType.id} value={roomType.id}>
+                          {roomType.title ?? roomType.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <select
+                      className={styles.fieldInput}
+                      value={ratePlanDrafts[room.id] ?? ""}
+                      onChange={(event) =>
+                        setRatePlanDrafts((current) => ({ ...current, [room.id]: event.target.value }))
+                      }
+                    >
+                      <option value="">Select provider rate plan</option>
+                      {allowedRatePlans.map((ratePlan) => (
+                        <option key={ratePlan.id} value={ratePlan.id}>
+                          {ratePlan.title ?? ratePlan.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <button
+                      type="button"
+                      className={styles.secondaryActionButton}
+                      disabled={Boolean(isSavingMappingByRoomId[room.id])}
+                      onClick={() => {
+                        void saveMappingForRoom(room.id);
+                      }}
+                    >
+                      {isSavingMappingByRoomId[room.id] ? "Saving..." : "Save mapping"}
+                    </button>
+                  </div>
+                </Fragment>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {showAdvancedReadiness ? (
+      <details className={styles.operatorDetails}>
+        <summary className={styles.operatorSummary}>Advanced readiness and mapping steps</summary>
 
       <section className={styles.listCard} style={{ marginBottom: 16 }}>
         <div className={styles.listTitle}>Readiness checklist</div>
@@ -546,15 +1264,80 @@ export default function ChannelSetupWizard({
                 <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.booking_connection_error}</div>
               ) : null}
             </div>
+          ) : assistedConnectionLabels ? (
+            <div className={styles.stack} style={{ marginTop: 12 }}>
+              <div className={styles.feedbackBox}>
+                {assistedConnectionLabels.instruction} This does not activate or sync the channel. MMT access tokens are stored only through encrypted credential storage.
+              </div>
+              <label>
+                <span className={styles.fieldLabel}>{assistedConnectionLabels.listingIdLabel}</span>
+                <input
+                  className={styles.fieldInput}
+                  value={providerListingIdInput}
+                  onChange={(event) => setProviderListingIdInput(event.target.value)}
+                  placeholder={assistedConnectionLabels.placeholderId}
+                />
+              </label>
+              <label>
+                <span className={styles.fieldLabel}>{assistedConnectionLabels.propertyCodeLabel}</span>
+                <input
+                  className={styles.fieldInput}
+                  value={providerPropertyCodeInput}
+                  onChange={(event) => setProviderPropertyCodeInput(event.target.value)}
+                  placeholder={assistedConnectionLabels.placeholderCode}
+                />
+              </label>
+              <label>
+                <span className={styles.fieldLabel}>{assistedConnectionLabels.listingUrlLabel}</span>
+                <input
+                  className={styles.fieldInput}
+                  value={providerListingUrlInput}
+                  onChange={(event) => setProviderListingUrlInput(event.target.value)}
+                  placeholder={assistedConnectionLabels.placeholderUrl}
+                />
+              </label>
+              {providerKey === "mmt" ? (
+                <label>
+                  <span className={styles.fieldLabel}>Access token</span>
+                  <input
+                    className={styles.fieldInput}
+                    value={providerAccessTokenInput}
+                    onChange={(event) => setProviderAccessTokenInput(event.target.value)}
+                    placeholder={
+                      state.metadata.provider_access_token_stored
+                        ? `Stored securely ending ${state.metadata.provider_access_token_last_four ?? "****"}. Leave blank to keep.`
+                        : "Paste MMT access token only when secure storage is configured"
+                    }
+                  />
+                </label>
+              ) : null}
+              <div className={styles.inlineActionRow}>
+                <button
+                  type="button"
+                  className={styles.primaryActionButton}
+                  disabled={isSaving}
+                  onClick={requestAssistedProviderVerification}
+                >
+                  Request Famlo verification
+                </button>
+              </div>
+              <div className={styles.feedCopy}>
+                Current verification state: {state.metadata.provider_connection_status ?? "Not requested"}
+                {state.metadata.provider_verification_requested_at
+                  ? ` · Requested ${state.metadata.provider_verification_requested_at}`
+                  : ""}
+              </div>
+              {state.metadata.provider_connection_error ? (
+                <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.provider_connection_error}</div>
+              ) : null}
+            </div>
           ) : null}
           <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
-            {providerKey === "booking" ? null : (
-              <button type="button" className={styles.secondaryActionButton} disabled={isSaving} onClick={() => void saveState({ status: "matching_needed", currentStep: "room_matching", metadataPatch: { hotel_id_available: true, operator_setup_requested: true } })}>
-                Mark connection details collected
-              </button>
-            )}
+            {providerKey === "booking" ? null : null}
           </div>
-          <div className={styles.feedbackBox}>No access tokens are stored in this phase. Setup stays guided and honest.</div>
+          <div className={styles.feedbackBox}>
+            Access tokens are encrypted server-side when secure credential storage is configured. This still does not activate, sync, or mark the OTA live.
+          </div>
         </section>
 
         <section className={styles.listCard}>
@@ -720,6 +1503,9 @@ export default function ChannelSetupWizard({
           </span>
         </div>
       </section>
+
+      </details>
+      ) : null}
     </article>
   );
 }

@@ -338,6 +338,16 @@ export type ChannexAcknowledgeBookingRevisionResult = {
   rawValidation: Record<string, unknown> | null;
 };
 
+export type ChannexOneTimeTokenResult = {
+  ok: boolean;
+  environment: ChannexEnvironment;
+  endpoint: string;
+  httpStatus: number | null;
+  message: string;
+  token: string | null;
+  rawValidation: Record<string, unknown> | null;
+};
+
 function asString(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -413,6 +423,140 @@ export function getChannexConfigSummary(): ChannexConfigSummary {
     productionMutationsAllowed,
     configured: apiKeyConfigured && baseUrlConfigured,
   };
+}
+
+export function buildChannexIframeUrl(input: {
+  oneTimeToken: string;
+  propertyId: string;
+  channels?: string[] | null;
+  groupId?: string | null;
+  language?: string | null;
+}): string {
+  const environment = loadEnvironment();
+  const baseUrl = resolveBaseUrl(environment);
+  const params = new URLSearchParams();
+  params.set("oauth_session_key", input.oneTimeToken);
+  params.set("app_mode", "headless");
+  params.set("redirect_to", "/channels");
+  params.set("property_id", input.propertyId);
+
+  if (input.groupId) {
+    params.set("group_id", input.groupId);
+  }
+
+  const filteredChannels = (input.channels ?? []).map((value) => value.trim()).filter(Boolean);
+  if (filteredChannels.length > 0) {
+    const joined = filteredChannels.join(",");
+    params.set("channels", joined);
+    params.set("available_channels", joined);
+    params.set("channels_filter", joined);
+  }
+
+  if (input.language) {
+    params.set("lng", input.language);
+  }
+
+  return `${baseUrl}/auth/exchange?${params.toString()}`;
+}
+
+export async function createChannexOneTimeToken(input: {
+  propertyId: string;
+  groupId?: string | null;
+  username: string;
+}): Promise<ChannexOneTimeTokenResult> {
+  const environment = loadEnvironment();
+  const summary = getChannexConfigSummary();
+  const endpoint = `${resolveBaseUrl(environment)}/api/v1/auth/one_time_token`;
+  const apiKey = loadApiKey(environment);
+
+  if (!summary.configured || !apiKey) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/auth/one_time_token",
+      httpStatus: null,
+      message: "Channex configuration is incomplete. Add the server-side API key first.",
+      token: null,
+      rawValidation: null,
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      cache: "no-store",
+      headers: buildHeaders(apiKey),
+      body: JSON.stringify({
+        one_time_token: {
+          property_id: input.propertyId,
+          group_id: input.groupId ?? null,
+          username: input.username,
+        },
+      }),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+
+    if (text.trim().length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!response.ok) {
+      const errors =
+        parsed &&
+        typeof parsed.errors === "object" &&
+        parsed.errors
+          ? (parsed.errors as Record<string, unknown>)
+          : null;
+      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
+
+      return {
+        ok: false,
+        environment,
+        endpoint: "/api/v1/auth/one_time_token",
+        httpStatus: response.status,
+        message: errorTitle
+          ? `Channex iframe token request failed: ${errorTitle}.`
+          : `Channex iframe token request failed with HTTP ${response.status}.`,
+        token: null,
+        rawValidation: parsed,
+      };
+    }
+
+    const data =
+      parsed &&
+      typeof parsed.data === "object" &&
+      parsed.data &&
+      !Array.isArray(parsed.data)
+        ? (parsed.data as Record<string, unknown>)
+        : null;
+    const token = typeof data?.token === "string" && data.token.trim().length > 0 ? data.token.trim() : null;
+
+    return {
+      ok: Boolean(token),
+      environment,
+      endpoint: "/api/v1/auth/one_time_token",
+      httpStatus: response.status,
+      message: token ? "Channex iframe token generated successfully." : "Channex iframe token response did not include a token.",
+      token,
+      rawValidation: parsed,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: "/api/v1/auth/one_time_token",
+      httpStatus: null,
+      message: error instanceof Error ? `Channex iframe token request failed: ${error.message}` : "Channex iframe token request failed.",
+      token: null,
+      rawValidation: null,
+    };
+  }
 }
 
 export async function checkChannexConnection(): Promise<ChannexConnectionCheckResult> {

@@ -63,6 +63,7 @@ type HostRoomsManagerProps = {
   selectedRoomId?: string | null;
   createMode?: boolean;
   compactMode?: boolean;
+  focusSection?: "all" | "details" | "pricing";
 };
 
 function parsePhotoList(value: string): string[] {
@@ -177,6 +178,7 @@ export default function HostRoomsManager({
   selectedRoomId = null,
   createMode = false,
   compactMode = false,
+  focusSection = "all",
 }: HostRoomsManagerProps) {
   const [roomDrafts, setRoomDrafts] = useState<RoomFormState[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
@@ -196,6 +198,8 @@ export default function HostRoomsManager({
       .reduce((acc, room) => acc + Math.max(1, Number(room.maxGuests) || 0), 0);
     return { activeRooms, totalCapacity, activeCapacity };
   }, [roomDrafts]);
+  const showDetailsSections = focusSection === "all" || focusSection === "details";
+  const showPricingSection = focusSection === "all" || focusSection === "pricing";
 
   useEffect(() => {
     let cancelled = false;
@@ -750,6 +754,7 @@ export default function HostRoomsManager({
                     </span>
                   </div>
 
+                  {showDetailsSections ? (
                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
                     <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Room identity</div>
                     <div className={dashboardStyles.gridCols2} style={{ gap: "14px", minWidth: 0 }}>
@@ -769,7 +774,9 @@ export default function HostRoomsManager({
                       </label>
                     </div>
                   </div>
+                  ) : null}
 
+                  {showDetailsSections ? (
                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
                     <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Room details</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "14px", minWidth: 0 }}>
@@ -796,7 +803,9 @@ export default function HostRoomsManager({
                       <textarea className={dashboardStyles.inputField} rows={3} value={room.description} onChange={(event) => updateRoomField(room.id, "description", event.target.value)} style={{ wordBreak: "break-word" }} />
                     </label>
                   </div>
+                  ) : null}
 
+                  {showDetailsSections ? (
                   <div style={{ display: "grid", gap: "10px", minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", minWidth: 0 }}>
                       <MapPin size={14} color="#1d4ed8" />
@@ -847,7 +856,9 @@ export default function HostRoomsManager({
                       </button>
                     </div>
                   </div>
+                  ) : null}
 
+                  {showDetailsSections ? (
                   <div style={{ display: "grid", gap: "10px", minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", minWidth: 0 }}>
                       <span style={{ fontSize: "11px", fontWeight: 900, color: "rgba(14,43,87,0.6)", textTransform: "uppercase" }}>Amenities</span>
@@ -931,7 +942,9 @@ export default function HostRoomsManager({
                       </button>
                     </div>
                   </div>
+                  ) : null}
 
+                  {showDetailsSections ? (
                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
                     <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Room photos</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", minWidth: 0 }}>
@@ -1017,9 +1030,16 @@ export default function HostRoomsManager({
                       </div>
                     ) : null}
                   </div>
+                  ) : null}
 
+                  {showPricingSection ? (
                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
                     <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Smart pricing</div>
+                    {focusSection === "pricing" ? (
+                      <div style={{ padding: "12px 14px", borderRadius: "14px", background: "#eff6ff", color: "#1d4ed8", fontSize: "13px", lineHeight: 1.65, fontWeight: 700 }}>
+                        Channel-wise pricing is not connected here yet. This edits the Famlo room price only.
+                      </div>
+                    ) : null}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "14px", minWidth: 0 }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
                         <span style={{ fontSize: "11px", fontWeight: 900, color: "rgba(14,43,87,0.6)", textTransform: "uppercase" }}>Public room price</span>
@@ -1058,6 +1078,7 @@ export default function HostRoomsManager({
                       <div style={{ fontSize: "18px", fontWeight: 900, color: "#165dcc" }}>₹{smartPriceMidpoint}</div>
                     </div>
                   </div>
+                  ) : null}
 
                   {showChannelManager ? (
                     <div style={{ display: "grid", gap: "10px", minWidth: 0, marginTop: "12px" }}>

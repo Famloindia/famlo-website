@@ -1,0 +1,1140 @@
+diff --git a/components/partners/pro/ChannelSetupWizard.tsx b/components/partners/pro/ChannelSetupWizard.tsx
+index 7a5f32cc..1829921d 100644
+--- a/components/partners/pro/ChannelSetupWizard.tsx
++++ b/components/partners/pro/ChannelSetupWizard.tsx
+@@ -36,6 +36,7 @@ export type ChannelSetupWizardSummary = {
+ type ChannelSetupWizardProps = {
+   providerKey: ChannelProviderKey;
+   familyId: string;
++  channexPropertyId: string | null;
+   summary: ChannelSetupWizardSummary;
+   readinessModel: ChannelReadinessModel;
+   testSyncReadiness: ChannelTestSyncReadinessModel;
+@@ -81,9 +82,78 @@ const STEP_ORDER: ChannelSetupStep[] = [
+   "activate",
+ ];
+ 
++function getAssistedConnectionLabels(providerKey: ChannelProviderKey): {
++  listingIdLabel: string;
++  propertyCodeLabel: string;
++  listingUrlLabel: string;
++  placeholderId: string;
++  placeholderCode: string;
++  placeholderUrl: string;
++  instruction: string;
++} {
++  if (providerKey === "mmt") {
++    return {
++      listingIdLabel: "MMT / Goibibo Hotel ID",
++      propertyCodeLabel: "Hotel Code",
++      listingUrlLabel: "Listing / extranet reference URL",
++      placeholderId: "Example: MMT hotel id",
++      placeholderCode: "Example: GI hotel code",
++      placeholderUrl: "Optional listing or extranet URL",
++      instruction: "Enter the safe hotel identifiers. Do not paste access tokens, passwords, or private contract credentials.",
++    };
++  }
++
++  if (providerKey === "airbnb") {
++    return {
++      listingIdLabel: "Airbnb Listing ID",
++      propertyCodeLabel: "Airbnb account / host reference",
++      listingUrlLabel: "Airbnb listing URL",
++      placeholderId: "Example: listing id",
++      placeholderCode: "Optional host/account reference",
++      placeholderUrl: "https://www.airbnb.com/rooms/...",
++      instruction: "Add the listing reference only. OAuth/login authorization is still assisted and no password is stored here.",
++    };
++  }
++
++  if (providerKey === "agoda") {
++    return {
++      listingIdLabel: "Agoda / YCS Property ID",
++      propertyCodeLabel: "Agoda Hotel Code",
++      listingUrlLabel: "Agoda or YCS reference URL",
++      placeholderId: "Example: Agoda property id",
++      placeholderCode: "Optional hotel code",
++      placeholderUrl: "Optional Agoda/YCS URL",
++      instruction: "Collect the Agoda/YCS property reference so Famlo can verify channel-manager setup manually.",
++    };
++  }
++
++  if (providerKey === "expedia") {
++    return {
++      listingIdLabel: "Expedia Property ID",
++      propertyCodeLabel: "Expedia Hotel Code",
++      listingUrlLabel: "Expedia PartnerCentral reference URL",
++      placeholderId: "Example: Expedia property id",
++      placeholderCode: "Optional hotel code",
++      placeholderUrl: "Optional PartnerCentral URL",
++      instruction: "Collect the Expedia property reference only. Contract credentials and secure provider access are not stored here.",
++    };
++  }
++
++  return {
++    listingIdLabel: "Google Hotel / Place ID",
++    propertyCodeLabel: "Google Business Profile reference",
++    listingUrlLabel: "Google property / search URL",
++    placeholderId: "Example: Place ID or hotel feed id",
++    placeholderCode: "Optional GBP reference",
++    placeholderUrl: "Optional Google listing URL",
++    instruction: "Google Hotel is feed/readiness driven. Capture only safe identifiers for operator review.",
++  };
++}
++
+ export default function ChannelSetupWizard({
+   providerKey,
+   familyId,
++  channexPropertyId,
+   summary,
+   readinessModel,
+   testSyncReadiness,
+@@ -103,6 +173,14 @@ export default function ChannelSetupWizard({
+   const [bookingHotelIdInput, setBookingHotelIdInput] = useState("");
+   const [bookingPropertyCodeInput, setBookingPropertyCodeInput] = useState("");
+   const [bookingExtranetRequested, setBookingExtranetRequested] = useState(false);
++  const [providerListingIdInput, setProviderListingIdInput] = useState("");
++  const [providerPropertyCodeInput, setProviderPropertyCodeInput] = useState("");
++  const [providerListingUrlInput, setProviderListingUrlInput] = useState("");
++  const [providerAccessTokenInput, setProviderAccessTokenInput] = useState("");
++  const [providerExtranetRequested, setProviderExtranetRequested] = useState(false);
++  const [isOpeningChannexWorkspace, setIsOpeningChannexWorkspace] = useState(false);
++  const [channexWorkspaceUrl, setChannexWorkspaceUrl] = useState<string | null>(null);
++  const [channexWorkspaceHint, setChannexWorkspaceHint] = useState<string | null>(null);
+ 
+   useEffect(() => {
+     let cancelled = false;
+@@ -141,16 +219,36 @@ export default function ChannelSetupWizard({
+     setBookingHotelIdInput(state.metadata.booking_hotel_id ?? "");
+     setBookingPropertyCodeInput(state.metadata.booking_property_code ?? "");
+     setBookingExtranetRequested(state.metadata.booking_extranet_request_acknowledged === true);
++    setProviderListingIdInput(state.metadata.provider_listing_id ?? "");
++    setProviderPropertyCodeInput(state.metadata.provider_property_code ?? "");
++    setProviderListingUrlInput(state.metadata.provider_listing_url ?? "");
++    setProviderExtranetRequested(state.metadata.provider_extranet_request_acknowledged === true);
+   }, [
+     state.metadata.booking_extranet_request_acknowledged,
+     state.metadata.booking_hotel_id,
+     state.metadata.booking_property_code,
++    state.metadata.provider_listing_id,
++    state.metadata.provider_listing_url,
++    state.metadata.provider_property_code,
++    state.metadata.provider_extranet_request_acknowledged,
+   ]);
+ 
+   const currentStepIndex = Math.max(0, STEP_ORDER.indexOf(state.currentStep ?? "listing"));
+   const currentStepLabel = getChannelSetupStepLabel(state.currentStep);
+   const currentStatusLabel = getChannelSetupStatusLabel(state.status);
+   const readinessItems = readinessModel.items;
++  const assistedConnectionLabels = providerKey === "booking" ? null : getAssistedConnectionLabels(providerKey);
++  const showAdvancedReadiness = false;
++  const providerConnectionStatusLabel =
++    state.metadata.provider_connection_status === "waiting_for_ota_approval"
++      ? "Waiting for OTA approval"
++      : state.metadata.provider_connection_status === "details_submitted"
++        ? "Details submitted, Famlo will verify"
++        : state.metadata.provider_connection_status === "ota_approval_verified"
++          ? "OTA approval verified"
++          : state.metadata.provider_connection_status === "verification_failed"
++            ? "Verification failed"
++            : state.metadata.provider_connection_status ?? "Not requested";
+ 
+   const savedStateSummary = useMemo(
+     () => [
+@@ -197,6 +295,48 @@ export default function ChannelSetupWizard({
+     }
+   };
+ 
++  const openRealChannexWorkspace = async (): Promise<void> => {
++    if (!channexPropertyId) {
++      setFeedback("Create the Channex property first, then open the real channel workspace.");
++      return;
++    }
++
++    setIsOpeningChannexWorkspace(true);
++    setFeedback(null);
++
++    try {
++      const response = await fetch("/api/host/pro/channel/channex/iframe", {
++        method: "POST",
++        headers: {
++          "Content-Type": "application/json",
++        },
++        body: JSON.stringify({
++          familyId,
++          providerKey,
++        }),
++      });
++
++      const payload = (await response.json()) as {
++        ok?: boolean;
++        iframeUrl?: string;
++        providerHint?: string;
++        error?: string;
++      };
++
++      if (!response.ok || !payload.iframeUrl) {
++        throw new Error(payload.error ?? "Unable to open the real Channex workspace.");
++      }
++
++      setChannexWorkspaceUrl(payload.iframeUrl);
++      setChannexWorkspaceHint(payload.providerHint ?? null);
++      setFeedback("Opened the real Channex workspace for this property.");
++    } catch (error) {
++      setFeedback(error instanceof Error ? error.message : "Unable to open the real Channex workspace.");
++    } finally {
++      setIsOpeningChannexWorkspace(false);
++    }
++  };
++
+   const selectListingMode = (setupMode: ChannelSetupState["setupMode"], hasExistingListing: boolean): void => {
+     void saveState({
+       setupMode,
+@@ -251,6 +391,76 @@ export default function ChannelSetupWizard({
+     });
+   };
+ 
++  const storeProviderCredential = async (credentialValue: string): Promise<ChannelSetupState | null> => {
++    const response = await fetch("/api/host/pro/channel/credentials", {
++      method: "POST",
++      headers: {
++        "Content-Type": "application/json",
++      },
++      body: JSON.stringify({
++        familyId,
++        providerKey,
++        credentialType: "access_token",
++        credentialValue,
++      }),
++    });
++
++    const payload = (await response.json()) as { state?: ChannelSetupState; error?: string; message?: string };
++    if (!response.ok) {
++      throw new Error(payload.error ?? "Unable to store provider credential securely.");
++    }
++
++    if (payload.state) {
++      setState(payload.state);
++      onSaved?.(payload.state);
++    }
++
++    return payload.state ?? null;
++  };
++
++  const requestAssistedProviderVerification = (): void => {
++    const normalizedListingId = providerListingIdInput.trim();
++    const normalizedPropertyCode = providerPropertyCodeInput.trim();
++    const normalizedListingUrl = providerListingUrlInput.trim();
++    const normalizedAccessToken = providerAccessTokenInput.trim();
++
++    if (!normalizedListingId && !normalizedPropertyCode && !normalizedListingUrl) {
++      setFeedback("Add at least one safe provider identifier before requesting Famlo verification.");
++      return;
++    }
++
++    void (async () => {
++      setIsSaving(true);
++      setFeedback(null);
++      try {
++        if (providerKey === "mmt" && normalizedAccessToken) {
++          await storeProviderCredential(normalizedAccessToken);
++          setProviderAccessTokenInput("");
++        }
++
++        await saveState({
++          status: "connection_requested",
++          currentStep: "connection",
++          metadataPatch: {
++            provider_listing_id: normalizedListingId,
++            provider_property_code: normalizedPropertyCode,
++            provider_listing_url: normalizedListingUrl,
++            provider_extranet_request_acknowledged: providerExtranetRequested,
++            provider_connection_status: providerExtranetRequested ? "details_submitted" : "waiting_for_ota_approval",
++            provider_connection_error: null,
++            provider_verification_requested_at: new Date().toISOString(),
++            hotel_id_available: true,
++            operator_setup_requested: true,
++          },
++        });
++      } catch (error) {
++        setFeedback(error instanceof Error ? error.message : "Unable to connect provider.");
++      } finally {
++        setIsSaving(false);
++      }
++    })();
++  };
++
+   const markRequirementsReady = (): void => {
+     void saveState({
+       status: state.setupMode === "prepare_listing" ? "needs_details" : "setup_started",
+@@ -331,6 +541,17 @@ export default function ChannelSetupWizard({
+         booking_extranet_request_acknowledged: state.metadata.booking_extranet_request_acknowledged,
+         booking_connection_status: state.metadata.booking_connection_status,
+         booking_connection_error: state.metadata.booking_connection_error,
++        provider_listing_id: state.metadata.provider_listing_id,
++        provider_property_code: state.metadata.provider_property_code,
++        provider_listing_url: state.metadata.provider_listing_url,
++        provider_connection_status: state.metadata.provider_connection_status,
++        provider_connection_error: state.metadata.provider_connection_error,
++        provider_extranet_request_acknowledged: state.metadata.provider_extranet_request_acknowledged,
++        provider_verification_requested_at: state.metadata.provider_verification_requested_at,
++        provider_access_token_stored: state.metadata.provider_access_token_stored,
++        provider_access_token_last_four: state.metadata.provider_access_token_last_four,
++        provider_access_token_stored_at: state.metadata.provider_access_token_stored_at,
++        provider_credential_store_status: state.metadata.provider_credential_store_status,
+         operator_verified_booking_connection: state.metadata.operator_verified_booking_connection,
+         operator_verified_booking_connection_at: state.metadata.operator_verified_booking_connection_at,
+         operator_notes: state.metadata.operator_notes,
+@@ -415,6 +636,187 @@ export default function ChannelSetupWizard({
+         </div>
+       </div>
+ 
++      <section className={styles.listCard} style={{ marginBottom: 16 }}>
++        <div className={styles.listTitle}>Connect {provider.displayName}</div>
++        <div className={styles.cardCopy}>
++          Enter the provider details and press Connect. Famlo will verify the channel safely before any sync or go-live action.
++        </div>
++        {providerKey === "booking" ? (
++          <div className={styles.stack} style={{ marginTop: 12 }}>
++            <label>
++              <span className={styles.fieldLabel}>Booking.com Hotel ID</span>
++              <input
++                className={styles.fieldInput}
++                value={bookingHotelIdInput}
++                onChange={(event) => setBookingHotelIdInput(event.target.value)}
++                placeholder="Example: 1234567"
++              />
++            </label>
++            <label>
++              <span className={styles.fieldLabel}>Booking.com Property Code</span>
++              <input
++                className={styles.fieldInput}
++                value={bookingPropertyCodeInput}
++                onChange={(event) => setBookingPropertyCodeInput(event.target.value)}
++                placeholder="Optional property code"
++              />
++            </label>
++            <label className={styles.feedCopy} style={{ display: "flex", gap: 10, alignItems: "center" }}>
++              <input
++                type="checkbox"
++                checked={bookingExtranetRequested}
++                onChange={(event) => setBookingExtranetRequested(event.target.checked)}
++              />
++              I have requested Channex or Famlo as the connectivity provider in Booking.com extranet.
++            </label>
++            <div className={styles.inlineActionRow}>
++              <button
++                type="button"
++                className={styles.primaryActionButton}
++                disabled={isSaving}
++                onClick={requestBookingVerification}
++              >
++                {isSaving ? "Connecting..." : "Connect Booking.com"}
++              </button>
++              <button
++                type="button"
++                className={styles.secondaryActionButton}
++                disabled={isOpeningChannexWorkspace || !channexPropertyId}
++                onClick={() => {
++                  void openRealChannexWorkspace();
++                }}
++              >
++                {isOpeningChannexWorkspace ? "Opening real workspace..." : "Open real Channex setup"}
++              </button>
++            </div>
++            <div className={styles.feedbackBox}>
++              This sends the real Booking.com connection request to Famlo operators. It does not activate Booking.com or run sync until Channex verification passes.
++            </div>
++          </div>
++        ) : assistedConnectionLabels ? (
++          <div className={styles.stack} style={{ marginTop: 12 }}>
++            {providerKey === "mmt" ? (
++              <div className={styles.feedbackBox}>
++                Open the MMT / Goibibo extranet, go to property settings or channel manager settings, enable or request Channex as the channel manager, then copy the Hotel ID / Hotel Code. If MMT gives an access token, paste it here only if secure credential storage is configured. Famlo will encrypt it and never show it back.
++              </div>
++            ) : null}
++            <label>
++              <span className={styles.fieldLabel}>{assistedConnectionLabels.listingIdLabel}</span>
++              <input
++                className={styles.fieldInput}
++                value={providerListingIdInput}
++                onChange={(event) => setProviderListingIdInput(event.target.value)}
++                placeholder={assistedConnectionLabels.placeholderId}
++              />
++            </label>
++            <label>
++              <span className={styles.fieldLabel}>{assistedConnectionLabels.propertyCodeLabel}</span>
++              <input
++                className={styles.fieldInput}
++                value={providerPropertyCodeInput}
++                onChange={(event) => setProviderPropertyCodeInput(event.target.value)}
++                placeholder={assistedConnectionLabels.placeholderCode}
++              />
++            </label>
++            <label>
++              <span className={styles.fieldLabel}>{assistedConnectionLabels.listingUrlLabel}</span>
++              <input
++                className={styles.fieldInput}
++                value={providerListingUrlInput}
++                onChange={(event) => setProviderListingUrlInput(event.target.value)}
++                placeholder={assistedConnectionLabels.placeholderUrl}
++              />
++            </label>
++            {providerKey === "mmt" ? (
++              <>
++                <label>
++                  <span className={styles.fieldLabel}>Access token</span>
++                  <input
++                    className={styles.fieldInput}
++                    value={providerAccessTokenInput}
++                    onChange={(event) => setProviderAccessTokenInput(event.target.value)}
++                    placeholder={
++                      state.metadata.provider_access_token_stored
++                        ? `Stored securely ending ${state.metadata.provider_access_token_last_four ?? "****"}. Leave blank to keep.`
++                        : "Paste MMT access token only when secure storage is configured"
++                    }
++                  />
++                </label>
++                <label className={styles.feedCopy} style={{ display: "flex", gap: 10, alignItems: "center" }}>
++                  <input
++                    type="checkbox"
++                    checked={providerExtranetRequested}
++                    onChange={(event) => setProviderExtranetRequested(event.target.checked)}
++                  />
++                  I have enabled or requested Channex as channel manager in MMT / Goibibo.
++                </label>
++              </>
++            ) : null}
++            <div className={styles.inlineActionRow}>
++              <button
++                type="button"
++                className={styles.primaryActionButton}
++                disabled={isSaving}
++                onClick={requestAssistedProviderVerification}
++              >
++                {isSaving ? "Connecting..." : `Connect ${provider.displayName}`}
++              </button>
++              <button
++                type="button"
++                className={styles.secondaryActionButton}
++                disabled={isOpeningChannexWorkspace || !channexPropertyId}
++                onClick={() => {
++                  void openRealChannexWorkspace();
++                }}
++              >
++                {isOpeningChannexWorkspace ? "Opening real workspace..." : "Open real Channex setup"}
++              </button>
++            </div>
++            <div className={styles.feedbackBox}>
++              {assistedConnectionLabels.instruction} Famlo stores access tokens only through encrypted credential storage and never returns them to the browser after saving.
++            </div>
++          </div>
++        ) : null}
++        <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
++          <span className={styles.readinessPill}>Connection state: {state.metadata.booking_connection_status ?? providerConnectionStatusLabel}</span>
++          <span className={styles.readinessPill}>Live status: {state.status === "live" ? "Live" : "Not live"}</span>
++          <span className={styles.readinessPill}>Channex property: {channexPropertyId ? "Ready" : "Missing"}</span>
++        </div>
++        {channexWorkspaceUrl ? (
++          <div className={styles.stack} style={{ marginTop: 16 }}>
++            <div className={styles.feedbackBox}>
++              {channexWorkspaceHint ??
++                "This is the real Channex property-scoped setup workspace. Any create/test/mapping action here affects the selected property only."}
++            </div>
++            <div className={styles.inlineActionRow}>
++              <a
++                className={styles.secondaryActionButton}
++                href={channexWorkspaceUrl}
++                target="_blank"
++                rel="noreferrer"
++              >
++                Open in new tab
++              </a>
++            </div>
++            <iframe
++              src={channexWorkspaceUrl}
++              title={`${provider.displayName} Channex workspace`}
++              style={{
++                width: "100%",
++                minHeight: 860,
++                border: "1px solid rgba(148, 163, 184, 0.35)",
++                borderRadius: 24,
++                background: "#ffffff",
++              }}
++            />
++          </div>
++        ) : null}
++      </section>
++
++      {showAdvancedReadiness ? (
++      <details className={styles.operatorDetails}>
++        <summary className={styles.operatorSummary}>Advanced readiness and mapping steps</summary>
++
+       <section className={styles.listCard} style={{ marginBottom: 16 }}>
+         <div className={styles.listTitle}>Readiness checklist</div>
+         <div className={styles.stack}>
+@@ -546,15 +948,80 @@ export default function ChannelSetupWizard({
+                 <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.booking_connection_error}</div>
+               ) : null}
+             </div>
++          ) : assistedConnectionLabels ? (
++            <div className={styles.stack} style={{ marginTop: 12 }}>
++              <div className={styles.feedbackBox}>
++                {assistedConnectionLabels.instruction} This does not activate or sync the channel. MMT access tokens are stored only through encrypted credential storage.
++              </div>
++              <label>
++                <span className={styles.fieldLabel}>{assistedConnectionLabels.listingIdLabel}</span>
++                <input
++                  className={styles.fieldInput}
++                  value={providerListingIdInput}
++                  onChange={(event) => setProviderListingIdInput(event.target.value)}
++                  placeholder={assistedConnectionLabels.placeholderId}
++                />
++              </label>
++              <label>
++                <span className={styles.fieldLabel}>{assistedConnectionLabels.propertyCodeLabel}</span>
++                <input
++                  className={styles.fieldInput}
++                  value={providerPropertyCodeInput}
++                  onChange={(event) => setProviderPropertyCodeInput(event.target.value)}
++                  placeholder={assistedConnectionLabels.placeholderCode}
++                />
++              </label>
++              <label>
++                <span className={styles.fieldLabel}>{assistedConnectionLabels.listingUrlLabel}</span>
++                <input
++                  className={styles.fieldInput}
++                  value={providerListingUrlInput}
++                  onChange={(event) => setProviderListingUrlInput(event.target.value)}
++                  placeholder={assistedConnectionLabels.placeholderUrl}
++                />
++              </label>
++              {providerKey === "mmt" ? (
++                <label>
++                  <span className={styles.fieldLabel}>Access token</span>
++                  <input
++                    className={styles.fieldInput}
++                    value={providerAccessTokenInput}
++                    onChange={(event) => setProviderAccessTokenInput(event.target.value)}
++                    placeholder={
++                      state.metadata.provider_access_token_stored
++                        ? `Stored securely ending ${state.metadata.provider_access_token_last_four ?? "****"}. Leave blank to keep.`
++                        : "Paste MMT access token only when secure storage is configured"
++                    }
++                  />
++                </label>
++              ) : null}
++              <div className={styles.inlineActionRow}>
++                <button
++                  type="button"
++                  className={styles.primaryActionButton}
++                  disabled={isSaving}
++                  onClick={requestAssistedProviderVerification}
++                >
++                  Request Famlo verification
++                </button>
++              </div>
++              <div className={styles.feedCopy}>
++                Current verification state: {state.metadata.provider_connection_status ?? "Not requested"}
++                {state.metadata.provider_verification_requested_at
++                  ? ` · Requested ${state.metadata.provider_verification_requested_at}`
++                  : ""}
++              </div>
++              {state.metadata.provider_connection_error ? (
++                <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.provider_connection_error}</div>
++              ) : null}
++            </div>
+           ) : null}
+           <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
+-            {providerKey === "booking" ? null : (
+-              <button type="button" className={styles.secondaryActionButton} disabled={isSaving} onClick={() => void saveState({ status: "matching_needed", currentStep: "room_matching", metadataPatch: { hotel_id_available: true, operator_setup_requested: true } })}>
+-                Mark connection details collected
+-              </button>
+-            )}
++            {providerKey === "booking" ? null : null}
++          </div>
++          <div className={styles.feedbackBox}>
++            Access tokens are encrypted server-side when secure credential storage is configured. This still does not activate, sync, or mark the OTA live.
+           </div>
+-          <div className={styles.feedbackBox}>No access tokens are stored in this phase. Setup stays guided and honest.</div>
+         </section>
+ 
+         <section className={styles.listCard}>
+@@ -720,6 +1187,9 @@ export default function ChannelSetupWizard({
+           </span>
+         </div>
+       </section>
++
++      </details>
++      ) : null}
+     </article>
+   );
+ }
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index 5d1e0802..b937544c 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -518,6 +518,7 @@ type ChannelOperatorReviewRow = {
+   providerKey: ChannelProviderKey;
+   providerName: string;
+   propertyName: string;
++  providerReference: string;
+   setupStatus: string;
+   goLiveStatus: string;
+   reviewRequested: string;
+@@ -1540,6 +1541,7 @@ export default function FamloProDashboardShell({
+   const [selectedBooking, setSelectedBooking] = useState<ProBookingSummary | null>(null);
+   const [activeMessageConversationId, setActiveMessageConversationId] = useState<string | null>(null);
+   const [activeChannelSetup, setActiveChannelSetup] = useState<ChannelProviderKey | null>(null);
++  const [selectedChannelToAdd, setSelectedChannelToAdd] = useState<ChannelProviderKey>("booking");
+   const [channelSetupOverrides, setChannelSetupOverrides] = useState<Partial<Record<ChannelProviderKey, ChannelSetupState>>>({});
+   const [timeAnchor] = useState(() => Date.now());
+   useEffect(() => {
+@@ -1551,6 +1553,7 @@ export default function FamloProDashboardShell({
+   const isPropertiesHomeView = activeSection === "properties-home" && !roomRouteState;
+   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
+   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
++  const showChannelOperatorDiagnostics = false;
+   const simplePropertiesHref = `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=properties-home`;
+   const hostWorkspacePropertyCount = propertyOptions.length;
+   const hostProfilePhotoUrl = hostProfile.photoUrl;
+@@ -2334,6 +2337,13 @@ export default function FamloProDashboardShell({
+       providerKey: provider.key,
+       providerName: provider.displayName,
+       propertyName: currentPropertyLabel,
++      providerReference: [
++        setupState.metadata.booking_hotel_id ? `Hotel ID ${setupState.metadata.booking_hotel_id}` : null,
++        setupState.metadata.booking_property_code ? `Property code ${setupState.metadata.booking_property_code}` : null,
++        setupState.metadata.provider_listing_id ? `Listing ID ${setupState.metadata.provider_listing_id}` : null,
++        setupState.metadata.provider_property_code ? `Provider code ${setupState.metadata.provider_property_code}` : null,
++        setupState.metadata.provider_listing_url ? "Listing URL saved" : null,
++      ].filter(Boolean).join(" · ") || "No safe provider details saved",
+       setupStatus: getChannelSetupStatusLabel(setupState.status),
+       goLiveStatus: goLiveModel.statusLabel,
+       reviewRequested: reviewRequested ? "Yes" : "No",
+@@ -2551,11 +2561,11 @@ export default function FamloProDashboardShell({
+       cta:
+         provider.key === "booking"
+           ? currentChannelAttached || Boolean(primaryProperty?.externalPropertyId) || roomMappingsReadyCount > 0 || rateMappingsReadyCount > 0 || isInProgress
+-            ? "Continue setup"
+-            : "Start setup"
++            ? "Continue connection"
++            : "Connect"
+           : isInProgress
+-            ? "Continue setup"
+-            : "Start setup",
++            ? "Continue connection"
++            : "Connect",
+       setupModeLabel:
+         setupState.setupMode === "existing_listing"
+           ? "Existing listing"
+@@ -5130,7 +5140,7 @@ export default function FamloProDashboardShell({
+                 <div>
+                   <h3 className={styles.cardTitle}>Channels</h3>
+                   <p className={styles.cardCopy}>
+-                    Select a provider, work through the guided setup, and keep activation disabled until the honest readiness checks pass.
++                    Add one OTA channel at a time. Pick the OTA, press Add channel, then enter the connection details.
+                   </p>
+                 </div>
+                 <span className={currentChannelAttached ? styles.badge : styles.badge + " " + styles.badgeMuted}>
+@@ -5138,72 +5148,86 @@ export default function FamloProDashboardShell({
+                 </span>
+               </div>
+               <div className={styles.cardBody}>
+-                <div className={styles.channelGrid}>
+-                  {channelProviderCards.map((channel) => {
+-                    const provider = getChannelProviderDefinition(channel.key);
+-                    return (
+-                      <article key={channel.key} className={styles.channelCard}>
+-                        <div className={styles.channelHeader}>
+-                          <div>
+-                            <div className={styles.channelTitle}>{provider.displayName}</div>
+-                            <div className={styles.channelCopy}>{provider.description}</div>
+-                          </div>
+-                          <span className={channel.status === "Connected" ? styles.badge : styles.badge + " " + styles.badgeMuted}>
+-                            {channel.status}
+-                          </span>
+-                        </div>
+-                        <div className={styles.inlineBadgeRow}>
+-                          <span className={styles.readinessPill}>{channel.progressPercent}% complete</span>
+-                          {channel.warningLabel ? <span className={`${styles.readinessPill} ${styles.readinessPillReview}`}>{channel.warningLabel}</span> : null}
+-                        </div>
+-                        <div className={styles.providerMetaRow}>
+-                          <span className={styles.filterChip}>{channel.setupModeLabel}</span>
+-                          <span className={styles.filterChip}>{channel.roomSupportLabel}</span>
+-                          <span className={styles.filterChip}>{channel.priceSupportLabel}</span>
+-                          <span className={styles.filterChip}>{channel.calendarSupportLabel}</span>
+-                        </div>
+-                        <div className={styles.placeholderGrid}>
+-                          <div className={styles.placeholderRow}>
+-                            <div className={styles.placeholderLabel}>Room matching</div>
+-                            <div className={styles.placeholderValue}>{channel.roomStatus}</div>
+-                          </div>
+-                          <div className={styles.placeholderRow}>
+-                            <div className={styles.placeholderLabel}>Price matching</div>
+-                            <div className={styles.placeholderValue}>{channel.priceStatus}</div>
+-                          </div>
+-                          <div className={styles.placeholderRow}>
+-                            <div className={styles.placeholderLabel}>Calendar sync</div>
+-                            <div className={styles.placeholderValue}>{channel.calendarStatus}</div>
+-                          </div>
+-                          <div className={styles.placeholderRow}>
+-                            <div className={styles.placeholderLabel}>Test sync</div>
+-                            <div className={styles.placeholderValue}>{channel.testSyncStatus}</div>
+-                          </div>
+-                          <div className={styles.placeholderRow}>
+-                            <div className={styles.placeholderLabel}>Go-live</div>
+-                            <div className={styles.placeholderValue}>{channel.goLiveStatus}</div>
+-                          </div>
+-                        </div>
+-                        <div className={styles.feedCopy}>{channel.goLiveNextStep ?? channel.nextStep}</div>
+-                        <div className={styles.inlineActionRow}>
+-                          <button type="button" className={styles.primaryActionButton} onClick={() => setActiveChannelSetup(channel.key)}>
+-                            {channel.cta}
+-                          </button>
+-                          {channel.key === "booking" ? (
+-                            <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("room-mapping")}>
+-                              View matching
+-                            </button>
+-                          ) : null}
+-                        </div>
+-                      </article>
+-                    );
+-                  })}
+-                </div>
++                <article className={styles.listCard}>
++                  <div className={styles.listTitle}>Add channel</div>
++                  <div className={styles.cardCopy}>
++                    Choose the OTA you want to connect for this property. The setup form will open immediately after you add it.
++                  </div>
++                  <div className={styles.listGrid} style={{ marginTop: 12 }}>
++                    <label>
++                      <span className={styles.fieldLabel}>Select OTA</span>
++                      <select
++                        className={styles.fieldInput}
++                        value={selectedChannelToAdd}
++                        onChange={(event) => setSelectedChannelToAdd(event.target.value as ChannelProviderKey)}
++                      >
++                        {CHANNEL_PROVIDER_REGISTRY.map((provider) => (
++                          <option key={provider.key} value={provider.key}>
++                            {provider.displayName}
++                          </option>
++                        ))}
++                      </select>
++                    </label>
++                    <div className={styles.placeholderRow}>
++                      <div className={styles.placeholderTitle}>{getChannelProviderDefinition(selectedChannelToAdd).displayName}</div>
++                      <div className={styles.placeholderCopy}>{getChannelProviderDefinition(selectedChannelToAdd).description}</div>
++                    </div>
++                  </div>
++                  <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
++                    <button
++                      type="button"
++                      className={styles.primaryActionButton}
++                      onClick={() => setActiveChannelSetup(selectedChannelToAdd)}
++                    >
++                      Add channel
++                    </button>
++                    {activeChannelSetup ? (
++                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveChannelSetup(null)}>
++                        Close setup
++                      </button>
++                    ) : null}
++                  </div>
++                </article>
++
++                <article className={styles.listCard}>
++                  <div className={styles.listTitle}>Added channels</div>
++                  <div className={styles.mappingTable} style={{ marginTop: 12 }}>
++                    <div className={styles.mappingHeader}>OTA</div>
++                    <div className={styles.mappingHeader}>Status</div>
++                    <div className={styles.mappingHeader}>Next action</div>
++                    <div className={styles.mappingHeader}>Action</div>
++                    {channelProviderCards
++                      .filter((channel) => channel.status !== "Not started" || channel.key === activeChannelSetup)
++                      .map((channel) => {
++                        const provider = getChannelProviderDefinition(channel.key);
++                        return (
++                          <Fragment key={channel.key}>
++                            <div className={styles.mappingCell}>
++                              <div className={styles.mappingTitle}>{provider.displayName}</div>
++                              <div className={styles.mappingSubcopy}>{channel.progressPercent}% complete</div>
++                            </div>
++                            <div className={styles.mappingCell}>
++                              <span className={channel.status === "Connected" ? styles.badge : styles.badge + " " + styles.badgeMuted}>
++                                {channel.status}
++                              </span>
++                            </div>
++                            <div className={styles.mappingCellMuted}>{channel.goLiveNextStep ?? channel.nextStep}</div>
++                            <div className={styles.mappingCell}>
++                              <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveChannelSetup(channel.key)}>
++                                Open setup
++                              </button>
++                            </div>
++                          </Fragment>
++                        );
++                      })}
++                  </div>
++                </article>
+ 
+                 {activeChannelSetup ? (
+                   <ChannelSetupWizard
+                     providerKey={activeChannelSetup}
+                     familyId={familyId}
++                    channexPropertyId={primaryProperty?.externalPropertyId ?? null}
+                     summary={selectedChannelSetupSummary ?? channelSetupSummariesByKey.booking}
+                     readinessModel={channelReadinessModelsByKey[activeChannelSetup]}
+                     testSyncReadiness={channelTestSyncReadinessByKey[activeChannelSetup]}
+@@ -5245,8 +5269,8 @@ export default function FamloProDashboardShell({
+                         <div className={styles.feedCopy}>A provider only looks connected when real loaded readiness exists. Otherwise the card stays assisted or not started.</div>
+                       </div>
+                       <div className={styles.feedItem}>
+-                        <div className={styles.feedTitle}>No credential storage yet</div>
+-                        <div className={styles.feedCopy}>Setup stays guided-only until secure credential storage is ready.</div>
++                        <div className={styles.feedTitle}>Secure credential storage is live</div>
++                        <div className={styles.feedCopy}>Assisted providers like MakeMyTrip / Goibibo can now store access tokens encrypted on the server without exposing them back to the browser.</div>
+                       </div>
+                     </div>
+                   </article>
+@@ -5275,6 +5299,7 @@ export default function FamloProDashboardShell({
+                   </article>
+                 </div>
+ 
++                {showChannelOperatorDiagnostics ? (
+                 <details className={styles.operatorDetails}>
+                   <summary className={styles.operatorSummary}>Advanced / Operator diagnostics</summary>
+                   <div className={styles.listGrid}>
+@@ -5429,6 +5454,7 @@ export default function FamloProDashboardShell({
+                       </div>
+                       <div className={styles.mappingTable} style={{ marginTop: 12 }}>
+                         <div className={styles.mappingHeader}>Provider</div>
++                        <div className={styles.mappingHeader}>Safe details</div>
+                         <div className={styles.mappingHeader}>Setup / Go-live</div>
+                         <div className={styles.mappingHeader}>Go-live requested</div>
+                         <div className={styles.mappingHeader}>Test sync requested</div>
+@@ -5441,6 +5467,9 @@ export default function FamloProDashboardShell({
+                               <div className={styles.mappingTitle}>{row.providerName}</div>
+                               <div className={styles.mappingSubcopy}>{row.propertyName}</div>
+                             </div>
++                            <div className={styles.mappingCell}>
++                              <div className={styles.mappingSubcopy}>{row.providerReference}</div>
++                            </div>
+                             <div className={styles.mappingCell}>
+                               <div className={styles.mappingTitle}>{row.setupStatus}</div>
+                               <div className={styles.mappingSubcopy}>{row.goLiveStatus}</div>
+@@ -5472,6 +5501,7 @@ export default function FamloProDashboardShell({
+                     </article>
+                   </div>
+                 </details>
++                ) : null}
+               </div>
+             </section>
+           )}
+diff --git a/lib/channel-providers/channex/client.ts b/lib/channel-providers/channex/client.ts
+index c448048e..74aa008c 100644
+--- a/lib/channel-providers/channex/client.ts
++++ b/lib/channel-providers/channex/client.ts
+@@ -338,6 +338,16 @@ export type ChannexAcknowledgeBookingRevisionResult = {
+   rawValidation: Record<string, unknown> | null;
+ };
+ 
++export type ChannexOneTimeTokenResult = {
++  ok: boolean;
++  environment: ChannexEnvironment;
++  endpoint: string;
++  httpStatus: number | null;
++  message: string;
++  token: string | null;
++  rawValidation: Record<string, unknown> | null;
++};
++
+ function asString(value: string | undefined): string | null {
+   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+ }
+@@ -415,6 +425,140 @@ export function getChannexConfigSummary(): ChannexConfigSummary {
+   };
+ }
+ 
++export function buildChannexIframeUrl(input: {
++  oneTimeToken: string;
++  propertyId: string;
++  channels?: string[] | null;
++  groupId?: string | null;
++  language?: string | null;
++}): string {
++  const environment = loadEnvironment();
++  const baseUrl = resolveBaseUrl(environment);
++  const params = new URLSearchParams();
++  params.set("oauth_session_key", input.oneTimeToken);
++  params.set("app_mode", "headless");
++  params.set("redirect_to", "/channels");
++  params.set("property_id", input.propertyId);
++
++  if (input.groupId) {
++    params.set("group_id", input.groupId);
++  }
++
++  const filteredChannels = (input.channels ?? []).map((value) => value.trim()).filter(Boolean);
++  if (filteredChannels.length > 0) {
++    const joined = filteredChannels.join(",");
++    params.set("channels", joined);
++    params.set("available_channels", joined);
++    params.set("channels_filter", joined);
++  }
++
++  if (input.language) {
++    params.set("lng", input.language);
++  }
++
++  return `${baseUrl}/auth/exchange?${params.toString()}`;
++}
++
++export async function createChannexOneTimeToken(input: {
++  propertyId: string;
++  groupId?: string | null;
++  username: string;
++}): Promise<ChannexOneTimeTokenResult> {
++  const environment = loadEnvironment();
++  const summary = getChannexConfigSummary();
++  const endpoint = `${resolveBaseUrl(environment)}/api/v1/auth/one_time_token`;
++  const apiKey = loadApiKey(environment);
++
++  if (!summary.configured || !apiKey) {
++    return {
++      ok: false,
++      environment,
++      endpoint: "/api/v1/auth/one_time_token",
++      httpStatus: null,
++      message: "Channex configuration is incomplete. Add the server-side API key first.",
++      token: null,
++      rawValidation: null,
++    };
++  }
++
++  try {
++    const response = await fetch(endpoint, {
++      method: "POST",
++      cache: "no-store",
++      headers: buildHeaders(apiKey),
++      body: JSON.stringify({
++        one_time_token: {
++          property_id: input.propertyId,
++          group_id: input.groupId ?? null,
++          username: input.username,
++        },
++      }),
++    });
++
++    const text = await response.text();
++    let parsed: Record<string, unknown> | null = null;
++
++    if (text.trim().length > 0) {
++      try {
++        parsed = JSON.parse(text) as Record<string, unknown>;
++      } catch {
++        parsed = null;
++      }
++    }
++
++    if (!response.ok) {
++      const errors =
++        parsed &&
++        typeof parsed.errors === "object" &&
++        parsed.errors
++          ? (parsed.errors as Record<string, unknown>)
++          : null;
++      const errorTitle = typeof errors?.title === "string" ? errors.title : null;
++
++      return {
++        ok: false,
++        environment,
++        endpoint: "/api/v1/auth/one_time_token",
++        httpStatus: response.status,
++        message: errorTitle
++          ? `Channex iframe token request failed: ${errorTitle}.`
++          : `Channex iframe token request failed with HTTP ${response.status}.`,
++        token: null,
++        rawValidation: parsed,
++      };
++    }
++
++    const data =
++      parsed &&
++      typeof parsed.data === "object" &&
++      parsed.data &&
++      !Array.isArray(parsed.data)
++        ? (parsed.data as Record<string, unknown>)
++        : null;
++    const token = typeof data?.token === "string" && data.token.trim().length > 0 ? data.token.trim() : null;
++
++    return {
++      ok: Boolean(token),
++      environment,
++      endpoint: "/api/v1/auth/one_time_token",
++      httpStatus: response.status,
++      message: token ? "Channex iframe token generated successfully." : "Channex iframe token response did not include a token.",
++      token,
++      rawValidation: parsed,
++    };
++  } catch (error) {
++    return {
++      ok: false,
++      environment,
++      endpoint: "/api/v1/auth/one_time_token",
++      httpStatus: null,
++      message: error instanceof Error ? `Channex iframe token request failed: ${error.message}` : "Channex iframe token request failed.",
++      token: null,
++      rawValidation: null,
++    };
++  }
++}
++
+ export async function checkChannexConnection(): Promise<ChannexConnectionCheckResult> {
+   const environment = loadEnvironment();
+   const summary = getChannexConfigSummary();
+diff --git a/lib/channel-setup-state.ts b/lib/channel-setup-state.ts
+index 32b8e443..3727cbe4 100644
+--- a/lib/channel-setup-state.ts
++++ b/lib/channel-setup-state.ts
+@@ -33,6 +33,19 @@ export type ChannelSetupMetadata = {
+   hotel_id_available: boolean | null;
+   booking_hotel_id: string | null;
+   booking_property_code: string | null;
++  provider_listing_id: string | null;
++  provider_property_code: string | null;
++  provider_listing_url: string | null;
++  provider_connection_status: string | null;
++  provider_connection_error: string | null;
++  provider_extranet_request_acknowledged: boolean | null;
++  provider_verification_requested_at: string | null;
++  provider_approval_verified_at: string | null;
++  provider_approval_verified_by: string | null;
++  provider_access_token_stored: boolean | null;
++  provider_access_token_last_four: string | null;
++  provider_access_token_stored_at: string | null;
++  provider_credential_store_status: string | null;
+   connectivity_provider_requested: boolean | null;
+   connectivity_provider_requested_at: string | null;
+   booking_extranet_request_acknowledged: boolean | null;
+@@ -317,6 +330,19 @@ export function readChannelSetupMetadata(value: unknown): ChannelSetupMetadata {
+     hotel_id_available: asNullableBoolean(setup.hotel_id_available) ?? asNullableBoolean(setup.hotel_id_entered),
+     booking_hotel_id: asString(setup.booking_hotel_id),
+     booking_property_code: asString(setup.booking_property_code),
++    provider_listing_id: asString(setup.provider_listing_id),
++    provider_property_code: asString(setup.provider_property_code),
++    provider_listing_url: asString(setup.provider_listing_url),
++    provider_connection_status: asString(setup.provider_connection_status),
++    provider_connection_error: asString(setup.provider_connection_error),
++    provider_extranet_request_acknowledged: asNullableBoolean(setup.provider_extranet_request_acknowledged),
++    provider_verification_requested_at: asString(setup.provider_verification_requested_at),
++    provider_approval_verified_at: asString(setup.provider_approval_verified_at),
++    provider_approval_verified_by: asString(setup.provider_approval_verified_by),
++    provider_access_token_stored: asNullableBoolean(setup.provider_access_token_stored),
++    provider_access_token_last_four: asString(setup.provider_access_token_last_four),
++    provider_access_token_stored_at: asString(setup.provider_access_token_stored_at),
++    provider_credential_store_status: asString(setup.provider_credential_store_status),
+     connectivity_provider_requested: asNullableBoolean(setup.connectivity_provider_requested),
+     connectivity_provider_requested_at: asString(setup.connectivity_provider_requested_at),
+     booking_extranet_request_acknowledged: asNullableBoolean(setup.booking_extranet_request_acknowledged),
+@@ -381,6 +407,19 @@ export function createDefaultChannelSetupState(familyId: string, providerKey: Ch
+       hotel_id_available: null,
+       booking_hotel_id: null,
+       booking_property_code: null,
++      provider_listing_id: null,
++      provider_property_code: null,
++      provider_listing_url: null,
++      provider_connection_status: null,
++      provider_connection_error: null,
++      provider_extranet_request_acknowledged: null,
++      provider_verification_requested_at: null,
++      provider_approval_verified_at: null,
++      provider_approval_verified_by: null,
++      provider_access_token_stored: null,
++      provider_access_token_last_four: null,
++      provider_access_token_stored_at: null,
++      provider_credential_store_status: null,
+       connectivity_provider_requested: null,
+       connectivity_provider_requested_at: null,
+       booking_extranet_request_acknowledged: null,
+@@ -443,6 +482,19 @@ export function mergeChannelSetupMetadata(
+       : undefined,
+     booking_hotel_id: hasOwn(patchMetadata, "booking_hotel_id") ? asString(patchMetadata.booking_hotel_id) : undefined,
+     booking_property_code: hasOwn(patchMetadata, "booking_property_code") ? asString(patchMetadata.booking_property_code) : undefined,
++    provider_listing_id: hasOwn(patchMetadata, "provider_listing_id") ? asString(patchMetadata.provider_listing_id) : undefined,
++    provider_property_code: hasOwn(patchMetadata, "provider_property_code") ? asString(patchMetadata.provider_property_code) : undefined,
++    provider_listing_url: hasOwn(patchMetadata, "provider_listing_url") ? asString(patchMetadata.provider_listing_url) : undefined,
++    provider_connection_status: hasOwn(patchMetadata, "provider_connection_status") ? asString(patchMetadata.provider_connection_status) : undefined,
++    provider_connection_error: hasOwn(patchMetadata, "provider_connection_error") ? asString(patchMetadata.provider_connection_error) : undefined,
++    provider_extranet_request_acknowledged: hasOwn(patchMetadata, "provider_extranet_request_acknowledged") ? asBoolean(patchMetadata.provider_extranet_request_acknowledged) : undefined,
++    provider_verification_requested_at: hasOwn(patchMetadata, "provider_verification_requested_at") ? asString(patchMetadata.provider_verification_requested_at) : undefined,
++    provider_approval_verified_at: hasOwn(patchMetadata, "provider_approval_verified_at") ? asString(patchMetadata.provider_approval_verified_at) : undefined,
++    provider_approval_verified_by: hasOwn(patchMetadata, "provider_approval_verified_by") ? asString(patchMetadata.provider_approval_verified_by) : undefined,
++    provider_access_token_stored: hasOwn(patchMetadata, "provider_access_token_stored") ? asBoolean(patchMetadata.provider_access_token_stored) : undefined,
++    provider_access_token_last_four: hasOwn(patchMetadata, "provider_access_token_last_four") ? asString(patchMetadata.provider_access_token_last_four) : undefined,
++    provider_access_token_stored_at: hasOwn(patchMetadata, "provider_access_token_stored_at") ? asString(patchMetadata.provider_access_token_stored_at) : undefined,
++    provider_credential_store_status: hasOwn(patchMetadata, "provider_credential_store_status") ? asString(patchMetadata.provider_credential_store_status) : undefined,
+     connectivity_provider_requested: hasOwn(patchMetadata, "connectivity_provider_requested") ? asBoolean(patchMetadata.connectivity_provider_requested) : undefined,
+     connectivity_provider_requested_at: hasOwn(patchMetadata, "connectivity_provider_requested_at") ? asString(patchMetadata.connectivity_provider_requested_at) : undefined,
+     booking_extranet_request_acknowledged: hasOwn(patchMetadata, "booking_extranet_request_acknowledged") ? asBoolean(patchMetadata.booking_extranet_request_acknowledged) : undefined,
+@@ -501,6 +553,13 @@ function hasSafeSetupProgress(state: ChannelSetupState): boolean {
+       state.metadata.hotel_id_available ||
+       state.metadata.booking_hotel_id ||
+       state.metadata.booking_property_code ||
++      state.metadata.provider_listing_id ||
++      state.metadata.provider_property_code ||
++      state.metadata.provider_listing_url ||
++      state.metadata.provider_connection_status ||
++      state.metadata.provider_extranet_request_acknowledged ||
++      state.metadata.provider_approval_verified_at ||
++      state.metadata.provider_access_token_stored ||
+       state.metadata.connectivity_provider_requested ||
+       state.metadata.booking_extranet_request_acknowledged ||
+       state.metadata.booking_connection_status ||
+@@ -902,7 +961,16 @@ export function buildChannelReadinessModel(
+   const listingPrepRequested =
+     state.metadata.listing_preparation_requested === true || state.setupMode === "prepare_listing";
+   const requirementsAcknowledged = state.metadata.requirements_acknowledged === true || state.metadata.required_items_acknowledged === true;
+-  const hotelIdAvailable = state.metadata.hotel_id_available === true || state.metadata.hotel_id_entered === true;
++  const providerIdentifierAvailable = Boolean(
++    state.metadata.provider_listing_id ||
++      state.metadata.provider_property_code ||
++      state.metadata.provider_listing_url ||
++      state.metadata.provider_connection_status === "verification_requested" ||
++      state.metadata.provider_connection_status === "details_submitted" ||
++      state.metadata.provider_connection_status === "ota_approval_verified" ||
++      state.metadata.provider_extranet_request_acknowledged === true
++  );
++  const hotelIdAvailable = state.metadata.hotel_id_available === true || state.metadata.hotel_id_entered === true || providerIdentifierAvailable;
+   const operatorSetupRequested = state.metadata.operator_setup_requested === true || state.status === "connection_requested";
+   const roomMatchingReviewed = state.metadata.room_matching_reviewed === true;
+   const priceMatchingReviewed = state.metadata.price_matching_reviewed === true;
+diff --git a/lib/host-pro-channel-foundation.ts b/lib/host-pro-channel-foundation.ts
+index e5f83f1a..3a019af6 100644
+--- a/lib/host-pro-channel-foundation.ts
++++ b/lib/host-pro-channel-foundation.ts
+@@ -1,5 +1,7 @@
+ import type { SupabaseClient } from "@supabase/supabase-js";
+ 
++import { redactChannelCredentialMetadata } from "@/lib/channel-credentials";
++
+ type JsonRecord = Record<string, unknown>;
+ 
+ export type ChannelProviderRecord = {
+@@ -199,7 +201,7 @@ export async function loadHostProChannelFoundation(
+       code: asString(row.code) ?? "",
+       name: asString(row.name) ?? "Provider",
+       status: asString(row.status) ?? "available",
+-      metadata: asObject(row.metadata),
++      metadata: redactChannelCredentialMetadata(row.metadata),
+       createdAt: asString(row.created_at),
+     })),
+     properties: (propertiesResult.data ?? []).map((row) => ({
+@@ -211,7 +213,7 @@ export async function loadHostProChannelFoundation(
+       propertyType: asString(row.property_type),
+       syncStatus: asString(row.sync_status) ?? "not_connected",
+       lastSyncedAt: asString(row.last_synced_at),
+-      metadata: asObject(row.metadata),
++      metadata: redactChannelCredentialMetadata(row.metadata),
+       createdAt: asString(row.created_at),
+       updatedAt: asString(row.updated_at),
+     })),

@@ -1,0 +1,558 @@
+diff --git a/components/partners/pro/ChannelSetupWizard.tsx b/components/partners/pro/ChannelSetupWizard.tsx
+index 46465646..f0f863ec 100644
+--- a/components/partners/pro/ChannelSetupWizard.tsx
++++ b/components/partners/pro/ChannelSetupWizard.tsx
+@@ -100,6 +100,9 @@ export default function ChannelSetupWizard({
+   const [isLoading, setIsLoading] = useState(false);
+   const [isSaving, setIsSaving] = useState(false);
+   const [feedback, setFeedback] = useState<string | null>(null);
++  const [bookingHotelIdInput, setBookingHotelIdInput] = useState("");
++  const [bookingPropertyCodeInput, setBookingPropertyCodeInput] = useState("");
++  const [bookingExtranetRequested, setBookingExtranetRequested] = useState(false);
+ 
+   useEffect(() => {
+     let cancelled = false;
+@@ -134,6 +137,16 @@ export default function ChannelSetupWizard({
+     };
+   }, [familyId, providerKey, initialState]);
+ 
++  useEffect(() => {
++    setBookingHotelIdInput(state.metadata.booking_hotel_id ?? "");
++    setBookingPropertyCodeInput(state.metadata.booking_property_code ?? "");
++    setBookingExtranetRequested(state.metadata.booking_extranet_request_acknowledged === true);
++  }, [
++    state.metadata.booking_extranet_request_acknowledged,
++    state.metadata.booking_hotel_id,
++    state.metadata.booking_property_code,
++  ]);
++
+   const currentStepIndex = Math.max(0, STEP_ORDER.indexOf(state.currentStep ?? "listing"));
+   const currentStepLabel = getChannelSetupStepLabel(state.currentStep);
+   const currentStatusLabel = getChannelSetupStatusLabel(state.status);
+@@ -207,6 +220,37 @@ export default function ChannelSetupWizard({
+     });
+   };
+ 
++  const requestBookingVerification = (): void => {
++    const normalizedHotelId = bookingHotelIdInput.trim();
++    const normalizedPropertyCode = bookingPropertyCodeInput.trim();
++
++    if (!normalizedHotelId && !normalizedPropertyCode) {
++      setFeedback("Add a Booking.com Hotel ID or Property Code before requesting verification.");
++      return;
++    }
++
++    if (!bookingExtranetRequested) {
++      setFeedback("Confirm that Channex or Famlo was requested as the connectivity provider in Booking.com extranet first.");
++      return;
++    }
++
++    void saveState({
++      status: "connection_requested",
++      currentStep: "connection",
++      metadataPatch: {
++        booking_hotel_id: normalizedHotelId,
++        booking_property_code: normalizedPropertyCode,
++        booking_extranet_request_acknowledged: true,
++        connectivity_provider_requested: true,
++        connectivity_provider_requested_at: new Date().toISOString(),
++        booking_connection_status: "verification_requested",
++        booking_connection_error: null,
++        hotel_id_available: Boolean(normalizedHotelId || normalizedPropertyCode),
++        operator_setup_requested: true,
++      },
++    });
++  };
++
+   const markRequirementsReady = (): void => {
+     void saveState({
+       status: state.setupMode === "prepare_listing" ? "needs_details" : "setup_started",
+@@ -276,6 +320,15 @@ export default function ChannelSetupWizard({
+         test_sync_review_requested_at: state.metadata.test_sync_review_requested_at,
+         go_live_review_requested: state.metadata.go_live_review_requested,
+         go_live_review_requested_at: state.metadata.go_live_review_requested_at,
++        booking_hotel_id: state.metadata.booking_hotel_id,
++        booking_property_code: state.metadata.booking_property_code,
++        connectivity_provider_requested: state.metadata.connectivity_provider_requested,
++        connectivity_provider_requested_at: state.metadata.connectivity_provider_requested_at,
++        booking_extranet_request_acknowledged: state.metadata.booking_extranet_request_acknowledged,
++        booking_connection_status: state.metadata.booking_connection_status,
++        booking_connection_error: state.metadata.booking_connection_error,
++        operator_verified_booking_connection: state.metadata.operator_verified_booking_connection,
++        operator_verified_booking_connection_at: state.metadata.operator_verified_booking_connection_at,
+         operator_notes: state.metadata.operator_notes,
+       },
+     });
+@@ -438,10 +491,64 @@ export default function ChannelSetupWizard({
+               </div>
+             ))}
+           </div>
++          {providerKey === "booking" ? (
++            <div className={styles.stack} style={{ marginTop: 12 }}>
++              <label>
++                <span className={styles.fieldLabel}>Booking.com Hotel ID</span>
++                <input
++                  className={styles.fieldInput}
++                  value={bookingHotelIdInput}
++                  onChange={(event) => setBookingHotelIdInput(event.target.value)}
++                  placeholder="Example: 1234567"
++                />
++              </label>
++              <label>
++                <span className={styles.fieldLabel}>Booking.com Property Code</span>
++                <input
++                  className={styles.fieldInput}
++                  value={bookingPropertyCodeInput}
++                  onChange={(event) => setBookingPropertyCodeInput(event.target.value)}
++                  placeholder="Optional property code"
++                />
++              </label>
++              <label className={styles.feedCopy} style={{ display: "flex", gap: 10, alignItems: "center" }}>
++                <input
++                  type="checkbox"
++                  checked={bookingExtranetRequested}
++                  onChange={(event) => setBookingExtranetRequested(event.target.checked)}
++                />
++                I have requested Channex or Famlo as the connectivity provider in Booking.com extranet.
++              </label>
++              <div className={styles.feedbackBox}>
++                This step does not activate Booking.com. A Famlo operator must verify the connection in Channex, and no sync will run from here.
++              </div>
++              <div className={styles.inlineActionRow}>
++                <button
++                  type="button"
++                  className={styles.primaryActionButton}
++                  disabled={isSaving}
++                  onClick={requestBookingVerification}
++                >
++                  Request Famlo verification
++                </button>
++              </div>
++              <div className={styles.feedCopy}>
++                Current verification state: {state.metadata.booking_connection_status ?? "Not requested"}
++                {state.metadata.operator_verified_booking_connection_at
++                  ? ` · Verified ${state.metadata.operator_verified_booking_connection_at}`
++                  : ""}
++              </div>
++              {state.metadata.booking_connection_error ? (
++                <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.booking_connection_error}</div>
++              ) : null}
++            </div>
++          ) : null}
+           <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
+-            <button type="button" className={styles.secondaryActionButton} disabled={isSaving} onClick={() => void saveState({ status: "matching_needed", currentStep: "room_matching", metadataPatch: { hotel_id_available: true, operator_setup_requested: true } })}>
+-              Mark connection details collected
+-            </button>
++            {providerKey === "booking" ? null : (
++              <button type="button" className={styles.secondaryActionButton} disabled={isSaving} onClick={() => void saveState({ status: "matching_needed", currentStep: "room_matching", metadataPatch: { hotel_id_available: true, operator_setup_requested: true } })}>
++                Mark connection details collected
++              </button>
++            )}
+           </div>
+           <div className={styles.feedbackBox}>No access tokens are stored in this phase. Setup stays guided and honest.</div>
+         </section>
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index b167494d..57220a85 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -2224,19 +2224,26 @@ export default function FamloProDashboardShell({
+       : bookingSetupState.setupMode === "prepare_listing"
+         ? "Prepare listing"
+         : "Not chosen yet";
++  const bookingConnectionStatus = bookingSetupState.metadata.booking_connection_status;
+   const bookingComChannelStatus = currentChannelAttached
+     ? channelHealthNeedsAttention || !bookingComRoomMatched || !bookingComPriceMatched
+       ? "Needs review"
+       : "Connected"
+-    : bookingSetupState.status === "setup_started" || bookingSetupState.status === "ready_for_test_sync"
+-      ? "Setup in progress"
+-      : bookingSetupState.status === "connection_requested"
+-        ? "Assisted setup requested"
+-        : bookingSetupState.status === "needs_review"
+-          ? "Needs review"
+-          : primaryProperty?.externalPropertyId
++    : bookingConnectionStatus === "verified"
++      ? "Verification complete"
++      : bookingConnectionStatus === "failed"
++        ? "Verification failed"
++        : bookingConnectionStatus === "verification_requested"
++          ? "Verification requested"
++          : bookingSetupState.status === "setup_started" || bookingSetupState.status === "ready_for_test_sync"
+             ? "Setup in progress"
+-            : "Not started";
++            : bookingSetupState.status === "connection_requested"
++              ? "Assisted setup requested"
++              : bookingSetupState.status === "needs_review"
++                ? "Needs review"
++                : primaryProperty?.externalPropertyId
++                  ? "Setup in progress"
++                  : "Not started";
+   const bookingComNextStep = currentChannelAttached
+     ? !bookingComRoomMatched
+       ? "Finish room matching before test activation."
+@@ -2245,15 +2252,21 @@ export default function FamloProDashboardShell({
+         : channelHealthNeedsAttention
+           ? "Review the latest sync issue before activation."
+           : "Run a test sync and keep activation disabled until the operator review is complete."
+-    : bookingSetupState.status === "connection_requested"
+-      ? "Famlo setup help is requested. Continue with safe details once the assisted setup is ready."
+-      : bookingSetupState.setupMode === "existing_listing"
+-        ? "Continue the existing Booking.com setup, then match rooms and prices."
+-        : bookingSetupState.setupMode === "prepare_listing"
+-          ? "Prepare the Booking.com listing first, then continue with setup."
+-          : primaryProperty?.externalPropertyId
+-            ? "Continue the existing Booking.com setup, then match rooms and prices."
+-            : "Confirm the Booking.com listing exists before starting setup.";
++    : bookingConnectionStatus === "verified"
++      ? "Booking.com connection was verified. Continue with room and price matching."
++      : bookingConnectionStatus === "failed"
++        ? bookingSetupState.metadata.booking_connection_error ?? "Fix the Booking.com connection details and request verification again."
++        : bookingConnectionStatus === "verification_requested"
++          ? "Famlo operator verification is pending. Wait for Channex channel confirmation."
++          : bookingSetupState.status === "connection_requested"
++            ? "Famlo setup help is requested. Continue with safe details once the assisted setup is ready."
++            : bookingSetupState.setupMode === "existing_listing"
++              ? "Continue the existing Booking.com setup, then match rooms and prices."
++              : bookingSetupState.setupMode === "prepare_listing"
++                ? "Prepare the Booking.com listing first, then continue with setup."
++                : primaryProperty?.externalPropertyId
++                  ? "Continue the existing Booking.com setup, then match rooms and prices."
++                  : "Confirm the Booking.com listing exists before starting setup.";
+   const channelReadinessModelsByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
+     acc[provider.key] = buildChannelReadinessModel(provider.key, channelSetupStatesByKey[provider.key], {
+       activeRoomsCount,
+@@ -2368,9 +2381,15 @@ export default function FamloProDashboardShell({
+               : "Collect the live Booking.com listing details and prepare the property before setup starts.",
+         connectionLabel: currentChannelAttached
+           ? "Connected property is available in Famlo's loaded readiness view."
+-          : bookingSetupState.status === "connection_requested"
+-            ? "Famlo setup help has been requested for the Booking.com connection."
+-            : "Connect the existing Booking.com listing through the guided Channex-assisted flow.",
++          : bookingSetupState.metadata.booking_connection_status === "verified"
++            ? "Famlo operator verified the Booking.com connection in Channex. Continue with room and price matching."
++            : bookingSetupState.metadata.booking_connection_status === "verification_requested"
++              ? "Booking.com verification was requested. Famlo must confirm the Channex-attached channel before matching can begin."
++              : bookingSetupState.metadata.booking_connection_status === "failed"
++                ? bookingSetupState.metadata.booking_connection_error ?? "Booking.com verification failed. Update the safe connection details and retry."
++                : bookingSetupState.status === "connection_requested"
++                  ? "Famlo setup help has been requested for the Booking.com connection."
++                  : "Connect the existing Booking.com listing through the guided Channex-assisted flow.",
+         roomMatchingLabel: currentChannelAttached
+           ? activeRoomsCount > 0
+             ? `${roomMappingsReadyCount}/${activeRoomsCount} active rooms matched.`
+@@ -5359,6 +5378,19 @@ export default function FamloProDashboardShell({
+                     </article>
+                   </div>
+ 
++                  <div className={styles.listGrid}>
++                    <BookingComVerificationCard
++                      familyId={familyId}
++                      setupState={bookingSetupState}
++                      externalPropertyId={primaryProperty?.externalPropertyId ?? null}
++                      discoveredHotelId={channelFeedHealth?.hotelId ?? null}
++                      activeChannelId={channelFeedHealth?.activeChannelId ?? channelAriHealth?.activeChannelId ?? null}
++                      channelAttached={channelFeedHealth?.channelAttached ?? channelAriHealth?.channelAttached ?? false}
++                      channelActive={channelFeedHealth?.channelActive ?? channelAriHealth?.channelActive ?? false}
++                      attachedCount={channelFeedHealth?.accChannelsCount ?? channelAriHealth?.accChannelsCount ?? 0}
++                    />
++                  </div>
++
+                   <div className={styles.listGrid}>
+                     <article className={styles.listCard}>
+                       <div className={styles.listTitle}>Read-only operator review panel</div>
+@@ -7460,6 +7492,214 @@ function ChannexPropertyCard({
+   );
+ }
+ 
++function BookingComVerificationCard({
++  familyId,
++  setupState,
++  externalPropertyId,
++  discoveredHotelId,
++  activeChannelId,
++  channelAttached,
++  channelActive,
++  attachedCount,
++}: Readonly<{
++  familyId: string;
++  setupState: ChannelSetupState;
++  externalPropertyId: string | null;
++  discoveredHotelId: string | null;
++  activeChannelId: string | null;
++  channelAttached: boolean;
++  channelActive: boolean;
++  attachedCount: number;
++}>): React.JSX.Element {
++  const router = useRouter();
++  const [isChecking, startChecking] = useTransition();
++  const [isMarkingVerified, startMarkingVerified] = useTransition();
++  const [isMarkingFailed, startMarkingFailed] = useTransition();
++  const [failureReason, setFailureReason] = useState(setupState.metadata.booking_connection_error ?? "");
++  const [feedback, setFeedback] = useState<{
++    ok: boolean;
++    status: string;
++    message: string;
++    verification?: {
++      hotelId: string | null;
++      activeChannelId: string | null;
++      channelAttached: boolean;
++      channelActive: boolean;
++      accChannelsCount: number;
++    };
++  } | null>(null);
++
++  const displayedHotelId = feedback?.verification?.hotelId ?? discoveredHotelId ?? "Missing";
++  const displayedActiveChannelId = feedback?.verification?.activeChannelId ?? activeChannelId ?? "Missing";
++  const displayedChannelAttached = feedback?.verification?.channelAttached ?? channelAttached;
++  const displayedChannelActive = feedback?.verification?.channelActive ?? channelActive;
++  const displayedAttachedCount = feedback?.verification?.accChannelsCount ?? attachedCount;
++  const canMarkVerified = displayedChannelAttached && (displayedChannelActive || displayedActiveChannelId !== "Missing");
++
++  const sendVerificationAction = (action: "check" | "mark_verified" | "mark_failed", reason?: string): void => {
++    const runner =
++      action === "check" ? startChecking : action === "mark_verified" ? startMarkingVerified : startMarkingFailed;
++
++    runner(async () => {
++      setFeedback(null);
++
++      try {
++        const response = await fetch("/api/host/pro/channel/channex/booking/verify", {
++          method: "POST",
++          headers: {
++            "Content-Type": "application/json",
++          },
++          body: JSON.stringify({
++            familyId,
++            action,
++            reason,
++          }),
++        });
++
++        const payload = (await response.json()) as {
++          ok?: boolean;
++          status?: string;
++          error?: string;
++          verification?: {
++            hotelId: string | null;
++            activeChannelId: string | null;
++            channelAttached: boolean;
++            channelActive: boolean;
++            accChannelsCount: number;
++          };
++        };
++
++        setFeedback({
++          ok: Boolean(response.ok && payload.ok),
++          status: payload.status ?? "failed",
++          message:
++            typeof payload.error === "string" && payload.error.trim().length > 0
++              ? payload.error
++              : action === "check"
++                ? "Checked the current Booking.com channel state in Channex."
++                : action === "mark_verified"
++                  ? "Marked the Booking.com connection as verified."
++                  : "Marked the Booking.com verification as failed.",
++          verification: payload.verification,
++        });
++        router.refresh();
++      } catch (error) {
++        setFeedback({
++          ok: false,
++          status: "failed",
++          message: error instanceof Error ? error.message : "Unable to complete the Booking.com verification action.",
++        });
++      }
++    });
++  };
++
++  return (
++    <article className={styles.listCard}>
++      <div className={styles.listTitle}>Booking.com operator verification</div>
++      <div className={styles.cardCopy}>
++        Operator-only bridge between the host request and a real Channex-attached Booking.com channel. This does not activate the channel or run sync.
++      </div>
++
++      <div className={styles.placeholderGrid} style={{ marginTop: 12 }}>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Host-entered Hotel ID</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.booking_hotel_id ?? "Missing"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Host-entered Property Code</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.booking_property_code ?? "Missing"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Connectivity provider requested</div>
++          <div className={styles.placeholderCopy}>
++            {setupState.metadata.connectivity_provider_requested ? "Yes" : "No"}
++            {setupState.metadata.connectivity_provider_requested_at ? ` · ${formatDateTime(setupState.metadata.connectivity_provider_requested_at)}` : ""}
++          </div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Current Channex property id</div>
++          <div className={styles.placeholderCopy}>{externalPropertyId ?? "Missing"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Discovered hotelId</div>
++          <div className={styles.placeholderCopy}>{displayedHotelId}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Discovered activeChannelId</div>
++          <div className={styles.placeholderCopy}>{displayedActiveChannelId}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Channel attached</div>
++          <div className={styles.placeholderCopy}>{displayedChannelAttached ? "Yes" : "No"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Channel active</div>
++          <div className={styles.placeholderCopy}>{displayedChannelActive ? "Yes" : "No"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Attached count</div>
++          <div className={styles.placeholderCopy}>{displayedAttachedCount}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Last verification status</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.booking_connection_status ?? "Not checked"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Last error</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.booking_connection_error ?? "None"}</div>
++        </div>
++      </div>
++
++      {feedback ? (
++        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`} style={{ marginTop: 12 }}>
++          {feedback.message}
++        </div>
++      ) : null}
++
++      <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
++        <button
++          type="button"
++          className={styles.secondaryActionButton}
++          disabled={isChecking}
++          onClick={() => sendVerificationAction("check")}
++        >
++          {isChecking ? "Checking..." : "Check Booking.com channel in Channex"}
++        </button>
++        <button
++          type="button"
++          className={styles.primaryActionButton}
++          disabled={isMarkingVerified || !canMarkVerified}
++          onClick={() => sendVerificationAction("mark_verified")}
++        >
++          {isMarkingVerified ? "Saving..." : "Mark Booking.com connection verified"}
++        </button>
++      </div>
++
++      <div className={styles.stack} style={{ marginTop: 12 }}>
++        <label>
++          <span className={styles.fieldLabel}>Verification failure reason</span>
++          <input
++            className={styles.fieldInput}
++            value={failureReason}
++            onChange={(event) => setFailureReason(event.target.value)}
++            placeholder="Example: Channel not attached yet in Channex"
++          />
++        </label>
++        <div className={styles.inlineActionRow}>
++          <button
++            type="button"
++            className={styles.secondaryActionButton}
++            disabled={isMarkingFailed}
++            onClick={() => sendVerificationAction("mark_failed", failureReason)}
++          >
++            {isMarkingFailed ? "Saving..." : "Mark verification failed"}
++          </button>
++        </div>
++      </div>
++    </article>
++  );
++}
++
+ function ChannexBookingListVerifyCard({
+   familyId,
+   propertyCreated,
+diff --git a/lib/channel-setup-state.ts b/lib/channel-setup-state.ts
+index 8c0d2f8a..51ddd382 100644
+--- a/lib/channel-setup-state.ts
++++ b/lib/channel-setup-state.ts
+@@ -31,6 +31,15 @@ export type ChannelSetupMetadata = {
+   listing_preparation_requested: boolean | null;
+   requirements_acknowledged: boolean | null;
+   hotel_id_available: boolean | null;
++  booking_hotel_id: string | null;
++  booking_property_code: string | null;
++  connectivity_provider_requested: boolean | null;
++  connectivity_provider_requested_at: string | null;
++  booking_extranet_request_acknowledged: boolean | null;
++  booking_connection_status: string | null;
++  booking_connection_error: string | null;
++  operator_verified_booking_connection: boolean | null;
++  operator_verified_booking_connection_at: string | null;
+   operator_setup_requested: boolean | null;
+   room_matching_reviewed: boolean | null;
+   price_matching_reviewed: boolean | null;
+@@ -292,6 +301,15 @@ export function readChannelSetupMetadata(value: unknown): ChannelSetupMetadata {
+     listing_preparation_requested: asNullableBoolean(setup.listing_preparation_requested),
+     requirements_acknowledged: asNullableBoolean(setup.requirements_acknowledged) ?? asNullableBoolean(setup.required_items_acknowledged),
+     hotel_id_available: asNullableBoolean(setup.hotel_id_available) ?? asNullableBoolean(setup.hotel_id_entered),
++    booking_hotel_id: asString(setup.booking_hotel_id),
++    booking_property_code: asString(setup.booking_property_code),
++    connectivity_provider_requested: asNullableBoolean(setup.connectivity_provider_requested),
++    connectivity_provider_requested_at: asString(setup.connectivity_provider_requested_at),
++    booking_extranet_request_acknowledged: asNullableBoolean(setup.booking_extranet_request_acknowledged),
++    booking_connection_status: asString(setup.booking_connection_status),
++    booking_connection_error: asString(setup.booking_connection_error),
++    operator_verified_booking_connection: asNullableBoolean(setup.operator_verified_booking_connection),
++    operator_verified_booking_connection_at: asString(setup.operator_verified_booking_connection_at),
+     operator_setup_requested: asNullableBoolean(setup.operator_setup_requested),
+     room_matching_reviewed: asNullableBoolean(setup.room_matching_reviewed),
+     price_matching_reviewed: asNullableBoolean(setup.price_matching_reviewed),
+@@ -343,6 +361,15 @@ export function createDefaultChannelSetupState(familyId: string, providerKey: Ch
+       listing_preparation_requested: null,
+       requirements_acknowledged: null,
+       hotel_id_available: null,
++      booking_hotel_id: null,
++      booking_property_code: null,
++      connectivity_provider_requested: null,
++      connectivity_provider_requested_at: null,
++      booking_extranet_request_acknowledged: null,
++      booking_connection_status: null,
++      booking_connection_error: null,
++      operator_verified_booking_connection: null,
++      operator_verified_booking_connection_at: null,
+       operator_setup_requested: null,
+       room_matching_reviewed: null,
+       price_matching_reviewed: null,
+@@ -386,6 +413,15 @@ export function mergeChannelSetupMetadata(
+     listing_preparation_requested: asBoolean(patchMetadata.listing_preparation_requested),
+     requirements_acknowledged: asBoolean(patchMetadata.requirements_acknowledged ?? patchMetadata.required_items_acknowledged),
+     hotel_id_available: asBoolean(patchMetadata.hotel_id_available ?? patchMetadata.hotel_id_entered),
++    booking_hotel_id: asString(patchMetadata.booking_hotel_id),
++    booking_property_code: asString(patchMetadata.booking_property_code),
++    connectivity_provider_requested: asBoolean(patchMetadata.connectivity_provider_requested),
++    connectivity_provider_requested_at: asString(patchMetadata.connectivity_provider_requested_at),
++    booking_extranet_request_acknowledged: asBoolean(patchMetadata.booking_extranet_request_acknowledged),
++    booking_connection_status: asString(patchMetadata.booking_connection_status),
++    booking_connection_error: asString(patchMetadata.booking_connection_error),
++    operator_verified_booking_connection: asBoolean(patchMetadata.operator_verified_booking_connection),
++    operator_verified_booking_connection_at: asString(patchMetadata.operator_verified_booking_connection_at),
+     operator_setup_requested: asBoolean(patchMetadata.operator_setup_requested),
+     room_matching_reviewed: asBoolean(patchMetadata.room_matching_reviewed),
+     price_matching_reviewed: asBoolean(patchMetadata.price_matching_reviewed),
+@@ -425,6 +461,12 @@ function hasSafeSetupProgress(state: ChannelSetupState): boolean {
+       state.metadata.listing_preparation_requested ||
+       state.metadata.requirements_acknowledged ||
+       state.metadata.hotel_id_available ||
++      state.metadata.booking_hotel_id ||
++      state.metadata.booking_property_code ||
++      state.metadata.connectivity_provider_requested ||
++      state.metadata.booking_extranet_request_acknowledged ||
++      state.metadata.booking_connection_status ||
++      state.metadata.operator_verified_booking_connection ||
+       state.metadata.operator_setup_requested ||
+       state.metadata.room_matching_reviewed ||
+       state.metadata.price_matching_reviewed ||

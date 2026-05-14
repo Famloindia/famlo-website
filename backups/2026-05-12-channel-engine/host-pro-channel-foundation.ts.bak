@@ -1,7 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { redactChannelCredentialMetadata } from "@/lib/channel-credentials";
-
 type JsonRecord = Record<string, unknown>;
 
 export type ChannelProviderRecord = {
@@ -201,7 +199,7 @@ export async function loadHostProChannelFoundation(
       code: asString(row.code) ?? "",
       name: asString(row.name) ?? "Provider",
       status: asString(row.status) ?? "available",
-      metadata: redactChannelCredentialMetadata(row.metadata),
+      metadata: asObject(row.metadata),
       createdAt: asString(row.created_at),
     })),
     properties: (propertiesResult.data ?? []).map((row) => ({
@@ -213,7 +211,7 @@ export async function loadHostProChannelFoundation(
       propertyType: asString(row.property_type),
       syncStatus: asString(row.sync_status) ?? "not_connected",
       lastSyncedAt: asString(row.last_synced_at),
-      metadata: redactChannelCredentialMetadata(row.metadata),
+      metadata: asObject(row.metadata),
       createdAt: asString(row.created_at),
       updatedAt: asString(row.updated_at),
     })),

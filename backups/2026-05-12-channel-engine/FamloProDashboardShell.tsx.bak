@@ -35,28 +35,8 @@ import {
 
 import HostRoomsManager from "@/components/partners/rooms/HostRoomsManager";
 import PropertyContentManager from "@/components/partners/property/PropertyContentManager";
-import ChannelSetupWizard, {
-  type ChannelSetupWizardSummary,
-} from "@/components/partners/pro/ChannelSetupWizard";
 import MessagesTab from "@/components/partners/tabs/MessagesTab";
 import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
-import {
-  CHANNEL_PROVIDER_REGISTRY,
-  getChannelProviderDefinition,
-  type ChannelProviderKey,
-} from "@/lib/channel-providers/provider-registry";
-import {
-  createDefaultChannelSetupState,
-  buildChannelReadinessModel,
-  buildChannelGoLiveReadinessModel,
-  buildChannelTestSyncReadinessModel,
-  getChannelSetupStatusLabel,
-  readChannelSetupState,
-  type ChannelReadinessModel,
-  type ChannelGoLiveReadinessModel,
-  type ChannelTestSyncReadinessModel,
-  type ChannelSetupState,
-} from "@/lib/channel-setup-state";
 import {
   PRO_PROPERTY_MODEL_OPTIONS,
   PRO_PROPERTY_TYPE_OPTIONS,
@@ -463,75 +443,6 @@ type PropertyCenterTabId =
   | "sync-health"
   | "advanced";
 
-type ChannelCardSummary = {
-  key: ChannelProviderKey;
-  status: string;
-  nextStep: string;
-  roomStatus: string;
-  priceStatus: string;
-  calendarStatus: string;
-  testSyncStatus: string;
-  goLiveStatus: string;
-  goLiveNextStep: string;
-  cta: string;
-  setupModeLabel: string;
-  roomSupportLabel: string;
-  priceSupportLabel: string;
-  calendarSupportLabel: string;
-  progressPercent: number;
-  warningLabel: string | null;
-};
-
-type ChannelMatchingRoomRow = {
-  famloRoomName: string;
-  famloRoomType: string;
-  isActive: boolean;
-  basePriceLabel: string;
-  photoReadinessLabel: string;
-  providerRoomLabel: string;
-  statusLabel: "matched" | "needs match" | "provider room unavailable" | "needs channel connection";
-  note: string | null;
-};
-
-type ChannelMatchingRateRow = {
-  famloRoomName: string;
-  famloRoomType: string;
-  isActive: boolean;
-  basePriceLabel: string;
-  providerRateLabel: string;
-  statusLabel: "matched" | "needs match" | "provider rate unavailable" | "needs channel connection";
-  note: string | null;
-};
-
-type ChannelMatchingSnapshot = {
-  providerDataAvailable: boolean;
-  providerDataLabel: string;
-  roomRows: ChannelMatchingRoomRow[];
-  rateRows: ChannelMatchingRateRow[];
-  reviewLabel: string;
-};
-
-type ChannelTestSyncSnapshot = ChannelTestSyncReadinessModel;
-type ChannelGoLiveSnapshot = ChannelGoLiveReadinessModel;
-
-type ChannelOperatorReviewRow = {
-  providerKey: ChannelProviderKey;
-  providerName: string;
-  propertyName: string;
-  providerReference: string;
-  setupStatus: string;
-  goLiveStatus: string;
-  reviewRequested: string;
-  requestedAt: string;
-  testSyncRequested: string;
-  testSyncRequestedAt: string;
-  roomMatchingStatus: string;
-  priceMatchingStatus: string;
-  testSyncStatus: string;
-  blockers: string[];
-  nextAction: string;
-};
-
 const TOP_LEVEL_NAV_ITEMS: NavItem[] = [
   { id: "dashboard", title: "Dashboard", hint: "Action center", icon: Activity },
   { id: "host-profile", title: "Host Profile", hint: "Shared host identity", icon: UserRound },
@@ -679,6 +590,16 @@ function formatPropertySwitcherStatusLabel(value: string | null): string {
   return `Famlo Pro ${value}`;
 }
 
+const CHANNEL_CARDS = [
+  "Airbnb",
+  "Booking.com",
+  "Agoda",
+  "Expedia",
+  "MakeMyTrip / Goibibo",
+  "VRBO",
+  "Google Hotel",
+];
+
 const BOOKING_FILTERS: BookingWorkspaceFilter[] = [
   "All",
   "Famlo Direct",
@@ -715,9 +636,9 @@ const SYNC_LOG_GROUPS: SyncLogGroup[] = [
   { key: "property", title: "Property creation", actions: ["create_property", "connection_check", "verify_channex_structure"] },
   { key: "room", title: "Room creation", actions: ["create_room_type"] },
   { key: "rate", title: "Rate creation", actions: ["create_rate_plan"] },
-  { key: "ari", title: "ARI push", actions: ["push_ari_30_day", "push_ari_365_day", "push_ari_limited_test"] },
+  { key: "ari", title: "ARI push", actions: ["push_ari_30_day", "push_ari_365_day"] },
   { key: "booking-feed", title: "Booking feed / list", actions: ["fetch_booking_feed", "poll_booking_feed_cron", "store_booking_feed_preview", "verify_booking_list", "verify_booking_revision_visibility"] },
-  { key: "booking-import", title: "Booking import", actions: ["import_booking_preview", "apply_booking_modification", "mark_assisted_go_live_ready"] },
+  { key: "booking-import", title: "Booking import", actions: ["import_booking_preview", "apply_booking_modification"] },
   { key: "ack", title: "Acknowledgement", actions: ["acknowledge_booking_revision"] },
 ];
 
@@ -1540,20 +1461,14 @@ export default function FamloProDashboardShell({
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
   const [selectedBooking, setSelectedBooking] = useState<ProBookingSummary | null>(null);
   const [activeMessageConversationId, setActiveMessageConversationId] = useState<string | null>(null);
-  const [activeChannelSetup, setActiveChannelSetup] = useState<ChannelProviderKey | null>(null);
-  const [selectedChannelToAdd, setSelectedChannelToAdd] = useState<ChannelProviderKey>("booking");
-  const [channelSetupOverrides, setChannelSetupOverrides] = useState<Partial<Record<ChannelProviderKey, ChannelSetupState>>>({});
+  const [activeChannelSetup, setActiveChannelSetup] = useState<"booking" | "mmt" | null>(null);
   const [timeAnchor] = useState(() => Date.now());
-  useEffect(() => {
-    setChannelSetupOverrides({});
-  }, [familyId]);
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
   const activePropertyTabLinks = PROPERTY_TAB_SECTION_LINKS[activePropertyTab];
   const isPropertiesHomeView = activeSection === "properties-home" && !roomRouteState;
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
-  const showChannelOperatorDiagnostics = false;
   const simplePropertiesHref = `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=properties-home`;
   const hostWorkspacePropertyCount = propertyOptions.length;
   const hostProfilePhotoUrl = hostProfile.photoUrl;
@@ -1657,6 +1572,7 @@ export default function FamloProDashboardShell({
       .filter((plan) => Boolean(plan.stayUnitId))
       .map((plan) => [plan.stayUnitId as string, plan])
   );
+  const providerFoundationReady = channelFoundation.providers.length > 0;
   const connectedPropertyCount = channelFoundation.properties.filter(
     (property) => property.syncStatus === "connected"
   ).length;
@@ -1829,6 +1745,15 @@ export default function FamloProDashboardShell({
         (channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 ||
         Boolean(channelFeedHealth?.lastError))
   );
+  const channelHealthSummaryBadges = [
+    `Attached: ${channelFeedHealth?.channelAttached ? "Yes" : "No"}`,
+    `Active: ${channelFeedHealth?.channelActive ? "Yes" : "No"}`,
+    `Last poll: ${formatDateTime(channelFeedHealth?.lastPollAt ?? null)}`,
+    `Last success: ${formatDateTime(channelFeedHealth?.lastSuccessfulPollAt ?? null)}`,
+    `Unacked revisions: ${channelFeedHealth?.unackedRevisionsCount ?? 0}`,
+    `Failed imports: ${channelFeedHealth?.failedImportCount ?? 0}`,
+    `Auto-applied: ${channelFeedHealth?.autoAppliedCount ?? 0}`,
+  ];
   const firstMappedRoom = roomMappingRows.find((row) => Boolean(row.mapping?.externalRoomTypeId)) ?? null;
   const firstMappedRatePlan = rateMappingRows.find((row) => Boolean(row.ratePlan?.externalRatePlanId)) ?? null;
   const roomMappingsReadyCount = roomMappingRows.filter((row) => Boolean(row.mapping?.externalRoomTypeId)).length;
@@ -1874,15 +1799,94 @@ export default function FamloProDashboardShell({
   }).length;
   const lastAri30SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_30_day") ?? null;
   const lastAri365SyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_365_day") ?? null;
-  const lastLimitedAriSyncLog = channelFoundation.syncLogs.find((log) => log.action === "push_ari_limited_test") ?? null;
   const lastAriSyncLog = lastAri365SyncLog ?? lastAri30SyncLog;
   const ariHealth = computeAriHealthSnapshot(channelFoundation.syncLogs, timeAnchor, channelAriHealth);
   const ariSyncHealthy = ariHealth.statusLabel === "Synced";
+  const cancellationFlowAvailable = (channelFeedHealth?.autoCancelledCount ?? 0) > 0;
+  const modificationReviewAvailable = (channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 || (channelFeedHealth?.lastAutoApplyState === "waiting_for_manual_review");
+  const connectedChannelCards = channelFoundation.providers.length > 0
+    ? channelFoundation.providers.map((provider) => {
+        const providerProperty = channelFoundation.properties.find((property) => property.providerCode === provider.code) ?? null;
+        const isConnected = providerProperty?.syncStatus === "connected" || Boolean(providerProperty?.externalPropertyId);
+        const providerCodeMatches = (value: string | null | undefined) => value === provider.code;
+        const mappedRoomsCount = channelFoundation.roomMappings.filter((mapping) => providerCodeMatches(mapping.providerCode) && mapping.externalRoomTypeId).length;
+        const mappedRatesCount = channelFoundation.ratePlans.filter((plan) => providerCodeMatches(plan.providerCode) && plan.externalRatePlanId).length;
+        const recommendedAction =
+          !isConnected
+            ? "Needs setup"
+            : mappedRoomsCount < activeRoomsCount
+              ? "Finish room mapping"
+              : mappedRatesCount < activeRoomsCount
+                ? "Finish rate mapping"
+                : channelHealthNeedsAttention
+                  ? "Famlo team may need to review"
+                  : "Ready";
+
+        return {
+          key: provider.code,
+          name: provider.name,
+          statusLabel: isConnected ? "Connected" : "Not connected",
+          mappedRoomsCount,
+          mappedRatesCount,
+          lastFeedSuccess: formatDateTime(channelFeedHealth?.lastSuccessfulPollAt ?? null),
+          ariStatus: ariHealth.statusLabel,
+          recommendedAction,
+        };
+      })
+    : [];
+  const channelReadinessChecklist = [
+    {
+      label: "Property connected to channel",
+      ready: channelAriHealth
+        ? channelAriHealth.channelAttached && channelAriHealth.channelActive
+        : (channelFeedHealth?.channelAttached ?? false) && (channelFeedHealth?.channelActive ?? false),
+      value:
+        channelAriHealth
+          ? channelAriHealth.channelAttached && channelAriHealth.channelActive
+            ? "Connected"
+            : "Not connected"
+          : (channelFeedHealth?.channelAttached ?? false) && (channelFeedHealth?.channelActive ?? false)
+            ? "Connected"
+            : "Not connected",
+    },
+    {
+      label: "At least one active room exists",
+      ready: activeRoomsCount > 0,
+      value: activeRoomsCount > 0 ? `${activeRoomsCount} active` : "No active rooms",
+    },
+    {
+      label: "Room mapping ready",
+      ready: activeRoomsCount > 0 && roomMappingsReadyCount >= activeRoomsCount,
+      value: `${roomMappingsReadyCount}/${activeRoomsCount || 0} mapped`,
+    },
+    {
+      label: "Rate mapping ready",
+      ready: activeRoomsCount > 0 && rateMappingsReadyCount >= activeRoomsCount,
+      value: `${rateMappingsReadyCount}/${activeRoomsCount || 0} mapped`,
+    },
+    {
+      label: "ARI sync checked",
+      ready: Boolean(channelAriHealth?.lastAriSyncAt || ariHealth.lastAriSyncAt),
+      value: ariSyncHealthy ? "Healthy" : ariHealth.statusLabel,
+    },
+    {
+      label: "Booking feed checked",
+      ready: Boolean(channelFeedHealth?.lastPollAt),
+      value: bookingFeedHealthy ? "Healthy" : (channelFeedHealth?.lastPollAt ? "Action needed" : "Not checked"),
+    },
+    {
+      label: "Cancellation flow proof",
+      ready: cancellationFlowAvailable,
+      value: cancellationFlowAvailable ? "Available" : "Not proven here yet",
+    },
+    {
+      label: "Modification review available",
+      ready: modificationReviewAvailable,
+      value: modificationReviewAvailable ? "Available" : "Not visible yet",
+    },
+  ];
+  channelHealthSummaryBadges.push(`ARI: ${ariHealth.statusLabel}`);
   const lastBookingFeedLog = channelFoundation.syncLogs.find((log) => log.action === "fetch_booking_feed") ?? null;
-  const lastCreatePropertyLog = channelFoundation.syncLogs.find((log) => log.action === "create_property") ?? null;
-  const lastCreateRoomTypeLog = channelFoundation.syncLogs.find((log) => log.action === "create_room_type") ?? null;
-  const lastCreateRatePlanLog = channelFoundation.syncLogs.find((log) => log.action === "create_rate_plan") ?? null;
-  const lastAssistedGoLiveLog = channelFoundation.syncLogs.find((log) => log.action === "mark_assisted_go_live_ready") ?? null;
   const groupedSyncLogs = SYNC_LOG_GROUPS.map((group) => ({
     ...group,
     logs: channelFoundation.syncLogs.filter((log) => group.actions.includes(log.action)),
@@ -2178,12 +2182,6 @@ export default function FamloProDashboardShell({
   const activeRooms = rooms.filter((room) => room.isActive);
   const allActiveRoomsMapped = activeRooms.length > 0 && activeRooms.every((room) => Boolean(roomMappingsByRoomId.get(room.id)?.externalRoomTypeId));
   const allActiveRoomsHaveRatePlans = activeRooms.length > 0 && activeRooms.every((room) => Boolean(ratePlansByRoomId.get(room.id)?.externalRatePlanId));
-  const missingRoomMappingNames = activeRooms
-    .filter((room) => !roomMappingsByRoomId.get(room.id)?.externalRoomTypeId)
-    .map((room) => room.name);
-  const missingRatePlanNames = activeRooms
-    .filter((room) => !ratePlansByRoomId.get(room.id)?.externalRatePlanId)
-    .map((room) => room.name);
   const bookingImportTested = channelFoundation.bookingRevisions.some((revision) =>
     Boolean(revision.linkedBookingId) ||
     revision.importStatus === "imported" ||
@@ -2211,471 +2209,84 @@ export default function FamloProDashboardShell({
     channelAriHealth?.activeChannelTitle ??
     channelFeedHealth?.activeChannelTitle ??
     currentPropertyLabel;
-  const bookingComRoomMatched = activeRoomsCount > 0 && roomMappingsReadyCount >= activeRoomsCount;
-  const bookingComPriceMatched = activeRoomsCount > 0 && rateMappingsReadyCount >= activeRoomsCount;
-  const bookingComReadyForActivation =
-    currentChannelAttached &&
-    bookingComRoomMatched &&
-    bookingComPriceMatched &&
-    !channelHealthNeedsAttention &&
-    bookingFeedHealthy &&
-    ariSyncHealthy;
-  const baseChannelSetupStatesByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
-    const matchingProperty = channelFoundation.properties.find((property) => property.providerCode === provider.key) ?? null;
-    acc[provider.key] = matchingProperty
-      ? readChannelSetupState(matchingProperty)
-      : createDefaultChannelSetupState(familyId, provider.key);
-    return acc;
-  }, {} as Record<ChannelProviderKey, ChannelSetupState>);
-  const channelSetupStatesByKey = {
-    ...baseChannelSetupStatesByKey,
-    ...channelSetupOverrides,
-  };
-  const bookingSetupState = channelSetupStatesByKey.booking;
-  const bookingSetupModeLabel =
-    bookingSetupState.setupMode === "existing_listing"
-      ? "Existing listing"
-      : bookingSetupState.setupMode === "prepare_listing"
-        ? "Prepare listing"
-        : "Not chosen yet";
-  const bookingConnectionStatus = bookingSetupState.metadata.booking_connection_status;
   const bookingComChannelStatus = currentChannelAttached
-    ? channelHealthNeedsAttention || !bookingComRoomMatched || !bookingComPriceMatched
-      ? "Needs review"
-      : "Connected"
-    : bookingConnectionStatus === "channel_visible_in_channex"
-      ? "Channel detected"
-    : bookingConnectionStatus === "verified"
-      ? "Verification complete"
-      : bookingConnectionStatus === "failed"
-        ? "Verification failed"
-        : bookingConnectionStatus === "verification_requested"
-          ? "Verification requested"
-          : bookingSetupState.status === "setup_started" || bookingSetupState.status === "ready_for_test_sync"
-            ? "Setup in progress"
-            : bookingSetupState.status === "connection_requested"
-              ? "Assisted setup requested"
-              : bookingSetupState.status === "needs_review"
-                ? "Needs review"
-                : primaryProperty?.externalPropertyId
-                  ? "Setup in progress"
-                  : "Not started";
+    ? "Connected"
+    : primaryProperty?.externalPropertyId
+      ? "Needs setup"
+      : "Not connected";
   const bookingComNextStep = currentChannelAttached
-    ? !bookingComRoomMatched
-      ? "Finish room matching before test activation."
-      : !bookingComPriceMatched
-        ? "Finish price matching before test activation."
-        : channelHealthNeedsAttention
-          ? "Review the latest sync issue before activation."
-          : "Run a test sync and keep activation disabled until the operator review is complete."
-    : bookingConnectionStatus === "verified"
-      ? "Booking.com connection was verified. Continue with room and price matching."
-      : bookingConnectionStatus === "channel_visible_in_channex"
-        ? "Booking.com channel is visible in Channex. Continue with room and price matching, then run operator verification."
-      : bookingConnectionStatus === "failed"
-        ? bookingSetupState.metadata.booking_connection_error ?? "Fix the Booking.com connection details and request verification again."
-        : bookingConnectionStatus === "verification_requested"
-          ? "Famlo operator verification is pending. Wait for Channex channel confirmation."
-          : bookingSetupState.status === "connection_requested"
-            ? "Famlo setup help is requested. Continue with safe details once the assisted setup is ready."
-            : bookingSetupState.setupMode === "existing_listing"
-              ? "Continue the existing Booking.com setup, then match rooms and prices."
-              : bookingSetupState.setupMode === "prepare_listing"
-                ? "Prepare the Booking.com listing first, then continue with setup."
-                : primaryProperty?.externalPropertyId
-                  ? "Continue the existing Booking.com setup, then match rooms and prices."
-                  : "Confirm the Booking.com listing exists before starting setup.";
-  const providerHasRealConnection = (providerKey: ChannelProviderKey): boolean => {
-    if (providerKey === "booking") {
-      return currentChannelAttached || bookingSetupState.metadata.provider_channel_attached === true;
-    }
-    const state = channelSetupStatesByKey[providerKey];
-    return state?.metadata.provider_channel_attached === true;
-  };
-  const channelReadinessModelsByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
-    acc[provider.key] = buildChannelReadinessModel(provider.key, channelSetupStatesByKey[provider.key], {
-      activeRoomsCount,
-      roomMappingsReadyCount,
-      rateMappingsReadyCount,
-      hasRealConnection: providerHasRealConnection(provider.key),
-      channelHealthNeedsAttention,
-      bookingReadyForActivation: provider.key === "booking" ? bookingComReadyForActivation : false,
-    });
-    return acc;
-  }, {} as Record<ChannelProviderKey, ChannelReadinessModel>);
-  const channelTestSyncReadinessByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
-    acc[provider.key] = buildChannelTestSyncReadinessModel(provider.key, channelSetupStatesByKey[provider.key], {
-      activeRoomsCount,
-      roomMappingsReadyCount,
-      rateMappingsReadyCount,
-      hasRealConnection: providerHasRealConnection(provider.key),
-      channelHealthNeedsAttention,
-      bookingReadyForActivation: provider.key === "booking" ? bookingComReadyForActivation : false,
-      bookingFeedHealthy,
-      ariSyncHealthy,
-    });
-    return acc;
-  }, {} as Record<ChannelProviderKey, ChannelTestSyncSnapshot>);
-  const channelGoLiveReadinessByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
-    acc[provider.key] = buildChannelGoLiveReadinessModel(provider.key, channelSetupStatesByKey[provider.key], {
-      activeRoomsCount,
-      roomMappingsReadyCount,
-      rateMappingsReadyCount,
-      hasRealConnection: providerHasRealConnection(provider.key),
-      channelHealthNeedsAttention,
-      bookingReadyForActivation: provider.key === "booking" ? bookingComReadyForActivation : false,
-      bookingFeedHealthy,
-      ariSyncHealthy,
-    });
-    return acc;
-  }, {} as Record<ChannelProviderKey, ChannelGoLiveSnapshot>);
-  const channelOperatorReviewRows: ChannelOperatorReviewRow[] = CHANNEL_PROVIDER_REGISTRY.map((provider) => {
-    const setupState = channelSetupStatesByKey[provider.key];
-    const readinessModel = channelReadinessModelsByKey[provider.key];
-    const testSyncModel = channelTestSyncReadinessByKey[provider.key];
-    const goLiveModel = channelGoLiveReadinessByKey[provider.key];
-    const reviewRequested = setupState.metadata.go_live_review_requested === true || setupState.status === "review_requested";
-    const testSyncRequested = setupState.metadata.test_sync_review_requested === true || setupState.status === "ready_for_test_sync" || setupState.status === "needs_review";
-    const requestedAt = setupState.metadata.go_live_review_requested_at ?? setupState.metadata.requested_at ?? setupState.updatedAt ?? setupState.metadata.updated_at ?? null;
-    const testSyncRequestedAt = setupState.metadata.test_sync_review_requested_at ?? setupState.metadata.requested_at ?? setupState.updatedAt ?? setupState.metadata.updated_at ?? null;
-    const blockerLabels = [
-      goLiveModel.nextRequiredAction,
-      testSyncModel.nextRequiredAction,
-      readinessModel.warningLabel,
-    ].filter((item): item is string => Boolean(item));
-
-    return {
-      providerKey: provider.key,
-      providerName: provider.displayName,
-      propertyName: currentPropertyLabel,
-      providerReference: [
-        setupState.metadata.booking_hotel_id ? `Hotel ID ${setupState.metadata.booking_hotel_id}` : null,
-        setupState.metadata.booking_property_code ? `Property code ${setupState.metadata.booking_property_code}` : null,
-        setupState.metadata.provider_listing_id ? `Listing ID ${setupState.metadata.provider_listing_id}` : null,
-        setupState.metadata.provider_property_code ? `Provider code ${setupState.metadata.provider_property_code}` : null,
-        setupState.metadata.provider_listing_url ? "Listing URL saved" : null,
-      ].filter(Boolean).join(" · ") || "No safe provider details saved",
-      setupStatus: getChannelSetupStatusLabel(setupState.status),
-      goLiveStatus: goLiveModel.statusLabel,
-      reviewRequested: reviewRequested ? "Yes" : "No",
-      requestedAt: requestedAt ? formatDateTime(requestedAt) : "Not requested",
-      testSyncRequested: testSyncRequested ? "Yes" : "No",
-      testSyncRequestedAt: testSyncRequestedAt ? formatDateTime(testSyncRequestedAt) : "Not requested",
-      roomMatchingStatus:
-        readinessModel.items[4]?.status === "ready"
-          ? "Ready"
-          : readinessModel.items[4]?.status === "blocked"
-            ? "Blocked"
-            : readinessModel.items[4]?.status === "in_progress"
-              ? "In progress"
-              : readinessModel.items[4]?.status === "needed"
-                ? "Needed"
-                : "Not available",
-      priceMatchingStatus:
-        readinessModel.items[5]?.status === "ready"
-          ? "Ready"
-          : readinessModel.items[5]?.status === "blocked"
-            ? "Blocked"
-            : readinessModel.items[5]?.status === "in_progress"
-              ? "In progress"
-              : readinessModel.items[5]?.status === "needed"
-                ? "Needed"
-                : "Not available",
-      testSyncStatus:
-        testSyncModel.statusLabel,
-      blockers: blockerLabels.length > 0 ? blockerLabels : ["No blockers recorded"],
-      nextAction: goLiveModel.nextRequiredAction,
-    };
-  });
-  const channelSetupSummariesByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
-    const setupState = channelSetupStatesByKey[provider.key];
-    const readinessModel = channelReadinessModelsByKey[provider.key];
-    const testSyncModel = channelTestSyncReadinessByKey[provider.key];
-    const goLiveModel = channelGoLiveReadinessByKey[provider.key];
-
-    if (provider.key === "booking") {
-      acc.booking = {
-        statusLabel: bookingComChannelStatus,
-        nextStep: bookingComNextStep,
-        listedOnOtaLabel: bookingSetupState.setupMode === "existing_listing"
-          ? "Yes. The property is already listed on Booking.com."
-          : bookingSetupState.setupMode === "prepare_listing"
-            ? "No. Famlo will prepare the Booking.com listing flow first."
-            : currentChannelAttached
-              ? "Yes. The current Booking.com staging property is already loaded."
-              : "Not yet. Confirm the Booking.com listing exists before connection.",
-        requirementsLabel: currentChannelAttached
-          ? "The live property data is already loaded, so the remaining work is readiness and review."
-          : bookingSetupState.metadata.required_items_acknowledged
-            ? "The safe Booking.com requirements were acknowledged and the setup can continue."
-            : bookingSetupState.setupMode === "existing_listing"
-              ? "The listing exists, but it still needs guided connection details and readiness checks."
-              : "Collect the live Booking.com listing details and prepare the property before setup starts.",
-        connectionLabel: currentChannelAttached
-          ? "Connected property is available in Famlo's loaded readiness view."
-          : bookingSetupState.metadata.booking_connection_status === "verified"
-            ? "Famlo operator verified the Booking.com connection in Channex. Continue with room and price matching."
-            : bookingSetupState.metadata.booking_connection_status === "verification_requested"
-              ? "Booking.com verification was requested. Famlo must confirm the Channex-attached channel before matching can begin."
-              : bookingSetupState.metadata.booking_connection_status === "failed"
-                ? bookingSetupState.metadata.booking_connection_error ?? "Booking.com verification failed. Update the safe connection details and retry."
-                : bookingSetupState.status === "connection_requested"
-                  ? "Famlo setup help has been requested for the Booking.com connection."
-                  : "Connect the existing Booking.com listing through the guided Channex-assisted flow.",
-        roomMatchingLabel: currentChannelAttached
-          ? activeRoomsCount > 0
-            ? `${roomMappingsReadyCount}/${activeRoomsCount} active rooms matched.`
-            : "Add at least one active room before matching can begin."
-          : bookingSetupState.status === "matching_needed"
-            ? "Room matching has been saved and still needs completion."
-            : "Add at least one active room before matching can begin.",
-        priceMatchingLabel: currentChannelAttached
-          ? activeRoomsCount > 0
-            ? `${rateMappingsReadyCount}/${activeRoomsCount} active rooms matched for pricing.`
-            : "Add pricing before price matching can begin."
-          : bookingSetupState.status === "matching_needed"
-            ? "Price matching has been saved and still needs completion."
-            : "Add pricing before price matching can begin.",
-        syncReadinessLabel: testSyncModel.statusLabel,
-        testSyncLabel: testSyncModel.statusLabel,
-        activationLabel: goLiveModel.statusLabel,
-        activationReady: goLiveModel.status === "ready_for_review" || goLiveModel.status === "review_requested" || goLiveModel.status === "live",
-        activationBlockedReason: goLiveModel.nextRequiredAction,
-        readinessLines: readinessModel.items.map((item) => `${item.label}: ${item.status === "ready" ? "Done" : item.status === "blocked" ? "Blocked" : item.status === "in_progress" ? "In progress" : item.status === "not_available" ? "Not available" : item.status === "needed" ? "Needed" : "Not started"}`),
-      };
-      return acc;
-    }
-
-    const statusLabel = getChannelSetupStatusLabel(setupState.status);
-    const setupModeLabel =
-      setupState.setupMode === "existing_listing"
-        ? "Existing listing"
-        : setupState.setupMode === "prepare_listing"
-          ? "Prepare listing"
-          : provider.setupMode === "self-serve"
-            ? "Self-serve"
-            : "Assisted setup";
-
-    acc[provider.key] = {
-      statusLabel,
-      nextStep:
-        setupState.status === "connection_requested"
-          ? "Famlo setup help has been requested. Continue with safe details once assisted setup is ready."
-          : setupState.status === "needs_details"
-            ? "Collect the remaining listing details before room and price matching can begin."
-            : setupState.status === "matching_needed"
-              ? "Match rooms and prices once the provider details are ready."
-              : setupState.status === "ready_for_test_sync"
-                ? "Run a readiness check before any activation attempt."
-                : setupState.status === "needs_review"
-                  ? "Review the open issues before proceeding."
-                  : setupState.setupMode === "existing_listing"
-                    ? "Continue setup from the existing listing details."
-            : setupState.setupMode === "prepare_listing"
-              ? "Prepare the listing before starting provider setup."
-              : provider.setupMode === "self-serve"
-                        ? "Authorize the provider and confirm the listing before room matching."
-                        : "Prepare the provider details before Famlo can continue setup.",
-      listedOnOtaLabel:
-        readinessModel.items[0]?.explanation ?? "Confirm whether the listing already exists before setup begins.",
-      requirementsLabel:
-        readinessModel.items[1]?.explanation ?? "The provider still needs the safe requirements below before activation can proceed.",
-      connectionLabel:
-        readinessModel.items[2]?.explanation ?? provider.connectionMode,
-      roomMatchingLabel:
-        readinessModel.items[4]?.explanation ?? "Room matching is supported after setup.",
-      priceMatchingLabel:
-        readinessModel.items[5]?.explanation ?? "Price matching is supported after setup.",
-      syncReadinessLabel:
-        testSyncModel.statusLabel,
-      testSyncLabel: testSyncModel.statusLabel,
-      activationLabel: goLiveModel.statusLabel,
-      activationReady: goLiveModel.status === "ready_for_review" || goLiveModel.status === "review_requested" || goLiveModel.status === "live",
-      activationBlockedReason: goLiveModel.nextRequiredAction,
-      readinessLines: readinessModel.items.map((item) => `${item.label}: ${item.status}`),
-    };
-
-    return acc;
-  }, {} as Record<ChannelProviderKey, ChannelSetupWizardSummary>);
-  const channelProviderCards: ChannelCardSummary[] = CHANNEL_PROVIDER_REGISTRY.map((provider) => {
-    const summary = channelSetupSummariesByKey[provider.key];
-    const setupState = channelSetupStatesByKey[provider.key];
-    const readinessModel = channelReadinessModelsByKey[provider.key];
-    const testSyncModel = channelTestSyncReadinessByKey[provider.key];
-    const goLiveModel = channelGoLiveReadinessByKey[provider.key];
-    const isInProgress = setupState.status !== "not_started";
-    const testSyncStatusLabel =
-      testSyncModel.status === "ready"
-        ? "Ready"
-        : testSyncModel.status === "assisted_only"
-          ? "Assisted"
-          : testSyncModel.status === "blocked"
-            ? "Blocked"
-            : testSyncModel.status === "unavailable"
-              ? "Unavailable"
-              : "Not ready";
-    const goLiveStatusLabel =
-      goLiveModel.status === "ready_for_review"
-        ? "Ready for review"
-        : goLiveModel.status === "review_requested"
-          ? "Review requested"
-          : goLiveModel.status === "blocked"
-            ? "Blocked"
-            : goLiveModel.status === "assisted_only"
-              ? "Assisted"
-              : goLiveModel.status === "live"
-                ? "Live"
-                : "Not ready";
-    const providerStatusLabel = readinessModel.setupRowExists && !readinessModel.actuallyConnected
-      ? setupState.status === "not_started"
-        ? "Setup started"
-        : summary.statusLabel
-      : summary.statusLabel;
-
-    return {
-      key: provider.key,
-      status: providerStatusLabel,
-      nextStep: readinessModel.nextRequiredAction,
-      roomStatus:
-        provider.key === "booking"
-          ? summary.roomMatchingLabel
-          : setupState.status === "matching_needed"
-            ? "Matching needed"
-            : provider.supportsRoomMatching
-              ? isInProgress
-                ? "Setup started"
-                : "Not started"
-              : "Not supported",
-      priceStatus:
-        provider.key === "booking"
-          ? summary.priceMatchingLabel
-          : setupState.status === "matching_needed"
-            ? "Matching needed"
-            : provider.supportsPriceMatching
-              ? isInProgress
-                ? "Setup started"
-                : "Not started"
-              : "Not supported",
-      calendarStatus:
-        provider.key === "booking"
-          ? summary.syncReadinessLabel
-          : setupState.status === "ready_for_test_sync"
-            ? "Ready for test sync"
-            : provider.supportsCalendarRateSync
-              ? isInProgress
-                ? "Setup started"
-                : "Not started"
-              : "Not supported",
-      testSyncStatus: testSyncStatusLabel,
-      goLiveStatus: goLiveStatusLabel,
-      goLiveNextStep: goLiveModel.nextRequiredAction,
-      cta:
-        provider.key === "booking"
-          ? currentChannelAttached || Boolean(primaryProperty?.externalPropertyId) || roomMappingsReadyCount > 0 || rateMappingsReadyCount > 0 || isInProgress
-            ? "Continue connection"
-            : "Connect"
-          : isInProgress
-            ? "Continue connection"
-            : "Connect",
-      setupModeLabel:
-        setupState.setupMode === "existing_listing"
-          ? "Existing listing"
-          : setupState.setupMode === "prepare_listing"
-            ? "Prepare listing"
-            : provider.setupMode === "self-serve"
-              ? "Self-serve"
-              : "Assisted setup",
-      roomSupportLabel: provider.supportsRoomMatching ? "Room matching: Supported" : "Room matching: Not available",
-      priceSupportLabel: provider.supportsPriceMatching ? "Price matching: Supported" : "Price matching: Not available",
-      calendarSupportLabel: provider.supportsCalendarRateSync ? "Calendar / rate sync: Supported" : "Calendar / rate sync: Not available",
-      progressPercent: readinessModel.progressPercent,
-      warningLabel: readinessModel.warningLabel,
-    };
-  });
-  const channelMatchingSnapshotsByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
-    const setupState = channelSetupStatesByKey[provider.key];
-    const hasRealProviderData = provider.key === "booking" ? currentChannelAttached : false;
-    const providerDataAvailable = hasRealProviderData && provider.key === "booking";
-    const providerDataLabel = provider.key === "booking"
-      ? hasRealProviderData
-        ? "Real Booking.com / Channex room and rate data is loaded."
-        : "Booking.com provider data is not connected yet."
-      : "Provider data unavailable. Assisted setup required.";
-    const roomRows: ChannelMatchingRoomRow[] = rooms.map((room) => {
-      const mapping = roomMappingsByRoomId.get(room.id) ?? null;
-      const hasPhotoReadiness = room.photosCount > 0;
-      const hasPriceReadiness = room.priceFullday > 0;
-      if (!providerDataAvailable) {
-        return {
-          famloRoomName: room.name,
-          famloRoomType: room.unitType || "Famlo room",
-          isActive: room.isActive,
-          basePriceLabel: room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing price",
-          photoReadinessLabel: hasPhotoReadiness ? "Photos ready" : "Needs photos",
-          providerRoomLabel: provider.key === "booking" ? "Needs channel connection" : "Provider room unavailable",
-          statusLabel: provider.key === "booking" && setupState.status !== "not_started" ? "needs channel connection" : provider.key === "booking" ? "needs channel connection" : "provider room unavailable",
-          note: provider.key === "booking"
-            ? "Connect the channel first to compare Famlo rooms with Booking.com room types."
-            : "Room matching remains assisted until provider data exists.",
-        };
-      }
-
-      const providerRoomLabel = mapping?.externalRoomTypeId ?? "Not mapped";
-      const statusLabel: ChannelMatchingRoomRow["statusLabel"] = mapping?.externalRoomTypeId ? "matched" : "needs match";
-      return {
-        famloRoomName: room.name,
-        famloRoomType: room.unitType || "Famlo room",
-        isActive: room.isActive,
-        basePriceLabel: room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing price",
-        photoReadinessLabel: hasPhotoReadiness ? "Photos ready" : "Needs photos",
-        providerRoomLabel,
-        statusLabel,
-        note: hasPriceReadiness ? null : "Set a base price in Famlo before price matching is considered complete.",
-      };
-    });
-    const rateRows: ChannelMatchingRateRow[] = rooms.map((room) => {
-      const ratePlan = ratePlansByRoomId.get(room.id) ?? null;
-      if (!providerDataAvailable) {
-        return {
-          famloRoomName: room.name,
-          famloRoomType: room.unitType || "Famlo room",
-          isActive: room.isActive,
-          basePriceLabel: room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing price",
-          providerRateLabel: provider.key === "booking" ? "Needs channel connection" : "Provider rate unavailable",
-          statusLabel: provider.key === "booking" && setupState.status !== "not_started" ? "needs channel connection" : provider.key === "booking" ? "needs channel connection" : "provider rate unavailable",
-          note: provider.key === "booking"
-            ? "Connect the channel first to compare Famlo prices with Booking.com rate plans."
-            : "Price matching remains assisted until provider data exists.",
-        };
-      }
-
-      const providerRateLabel = ratePlan?.externalRatePlanId ?? "Not mapped";
-      const statusLabel: ChannelMatchingRateRow["statusLabel"] = ratePlan?.externalRatePlanId ? "matched" : "needs match";
-      return {
-        famloRoomName: room.name,
-        famloRoomType: room.unitType || "Famlo room",
-        isActive: room.isActive,
-        basePriceLabel: room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing price",
-        providerRateLabel,
-        statusLabel,
-        note: room.priceFullday > 0 ? null : "Set a base price in Famlo before price matching is considered complete.",
-      };
-    });
-
-    acc[provider.key] = {
-      providerDataAvailable,
-      providerDataLabel,
-      roomRows,
-      rateRows,
-      reviewLabel: provider.key === "booking"
-        ? hasRealProviderData
-          ? "Review the real Booking.com / Channex room and rate mappings below."
-          : "Booking.com needs channel connection before real matching can be reviewed."
-        : "Matching stays assisted until provider data exists.",
-    };
-    return acc;
-  }, {} as Record<ChannelProviderKey, ChannelMatchingSnapshot>);
-  const selectedChannelSetupSummary = activeChannelSetup ? channelSetupSummariesByKey[activeChannelSetup] : null;
+    ? "Review room, price, and calendar readiness before relying on OTA sync."
+    : primaryProperty?.externalPropertyId
+      ? "Continue provider setup, then match rooms and prices."
+      : "Connect an existing Booking.com listing or prepare the listing first.";
+  const hostChannelCards = [
+    {
+      key: "booking",
+      name: "Booking.com",
+      status: bookingComChannelStatus,
+      nextStep: bookingComNextStep,
+      roomStatus: activeRoomsCount > 0 ? `${roomMappingsReadyCount}/${activeRoomsCount} rooms matched` : "Add an active room first",
+      priceStatus: activeRoomsCount > 0 ? `${rateMappingsReadyCount}/${activeRoomsCount} prices matched` : "Add pricing first",
+      calendarStatus: currentChannelAttached && allActiveRoomsMapped && allActiveRoomsHaveRatePlans ? "Ready for checks" : "Not active yet",
+      cta: currentChannelAttached ? "View details" : "Setup channel",
+      setup: "booking" as const,
+    },
+    {
+      key: "mmt",
+      name: "MakeMyTrip / Goibibo",
+      status: "Not connected",
+      nextStep: "Connect MakeMyTrip setup coming next. Requires an existing MMT/Goibibo listing or assisted onboarding.",
+      roomStatus: "Needs channel connection",
+      priceStatus: "Needs channel connection",
+      calendarStatus: "Not active",
+      cta: "Setup guide",
+      setup: "mmt" as const,
+    },
+    {
+      key: "airbnb",
+      name: "Airbnb",
+      status: "Coming later",
+      nextStep: "Famlo is not connecting Airbnb from this dashboard yet.",
+      roomStatus: "Not connected",
+      priceStatus: "Not connected",
+      calendarStatus: "Not active",
+      cta: "View details",
+      setup: null,
+    },
+    {
+      key: "agoda",
+      name: "Agoda",
+      status: "Coming later",
+      nextStep: "Agoda setup will be added after the pilot channel flow is ready.",
+      roomStatus: "Not connected",
+      priceStatus: "Not connected",
+      calendarStatus: "Not active",
+      cta: "View details",
+      setup: null,
+    },
+    {
+      key: "expedia",
+      name: "Expedia",
+      status: "Coming later",
+      nextStep: "Expedia setup is not connected in this phase.",
+      roomStatus: "Not connected",
+      priceStatus: "Not connected",
+      calendarStatus: "Not active",
+      cta: "View details",
+      setup: null,
+    },
+    {
+      key: "google-hotel",
+      name: "Google Hotel",
+      status: "Coming later",
+      nextStep: "Google Hotel visibility will depend on connected inventory and future setup.",
+      roomStatus: "Not connected",
+      priceStatus: "Not connected",
+      calendarStatus: "Not active",
+      cta: "View details",
+      setup: null,
+    },
+  ];
   const criticalConflictCount = conflictItems.filter((item) => item.severity === "critical").length;
   const warningConflictCount = conflictItems.filter((item) => item.severity === "warning").length;
   const infoConflictCount = conflictItems.filter((item) => item.severity === "info").length;
@@ -5151,371 +4762,431 @@ export default function FamloProDashboardShell({
                 <div>
                   <h3 className={styles.cardTitle}>Channels</h3>
                   <p className={styles.cardCopy}>
-                    Add one OTA channel at a time. Pick the OTA, press Add channel, then enter the connection details.
+                    Channels for this property. Use this page to understand whether this property is ready to sell on connected OTAs. Technical mapping and logs remain available under Advanced.
                   </p>
                 </div>
-                <span className={currentChannelAttached ? styles.badge : styles.badge + " " + styles.badgeMuted}>
-                  {currentChannelAttached ? "Connected property loaded" : "Needs setup"}
+                <span className={`${styles.badge} ${primaryProperty?.externalPropertyId ? "" : styles.badgeMuted}`.trim()}>
+                  {primaryProperty?.externalPropertyId ? "Connected foundation" : "Needs setup"}
                 </span>
               </div>
               <div className={styles.cardBody}>
-                <article className={styles.listCard}>
-                  <div className={styles.listTitle}>Add channel</div>
-                  <div className={styles.cardCopy}>
-                    Choose the OTA you want to connect for this property. The setup form will open immediately after you add it.
-                  </div>
-                  <div className={styles.listGrid} style={{ marginTop: 12 }}>
-                    <label>
-                      <span className={styles.fieldLabel}>Select OTA</span>
-                      <select
-                        className={styles.fieldInput}
-                        value={selectedChannelToAdd}
-                        onChange={(event) => setSelectedChannelToAdd(event.target.value as ChannelProviderKey)}
-                      >
-                        {CHANNEL_PROVIDER_REGISTRY.map((provider) => (
-                          <option key={provider.key} value={provider.key}>
-                            {provider.displayName}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className={styles.placeholderRow}>
-                      <div className={styles.placeholderTitle}>{getChannelProviderDefinition(selectedChannelToAdd).displayName}</div>
-                      <div className={styles.placeholderCopy}>{getChannelProviderDefinition(selectedChannelToAdd).description}</div>
-                    </div>
-                  </div>
-                  <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
-                    <button
-                      type="button"
-                      className={styles.primaryActionButton}
-                      onClick={() => setActiveChannelSetup(selectedChannelToAdd)}
-                    >
-                      Add channel
-                    </button>
-                    {activeChannelSetup ? (
-                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveChannelSetup(null)}>
-                        Close setup
-                      </button>
-                    ) : null}
-                  </div>
-                </article>
-
-                <article className={styles.listCard}>
-                  <div className={styles.listTitle}>Added channels</div>
-                  <div className={styles.mappingTable} style={{ marginTop: 12 }}>
-                    <div className={styles.mappingHeader}>OTA</div>
-                    <div className={styles.mappingHeader}>Status</div>
-                    <div className={styles.mappingHeader}>Next action</div>
-                    <div className={styles.mappingHeader}>Action</div>
-                    {channelProviderCards
-                      .filter((channel) => channel.status !== "Not started" || channel.key === activeChannelSetup)
-                      .map((channel) => {
-                        const provider = getChannelProviderDefinition(channel.key);
-                        return (
-                          <Fragment key={channel.key}>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingTitle}>{provider.displayName}</div>
-                              <div className={styles.mappingSubcopy}>{channel.progressPercent}% complete</div>
-                            </div>
-                            <div className={styles.mappingCell}>
-                              <span className={channel.status === "Connected" ? styles.badge : styles.badge + " " + styles.badgeMuted}>
-                                {channel.status}
-                              </span>
-                            </div>
-                            <div className={styles.mappingCellMuted}>{channel.goLiveNextStep ?? channel.nextStep}</div>
-                            <div className={styles.mappingCell}>
-                              <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveChannelSetup(channel.key)}>
-                                Open setup
-                              </button>
-                            </div>
-                          </Fragment>
-                        );
-                      })}
-                  </div>
-                </article>
+                <div className={styles.channelGrid}>
+                  {hostChannelCards.map((channel) => (
+                    <article key={channel.key} className={styles.channelCard}>
+                      <div className={styles.channelHeader}>
+                        <div>
+                          <div className={styles.channelTitle}>{channel.name}</div>
+                          <div className={styles.channelCopy}>{channel.nextStep}</div>
+                        </div>
+                        <span className={`${styles.badge} ${channel.status === "Connected" ? "" : styles.badgeMuted}`.trim()}>
+                          {channel.status}
+                        </span>
+                      </div>
+                      <div className={styles.placeholderGrid}>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderLabel}>Room matching</div>
+                          <div className={styles.placeholderValue}>{channel.roomStatus}</div>
+                        </div>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderLabel}>Price matching</div>
+                          <div className={styles.placeholderValue}>{channel.priceStatus}</div>
+                        </div>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderLabel}>Calendar sync</div>
+                          <div className={styles.placeholderValue}>{channel.calendarStatus}</div>
+                        </div>
+                      </div>
+                      <div className={styles.inlineActionRow}>
+                        {channel.setup ? (
+                          <button type="button" className={styles.primaryActionButton} onClick={() => setActiveChannelSetup(channel.setup)}>
+                            {channel.cta}
+                          </button>
+                        ) : (
+                          <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveChannelSetup(null)}>
+                            {channel.cta}
+                          </button>
+                        )}
+                        {channel.key === "booking" && currentChannelAttached ? (
+                          <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("room-mapping")}>
+                            View matching
+                          </button>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+                </div>
 
                 {activeChannelSetup ? (
-                  <ChannelSetupWizard
-                    providerKey={activeChannelSetup}
-                    familyId={familyId}
-                    channexPropertyId={primaryProperty?.externalPropertyId ?? null}
-                    summary={selectedChannelSetupSummary ?? channelSetupSummariesByKey.booking}
-                    readinessModel={channelReadinessModelsByKey[activeChannelSetup]}
-                    testSyncReadiness={channelTestSyncReadinessByKey[activeChannelSetup]}
-                    goLiveReadiness={channelGoLiveReadinessByKey[activeChannelSetup]}
-                    matchingSnapshot={channelMatchingSnapshotsByKey[activeChannelSetup]}
-                    initialState={channelSetupStatesByKey[activeChannelSetup] ?? null}
-                    onSaved={(savedState) => {
-                      setChannelSetupOverrides((current) => ({
-                        ...current,
-                        [savedState.providerKey]: savedState,
-                      }));
-                    }}
-                    onOpenRoomMatching={() => {
-                      setActiveChannelSetup(null);
-                      setActiveSection("room-mapping");
-                    }}
-                    onOpenPriceMatching={() => {
-                      setActiveChannelSetup(null);
-                      setActiveSection("rate-mapping");
-                    }}
-                    onClose={() => setActiveChannelSetup(null)}
-                  />
-                ) : (
-                  <div className={styles.feedbackBox}>
-                    Pick a provider card above to continue the guided setup. The wizard will show the safe next step without exposing raw technical identifiers.
-                  </div>
-                )}
+                  <article className={styles.cardInset}>
+                    <div className={styles.cardHeaderCompact}>
+                      <div>
+                        <div className={styles.listTitle}>
+                          {activeChannelSetup === "booking" ? "Booking.com setup" : "MakeMyTrip / Goibibo setup"}
+                        </div>
+                        <div className={styles.cardCopy}>Step 1: Is this property already listed on this OTA?</div>
+                      </div>
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveChannelSetup(null)}>
+                        Close
+                      </button>
+                    </div>
+                    <div className={styles.listGrid}>
+                      <div className={styles.listCard}>
+                        <div className={styles.listTitle}>Yes, connect existing listing</div>
+                        <div className={styles.feedCopy}>
+                          {activeChannelSetup === "booking"
+                            ? "Booking.com requires a property/channel connection through the provider flow. Famlo will match rooms and prices after the listing is connected."
+                            : "MakeMyTrip / Goibibo requires an existing MMT Hotel ID or Hotel Code and an access token from MMT/Goibibo/Channex setup."}
+                        </div>
+                        <div className={styles.feedbackBox}>
+                          Credential saving and real connection will be enabled after secure channel setup is ready. Nothing is saved from this panel.
+                        </div>
+                      </div>
+                      <div className={styles.listCard}>
+                        <div className={styles.listTitle}>No, help me prepare listing</div>
+                        <div className={styles.feedCopy}>
+                          Prepare property details, rooms, photos, pricing, documents, and OTA verification before asking Famlo to connect the channel.
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                ) : null}
 
+                <details className={styles.operatorDetails}>
+                  <summary className={styles.operatorSummary}>Advanced / Operator diagnostics</summary>
                 <div className={styles.listGrid}>
                   <article className={styles.listCard}>
-                    <div className={styles.listTitle}>What this engine does now</div>
-                    <div className={styles.stack}>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>One registry for every provider</div>
-                        <div className={styles.feedCopy}>Booking.com, MakeMyTrip / Goibibo, Airbnb, Agoda, Expedia, and Google Hotel all use the same guided setup surface.</div>
+                    <div className={styles.listTitle}>Channel summary</div>
+                    <div className={styles.roomStats}>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Connected channels</div>
+                        <div className={styles.miniValue}>{currentChannelAttached ? 1 : 0}</div>
                       </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>No fake connection state</div>
-                        <div className={styles.feedCopy}>A provider only looks connected when real loaded readiness exists. Otherwise the card stays assisted or not started.</div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Booking.com / Channex</div>
+                        <div className={styles.miniValue}>{currentChannelAttached ? (currentChannelAttached ? ((channelFeedHealth?.channelActive ?? false) ? "Connected" : "Attached") : "Needs setup") : "Needs setup"}</div>
                       </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Secure credential storage is live</div>
-                        <div className={styles.feedCopy}>Assisted providers like MakeMyTrip / Goibibo can now store access tokens encrypted on the server without exposing them back to the browser.</div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Room mapping</div>
+                        <div className={styles.miniValue}>{roomMappingsReadyCount}/{rooms.length || 0}</div>
                       </div>
+                      <div className={styles.miniStat}>
+                        <div className={styles.miniLabel}>Rate mapping</div>
+                        <div className={styles.miniValue}>{rateMappingsReadyCount}/{rooms.length || 0}</div>
+                      </div>
+                    </div>
+                    <div className={styles.roomReadinessRow}>
+                      <span className={`${styles.readinessPill} ${channelHealthNeedsAttention ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                        {channelHealthNeedsAttention ? "Action needed" : "Sync healthy"}
+                      </span>
+                      <span className={`${styles.readinessPill} ${(channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                        Famlo team review: {(channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 ? "Needed" : "Not needed"}
+                      </span>
+                      <span className={`${styles.readinessPill} ${ariHealth.statusLabel === "Synced" ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                        ARI: {ariHealth.statusLabel}
+                      </span>
+                    </div>
+                    <div className={styles.feedCopy} style={{ marginTop: 12 }}>
+                      {connectedChannelCards.length === 0
+                        ? "No connected channel data is available yet for this property."
+                        : roomMappingsMissingCount > 0 || rateMappingsMissingCount > 0
+                          ? `Setup is still needed: ${roomMappingsMissingCount} active rooms still need room mapping and ${rateMappingsMissingCount} still need rate mapping.`
+                          : channelHealthNeedsAttention
+                            ? "A sync or review issue is visible for this property, so Famlo team may need to review."
+                            : "This property looks healthy enough to move through connected OTA setup with the current foundation."}
                     </div>
                   </article>
 
                   <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Current Booking.com readiness</div>
-                    <div className={styles.roomReadinessRow}>
-                      <span className={currentChannelAttached ? styles.readinessPill + " " + styles.readinessPillOk : styles.readinessPill + " " + styles.readinessPillMissing}>
-                        Property connected: {currentChannelAttached ? "Yes" : "No"}
-                      </span>
-                      <span className={bookingComRoomMatched ? styles.readinessPill + " " + styles.readinessPillOk : styles.readinessPill + " " + styles.readinessPillReview}>
-                        Rooms matched: {roomMappingsReadyCount}/{activeRoomsCount || 0}
-                      </span>
-                      <span className={bookingComPriceMatched ? styles.readinessPill + " " + styles.readinessPillOk : styles.readinessPill + " " + styles.readinessPillReview}>
-                        Prices matched: {rateMappingsReadyCount}/{activeRoomsCount || 0}
-                      </span>
-                      <span className={channelHealthNeedsAttention ? styles.readinessPill + " " + styles.readinessPillReview : styles.readinessPill + " " + styles.readinessPillOk}>
-                        Sync review: {channelHealthNeedsAttention ? "Needs review" : "Clear"}
-                      </span>
-                    </div>
-                    <div className={styles.feedCopy} style={{ marginTop: 12 }}>
-                      {bookingComReadyForActivation
-                        ? "The loaded Booking.com / Channex property is ready for an operator-approved activation review."
-                        : "The loaded Booking.com / Channex property still needs readiness work, so activation remains disabled."}
+                    <div className={styles.listTitle}>What stays here</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Host-safe channel status</div>
+                        <div className={styles.feedCopy}>Use this tab to understand if the property is connected, healthy, and ready for OTA flow.</div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Technical tools stay separate</div>
+                        <div className={styles.feedCopy}>Room mapping, rate mapping, and sync logs remain available under Advanced so this tab stays simple.</div>
+                      </div>
+                      <div className={styles.inlineActionRow}>
+                        <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("room-mapping")}>
+                          Open Advanced tools
+                        </button>
+                        <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("conflicts")}>
+                          Open Sync Health
+                        </button>
+                      </div>
                     </div>
                   </article>
                 </div>
 
-                {showChannelOperatorDiagnostics ? (
-                <details className={styles.operatorDetails}>
-                  <summary className={styles.operatorSummary}>Advanced / Operator diagnostics</summary>
-                  <div className={styles.listGrid}>
-                    <article className={styles.listCard}>
-                      <div className={styles.listTitle}>Channex / booking summary</div>
-                      <div className={styles.roomStats}>
-                        <div className={styles.miniStat}>
-                          <div className={styles.miniLabel}>Connected channels</div>
-                          <div className={styles.miniValue}>{currentChannelAttached ? 1 : 0}</div>
-                        </div>
-                        <div className={styles.miniStat}>
-                          <div className={styles.miniLabel}>Property row</div>
-                          <div className={styles.miniValue}>{primaryProperty?.externalPropertyId ? "Loaded" : "Missing"}</div>
-                        </div>
-                        <div className={styles.miniStat}>
-                          <div className={styles.miniLabel}>Room mapping</div>
-                          <div className={styles.miniValue}>{roomMappingsReadyCount}/{rooms.length || 0}</div>
-                        </div>
-                        <div className={styles.miniStat}>
-                          <div className={styles.miniLabel}>Rate mapping</div>
-                          <div className={styles.miniValue}>{rateMappingsReadyCount}/{rooms.length || 0}</div>
-                        </div>
-                      </div>
-                      <div className={styles.roomReadinessRow}>
-                        <span className={channelHealthNeedsAttention ? styles.readinessPill + " " + styles.readinessPillReview : styles.readinessPill + " " + styles.readinessPillOk}>
-                          {channelHealthNeedsAttention ? "Action needed" : "Sync healthy"}
-                        </span>
-                        <span className={(channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 ? styles.readinessPill + " " + styles.readinessPillReview : styles.readinessPill + " " + styles.readinessPillOk}>
-                          Famlo team review: {(channelFeedHealth?.pendingManualReviewCount ?? 0) > 0 ? "Needed" : "Not needed"}
-                        </span>
-                        <span className={ariHealth.statusLabel === "Synced" ? styles.readinessPill + " " + styles.readinessPillOk : styles.readinessPill + " " + styles.readinessPillReview}>
-                          ARI: {ariHealth.statusLabel}
-                        </span>
-                      </div>
-                      <div className={styles.feedCopy} style={{ marginTop: 12 }}>
-                        {currentChannelAttached
-                          ? "The loaded channel is " + (currentChannelReference ?? "not visible") + " and remains tied to the current staging property."
-                          : "No connected channel data is available yet for this property."}
-                      </div>
-                    </article>
-
-                    <article className={styles.listCard}>
-                      <div className={styles.listTitle}>Booking.com staging checklist</div>
-                      <div className={styles.mappingTable}>
-                        <div className={styles.mappingHeader}>Item</div>
-                        <div className={styles.mappingHeader}>Value</div>
-                        <div className={styles.mappingHeader}>Status</div>
-                        {bookingComManualChecklist.map((item) => {
-                          const ready = item.value !== "Missing";
-                          return (
-                            <Fragment key={item.label}>
-                              <div className={styles.mappingCell}>
-                                <div className={styles.mappingTitle}>{item.label}</div>
-                              </div>
-                              <div className={styles.mappingCellMuted}>{item.value}</div>
-                              <div className={styles.mappingCell}>
-                                <span className={ready ? styles.badge : styles.badge + " " + styles.badgeMuted}>
-                                  {ready ? "Ready" : "Needs action"}
-                                </span>
-                              </div>
-                            </Fragment>
-                          );
-                        })}
-                      </div>
-                    </article>
-                  </div>
-
-                  <div className={styles.listGrid}>
-                    <article className={styles.listCard}>
-                      <div className={styles.listTitle}>Technical fields kept out of the host flow</div>
-                      <div className={styles.stack}>
-                        <div className={styles.feedItem}>
-                          <div className={styles.feedTitle}>Last feed poll</div>
-                          <div className={styles.feedCopy}>{formatDateTime(channelFeedHealth?.lastPollAt ?? null)}</div>
-                        </div>
-                        <div className={styles.feedItem}>
-                          <div className={styles.feedTitle}>Active channel id</div>
-                          <div className={styles.feedCopy}>{channelFeedHealth?.activeChannelId ?? "Missing"}</div>
-                        </div>
-                        <div className={styles.feedItem}>
-                          <div className={styles.feedTitle}>Hotel id</div>
-                          <div className={styles.feedCopy}>{channelFeedHealth?.hotelId ?? "Missing"}</div>
-                        </div>
-                        <div className={styles.feedItem}>
-                          <div className={styles.feedTitle}>Attached count</div>
-                          <div className={styles.feedCopy}>{channelFeedHealth?.accChannelsCount ?? 0}</div>
-                        </div>
-                        <div className={styles.feedItem}>
-                          <div className={styles.feedTitle}>Last ARI range</div>
-                          <div className={styles.feedCopy}>
-                            {ariHealth.syncedDateRange
-                              ? ariHealth.syncedDateRange.from + " → " + ariHealth.syncedDateRange.to
-                              : "Not synced yet"}
+                <div className={styles.listGrid}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Channel readiness checklist</div>
+                    <div className={styles.stack}>
+                      {channelReadinessChecklist.map((item) => (
+                        <div key={item.label} className={styles.feedItem}>
+                          <div className={styles.feedTitle}>{item.label}</div>
+                          <div className={styles.roomReadinessRow}>
+                            <span className={`${styles.readinessPill} ${item.ready ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                              {item.ready ? "Ready" : "Needs setup"}
+                            </span>
+                            <span className={styles.readinessPill}>{item.value}</span>
                           </div>
                         </div>
-                        <div className={styles.feedItem}>
-                          <div className={styles.feedTitle}>Last ARI error</div>
-                          <div className={styles.feedCopy}>{ariHealth.lastAriSyncError ?? "None"}</div>
-                        </div>
-                      </div>
-                    </article>
+                      ))}
+                    </div>
+                  </article>
 
-                    <article className={styles.listCard}>
-                      <div className={styles.listTitle}>Operator notes</div>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Connected channel actions</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 12 }}>
+                      These are the safest next actions using the data already loaded for this property.
+                    </div>
+                    {connectedChannelCards.length > 0 ? (
                       <div className={styles.stack}>
-                        {getChannelProviderDefinition(activeChannelSetup ?? "booking").operatorNotes.map((note) => (
-                          <div key={note} className={styles.feedItem}>
-                            <div className={styles.feedCopy}>{note}</div>
+                        {connectedChannelCards.map((channel) => (
+                          <div key={channel.key} className={styles.feedItem}>
+                            <div className={styles.feedTitle}>{channel.name}</div>
+                            <div className={styles.roomReadinessRow}>
+                              <span className={`${styles.readinessPill} ${channel.statusLabel === "Connected" ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                                {channel.statusLabel}
+                              </span>
+                              <span className={styles.readinessPill}>Rooms mapped: {channel.mappedRoomsCount}/{activeRoomsCount || 0}</span>
+                              <span className={styles.readinessPill}>Rates mapped: {channel.mappedRatesCount}/{activeRoomsCount || 0}</span>
+                              <span className={`${styles.readinessPill} ${channel.ariStatus === "Synced" ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                                ARI: {channel.ariStatus}
+                              </span>
+                            </div>
+                            <div className={styles.feedCopy}>
+                              Feed health: {channel.lastFeedSuccess !== "Not checked" ? `last success ${channel.lastFeedSuccess}` : "not checked yet"}. Recommended next action: {channel.recommendedAction}.
+                            </div>
                           </div>
                         ))}
                       </div>
-                    </article>
-                  </div>
+                    ) : (
+                      <div className={styles.emptyState}>
+                        <div className={styles.emptyTitle}>No channel connected</div>
+                        <div className={styles.emptyCopy}>
+                          Channel data is unavailable for this property right now. Once a provider foundation is attached, this space will show host-safe readiness and next actions.
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                </div>
 
-                  <div className={styles.listGrid}>
-                    <BookingComVerificationCard
-                      familyId={familyId}
-                      setupState={bookingSetupState}
-                      externalPropertyId={primaryProperty?.externalPropertyId ?? null}
-                      discoveredHotelId={channelFeedHealth?.hotelId ?? null}
-                      activeChannelId={channelFeedHealth?.activeChannelId ?? channelAriHealth?.activeChannelId ?? null}
-                      channelAttached={channelFeedHealth?.channelAttached ?? channelAriHealth?.channelAttached ?? false}
-                      channelActive={channelFeedHealth?.channelActive ?? channelAriHealth?.channelActive ?? false}
-                      attachedCount={channelFeedHealth?.accChannelsCount ?? channelAriHealth?.accChannelsCount ?? 0}
-                    />
-                    <BookingComAssistedChannelManagerCard
-                      familyId={familyId}
-                      setupState={bookingSetupState}
-                      externalPropertyId={primaryProperty?.externalPropertyId ?? null}
-                      channelAttached={channelFeedHealth?.channelAttached ?? channelAriHealth?.channelAttached ?? false}
-                      channelActive={channelFeedHealth?.channelActive ?? channelAriHealth?.channelActive ?? false}
-                      activeRoomsCount={activeRooms.length}
-                      roomMappingsReadyCount={roomMappingsReadyCount}
-                      ratePlansReadyCount={rateMappingsReadyCount}
-                      missingRoomMappings={missingRoomMappingNames}
-                      missingRatePlans={missingRatePlanNames}
-                      lastCreatePropertyLog={lastCreatePropertyLog}
-                      lastCreateRoomTypeLog={lastCreateRoomTypeLog}
-                      lastCreateRatePlanLog={lastCreateRatePlanLog}
-                      lastLimitedAriSyncLog={lastLimitedAriSyncLog}
-                      lastBookingFeedLog={lastBookingFeedLog}
-                      lastAssistedGoLiveLog={lastAssistedGoLiveLog}
-                      bookingRevisionsCount={channelFoundation.bookingRevisions.length}
-                    />
-                  </div>
-
-                  <div className={styles.listGrid}>
-                    <article className={styles.listCard}>
-                      <div className={styles.listTitle}>Read-only operator review panel</div>
+                <div className={styles.providerCard}>
+                  <div className={styles.providerCardHeader}>
+                    <div>
+                      <div className={styles.cardTitle}>{primaryProvider?.name ?? "Channex"}</div>
                       <div className={styles.cardCopy}>
-                        Safe review queue for channel setup and go-live requests. This panel is read-only and does not approve or activate any channel.
+                        Current provider connection for this property.
                       </div>
-                      <div className={styles.mappingTable} style={{ marginTop: 12 }}>
-                        <div className={styles.mappingHeader}>Provider</div>
-                        <div className={styles.mappingHeader}>Safe details</div>
-                        <div className={styles.mappingHeader}>Setup / Go-live</div>
-                        <div className={styles.mappingHeader}>Go-live requested</div>
-                        <div className={styles.mappingHeader}>Test sync requested</div>
-                        <div className={styles.mappingHeader}>Matching / Test sync</div>
-                        <div className={styles.mappingHeader}>Blockers</div>
-                        <div className={styles.mappingHeader}>Next action</div>
-                        {channelOperatorReviewRows.map((row) => (
-                          <Fragment key={row.providerKey}>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingTitle}>{row.providerName}</div>
-                              <div className={styles.mappingSubcopy}>{row.propertyName}</div>
-                            </div>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingSubcopy}>{row.providerReference}</div>
-                            </div>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingTitle}>{row.setupStatus}</div>
-                              <div className={styles.mappingSubcopy}>{row.goLiveStatus}</div>
-                            </div>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingTitle}>{row.reviewRequested}</div>
-                              <div className={styles.mappingSubcopy}>{row.requestedAt}</div>
-                            </div>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingTitle}>{row.testSyncRequested}</div>
-                              <div className={styles.mappingSubcopy}>{row.testSyncRequestedAt}</div>
-                            </div>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingTitle}>{row.roomMatchingStatus}</div>
-                              <div className={styles.mappingSubcopy}>{row.priceMatchingStatus}</div>
-                              <div className={styles.mappingSubcopy} style={{ marginTop: 4 }}>
-                                {row.testSyncStatus}
-                              </div>
-                            </div>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingSubcopy}>{row.blockers.join(" · ")}</div>
-                            </div>
-                            <div className={styles.mappingCell}>
-                              <div className={styles.mappingTitle}>{row.nextAction}</div>
-                            </div>
-                          </Fragment>
-                        ))}
+                    </div>
+                    <span className={`${styles.badge} ${primaryProperty?.externalPropertyId ? "" : styles.badgeMuted}`.trim()}>
+                      {labelizeToken(primaryProperty?.syncStatus ?? "not_connected", primaryProperty?.externalPropertyId ? "Created" : "Not connected")}
+                    </span>
+                  </div>
+                  <div className={styles.providerMetaRow}>
+                    <span className={styles.filterChip}>Environment: {formatChannexEnvironmentLabel(channexConfig.environment)}</span>
+                    <span className={styles.filterChip}>Foundation: {providerFoundationReady ? "Ready" : "Missing"}</span>
+                    <span className={styles.filterChip}>Property connection: {primaryProperty?.externalPropertyId ? "Connected" : "Needs setup"}</span>
+                    <span className={styles.filterChip}>Last sync: {formatDateTime(primaryProperty?.lastSyncedAt ?? null)}</span>
+                  </div>
+                  <div className={styles.providerMetaRow}>
+                    {channelHealthSummaryBadges.map((badge) => (
+                      <span key={badge} className={styles.filterChip}>{badge}</span>
+                    ))}
+                  </div>
+                  <div className={styles.providerActionRow}>
+                    <button
+                      type="button"
+                      className={styles.secondaryActionButton}
+                      onClick={() => setActiveSection("room-mapping")}
+                    >
+                      Prepare mapping
+                    </button>
+                  </div>
+                </div>
+                <div className={`${styles.feedbackBox} ${channelHealthNeedsAttention ? styles.feedbackError : styles.feedbackSuccess}`}>
+                  {channelHealthNeedsAttention
+                    ? "Action needed: this property has a channel health issue, pending revision work, or a disconnected channel."
+                    : "Sync healthy: the current channel health looks stable for this property."}
+                  <div className={styles.inlineBadgeRow}>
+                    <span className={`${styles.readinessPill} ${currentChannelAttached ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                      Attached: {currentChannelAttached ? "Yes" : "No"}
+                    </span>
+                    <span className={`${styles.readinessPill} ${currentChannelAttached ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                      Active: {currentChannelAttached ? "Yes" : "No"}
+                    </span>
+                    <span className={`${styles.readinessPill} ${(channelFeedHealth?.unackedRevisionsCount ?? 0) === 0 ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                      Unacked: {channelFeedHealth?.unackedRevisionsCount ?? 0}
+                    </span>
+                    <span className={`${styles.readinessPill} ${(channelFeedHealth?.failedImportCount ?? 0) === 0 ? styles.readinessPillOk : styles.readinessPillMissing}`}>
+                      Failed imports: {channelFeedHealth?.failedImportCount ?? 0}
+                    </span>
+                    <span className={`${styles.readinessPill} ${(channelFeedHealth?.pendingApplyCount ?? 0) === 0 ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                      Pending apply: {channelFeedHealth?.pendingApplyCount ?? 0}
+                    </span>
+                    <span className={`${styles.readinessPill} ${channelHealthNeedsAttention ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                      Auto-apply state: {autoApplyStateLabel}
+                    </span>
+                    <span className={`${styles.readinessPill} ${
+                      ariHealth.statusLabel === "Synced"
+                        ? styles.readinessPillOk
+                        : ariHealth.statusLabel === "Channel disconnected" || ariHealth.statusLabel === "Sync failed"
+                          ? styles.readinessPillMissing
+                          : styles.readinessPillReview
+                    }`}>
+                      Daily ARI: {ariHealth.statusLabel}
+                    </span>
+                  </div>
+                  <div className={styles.placeholderGrid} style={{ marginTop: 14 }}>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Last feed poll</div>
+                      <div className={styles.placeholderValue}>{formatDateTime(channelFeedHealth?.lastPollAt ?? null)}</div>
+                      <div className={styles.placeholderCopy}>
+                        Last successful poll: {formatDateTime(channelFeedHealth?.lastSuccessfulPollAt ?? null)}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Active channel</div>
+                      <div className={styles.placeholderValue}>{currentChannelReference ?? "Not visible"}</div>
+                      <div className={styles.placeholderCopy}>
+                        Feed health: channel id {channelFeedHealth?.activeChannelId ?? "Missing"} · hotel {channelFeedHealth?.hotelId ?? "Missing"} · attached count {channelFeedHealth?.accChannelsCount ?? 0}
+                        {channelAriHealth ? ` · Daily ARI sees attached count ${channelAriHealth.accChannelsCount ?? 0}` : ""}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Last error</div>
+                      <div className={styles.placeholderValue}>{channelFeedHealth?.lastError ? "Present" : "None"}</div>
+                      <div className={styles.placeholderCopy}>
+                        {channelFeedHealth?.lastError
+                          ? `${channelFeedHealth.lastError} (${formatDateTime(channelFeedHealth.lastErrorAt ?? null)})`
+                          : "No recent polling error recorded."}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Auto-apply summary</div>
+                      <div className={styles.placeholderValue}>
+                        {channelFeedHealth?.autoAppliedCount ?? 0} applied · {channelFeedHealth?.pendingManualReviewCount ?? 0} waiting review
+                      </div>
+                      <div className={styles.placeholderCopy}>
+                        Last auto-apply: {formatDateTime(channelFeedHealth?.lastAutoApplyAt ?? null)}. {channelFeedHealth?.lastAutoApplyMessage ?? "No automatic apply run recorded yet."}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Auto-apply counters</div>
+                      <div className={styles.placeholderValue}>
+                        New imports {channelFeedHealth?.autoImportedCount ?? 0} · Cancellations {channelFeedHealth?.autoCancelledCount ?? 0}
+                      </div>
+                      <div className={styles.placeholderCopy}>
+                        Failed auto-apply: {channelFeedHealth?.failedAutoApplyCount ?? 0} · acknowledged automatically: {channelFeedHealth?.acknowledgedCount ?? 0}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>Daily ARI sync</div>
+                      <div className={styles.placeholderValue}>{ariHealth.statusLabel}</div>
+                      <div className={styles.placeholderCopy}>
+                        Last sync: {formatDateTime(ariHealth.lastAriSyncAt)} · Last success: {formatDateTime(ariHealth.lastSuccessfulAriSyncAt)}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>ARI range + verification</div>
+                      <div className={styles.placeholderValue}>
+                        {ariHealth.syncedDateRange
+                          ? `${ariHealth.syncedDateRange.from} → ${ariHealth.syncedDateRange.to}`
+                          : "Not synced yet"}
+                      </div>
+                      <div className={styles.placeholderCopy}>
+                        {channelAriHealth
+                          ? `${channelAriHealth.verifiedAvailabilityCount} availability · ${channelAriHealth.verifiedRateCount} rates · ${channelAriHealth.verifiedMinStayThroughCount} min-stay checks`
+                          : "No daily ARI verification summary yet."}
+                      </div>
+                    </div>
+                    <div className={styles.placeholderRow}>
+                      <div className={styles.placeholderTitle}>ARI last error</div>
+                      <div className={styles.placeholderValue}>{ariHealth.lastAriSyncError ? "Present" : "None"}</div>
+                      <div className={styles.placeholderCopy}>
+                        {ariHealth.lastAriSyncError
+                          ? `${ariHealth.lastAriSyncError} · failures in a row ${ariHealth.consecutiveAriFailures}`
+                          : "No daily ARI sync error recorded."}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.placeholderGrid}>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Host-facing note</div>
+                    <div className={styles.placeholderValue}>No OTA listing buttons yet</div>
+                    <div className={styles.placeholderCopy}>
+                      Famlo Pro is showing channel status only in this phase. OTA room creation and listing controls will come later.
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.mappingTable}>
+                  <div className={styles.mappingHeader}>Booking.com staging checklist</div>
+                  <div className={styles.mappingHeader}>Value</div>
+                  <div className={styles.mappingHeader}>Status</div>
+                  {bookingComManualChecklist.map((item) => {
+                    const ready = item.value !== "Missing";
+                    return (
+                      <Fragment key={item.label}>
+                        <div className={styles.mappingCell}>
+                          <div className={styles.mappingTitle}>{item.label}</div>
+                        </div>
+                        <div className={styles.mappingCellMuted}>{item.value}</div>
+                        <div className={styles.mappingCell}>
+                          <span className={`${styles.badge} ${ready ? "" : styles.badgeMuted}`.trim()}>
+                            {ready ? "Ready" : "Needs action"}
+                          </span>
+                        </div>
+                      </Fragment>
+                    );
+                  })}
+                </div>
+                <div className={styles.placeholderGrid}>
+                  <div className={styles.placeholderRow}>
+                    <div className={styles.placeholderTitle}>Manual Channex steps</div>
+                    <div className={styles.placeholderValue}>Booking.com staging/test channel</div>
+                    <div className={styles.placeholderCopy}>
+                      In Channex dashboard, connect the Booking.com test channel for this GBP property, map room type
+                      <strong> {firstMappedRoom?.mapping?.externalRoomTypeId ?? " MISSING "}</strong>
+                      and rate plan
+                      <strong> {firstMappedRatePlan?.ratePlan?.externalRatePlanId ?? " MISSING "}</strong>,
+                      then activate the channel before feed polling. Automatic cron polling now reads preview revisions, but pending imports/cancellations still stay visible for operator review.
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.channelGrid}>
+                  {CHANNEL_CARDS.map((channel) => (
+                    <article key={channel} className={styles.channelCard}>
+                      <div className={styles.channelHeader}>
+                        <div>
+                          <div className={styles.channelTitle}>{channel}</div>
+                          <div className={styles.channelCopy}>Provider connection placeholder</div>
+                        </div>
+                        <span className={`${styles.badge} ${channel === "Booking.com" && (channelFeedHealth?.channelAttached ?? false) ? "" : styles.badgeMuted}`.trim()}>
+                          {channel === "Booking.com"
+                            ? ((channelFeedHealth?.channelAttached ?? false) ? ((channelFeedHealth?.channelActive ?? false) ? "Active" : "Attached") : "Not connected")
+                            : "Not connected"}
+                        </span>
+                      </div>
+                      <div className={styles.channelMeta}>
+                        <span className={styles.filterChip}>Environment: {formatChannexEnvironmentLabel(channexConfig.environment)}</span>
+                        <span className={styles.filterChip}>
+                          {channel === "Booking.com"
+                            ? `Last poll: ${formatDateTime(channelFeedHealth?.lastPollAt ?? null)}`
+                            : "Full sync: Not started"}
+                        </span>
                       </div>
                     </article>
-                  </div>
+                  ))}
+                </div>
                 </details>
-                ) : null}
               </div>
             </section>
           )}
+
           {activeSection === "room-mapping" && (
             <section className={styles.card}>
               <div className={styles.cardHeader}>
@@ -7509,12 +7180,12 @@ function ChannexPropertyCard({
               setFeedback(null);
 
               try {
-                const response = await fetch("/api/host/pro/channel/channex/operator/setup", {
+                const response = await fetch("/api/host/pro/channel/channex/property", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
                   },
-                  body: JSON.stringify({ familyId, action: "create_property" }),
+                  body: JSON.stringify({ familyId }),
                 });
 
                 const payload = (await response.json()) as {
@@ -7560,515 +7231,6 @@ function ChannexPropertyCard({
         </button>
       </div>
     </section>
-  );
-}
-
-function BookingComVerificationCard({
-  familyId,
-  setupState,
-  externalPropertyId,
-  discoveredHotelId,
-  activeChannelId,
-  channelAttached,
-  channelActive,
-  attachedCount,
-}: Readonly<{
-  familyId: string;
-  setupState: ChannelSetupState;
-  externalPropertyId: string | null;
-  discoveredHotelId: string | null;
-  activeChannelId: string | null;
-  channelAttached: boolean;
-  channelActive: boolean;
-  attachedCount: number;
-}>): React.JSX.Element {
-  const router = useRouter();
-  const [isChecking, startChecking] = useTransition();
-  const [isMarkingVerified, startMarkingVerified] = useTransition();
-  const [isMarkingFailed, startMarkingFailed] = useTransition();
-  const [failureReason, setFailureReason] = useState(setupState.metadata.booking_connection_error ?? "");
-  const [feedback, setFeedback] = useState<{
-    ok: boolean;
-    status: string;
-    message: string;
-    verification?: {
-      hotelId: string | null;
-      activeChannelId: string | null;
-      channelAttached: boolean;
-      channelActive: boolean;
-      accChannelsCount: number;
-    };
-  } | null>(null);
-
-  const displayedHotelId = feedback?.verification?.hotelId ?? discoveredHotelId ?? "Missing";
-  const displayedActiveChannelId = feedback?.verification?.activeChannelId ?? activeChannelId ?? "Missing";
-  const displayedChannelAttached = feedback?.verification?.channelAttached ?? channelAttached;
-  const displayedChannelActive = feedback?.verification?.channelActive ?? channelActive;
-  const displayedAttachedCount = feedback?.verification?.accChannelsCount ?? attachedCount;
-  const canMarkVerified = displayedChannelAttached && (displayedChannelActive || displayedActiveChannelId !== "Missing");
-
-  const sendVerificationAction = (action: "check" | "mark_verified" | "mark_failed", reason?: string): void => {
-    const runner =
-      action === "check" ? startChecking : action === "mark_verified" ? startMarkingVerified : startMarkingFailed;
-
-    runner(async () => {
-      setFeedback(null);
-
-      try {
-        const response = await fetch("/api/host/pro/channel/channex/booking/verify", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            familyId,
-            action,
-            reason,
-          }),
-        });
-
-        const payload = (await response.json()) as {
-          ok?: boolean;
-          status?: string;
-          error?: string;
-          verification?: {
-            hotelId: string | null;
-            activeChannelId: string | null;
-            channelAttached: boolean;
-            channelActive: boolean;
-            accChannelsCount: number;
-          };
-        };
-
-        setFeedback({
-          ok: Boolean(response.ok && payload.ok),
-          status: payload.status ?? "failed",
-          message:
-            typeof payload.error === "string" && payload.error.trim().length > 0
-              ? payload.error
-              : action === "check"
-                ? "Checked the current Booking.com channel state in Channex."
-                : action === "mark_verified"
-                  ? "Marked the Booking.com connection as verified."
-                  : "Marked the Booking.com verification as failed.",
-          verification: payload.verification,
-        });
-        router.refresh();
-      } catch (error) {
-        setFeedback({
-          ok: false,
-          status: "failed",
-          message: error instanceof Error ? error.message : "Unable to complete the Booking.com verification action.",
-        });
-      }
-    });
-  };
-
-  return (
-    <article className={styles.listCard}>
-      <div className={styles.listTitle}>Booking.com operator verification</div>
-      <div className={styles.cardCopy}>
-        Operator-only bridge between the host request and a real Channex-attached Booking.com channel. This does not activate the channel or run sync.
-      </div>
-
-      <div className={styles.placeholderGrid} style={{ marginTop: 12 }}>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Host-entered Hotel ID</div>
-          <div className={styles.placeholderCopy}>{setupState.metadata.booking_hotel_id ?? "Missing"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Host-entered Property Code</div>
-          <div className={styles.placeholderCopy}>{setupState.metadata.booking_property_code ?? "Missing"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Connectivity provider requested</div>
-          <div className={styles.placeholderCopy}>
-            {setupState.metadata.connectivity_provider_requested ? "Yes" : "No"}
-            {setupState.metadata.connectivity_provider_requested_at ? ` · ${formatDateTime(setupState.metadata.connectivity_provider_requested_at)}` : ""}
-          </div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Current Channex property id</div>
-          <div className={styles.placeholderCopy}>{externalPropertyId ?? "Missing"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Discovered hotelId</div>
-          <div className={styles.placeholderCopy}>{displayedHotelId}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Discovered activeChannelId</div>
-          <div className={styles.placeholderCopy}>{displayedActiveChannelId}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Channel attached</div>
-          <div className={styles.placeholderCopy}>{displayedChannelAttached ? "Yes" : "No"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Channel active</div>
-          <div className={styles.placeholderCopy}>{displayedChannelActive ? "Yes" : "No"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Attached count</div>
-          <div className={styles.placeholderCopy}>{displayedAttachedCount}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Last verification status</div>
-          <div className={styles.placeholderCopy}>{setupState.metadata.booking_connection_status ?? "Not checked"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Last error</div>
-          <div className={styles.placeholderCopy}>{setupState.metadata.booking_connection_error ?? "None"}</div>
-        </div>
-      </div>
-
-      {feedback ? (
-        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`} style={{ marginTop: 12 }}>
-          {feedback.message}
-        </div>
-      ) : null}
-
-      <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
-        <button
-          type="button"
-          className={styles.secondaryActionButton}
-          disabled={isChecking}
-          onClick={() => sendVerificationAction("check")}
-        >
-          {isChecking ? "Checking..." : "Check Booking.com channel in Channex"}
-        </button>
-        <button
-          type="button"
-          className={styles.primaryActionButton}
-          disabled={isMarkingVerified || !canMarkVerified}
-          onClick={() => sendVerificationAction("mark_verified")}
-        >
-          {isMarkingVerified ? "Saving..." : "Mark Booking.com connection verified"}
-        </button>
-      </div>
-
-      <div className={styles.stack} style={{ marginTop: 12 }}>
-        <label>
-          <span className={styles.fieldLabel}>Verification failure reason</span>
-          <input
-            className={styles.fieldInput}
-            value={failureReason}
-            onChange={(event) => setFailureReason(event.target.value)}
-            placeholder="Example: Channel not attached yet in Channex"
-          />
-        </label>
-        <div className={styles.inlineActionRow}>
-          <button
-            type="button"
-            className={styles.secondaryActionButton}
-            disabled={isMarkingFailed}
-            onClick={() => sendVerificationAction("mark_failed", failureReason)}
-          >
-            {isMarkingFailed ? "Saving..." : "Mark verification failed"}
-          </button>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function BookingComAssistedChannelManagerCard({
-  familyId,
-  setupState,
-  externalPropertyId,
-  channelAttached,
-  channelActive,
-  activeRoomsCount,
-  roomMappingsReadyCount,
-  ratePlansReadyCount,
-  missingRoomMappings,
-  missingRatePlans,
-  lastCreatePropertyLog,
-  lastCreateRoomTypeLog,
-  lastCreateRatePlanLog,
-  lastLimitedAriSyncLog,
-  lastBookingFeedLog,
-  lastAssistedGoLiveLog,
-  bookingRevisionsCount,
-}: Readonly<{
-  familyId: string;
-  setupState: ChannelSetupState;
-  externalPropertyId: string | null;
-  channelAttached: boolean;
-  channelActive: boolean;
-  activeRoomsCount: number;
-  roomMappingsReadyCount: number;
-  ratePlansReadyCount: number;
-  missingRoomMappings: string[];
-  missingRatePlans: string[];
-  lastCreatePropertyLog: HostProChannelFoundation["syncLogs"][number] | null;
-  lastCreateRoomTypeLog: HostProChannelFoundation["syncLogs"][number] | null;
-  lastCreateRatePlanLog: HostProChannelFoundation["syncLogs"][number] | null;
-  lastLimitedAriSyncLog: HostProChannelFoundation["syncLogs"][number] | null;
-  lastBookingFeedLog: HostProChannelFoundation["syncLogs"][number] | null;
-  lastAssistedGoLiveLog: HostProChannelFoundation["syncLogs"][number] | null;
-  bookingRevisionsCount: number;
-}>): React.JSX.Element {
-  const router = useRouter();
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{
-    ok: boolean;
-    message: string;
-    blockers?: string[];
-    summary?: string;
-  } | null>(null);
-
-  const bookingVerified =
-    setupState.metadata.operator_verified_booking_connection === true ||
-    setupState.metadata.booking_connection_status === "verified" ||
-    setupState.metadata.booking_connection_status === "ready_for_assisted_go_live";
-  const structureReady = Boolean(externalPropertyId) && activeRoomsCount > 0 && missingRoomMappings.length === 0 && missingRatePlans.length === 0;
-  const limitedSyncReady = bookingVerified && structureReady && channelAttached && channelActive;
-  const feedReady = bookingVerified && Boolean(externalPropertyId);
-  const goLiveReady = setupState.metadata.channel_ready_for_assisted_go_live === true;
-  const goLiveBlockers = [
-    bookingVerified ? null : "Booking.com connection not operator-verified",
-    externalPropertyId ? null : "Channex property missing",
-    activeRoomsCount > 0 ? null : "No active room",
-    missingRoomMappings.length === 0 ? null : `Missing room mappings: ${missingRoomMappings.join(", ")}`,
-    missingRatePlans.length === 0 ? null : `Missing rate plans: ${missingRatePlans.join(", ")}`,
-    lastLimitedAriSyncLog?.status === "success" ? null : "Limited ARI test sync not successful yet",
-    lastBookingFeedLog?.status === "success" ? null : "Booking feed poll not successful yet",
-    channelAttached ? null : "Channel not attached",
-    channelActive ? null : "Channel not active",
-  ].filter((item): item is string => Boolean(item));
-
-  const formatLog = (log: HostProChannelFoundation["syncLogs"][number] | null): string =>
-    log ? `${labelizeToken(log.status, "status")} · ${formatDateTime(log.createdAt)}` : "Not run";
-
-  const runOperatorAction = async (
-    action: string,
-    url: string,
-    body: Record<string, unknown>
-  ): Promise<void> => {
-    setPendingAction(action);
-    setFeedback(null);
-
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-      const payload = (await response.json()) as {
-        ok?: boolean;
-        status?: string;
-        message?: string;
-        error?: string;
-        blockers?: string[];
-        windowDays?: number;
-        eligibleRooms?: number;
-        revisionsFound?: number;
-        storedCount?: number;
-        insertedCount?: number;
-        updatedCount?: number;
-      };
-
-      const message =
-        payload.message ??
-        payload.error ??
-        (response.ok ? "Operator action completed." : "Operator action failed.");
-      const summary =
-        typeof payload.windowDays === "number"
-          ? `${payload.windowDays}-day window · ${payload.eligibleRooms ?? 0} eligible room${payload.eligibleRooms === 1 ? "" : "s"}`
-          : typeof payload.revisionsFound === "number"
-            ? `${payload.revisionsFound} matched revision${payload.revisionsFound === 1 ? "" : "s"} · ${payload.storedCount ?? 0} stored`
-            : payload.status
-              ? labelizeToken(payload.status, "status")
-              : undefined;
-
-      setFeedback({
-        ok: Boolean(response.ok && payload.ok !== false),
-        message,
-        blockers: Array.isArray(payload.blockers) ? payload.blockers : undefined,
-        summary,
-      });
-
-      router.refresh();
-    } catch (error) {
-      setFeedback({
-        ok: false,
-        message: error instanceof Error ? error.message : "Unable to run operator action.",
-      });
-    } finally {
-      setPendingAction(null);
-    }
-  };
-
-  return (
-    <article className={styles.listCard}>
-      <div className={styles.listTitle}>Booking.com assisted channel manager</div>
-      <div className={styles.cardCopy}>
-        Operator-only path for creating/linking Channex structure, running a limited selected-property test sync, polling the selected-property booking feed, and marking assisted go-live readiness. This never activates a channel.
-      </div>
-
-      <div className={styles.placeholderGrid} style={{ marginTop: 12 }}>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Famlo family/property id</div>
-          <div className={styles.placeholderCopy}>{familyId}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Channex property id</div>
-          <div className={styles.placeholderCopy}>{externalPropertyId ?? "Missing"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Booking.com verification</div>
-          <div className={styles.placeholderCopy}>{bookingVerified ? "Operator verified" : "Not verified"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Channel attached / active</div>
-          <div className={styles.placeholderCopy}>{channelAttached ? "Attached" : "Detached"} · {channelActive ? "Active" : "Inactive"}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Room mappings</div>
-          <div className={styles.placeholderCopy}>{roomMappingsReadyCount}/{activeRoomsCount} ready</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Rate plans</div>
-          <div className={styles.placeholderCopy}>{ratePlansReadyCount}/{activeRoomsCount} ready</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Limited ARI test</div>
-          <div className={styles.placeholderCopy}>{formatLog(lastLimitedAriSyncLog)}</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Booking feed poll</div>
-          <div className={styles.placeholderCopy}>{formatLog(lastBookingFeedLog)} · {bookingRevisionsCount} stored previews</div>
-        </div>
-        <div className={styles.placeholderRow}>
-          <div className={styles.placeholderTitle}>Assisted go-live</div>
-          <div className={styles.placeholderCopy}>
-            {goLiveReady ? "Ready for assisted review" : "Not ready"} · {formatLog(lastAssistedGoLiveLog)}
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.mappingTable} style={{ marginTop: 14 }}>
-        <div className={styles.mappingHeader}>Step</div>
-        <div className={styles.mappingHeader}>Last result</div>
-        <div className={styles.mappingHeader}>Operator action</div>
-
-        <div className={styles.mappingCell}>
-          <div className={styles.mappingTitle}>Create/link Channex property</div>
-          <div className={styles.mappingSubcopy}>Selected family only.</div>
-        </div>
-        <div className={styles.mappingCellMuted}>{formatLog(lastCreatePropertyLog)}</div>
-        <div className={styles.mappingCell}>
-          <button
-            type="button"
-            className={styles.secondaryActionButton}
-            disabled={pendingAction != null || Boolean(externalPropertyId)}
-            onClick={() => runOperatorAction("create-property", "/api/host/pro/channel/channex/operator/setup", { familyId, action: "create_property" })}
-          >
-            {pendingAction === "create-property" ? "Creating..." : externalPropertyId ? "Property linked" : "Create/link property"}
-          </button>
-        </div>
-
-        <div className={styles.mappingCell}>
-          <div className={styles.mappingTitle}>Create/link room types</div>
-          <div className={styles.mappingSubcopy}>{missingRoomMappings.length > 0 ? `Missing: ${missingRoomMappings.join(", ")}` : "All active rooms prepared."}</div>
-        </div>
-        <div className={styles.mappingCellMuted}>{formatLog(lastCreateRoomTypeLog)}</div>
-        <div className={styles.mappingCell}>
-          <button
-            type="button"
-            className={styles.secondaryActionButton}
-            disabled={pendingAction != null || !externalPropertyId}
-            onClick={() => runOperatorAction("create-rooms", "/api/host/pro/channel/channex/operator/setup", { familyId, action: "create_room_types" })}
-          >
-            {pendingAction === "create-rooms" ? "Creating..." : "Create/link room types"}
-          </button>
-        </div>
-
-        <div className={styles.mappingCell}>
-          <div className={styles.mappingTitle}>Create/link rate plans</div>
-          <div className={styles.mappingSubcopy}>{missingRatePlans.length > 0 ? `Missing: ${missingRatePlans.join(", ")}` : "All active room prices prepared."}</div>
-        </div>
-        <div className={styles.mappingCellMuted}>{formatLog(lastCreateRatePlanLog)}</div>
-        <div className={styles.mappingCell}>
-          <button
-            type="button"
-            className={styles.secondaryActionButton}
-            disabled={pendingAction != null || !externalPropertyId || missingRoomMappings.length > 0}
-            onClick={() => runOperatorAction("create-rates", "/api/host/pro/channel/channex/operator/setup", { familyId, action: "create_rate_plans" })}
-          >
-            {pendingAction === "create-rates" ? "Creating..." : "Create/link rate plans"}
-          </button>
-        </div>
-
-        <div className={styles.mappingCell}>
-          <div className={styles.mappingTitle}>Run limited ARI test sync</div>
-          <div className={styles.mappingSubcopy}>Booking.com / Channex only. Selected property only. Default 7 days, hard cap 14 days.</div>
-        </div>
-        <div className={styles.mappingCellMuted}>{limitedSyncReady ? "Ready to run" : "Blocked until verified, mapped, and active"}</div>
-        <div className={styles.mappingCell}>
-          <button
-            type="button"
-            className={styles.primaryActionButton}
-            disabled={pendingAction != null || !limitedSyncReady}
-            onClick={() => runOperatorAction("limited-ari", "/api/host/pro/channel/channex/operator/ari-test", { familyId, providerKey: "booking", windowDays: 7 })}
-          >
-            {pendingAction === "limited-ari" ? "Running..." : "Run limited ARI test sync"}
-          </button>
-        </div>
-
-        <div className={styles.mappingCell}>
-          <div className={styles.mappingTitle}>Poll booking feed</div>
-          <div className={styles.mappingSubcopy}>Stores selected-property preview rows only. Import and acknowledgement are not automatic.</div>
-        </div>
-        <div className={styles.mappingCellMuted}>{feedReady ? "Ready to poll" : "Blocked until property and verification are ready"}</div>
-        <div className={styles.mappingCell}>
-          <button
-            type="button"
-            className={styles.secondaryActionButton}
-            disabled={pendingAction != null || !feedReady}
-            onClick={() => runOperatorAction("booking-feed", "/api/host/pro/channel/channex/operator/bookings/feed", { familyId, providerKey: "booking" })}
-          >
-            {pendingAction === "booking-feed" ? "Polling..." : "Poll selected-property booking feed"}
-          </button>
-        </div>
-
-        <div className={styles.mappingCell}>
-          <div className={styles.mappingTitle}>Mark ready for assisted go-live</div>
-          <div className={styles.mappingSubcopy}>{goLiveBlockers.length > 0 ? goLiveBlockers.join(" · ") : "All safe gates are satisfied."}</div>
-        </div>
-        <div className={styles.mappingCellMuted}>{goLiveReady ? "Ready metadata saved" : "No activation will occur"}</div>
-        <div className={styles.mappingCell}>
-          <button
-            type="button"
-            className={styles.secondaryActionButton}
-            disabled={pendingAction != null}
-            onClick={() => runOperatorAction("go-live-ready", "/api/host/pro/channel/channex/operator/go-live-readiness", { familyId, providerKey: "booking" })}
-          >
-            {pendingAction === "go-live-ready" ? "Checking..." : "Mark assisted go-live ready"}
-          </button>
-        </div>
-      </div>
-
-      {feedback ? (
-        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`} style={{ marginTop: 12 }}>
-          {feedback.message}
-          {feedback.summary ? <div className={styles.feedCopy} style={{ marginTop: 8 }}>{feedback.summary}</div> : null}
-          {feedback.blockers && feedback.blockers.length > 0 ? (
-            <div className={styles.stack} style={{ marginTop: 8 }}>
-              {feedback.blockers.map((blocker) => (
-                <div key={blocker} className={styles.feedCopy}>- {blocker}</div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
-        Import, cancellation apply, and acknowledgement remain in the existing booking diagnostics below. Nothing here activates Booking.com, starts scheduled sync, or acknowledges provider bookings.
-      </div>
-    </article>
   );
 }
 
@@ -8819,12 +7981,12 @@ function ChannexRoomTypeBatchCard({
               setFeedback(null);
 
               try {
-                const response = await fetch("/api/host/pro/channel/channex/operator/setup", {
+                const response = await fetch("/api/host/pro/channel/channex/rooms", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
                   },
-                  body: JSON.stringify({ familyId, action: "create_room_types" }),
+                  body: JSON.stringify({ familyId }),
                 });
 
                 const payload = (await response.json()) as {
@@ -8939,12 +8101,12 @@ function ChannexRatePlanBatchCard({
               setFeedback(null);
 
               try {
-                const response = await fetch("/api/host/pro/channel/channex/operator/setup", {
+                const response = await fetch("/api/host/pro/channel/channex/rate-plans", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
                   },
-                  body: JSON.stringify({ familyId, action: "create_rate_plans" }),
+                  body: JSON.stringify({ familyId }),
                 });
 
                 const payload = (await response.json()) as {
@@ -9646,12 +8808,12 @@ function ChannexBookingFeedCard({
 }>): React.JSX.Element {
   const router = useRouter();
   const [isFetching, startFetching] = useTransition();
-  const [isPreviewingRevision, startPreviewingRevision] = useTransition();
   const [isImportingPreview, startImportingPreview] = useTransition();
+  const [isApplyingModification, startApplyingModification] = useTransition();
   const [isApplyingCancellation, startApplyingCancellation] = useTransition();
   const [isAcknowledgingPreview, startAcknowledgingPreview] = useTransition();
-  const [previewingRevisionId, setPreviewingRevisionId] = useState<string | null>(null);
   const [importingPreviewId, setImportingPreviewId] = useState<string | null>(null);
+  const [applyingModificationId, setApplyingModificationId] = useState<string | null>(null);
   const [applyingCancellationId, setApplyingCancellationId] = useState<string | null>(null);
   const [acknowledgingPreviewId, setAcknowledgingPreviewId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -9742,13 +8904,13 @@ function ChannexBookingFeedCard({
     <section className={styles.cardInset}>
       <div className={styles.cardHeaderCompact}>
         <div>
-          <div className={styles.listTitle}>Booking.com import test flow</div>
+          <div className={styles.listTitle}>Channex booking feed</div>
           <div className={styles.cardCopy}>
-            Operator-only Booking.com/Channex booking previews for the selected property. Preview before apply, import before acknowledge, and no payment/refund logic runs here.
+            Preview of Channex staging booking revisions. New bookings and cancellations can sync automatically, while modification revisions stay operator-reviewed before acknowledgement.
           </div>
         </div>
         <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
-          {blockedMessage ? "Blocked" : "Operator-only"}
+          {blockedMessage ? "Blocked" : "Read-only"}
         </span>
       </div>
 
@@ -9921,64 +9083,8 @@ function ChannexBookingFeedCard({
                           type="button"
                           className={styles.secondaryActionButton}
                           disabled={
-                            isPreviewingRevision ||
                             isImportingPreview ||
-                            isApplyingCancellation ||
-                            Boolean(blockedMessage) ||
-                            !revision.externalRoomTypeId
-                          }
-                          onClick={() => {
-                            startPreviewingRevision(async () => {
-                              setPreviewingRevisionId(typeof revision.id === "string" ? revision.id : null);
-                              try {
-                                const response = await fetch("/api/host/pro/channel/channex/operator/bookings/preview", {
-                                  method: "POST",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({
-                                    familyId,
-                                    providerKey: "booking",
-                                    channelBookingRevisionId: revision.id,
-                                  }),
-                                });
-
-                                const payload = (await response.json()) as {
-                                  ok?: boolean;
-                                  message?: string;
-                                  error?: string;
-                                  blockers?: string[];
-                                };
-
-                                if (!response.ok || !payload.ok) {
-                                  throw new Error(payload.error ?? payload.message ?? "Unable to preview this Booking.com revision.");
-                                }
-
-                                const blockers = Array.isArray(payload.blockers) && payload.blockers.length > 0
-                                  ? ` Blockers: ${payload.blockers.join(" · ")}`
-                                  : "";
-                                setFeedback({
-                                  ok: true,
-                                  message: `${payload.message ?? "Preview loaded for the selected property."}${blockers}`,
-                                });
-                              } catch (error) {
-                                setFeedback({
-                                  ok: false,
-                                  message: error instanceof Error ? error.message : "Unable to preview this Booking.com revision.",
-                                });
-                              } finally {
-                                setPreviewingRevisionId(null);
-                              }
-                            });
-                          }}
-                        >
-                          {isPreviewingRevision && previewingRevisionId === revision.id ? "Previewing..." : "Preview safety"}
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.secondaryActionButton}
-                          disabled={
-                            isImportingPreview ||
+                            isApplyingModification ||
                             isApplyingCancellation ||
                             Boolean(blockedMessage) ||
                             revision.importStatus === "imported" ||
@@ -9991,14 +9097,13 @@ function ChannexBookingFeedCard({
                             startImportingPreview(async () => {
                                 setImportingPreviewId(typeof revision.id === "string" ? revision.id : null);
                               try {
-                                const response = await fetch("/api/host/pro/channel/channex/operator/bookings/apply", {
+                                const response = await fetch("/api/host/pro/channel/channex/bookings/import-preview", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
                                   body: JSON.stringify({
                                     familyId,
-                                    providerKey: "booking",
                                     channelBookingRevisionId: revision.id,
                                   }),
                                 });
@@ -10040,8 +9145,57 @@ function ChannexBookingFeedCard({
                               : "Import to Famlo"}
                         </button>
                         {revision.importStatus === "modified_pending_review" ? (
-                          <button type="button" className={styles.secondaryActionButton} disabled>
-                            Modification manual only
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            disabled={isApplyingModification || Boolean(blockedMessage)}
+                            onClick={() => {
+                              startApplyingModification(async () => {
+                                setApplyingModificationId(typeof revision.id === "string" ? revision.id : null);
+                                try {
+                                  const response = await fetch("/api/host/pro/channel/channex/bookings/apply-modification", {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      channelBookingRevisionId: revision.id,
+                                    }),
+                                  });
+
+                                  const payload = (await response.json()) as {
+                                    ok?: boolean;
+                                    message?: string;
+                                    error?: string;
+                                    status?: string;
+                                  };
+
+                                  if (!response.ok || !payload.ok) {
+                                    throw new Error(payload.error ?? payload.message ?? "Unable to apply this Channex booking modification.");
+                                  }
+
+                                  setFeedback({
+                                    ok: true,
+                                    message:
+                                      typeof payload.message === "string" && payload.message.trim().length > 0
+                                        ? payload.message
+                                        : "Modification applied to Famlo. Not acknowledged yet.",
+                                  });
+                                  router.refresh();
+                                } catch (error) {
+                                  setFeedback({
+                                    ok: false,
+                                    message: error instanceof Error ? error.message : "Unable to apply this Channex booking modification.",
+                                  });
+                                } finally {
+                                  setApplyingModificationId(null);
+                                }
+                              });
+                            }}
+                          >
+                            {isApplyingModification && applyingModificationId === revision.id
+                              ? "Applying..."
+                              : "Apply modification"}
                           </button>
                         ) : null}
                         {revision.importStatus === "modified_pending_review" ? (
@@ -10069,14 +9223,12 @@ function ChannexBookingFeedCard({
                               startApplyingCancellation(async () => {
                                 setApplyingCancellationId(typeof revision.id === "string" ? revision.id : null);
                                 try {
-                                  const response = await fetch("/api/host/pro/channel/channex/operator/bookings/cancel", {
+                                  const response = await fetch("/api/host/pro/channel/channex/bookings/apply-cancellation", {
                                     method: "POST",
                                     headers: {
                                       "Content-Type": "application/json",
                                     },
                                     body: JSON.stringify({
-                                      familyId,
-                                      providerKey: "booking",
                                       channelBookingRevisionId: revision.id,
                                     }),
                                   });
@@ -10134,14 +9286,12 @@ function ChannexBookingFeedCard({
                                 startAcknowledgingPreview(async () => {
                                   setAcknowledgingPreviewId(typeof revision.id === "string" ? revision.id : null);
                                   try {
-                                    const response = await fetch("/api/host/pro/channel/channex/operator/bookings/acknowledge", {
+                                    const response = await fetch("/api/host/pro/channel/channex/bookings/acknowledge", {
                                       method: "POST",
                                       headers: {
                                         "Content-Type": "application/json",
                                       },
                                       body: JSON.stringify({
-                                        familyId,
-                                        providerKey: "booking",
                                         channelBookingRevisionId: revision.id,
                                       }),
                                     });
@@ -10206,12 +9356,12 @@ function ChannexBookingFeedCard({
               setFeedback(null);
 
               try {
-                const response = await fetch("/api/host/pro/channel/channex/operator/bookings/feed", {
+                const response = await fetch("/api/host/pro/channel/channex/bookings/feed", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
                   },
-                  body: JSON.stringify({ familyId, providerKey: "booking" }),
+                  body: JSON.stringify({ familyId }),
                 });
 
                 const payload = (await response.json()) as {
