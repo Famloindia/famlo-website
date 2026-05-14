@@ -379,6 +379,7 @@ type PropertyContentDraft = {
 
 interface FamloProDashboardShellProps {
   familyId: string;
+  isAdminView: boolean;
   hostUserId: string | null;
   hostProfile: HostProfileSummary;
   roomRouteState?: {
@@ -1493,6 +1494,7 @@ function buildSectionDescriptor(
 
 export default function FamloProDashboardShell({
   familyId,
+  isAdminView,
   hostUserId,
   hostProfile,
   roomRouteState = null,
@@ -1553,7 +1555,7 @@ export default function FamloProDashboardShell({
   const isPropertiesHomeView = activeSection === "properties-home" && !roomRouteState;
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
-  const showChannelOperatorDiagnostics = false;
+  const showChannelOperatorDiagnostics = isAdminView;
   const simplePropertiesHref = `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=properties-home`;
   const hostWorkspacePropertyCount = propertyOptions.length;
   const hostProfilePhotoUrl = hostProfile.photoUrl;
@@ -5458,6 +5460,24 @@ export default function FamloProDashboardShell({
                   </div>
 
                   <div className={styles.listGrid}>
+                    {CHANNEL_PROVIDER_REGISTRY.filter((provider) => provider.key !== "booking").map((provider) => (
+                      <ProviderOperatorVerificationCard
+                        key={provider.key}
+                        familyId={familyId}
+                        providerKey={provider.key}
+                        setupState={channelSetupStatesByKey[provider.key]}
+                        channexPropertyId={primaryProperty?.externalPropertyId ?? null}
+                        readinessModel={channelReadinessModelsByKey[provider.key]}
+                        testSyncReadiness={channelTestSyncReadinessByKey[provider.key]}
+                        goLiveReadiness={channelGoLiveReadinessByKey[provider.key]}
+                        activeRoomsCount={activeRoomsCount}
+                        roomMappingsReadyCount={roomMappingsReadyCount}
+                        rateMappingsReadyCount={rateMappingsReadyCount}
+                      />
+                    ))}
+                  </div>
+
+                  <div className={styles.listGrid}>
                     <article className={styles.listCard}>
                       <div className={styles.listTitle}>Read-only operator review panel</div>
                       <div className={styles.cardCopy}>
@@ -7762,6 +7782,404 @@ function BookingComVerificationCard({
             className={styles.secondaryActionButton}
             disabled={isMarkingFailed}
             onClick={() => sendVerificationAction("mark_failed", failureReason)}
+          >
+            {isMarkingFailed ? "Saving..." : "Mark verification failed"}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ProviderOperatorVerificationCard({
+  familyId,
+  providerKey,
+  setupState,
+  channexPropertyId,
+  readinessModel,
+  testSyncReadiness,
+  goLiveReadiness,
+  activeRoomsCount,
+  roomMappingsReadyCount,
+  rateMappingsReadyCount,
+}: Readonly<{
+  familyId: string;
+  providerKey: ChannelProviderKey;
+  setupState: ChannelSetupState;
+  channexPropertyId: string | null;
+  readinessModel: ChannelReadinessModel;
+  testSyncReadiness: ChannelTestSyncSnapshot;
+  goLiveReadiness: ChannelGoLiveSnapshot;
+  activeRoomsCount: number;
+  roomMappingsReadyCount: number;
+  rateMappingsReadyCount: number;
+}>): React.JSX.Element {
+  const router = useRouter();
+  const provider = getChannelProviderDefinition(providerKey);
+  const [isChecking, startChecking] = useTransition();
+  const [isMarkingApproved, startMarkingApproved] = useTransition();
+  const [isMarkingFailed, startMarkingFailed] = useTransition();
+  const [isOpeningWorkspace, startOpeningWorkspace] = useTransition();
+  const [failureReason, setFailureReason] = useState(setupState.metadata.provider_connection_error ?? "");
+  const [workspaceUrl, setWorkspaceUrl] = useState<string | null>(null);
+  const [workspaceHint, setWorkspaceHint] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    ok: boolean;
+    status: string;
+    message: string;
+    inspection?: {
+      propertyTitle?: string | null;
+      hotelId?: string | null;
+      activeChannelId?: string | null;
+      discoveredChannelTitle?: string | null;
+      channelAttached?: boolean;
+      channelActive?: boolean;
+      matchedChannelCount?: number;
+      roomTypesFoundCount?: number;
+      ratePlansFoundCount?: number;
+    };
+  } | null>(null);
+
+  const displayedHotelId = feedback?.inspection?.hotelId ?? setupState.metadata.provider_discovered_hotel_id ?? "Missing";
+  const displayedChannelId = feedback?.inspection?.activeChannelId ?? setupState.metadata.provider_discovered_channel_id ?? "Missing";
+  const displayedChannelTitle = feedback?.inspection?.discoveredChannelTitle ?? setupState.metadata.provider_discovered_channel_title ?? "Missing";
+  const displayedChannelAttached = feedback?.inspection?.channelAttached ?? setupState.metadata.provider_channel_attached ?? false;
+  const displayedChannelActive = feedback?.inspection?.channelActive ?? setupState.metadata.provider_channel_active ?? false;
+  const displayedMatchedCount = feedback?.inspection?.matchedChannelCount ?? (setupState.metadata.provider_channel_attached ? 1 : 0);
+  const displayedRoomTypes = feedback?.inspection?.roomTypesFoundCount ?? setupState.metadata.provider_room_types_found_count ?? 0;
+  const displayedRatePlans = feedback?.inspection?.ratePlansFoundCount ?? setupState.metadata.provider_rate_plans_found_count ?? 0;
+  const canMarkApproved = displayedChannelAttached && (displayedChannelActive || displayedChannelId !== "Missing");
+  const readinessBlockers = readinessModel.items.filter((item) => item.status !== "ready" && item.status !== "not_available");
+  const primaryBlockers = [
+    readinessModel.nextRequiredAction,
+    testSyncReadiness.nextRequiredAction,
+    goLiveReadiness.nextRequiredAction,
+  ].filter((value, index, list): value is string => Boolean(value) && list.indexOf(value) === index);
+  const readinessSummaryPills = [
+    `Progress ${readinessModel.progressPercent}%`,
+    `Rooms ${roomMappingsReadyCount}/${activeRoomsCount}`,
+    `Rates ${rateMappingsReadyCount}/${activeRoomsCount}`,
+    `Test sync ${testSyncReadiness.statusLabel}`,
+    `Go live ${goLiveReadiness.statusLabel}`,
+  ];
+
+  const openWorkspace = (): void => {
+    startOpeningWorkspace(async () => {
+      setFeedback(null);
+      try {
+        const response = await fetch("/api/host/pro/channel/channex/iframe", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            familyId,
+            providerKey,
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          iframeUrl?: string;
+          providerHint?: string;
+          error?: string;
+        };
+
+        if (!response.ok || !payload.iframeUrl) {
+          throw new Error(payload.error ?? "Unable to open the real Channex workspace.");
+        }
+
+        setWorkspaceUrl(payload.iframeUrl);
+        setWorkspaceHint(payload.providerHint ?? null);
+        setFeedback({
+          ok: true,
+          status: "workspace_ready",
+          message: `${provider.displayName} workspace is ready. Complete create/test/mapping in Channex, then come back and run Check in Channex.`,
+        });
+      } catch (error) {
+        setFeedback({
+          ok: false,
+          status: "failed",
+          message: error instanceof Error ? error.message : `Unable to open the ${provider.displayName} Channex workspace.`,
+        });
+      }
+    });
+  };
+
+  const sendAction = (action: "check_channel_attachment" | "mark_ota_approved" | "mark_failed", reason?: string): void => {
+    const runner =
+      action === "check_channel_attachment"
+        ? startChecking
+        : action === "mark_ota_approved"
+          ? startMarkingApproved
+          : startMarkingFailed;
+
+    runner(async () => {
+      setFeedback(null);
+
+      try {
+        const response = await fetch("/api/host/pro/channel/operator/provider-verify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            familyId,
+            providerKey,
+            action,
+            reason,
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          status?: string;
+          error?: string;
+          message?: string;
+          inspection?: {
+            propertyTitle?: string | null;
+            hotelId?: string | null;
+            activeChannelId?: string | null;
+            discoveredChannelTitle?: string | null;
+            channelAttached?: boolean;
+            channelActive?: boolean;
+            matchedChannelCount?: number;
+            roomTypesFoundCount?: number;
+            ratePlansFoundCount?: number;
+          };
+        };
+
+        setFeedback({
+          ok: Boolean(response.ok && payload.ok),
+          status: payload.status ?? "failed",
+          message:
+            payload.message ??
+            payload.error ??
+            (action === "check_channel_attachment"
+              ? `Checked ${provider.displayName} channel state in Channex.`
+              : action === "mark_ota_approved"
+                ? `Marked ${provider.displayName} approval as verified.`
+                : `Marked ${provider.displayName} verification as failed.`),
+          inspection: payload.inspection,
+        });
+        router.refresh();
+      } catch (error) {
+        setFeedback({
+          ok: false,
+          status: "failed",
+          message: error instanceof Error ? error.message : `Unable to complete the ${provider.displayName} verification action.`,
+        });
+      }
+    });
+  };
+
+  return (
+    <article className={styles.listCard}>
+      <div className={styles.listTitle}>{provider.displayName} operator verification</div>
+      <div className={styles.cardCopy}>
+        Operator-only connection check for the selected property. This reads Channex server-side, refreshes real channel state, and never activates the OTA.
+      </div>
+      <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+        {readinessSummaryPills.map((pill) => (
+          <span key={pill} className={styles.readinessPill}>
+            {pill}
+          </span>
+        ))}
+      </div>
+      <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
+        {providerKey === "mmt"
+          ? "Real MMT / Goibibo create and test-connection steps still happen inside Channex. Famlo opens the property-scoped workspace, then checks back the attached channel and mapping structures."
+          : providerKey === "airbnb"
+            ? "Real Airbnb connection still depends on authorization inside Channex or Airbnb-side access. Famlo checks the result after the real connection flow."
+            : providerKey === "agoda"
+              ? "Real Agoda / YCS connection still depends on Agoda-side approval and Channex channel setup. Famlo checks the result after the real connection flow."
+              : providerKey === "expedia"
+                ? "Real Expedia create and test-connection steps still happen inside Channex after Expedia connectivity approval. Famlo checks the result after the real connection flow."
+                : "Real Google Hotel feed/channel setup still happens inside Channex. Famlo checks the resulting channel state after the real setup flow."}
+      </div>
+
+      <div className={styles.placeholderGrid} style={{ marginTop: 12 }}>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Host-entered listing id</div>
+          <div className={styles.placeholderCopy}>{setupState.metadata.provider_listing_id ?? "Missing"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Host-entered property code</div>
+          <div className={styles.placeholderCopy}>{setupState.metadata.provider_property_code ?? "Missing"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Reference URL</div>
+          <div className={styles.placeholderCopy}>{setupState.metadata.provider_listing_url ?? "Missing"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Provider approval requested</div>
+          <div className={styles.placeholderCopy}>
+            {setupState.metadata.provider_extranet_request_acknowledged ? "Yes" : "No"}
+            {setupState.metadata.provider_verification_requested_at ? ` · ${formatDateTime(setupState.metadata.provider_verification_requested_at)}` : ""}
+          </div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Current Channex property id</div>
+          <div className={styles.placeholderCopy}>{channexPropertyId ?? "Missing"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Discovered hotel/provider id</div>
+          <div className={styles.placeholderCopy}>{displayedHotelId}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Discovered channel title</div>
+          <div className={styles.placeholderCopy}>{displayedChannelTitle}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Discovered channel id</div>
+          <div className={styles.placeholderCopy}>{displayedChannelId}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Channel attached</div>
+          <div className={styles.placeholderCopy}>{displayedChannelAttached ? "Yes" : "No"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Channel active</div>
+          <div className={styles.placeholderCopy}>{displayedChannelActive ? "Yes" : "No"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Matched channel count</div>
+          <div className={styles.placeholderCopy}>{displayedMatchedCount}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Room types / Rate plans</div>
+          <div className={styles.placeholderCopy}>{displayedRoomTypes} / {displayedRatePlans}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last verification status</div>
+          <div className={styles.placeholderCopy}>{setupState.metadata.provider_connection_status ?? "Not checked"}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Last error</div>
+          <div className={styles.placeholderCopy}>{setupState.metadata.provider_connection_error ?? "None"}</div>
+        </div>
+      </div>
+
+      {feedback ? (
+        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`} style={{ marginTop: 12 }}>
+          {feedback.message}
+        </div>
+      ) : null}
+
+      <div className={styles.stack} style={{ marginTop: 12 }}>
+        <div className={styles.listTitle}>Readiness verification after mapping</div>
+        <div className={styles.feedCopy}>
+          {readinessBlockers.length === 0
+            ? "This provider has no safe readiness blockers left in Famlo’s current model. Keep activation disabled until operator test sync and go-live review are complete."
+            : "These are the exact blockers Famlo still sees before operator test sync or go-live review."}
+        </div>
+        <div className={styles.placeholderGrid} style={{ marginTop: 8 }}>
+          {readinessModel.items
+            .filter((item) => item.key === "connection_verified" || item.key === "room_matching" || item.key === "price_matching" || item.key === "test_sync" || item.key === "activation")
+            .map((item) => (
+              <div key={item.key} className={styles.placeholderRow}>
+                <div className={styles.placeholderTitle}>{item.label}</div>
+                <div className={styles.placeholderCopy}>{item.explanation}</div>
+                <div className={styles.inlineBadgeRow} style={{ marginTop: 6 }}>
+                  <span
+                    className={`${styles.readinessPill} ${
+                      item.status === "ready"
+                        ? styles.readinessPillOk
+                        : item.status === "blocked" || item.status === "in_progress"
+                          ? styles.readinessPillReview
+                          : styles.readinessPillMissing
+                    }`}
+                  >
+                    {item.status === "ready"
+                      ? "Done"
+                      : item.status === "blocked"
+                        ? "Blocked"
+                        : item.status === "in_progress"
+                          ? "In progress"
+                          : item.status === "needed"
+                            ? "Needed"
+                            : item.status}
+                  </span>
+                  {item.operatorNote ? <span className={styles.readinessPill}>{item.operatorNote}</span> : null}
+                </div>
+              </div>
+            ))}
+        </div>
+        <div className={styles.feedbackBox} style={{ marginTop: 8 }}>
+          {primaryBlockers[0] ?? "No blockers recorded."}
+        </div>
+        {primaryBlockers.length > 1 ? (
+          <div className={styles.stack} style={{ marginTop: 8 }}>
+            {primaryBlockers.slice(1).map((blocker) => (
+              <div key={blocker} className={styles.feedCopy}>
+                {blocker}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isOpeningWorkspace}
+          onClick={openWorkspace}
+        >
+          {isOpeningWorkspace ? "Opening..." : "Open real Channex setup"}
+        </button>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isChecking}
+          onClick={() => sendAction("check_channel_attachment")}
+        >
+          {isChecking ? "Checking..." : `Check ${provider.displayName} in Channex`}
+        </button>
+        <button
+          type="button"
+          className={styles.primaryActionButton}
+          disabled={isMarkingApproved || !canMarkApproved}
+          onClick={() => sendAction("mark_ota_approved")}
+        >
+          {isMarkingApproved ? "Saving..." : `Mark ${provider.displayName} approved`}
+        </button>
+      </div>
+
+      {workspaceUrl ? (
+        <div className={styles.stack} style={{ marginTop: 12 }}>
+          <div className={styles.feedbackBox}>
+            {workspaceHint ?? "This opens the real property-scoped Channex setup UI for this provider."}
+          </div>
+          <div className={styles.inlineActionRow}>
+            <a
+              className={styles.secondaryActionButton}
+              href={workspaceUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open in new tab
+            </a>
+          </div>
+        </div>
+      ) : null}
+
+      <div className={styles.stack} style={{ marginTop: 12 }}>
+        <label>
+          <span className={styles.fieldLabel}>Verification failure reason</span>
+          <input
+            className={styles.fieldInput}
+            value={failureReason}
+            onChange={(event) => setFailureReason(event.target.value)}
+            placeholder={`Example: ${provider.displayName} channel not attached yet in Channex`}
+          />
+        </label>
+        <div className={styles.inlineActionRow}>
+          <button
+            type="button"
+            className={styles.secondaryActionButton}
+            disabled={isMarkingFailed}
+            onClick={() => sendAction("mark_failed", failureReason)}
           >
             {isMarkingFailed ? "Saving..." : "Mark verification failed"}
           </button>

@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
 
 import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardShell";
+import { hasValidAdminSession } from "@/lib/admin-auth";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { loadCanonicalCalendar } from "@/lib/calendar";
@@ -349,6 +350,7 @@ export async function renderFamloProDashboardPage({
   searchParams,
   roomRouteState = null,
 }: Readonly<FamloProDashboardRenderProps>): Promise<React.JSX.Element> {
+  const isAdminView = await hasValidAdminSession().catch(() => false);
   const params = await searchParams;
   const cookieStore = await cookies();
   const requestedFamilyId = normalizeFamilyId(params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "");
@@ -1242,6 +1244,7 @@ export async function renderFamloProDashboardPage({
   return (
     <FamloProDashboardShell
       roomRouteState={roomRouteState}
+      isAdminView={isAdminView}
       hostUserId={hostSession?.hostUserId ?? null}
       hostProfile={hostProfile}
       propertyName={propertyName}

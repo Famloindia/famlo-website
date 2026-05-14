@@ -1,0 +1,723 @@
+diff --git a/app/api/host/pro/channel/channex/provider-refresh/route.ts b/app/api/host/pro/channel/channex/provider-refresh/route.ts
+index 7d710f05..53ed1f16 100644
+--- a/app/api/host/pro/channel/channex/provider-refresh/route.ts
++++ b/app/api/host/pro/channel/channex/provider-refresh/route.ts
+@@ -1,15 +1,14 @@
+ import { NextResponse } from "next/server";
+ 
+ import {
+-  fetchChannexChannelsForProperty,
+-  fetchChannexPropertyById,
+-  fetchChannexRatePlansForProperty,
+-  fetchChannexRoomTypesForProperty,
+   getChannexConfigSummary,
+-  type ChannexChannelStructureRecord,
+ } from "@/lib/channel-providers/channex/client";
++import {
++  buildProviderRefreshState,
++  inspectProviderConnectionInChannex,
++} from "@/lib/channel-providers/provider-adapter";
+ import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+-import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupState } from "@/lib/channel-setup-state";
++import { isChannelProviderKey, readChannelSetupState } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -27,17 +26,6 @@ function asRecord(value: unknown): Record<string, unknown> {
+   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+ }
+ 
+-function providerChannelMatches(providerKey: ChannelProviderKey, channel: ChannexChannelStructureRecord): boolean {
+-  const haystack = `${channel.title ?? ""} ${channel.hotelId ?? ""}`.toLowerCase();
+-
+-  if (providerKey === "booking") return /booking/.test(haystack);
+-  if (providerKey === "mmt") return /make.?my.?trip|goibibo|\bmmt\b/.test(haystack);
+-  if (providerKey === "airbnb") return /airbnb/.test(haystack);
+-  if (providerKey === "agoda") return /agoda|ycs/.test(haystack);
+-  if (providerKey === "expedia") return /expedia/.test(haystack);
+-  return /google/.test(haystack);
+-}
+-
+ async function logRefreshEvent(input: {
+   supabase: ReturnType<typeof createAdminSupabaseClient>;
+   familyId: string;
+@@ -129,91 +117,25 @@ export async function POST(request: Request): Promise<NextResponse> {
+       );
+     }
+ 
+-    const [propertyResult, channelsResult, roomTypesResult, ratePlansResult] = await Promise.all([
+-      fetchChannexPropertyById(externalPropertyId),
+-      fetchChannexChannelsForProperty(externalPropertyId),
+-      fetchChannexRoomTypesForProperty(externalPropertyId),
+-      fetchChannexRatePlansForProperty(externalPropertyId),
+-    ]);
+-
+-    if (!propertyResult.ok || !channelsResult.ok || !roomTypesResult.ok || !ratePlansResult.ok) {
+-      const message = propertyResult.message || channelsResult.message || roomTypesResult.message || ratePlansResult.message;
+-      throw new Error(message);
++    const inspectionResult = await inspectProviderConnectionInChannex(providerKey, externalPropertyId);
++    if (!inspectionResult.ok) {
++      throw new Error(inspectionResult.message);
+     }
+-
+-    const matchedChannels = channelsResult.data.filter((channel) => providerChannelMatches(providerKey, channel));
+-    const activeChannel = matchedChannels.find((channel) => channel.isActive) ?? null;
+-    const discoveredChannel = activeChannel ?? matchedChannels[0] ?? null;
+-    const channelAttached = matchedChannels.length > 0;
+-    const channelActive = Boolean(activeChannel?.id);
+-    const discoveredHotelId = discoveredChannel?.hotelId ?? null;
+-    const roomTypesFoundCount = roomTypesResult.data.length;
+-    const ratePlansFoundCount = ratePlansResult.data.length;
+-    const nowIso = new Date().toISOString();
+-
++    const inspection = inspectionResult.inspection;
+     const currentMetadata = asRecord(providerRow?.metadata);
+-    const nextSetupMetadata = mergeChannelSetupMetadata(currentMetadata, {
+-      status: channelAttached ? "matching_needed" : "connection_requested",
+-      currentStep: channelAttached ? "room_matching" : "connection",
+-      lastError: null,
+-      metadataPatch: providerKey === "booking"
+-        ? {
+-            booking_connection_status: channelAttached ? "channel_visible_in_channex" : "verification_requested",
+-            booking_connection_error: null,
+-            provider_discovered_hotel_id: discoveredHotelId,
+-            provider_discovered_channel_id: discoveredChannel?.id ?? null,
+-            provider_discovered_channel_title: discoveredChannel?.title ?? null,
+-            provider_channel_attached: channelAttached,
+-            provider_channel_active: channelActive,
+-            provider_room_types_found_count: roomTypesFoundCount,
+-            provider_rate_plans_found_count: ratePlansFoundCount,
+-            provider_structure_refreshed_at: nowIso,
+-          }
+-        : {
+-            provider_connection_status: channelAttached ? "channel_visible_in_channex" : (currentMetadata.channel_setup && typeof currentMetadata.channel_setup === "object"
+-              ? asString((currentMetadata.channel_setup as Record<string, unknown>).provider_connection_status)
+-              : "") || "details_submitted",
+-            provider_connection_error: null,
+-            provider_discovered_hotel_id: discoveredHotelId,
+-            provider_discovered_channel_id: discoveredChannel?.id ?? null,
+-            provider_discovered_channel_title: discoveredChannel?.title ?? null,
+-            provider_channel_attached: channelAttached,
+-            provider_channel_active: channelActive,
+-            provider_room_types_found_count: roomTypesFoundCount,
+-            provider_rate_plans_found_count: ratePlansFoundCount,
+-            provider_structure_refreshed_at: nowIso,
+-          },
+-      updatedAt: nowIso,
++    const refreshState = buildProviderRefreshState({
++      providerKey,
++      currentMetadata,
++      inspection,
+     });
+-    const nextMetadata = {
+-      ...nextSetupMetadata,
+-      provider_mapping_catalog: {
+-        room_types: roomTypesResult.data.map((roomType) => ({
+-          id: roomType.id,
+-          title: roomType.title,
+-          property_id: roomType.propertyId,
+-          count_of_rooms: roomType.countOfRooms,
+-        })),
+-        rate_plans: ratePlansResult.data.map((ratePlan) => ({
+-          id: ratePlan.id,
+-          title: ratePlan.title,
+-          property_id: ratePlan.propertyId,
+-          room_type_id: ratePlan.roomTypeId,
+-        })),
+-        refreshed_at: nowIso,
+-      },
+-    };
++    const nextMetadata = refreshState.metadata;
++    const nowIso = inspection.structureRefreshedAt;
+ 
+     const payload = {
+       family_id: familyId,
+       provider_code: providerKey,
+       external_property_id: typeof providerRow?.external_property_id === "string" ? providerRow.external_property_id : null,
+-      sync_status:
+-        channelAttached && channelActive
+-          ? "connected"
+-          : typeof providerRow?.sync_status === "string"
+-            ? providerRow.sync_status
+-            : "not_connected",
++      sync_status: refreshState.syncStatus,
+       metadata: nextMetadata,
+       updated_at: nowIso,
+     };
+@@ -236,15 +158,15 @@ export async function POST(request: Request): Promise<NextResponse> {
+       familyId,
+       providerKey,
+       status: "success",
+-      message: channelAttached
++      message: inspection.channelAttached
+         ? "Refreshed provider connection state from Channex."
+         : "Refreshed Channex structure, but a matching provider channel was not detected yet.",
+       payload: {
+         external_property_id: externalPropertyId,
+-        matched_channel_count: matchedChannels.length,
+-        active_channel_id: activeChannel?.id ?? null,
+-        room_types_found_count: roomTypesFoundCount,
+-        rate_plans_found_count: ratePlansFoundCount,
++        matched_channel_count: inspection.matchedChannelCount,
++        active_channel_id: inspection.activeChannelId,
++        room_types_found_count: inspection.roomTypesFoundCount,
++        rate_plans_found_count: inspection.ratePlansFoundCount,
+       },
+     });
+ 
+@@ -266,21 +188,21 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     return NextResponse.json({
+       ok: true,
+-      status: channelAttached ? "channel_visible" : "channel_not_detected",
+-      message: channelAttached
++      status: inspection.channelAttached ? "channel_visible" : "channel_not_detected",
++      message: inspection.channelAttached
+         ? "Real Channex channel state was loaded for this property."
+         : "No matching provider channel was detected yet on this Channex property.",
+       verification: {
+-        propertyTitle: propertyResult.data?.title ?? null,
+-        hotelId: discoveredHotelId,
+-        activeChannelId: activeChannel?.id ?? null,
+-        activeChannelTitle: activeChannel?.title ?? null,
+-        channelAttached,
+-        channelActive,
+-        matchedChannelCount: matchedChannels.length,
+-        roomTypesFoundCount,
+-        ratePlansFoundCount,
+-        structureRefreshedAt: nowIso,
++        propertyTitle: inspection.propertyTitle,
++        hotelId: inspection.hotelId,
++        activeChannelId: inspection.activeChannelId,
++        activeChannelTitle: inspection.activeChannelTitle,
++        channelAttached: inspection.channelAttached,
++        channelActive: inspection.channelActive,
++        matchedChannelCount: inspection.matchedChannelCount,
++        roomTypesFoundCount: inspection.roomTypesFoundCount,
++        ratePlansFoundCount: inspection.ratePlansFoundCount,
++        structureRefreshedAt: inspection.structureRefreshedAt,
+       },
+       catalog: (nextMetadata.provider_mapping_catalog as Record<string, unknown>) ?? null,
+       state,
+diff --git a/app/api/host/pro/channel/operator/provider-verify/route.ts b/app/api/host/pro/channel/operator/provider-verify/route.ts
+index 1348f57f..f20ddb04 100644
+--- a/app/api/host/pro/channel/operator/provider-verify/route.ts
++++ b/app/api/host/pro/channel/operator/provider-verify/route.ts
+@@ -1,12 +1,16 @@
+ import { NextResponse } from "next/server";
+ 
++import {
++  buildProviderRefreshState,
++  inspectProviderConnectionInChannex,
++} from "@/lib/channel-providers/provider-adapter";
+ import { CHANNEL_PROVIDER_REGISTRY, type ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+ import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupState } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+ 
+-type ProviderVerifyAction = "mark_ota_approved" | "mark_failed";
++type ProviderVerifyAction = "check_channel_attachment" | "mark_ota_approved" | "mark_failed";
+ 
+ type ProviderVerifyBody = {
+   familyId?: string;
+@@ -24,7 +28,7 @@ function asRecord(value: unknown): Record<string, unknown> {
+ }
+ 
+ function isProviderVerifyAction(value: string): value is ProviderVerifyAction {
+-  return value === "mark_ota_approved" || value === "mark_failed";
++  return value === "check_channel_attachment" || value === "mark_ota_approved" || value === "mark_failed";
+ }
+ 
+ export async function POST(request: Request): Promise<NextResponse> {
+@@ -76,7 +80,71 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     if (lookupError) throw lookupError;
+ 
++    const { data: channexRow, error: channexLookupError } = await supabase
++      .from("channel_properties")
++      .select("external_property_id")
++      .eq("family_id", familyId)
++      .eq("provider_code", "channex")
++      .maybeSingle();
++
++    if (channexLookupError) throw channexLookupError;
++
++    const externalPropertyId =
++      typeof channexRow?.external_property_id === "string" && channexRow.external_property_id.trim().length > 0
++        ? channexRow.external_property_id.trim()
++        : null;
++
+     const nowIso = new Date().toISOString();
++    let inspectionPayload: Record<string, unknown> | null = null;
++
++    if (action === "check_channel_attachment") {
++      if (!externalPropertyId) {
++        return NextResponse.json(
++          {
++            ok: false,
++            status: "missing_property",
++            error: "Create or link the Channex property first.",
++          },
++          { status: 409 }
++        );
++      }
++
++      const inspectionResult = await inspectProviderConnectionInChannex(providerKey, externalPropertyId);
++      if (!inspectionResult.ok) {
++        return NextResponse.json(
++          {
++            ok: false,
++            status: "failed",
++            error: inspectionResult.message,
++          },
++          { status: 502 }
++        );
++      }
++
++      const refreshState = buildProviderRefreshState({
++        providerKey,
++        currentMetadata: asRecord(existingRow?.metadata),
++        inspection: inspectionResult.inspection,
++      });
++
++      const { error: refreshError } = await supabase
++        .from("channel_properties")
++        .upsert(
++          {
++            family_id: familyId,
++            provider_code: providerKey,
++            external_property_id: typeof existingRow?.external_property_id === "string" ? existingRow.external_property_id : null,
++            sync_status: refreshState.syncStatus,
++            metadata: refreshState.metadata,
++            updated_at: nowIso,
++          } as never,
++          { onConflict: "family_id,provider_code" }
++        );
++
++      if (refreshError) throw refreshError;
++      inspectionPayload = inspectionResult.inspection as unknown as Record<string, unknown>;
++    }
++
+     const metadataPatch =
+       action === "mark_ota_approved"
+         ? {
+@@ -146,12 +214,20 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     return NextResponse.json({
+       ok: true,
+-      status: action === "mark_ota_approved" ? "ota_approval_verified" : "verification_failed",
++      status:
++        action === "check_channel_attachment"
++          ? "channel_checked"
++          : action === "mark_ota_approved"
++            ? "ota_approval_verified"
++            : "verification_failed",
+       message:
+-        action === "mark_ota_approved"
++        action === "check_channel_attachment"
++          ? `${provider?.displayName ?? providerKey} channel state refreshed from Channex.`
++          : action === "mark_ota_approved"
+           ? `${provider?.displayName ?? providerKey} approval verified. Continue with room/rate mapping before sync.`
+           : `${provider?.displayName ?? providerKey} verification marked failed.`,
+       state,
++      inspection: inspectionPayload,
+     });
+   } catch (error) {
+     console.error("[host.pro.channel.operator.provider-verify] failed:", error);
+diff --git a/app/partnerslogin/home/pro/dashboard/render-dashboard.tsx b/app/partnerslogin/home/pro/dashboard/render-dashboard.tsx
+index 9b8246cd..ec68fffa 100644
+--- a/app/partnerslogin/home/pro/dashboard/render-dashboard.tsx
++++ b/app/partnerslogin/home/pro/dashboard/render-dashboard.tsx
+@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
+ import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
+ 
+ import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardShell";
++import { hasValidAdminSession } from "@/lib/admin-auth";
+ import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+ import { resolveAuthorizedHostSession } from "@/lib/chat-access";
+ import { loadCanonicalCalendar } from "@/lib/calendar";
+@@ -349,6 +350,7 @@ export async function renderFamloProDashboardPage({
+   searchParams,
+   roomRouteState = null,
+ }: Readonly<FamloProDashboardRenderProps>): Promise<React.JSX.Element> {
++  const isAdminView = await hasValidAdminSession().catch(() => false);
+   const params = await searchParams;
+   const cookieStore = await cookies();
+   const requestedFamilyId = normalizeFamilyId(params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "");
+@@ -1242,6 +1244,7 @@ export async function renderFamloProDashboardPage({
+   return (
+     <FamloProDashboardShell
+       roomRouteState={roomRouteState}
++      isAdminView={isAdminView}
+       hostUserId={hostSession?.hostUserId ?? null}
+       hostProfile={hostProfile}
+       propertyName={propertyName}
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index e7105493..899f1b20 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -379,6 +379,7 @@ type PropertyContentDraft = {
+ 
+ interface FamloProDashboardShellProps {
+   familyId: string;
++  isAdminView: boolean;
+   hostUserId: string | null;
+   hostProfile: HostProfileSummary;
+   roomRouteState?: {
+@@ -1493,6 +1494,7 @@ function buildSectionDescriptor(
+ 
+ export default function FamloProDashboardShell({
+   familyId,
++  isAdminView,
+   hostUserId,
+   hostProfile,
+   roomRouteState = null,
+@@ -1553,7 +1555,7 @@ export default function FamloProDashboardShell({
+   const isPropertiesHomeView = activeSection === "properties-home" && !roomRouteState;
+   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
+   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
+-  const showChannelOperatorDiagnostics = false;
++  const showChannelOperatorDiagnostics = isAdminView;
+   const simplePropertiesHref = `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=properties-home`;
+   const hostWorkspacePropertyCount = propertyOptions.length;
+   const hostProfilePhotoUrl = hostProfile.photoUrl;
+@@ -5457,6 +5459,18 @@ export default function FamloProDashboardShell({
+                     />
+                   </div>
+ 
++                  <div className={styles.listGrid}>
++                    {CHANNEL_PROVIDER_REGISTRY.filter((provider) => provider.key !== "booking").map((provider) => (
++                      <ProviderOperatorVerificationCard
++                        key={provider.key}
++                        familyId={familyId}
++                        providerKey={provider.key}
++                        setupState={channelSetupStatesByKey[provider.key]}
++                        channexPropertyId={primaryProperty?.externalPropertyId ?? null}
++                      />
++                    ))}
++                  </div>
++
+                   <div className={styles.listGrid}>
+                     <article className={styles.listCard}>
+                       <div className={styles.listTitle}>Read-only operator review panel</div>
+@@ -7771,6 +7785,319 @@ function BookingComVerificationCard({
+   );
+ }
+ 
++function ProviderOperatorVerificationCard({
++  familyId,
++  providerKey,
++  setupState,
++  channexPropertyId,
++}: Readonly<{
++  familyId: string;
++  providerKey: ChannelProviderKey;
++  setupState: ChannelSetupState;
++  channexPropertyId: string | null;
++}>): React.JSX.Element {
++  const router = useRouter();
++  const provider = getChannelProviderDefinition(providerKey);
++  const [isChecking, startChecking] = useTransition();
++  const [isMarkingApproved, startMarkingApproved] = useTransition();
++  const [isMarkingFailed, startMarkingFailed] = useTransition();
++  const [isOpeningWorkspace, startOpeningWorkspace] = useTransition();
++  const [failureReason, setFailureReason] = useState(setupState.metadata.provider_connection_error ?? "");
++  const [workspaceUrl, setWorkspaceUrl] = useState<string | null>(null);
++  const [workspaceHint, setWorkspaceHint] = useState<string | null>(null);
++  const [feedback, setFeedback] = useState<{
++    ok: boolean;
++    status: string;
++    message: string;
++    inspection?: {
++      propertyTitle?: string | null;
++      hotelId?: string | null;
++      activeChannelId?: string | null;
++      discoveredChannelTitle?: string | null;
++      channelAttached?: boolean;
++      channelActive?: boolean;
++      matchedChannelCount?: number;
++      roomTypesFoundCount?: number;
++      ratePlansFoundCount?: number;
++    };
++  } | null>(null);
++
++  const displayedHotelId = feedback?.inspection?.hotelId ?? setupState.metadata.provider_discovered_hotel_id ?? "Missing";
++  const displayedChannelId = feedback?.inspection?.activeChannelId ?? setupState.metadata.provider_discovered_channel_id ?? "Missing";
++  const displayedChannelTitle = feedback?.inspection?.discoveredChannelTitle ?? setupState.metadata.provider_discovered_channel_title ?? "Missing";
++  const displayedChannelAttached = feedback?.inspection?.channelAttached ?? setupState.metadata.provider_channel_attached ?? false;
++  const displayedChannelActive = feedback?.inspection?.channelActive ?? setupState.metadata.provider_channel_active ?? false;
++  const displayedMatchedCount = feedback?.inspection?.matchedChannelCount ?? (setupState.metadata.provider_channel_attached ? 1 : 0);
++  const displayedRoomTypes = feedback?.inspection?.roomTypesFoundCount ?? setupState.metadata.provider_room_types_found_count ?? 0;
++  const displayedRatePlans = feedback?.inspection?.ratePlansFoundCount ?? setupState.metadata.provider_rate_plans_found_count ?? 0;
++  const canMarkApproved = displayedChannelAttached && (displayedChannelActive || displayedChannelId !== "Missing");
++
++  const openWorkspace = (): void => {
++    startOpeningWorkspace(async () => {
++      setFeedback(null);
++      try {
++        const response = await fetch("/api/host/pro/channel/channex/iframe", {
++          method: "POST",
++          headers: {
++            "Content-Type": "application/json",
++          },
++          body: JSON.stringify({
++            familyId,
++            providerKey,
++          }),
++        });
++
++        const payload = (await response.json()) as {
++          ok?: boolean;
++          iframeUrl?: string;
++          providerHint?: string;
++          error?: string;
++        };
++
++        if (!response.ok || !payload.iframeUrl) {
++          throw new Error(payload.error ?? "Unable to open the real Channex workspace.");
++        }
++
++        setWorkspaceUrl(payload.iframeUrl);
++        setWorkspaceHint(payload.providerHint ?? null);
++        setFeedback({
++          ok: true,
++          status: "workspace_ready",
++          message: `${provider.displayName} workspace is ready. Complete create/test/mapping in Channex, then come back and run Check in Channex.`,
++        });
++      } catch (error) {
++        setFeedback({
++          ok: false,
++          status: "failed",
++          message: error instanceof Error ? error.message : `Unable to open the ${provider.displayName} Channex workspace.`,
++        });
++      }
++    });
++  };
++
++  const sendAction = (action: "check_channel_attachment" | "mark_ota_approved" | "mark_failed", reason?: string): void => {
++    const runner =
++      action === "check_channel_attachment"
++        ? startChecking
++        : action === "mark_ota_approved"
++          ? startMarkingApproved
++          : startMarkingFailed;
++
++    runner(async () => {
++      setFeedback(null);
++
++      try {
++        const response = await fetch("/api/host/pro/channel/operator/provider-verify", {
++          method: "POST",
++          headers: {
++            "Content-Type": "application/json",
++          },
++          body: JSON.stringify({
++            familyId,
++            providerKey,
++            action,
++            reason,
++          }),
++        });
++
++        const payload = (await response.json()) as {
++          ok?: boolean;
++          status?: string;
++          error?: string;
++          message?: string;
++          inspection?: {
++            propertyTitle?: string | null;
++            hotelId?: string | null;
++            activeChannelId?: string | null;
++            discoveredChannelTitle?: string | null;
++            channelAttached?: boolean;
++            channelActive?: boolean;
++            matchedChannelCount?: number;
++            roomTypesFoundCount?: number;
++            ratePlansFoundCount?: number;
++          };
++        };
++
++        setFeedback({
++          ok: Boolean(response.ok && payload.ok),
++          status: payload.status ?? "failed",
++          message:
++            payload.message ??
++            payload.error ??
++            (action === "check_channel_attachment"
++              ? `Checked ${provider.displayName} channel state in Channex.`
++              : action === "mark_ota_approved"
++                ? `Marked ${provider.displayName} approval as verified.`
++                : `Marked ${provider.displayName} verification as failed.`),
++          inspection: payload.inspection,
++        });
++        router.refresh();
++      } catch (error) {
++        setFeedback({
++          ok: false,
++          status: "failed",
++          message: error instanceof Error ? error.message : `Unable to complete the ${provider.displayName} verification action.`,
++        });
++      }
++    });
++  };
++
++  return (
++    <article className={styles.listCard}>
++      <div className={styles.listTitle}>{provider.displayName} operator verification</div>
++      <div className={styles.cardCopy}>
++        Operator-only connection check for the selected property. This reads Channex server-side, refreshes real channel state, and never activates the OTA.
++      </div>
++      <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
++        {providerKey === "mmt"
++          ? "Real MMT / Goibibo create and test-connection steps still happen inside Channex. Famlo opens the property-scoped workspace, then checks back the attached channel and mapping structures."
++          : providerKey === "airbnb"
++            ? "Real Airbnb connection still depends on authorization inside Channex or Airbnb-side access. Famlo checks the result after the real connection flow."
++            : providerKey === "agoda"
++              ? "Real Agoda / YCS connection still depends on Agoda-side approval and Channex channel setup. Famlo checks the result after the real connection flow."
++              : providerKey === "expedia"
++                ? "Real Expedia create and test-connection steps still happen inside Channex after Expedia connectivity approval. Famlo checks the result after the real connection flow."
++                : "Real Google Hotel feed/channel setup still happens inside Channex. Famlo checks the resulting channel state after the real setup flow."}
++      </div>
++
++      <div className={styles.placeholderGrid} style={{ marginTop: 12 }}>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Host-entered listing id</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.provider_listing_id ?? "Missing"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Host-entered property code</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.provider_property_code ?? "Missing"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Reference URL</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.provider_listing_url ?? "Missing"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Provider approval requested</div>
++          <div className={styles.placeholderCopy}>
++            {setupState.metadata.provider_extranet_request_acknowledged ? "Yes" : "No"}
++            {setupState.metadata.provider_verification_requested_at ? ` · ${formatDateTime(setupState.metadata.provider_verification_requested_at)}` : ""}
++          </div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Current Channex property id</div>
++          <div className={styles.placeholderCopy}>{channexPropertyId ?? "Missing"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Discovered hotel/provider id</div>
++          <div className={styles.placeholderCopy}>{displayedHotelId}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Discovered channel title</div>
++          <div className={styles.placeholderCopy}>{displayedChannelTitle}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Discovered channel id</div>
++          <div className={styles.placeholderCopy}>{displayedChannelId}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Channel attached</div>
++          <div className={styles.placeholderCopy}>{displayedChannelAttached ? "Yes" : "No"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Channel active</div>
++          <div className={styles.placeholderCopy}>{displayedChannelActive ? "Yes" : "No"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Matched channel count</div>
++          <div className={styles.placeholderCopy}>{displayedMatchedCount}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Room types / Rate plans</div>
++          <div className={styles.placeholderCopy}>{displayedRoomTypes} / {displayedRatePlans}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Last verification status</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.provider_connection_status ?? "Not checked"}</div>
++        </div>
++        <div className={styles.placeholderRow}>
++          <div className={styles.placeholderTitle}>Last error</div>
++          <div className={styles.placeholderCopy}>{setupState.metadata.provider_connection_error ?? "None"}</div>
++        </div>
++      </div>
++
++      {feedback ? (
++        <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`} style={{ marginTop: 12 }}>
++          {feedback.message}
++        </div>
++      ) : null}
++
++      <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
++        <button
++          type="button"
++          className={styles.secondaryActionButton}
++          disabled={isOpeningWorkspace}
++          onClick={openWorkspace}
++        >
++          {isOpeningWorkspace ? "Opening..." : "Open real Channex setup"}
++        </button>
++        <button
++          type="button"
++          className={styles.secondaryActionButton}
++          disabled={isChecking}
++          onClick={() => sendAction("check_channel_attachment")}
++        >
++          {isChecking ? "Checking..." : `Check ${provider.displayName} in Channex`}
++        </button>
++        <button
++          type="button"
++          className={styles.primaryActionButton}
++          disabled={isMarkingApproved || !canMarkApproved}
++          onClick={() => sendAction("mark_ota_approved")}
++        >
++          {isMarkingApproved ? "Saving..." : `Mark ${provider.displayName} approved`}
++        </button>
++      </div>
++
++      {workspaceUrl ? (
++        <div className={styles.stack} style={{ marginTop: 12 }}>
++          <div className={styles.feedbackBox}>
++            {workspaceHint ?? "This opens the real property-scoped Channex setup UI for this provider."}
++          </div>
++          <div className={styles.inlineActionRow}>
++            <a
++              className={styles.secondaryActionButton}
++              href={workspaceUrl}
++              target="_blank"
++              rel="noreferrer"
++            >
++              Open in new tab
++            </a>
++          </div>
++        </div>
++      ) : null}
++
++      <div className={styles.stack} style={{ marginTop: 12 }}>
++        <label>
++          <span className={styles.fieldLabel}>Verification failure reason</span>
++          <input
++            className={styles.fieldInput}
++            value={failureReason}
++            onChange={(event) => setFailureReason(event.target.value)}
++            placeholder={`Example: ${provider.displayName} channel not attached yet in Channex`}
++          />
++        </label>
++        <div className={styles.inlineActionRow}>
++          <button
++            type="button"
++            className={styles.secondaryActionButton}
++            disabled={isMarkingFailed}
++            onClick={() => sendAction("mark_failed", failureReason)}
++          >
++            {isMarkingFailed ? "Saving..." : "Mark verification failed"}
++          </button>
++        </div>
++      </div>
++    </article>
++  );
++}
++
+ function BookingComAssistedChannelManagerCard({
+   familyId,
+   setupState,

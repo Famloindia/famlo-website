@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
 
 import {
-  fetchChannexChannelsForProperty,
-  fetchChannexPropertyById,
-  fetchChannexRatePlansForProperty,
-  fetchChannexRoomTypesForProperty,
   getChannexConfigSummary,
-  type ChannexChannelStructureRecord,
 } from "@/lib/channel-providers/channex/client";
+import {
+  buildProviderRefreshState,
+  inspectProviderConnectionInChannex,
+} from "@/lib/channel-providers/provider-adapter";
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
-import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupState } from "@/lib/channel-setup-state";
+import { isChannelProviderKey, readChannelSetupState } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -25,17 +24,6 @@ function asString(value: unknown): string {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function providerChannelMatches(providerKey: ChannelProviderKey, channel: ChannexChannelStructureRecord): boolean {
-  const haystack = `${channel.title ?? ""} ${channel.hotelId ?? ""}`.toLowerCase();
-
-  if (providerKey === "booking") return /booking/.test(haystack);
-  if (providerKey === "mmt") return /make.?my.?trip|goibibo|\bmmt\b/.test(haystack);
-  if (providerKey === "airbnb") return /airbnb/.test(haystack);
-  if (providerKey === "agoda") return /agoda|ycs/.test(haystack);
-  if (providerKey === "expedia") return /expedia/.test(haystack);
-  return /google/.test(haystack);
 }
 
 async function logRefreshEvent(input: {
@@ -129,91 +117,25 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const [propertyResult, channelsResult, roomTypesResult, ratePlansResult] = await Promise.all([
-      fetchChannexPropertyById(externalPropertyId),
-      fetchChannexChannelsForProperty(externalPropertyId),
-      fetchChannexRoomTypesForProperty(externalPropertyId),
-      fetchChannexRatePlansForProperty(externalPropertyId),
-    ]);
-
-    if (!propertyResult.ok || !channelsResult.ok || !roomTypesResult.ok || !ratePlansResult.ok) {
-      const message = propertyResult.message || channelsResult.message || roomTypesResult.message || ratePlansResult.message;
-      throw new Error(message);
+    const inspectionResult = await inspectProviderConnectionInChannex(providerKey, externalPropertyId);
+    if (!inspectionResult.ok) {
+      throw new Error(inspectionResult.message);
     }
-
-    const matchedChannels = channelsResult.data.filter((channel) => providerChannelMatches(providerKey, channel));
-    const activeChannel = matchedChannels.find((channel) => channel.isActive) ?? null;
-    const discoveredChannel = activeChannel ?? matchedChannels[0] ?? null;
-    const channelAttached = matchedChannels.length > 0;
-    const channelActive = Boolean(activeChannel?.id);
-    const discoveredHotelId = discoveredChannel?.hotelId ?? null;
-    const roomTypesFoundCount = roomTypesResult.data.length;
-    const ratePlansFoundCount = ratePlansResult.data.length;
-    const nowIso = new Date().toISOString();
-
+    const inspection = inspectionResult.inspection;
     const currentMetadata = asRecord(providerRow?.metadata);
-    const nextSetupMetadata = mergeChannelSetupMetadata(currentMetadata, {
-      status: channelAttached ? "matching_needed" : "connection_requested",
-      currentStep: channelAttached ? "room_matching" : "connection",
-      lastError: null,
-      metadataPatch: providerKey === "booking"
-        ? {
-            booking_connection_status: channelAttached ? "channel_visible_in_channex" : "verification_requested",
-            booking_connection_error: null,
-            provider_discovered_hotel_id: discoveredHotelId,
-            provider_discovered_channel_id: discoveredChannel?.id ?? null,
-            provider_discovered_channel_title: discoveredChannel?.title ?? null,
-            provider_channel_attached: channelAttached,
-            provider_channel_active: channelActive,
-            provider_room_types_found_count: roomTypesFoundCount,
-            provider_rate_plans_found_count: ratePlansFoundCount,
-            provider_structure_refreshed_at: nowIso,
-          }
-        : {
-            provider_connection_status: channelAttached ? "channel_visible_in_channex" : (currentMetadata.channel_setup && typeof currentMetadata.channel_setup === "object"
-              ? asString((currentMetadata.channel_setup as Record<string, unknown>).provider_connection_status)
-              : "") || "details_submitted",
-            provider_connection_error: null,
-            provider_discovered_hotel_id: discoveredHotelId,
-            provider_discovered_channel_id: discoveredChannel?.id ?? null,
-            provider_discovered_channel_title: discoveredChannel?.title ?? null,
-            provider_channel_attached: channelAttached,
-            provider_channel_active: channelActive,
-            provider_room_types_found_count: roomTypesFoundCount,
-            provider_rate_plans_found_count: ratePlansFoundCount,
-            provider_structure_refreshed_at: nowIso,
-          },
-      updatedAt: nowIso,
+    const refreshState = buildProviderRefreshState({
+      providerKey,
+      currentMetadata,
+      inspection,
     });
-    const nextMetadata = {
-      ...nextSetupMetadata,
-      provider_mapping_catalog: {
-        room_types: roomTypesResult.data.map((roomType) => ({
-          id: roomType.id,
-          title: roomType.title,
-          property_id: roomType.propertyId,
-          count_of_rooms: roomType.countOfRooms,
-        })),
-        rate_plans: ratePlansResult.data.map((ratePlan) => ({
-          id: ratePlan.id,
-          title: ratePlan.title,
-          property_id: ratePlan.propertyId,
-          room_type_id: ratePlan.roomTypeId,
-        })),
-        refreshed_at: nowIso,
-      },
-    };
+    const nextMetadata = refreshState.metadata;
+    const nowIso = inspection.structureRefreshedAt;
 
     const payload = {
       family_id: familyId,
       provider_code: providerKey,
       external_property_id: typeof providerRow?.external_property_id === "string" ? providerRow.external_property_id : null,
-      sync_status:
-        channelAttached && channelActive
-          ? "connected"
-          : typeof providerRow?.sync_status === "string"
-            ? providerRow.sync_status
-            : "not_connected",
+      sync_status: refreshState.syncStatus,
       metadata: nextMetadata,
       updated_at: nowIso,
     };
@@ -236,15 +158,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       familyId,
       providerKey,
       status: "success",
-      message: channelAttached
+      message: inspection.channelAttached
         ? "Refreshed provider connection state from Channex."
         : "Refreshed Channex structure, but a matching provider channel was not detected yet.",
       payload: {
         external_property_id: externalPropertyId,
-        matched_channel_count: matchedChannels.length,
-        active_channel_id: activeChannel?.id ?? null,
-        room_types_found_count: roomTypesFoundCount,
-        rate_plans_found_count: ratePlansFoundCount,
+        matched_channel_count: inspection.matchedChannelCount,
+        active_channel_id: inspection.activeChannelId,
+        room_types_found_count: inspection.roomTypesFoundCount,
+        rate_plans_found_count: inspection.ratePlansFoundCount,
       },
     });
 
@@ -266,21 +188,21 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return NextResponse.json({
       ok: true,
-      status: channelAttached ? "channel_visible" : "channel_not_detected",
-      message: channelAttached
+      status: inspection.channelAttached ? "channel_visible" : "channel_not_detected",
+      message: inspection.channelAttached
         ? "Real Channex channel state was loaded for this property."
         : "No matching provider channel was detected yet on this Channex property.",
       verification: {
-        propertyTitle: propertyResult.data?.title ?? null,
-        hotelId: discoveredHotelId,
-        activeChannelId: activeChannel?.id ?? null,
-        activeChannelTitle: activeChannel?.title ?? null,
-        channelAttached,
-        channelActive,
-        matchedChannelCount: matchedChannels.length,
-        roomTypesFoundCount,
-        ratePlansFoundCount,
-        structureRefreshedAt: nowIso,
+        propertyTitle: inspection.propertyTitle,
+        hotelId: inspection.hotelId,
+        activeChannelId: inspection.activeChannelId,
+        activeChannelTitle: inspection.activeChannelTitle,
+        channelAttached: inspection.channelAttached,
+        channelActive: inspection.channelActive,
+        matchedChannelCount: inspection.matchedChannelCount,
+        roomTypesFoundCount: inspection.roomTypesFoundCount,
+        ratePlansFoundCount: inspection.ratePlansFoundCount,
+        structureRefreshedAt: inspection.structureRefreshedAt,
       },
       catalog: (nextMetadata.provider_mapping_catalog as Record<string, unknown>) ?? null,
       state,

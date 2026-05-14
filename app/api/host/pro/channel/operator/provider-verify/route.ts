@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 
+import {
+  buildProviderRefreshState,
+  inspectProviderConnectionInChannex,
+} from "@/lib/channel-providers/provider-adapter";
 import { CHANNEL_PROVIDER_REGISTRY, type ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupState } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
-type ProviderVerifyAction = "mark_ota_approved" | "mark_failed";
+type ProviderVerifyAction = "check_channel_attachment" | "mark_ota_approved" | "mark_failed";
 
 type ProviderVerifyBody = {
   familyId?: string;
@@ -24,7 +28,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function isProviderVerifyAction(value: string): value is ProviderVerifyAction {
-  return value === "mark_ota_approved" || value === "mark_failed";
+  return value === "check_channel_attachment" || value === "mark_ota_approved" || value === "mark_failed";
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -76,7 +80,71 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     if (lookupError) throw lookupError;
 
+    const { data: channexRow, error: channexLookupError } = await supabase
+      .from("channel_properties")
+      .select("external_property_id")
+      .eq("family_id", familyId)
+      .eq("provider_code", "channex")
+      .maybeSingle();
+
+    if (channexLookupError) throw channexLookupError;
+
+    const externalPropertyId =
+      typeof channexRow?.external_property_id === "string" && channexRow.external_property_id.trim().length > 0
+        ? channexRow.external_property_id.trim()
+        : null;
+
     const nowIso = new Date().toISOString();
+    let inspectionPayload: Record<string, unknown> | null = null;
+
+    if (action === "check_channel_attachment") {
+      if (!externalPropertyId) {
+        return NextResponse.json(
+          {
+            ok: false,
+            status: "missing_property",
+            error: "Create or link the Channex property first.",
+          },
+          { status: 409 }
+        );
+      }
+
+      const inspectionResult = await inspectProviderConnectionInChannex(providerKey, externalPropertyId);
+      if (!inspectionResult.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            status: "failed",
+            error: inspectionResult.message,
+          },
+          { status: 502 }
+        );
+      }
+
+      const refreshState = buildProviderRefreshState({
+        providerKey,
+        currentMetadata: asRecord(existingRow?.metadata),
+        inspection: inspectionResult.inspection,
+      });
+
+      const { error: refreshError } = await supabase
+        .from("channel_properties")
+        .upsert(
+          {
+            family_id: familyId,
+            provider_code: providerKey,
+            external_property_id: typeof existingRow?.external_property_id === "string" ? existingRow.external_property_id : null,
+            sync_status: refreshState.syncStatus,
+            metadata: refreshState.metadata,
+            updated_at: nowIso,
+          } as never,
+          { onConflict: "family_id,provider_code" }
+        );
+
+      if (refreshError) throw refreshError;
+      inspectionPayload = inspectionResult.inspection as unknown as Record<string, unknown>;
+    }
+
     const metadataPatch =
       action === "mark_ota_approved"
         ? {
@@ -146,12 +214,20 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return NextResponse.json({
       ok: true,
-      status: action === "mark_ota_approved" ? "ota_approval_verified" : "verification_failed",
+      status:
+        action === "check_channel_attachment"
+          ? "channel_checked"
+          : action === "mark_ota_approved"
+            ? "ota_approval_verified"
+            : "verification_failed",
       message:
-        action === "mark_ota_approved"
+        action === "check_channel_attachment"
+          ? `${provider?.displayName ?? providerKey} channel state refreshed from Channex.`
+          : action === "mark_ota_approved"
           ? `${provider?.displayName ?? providerKey} approval verified. Continue with room/rate mapping before sync.`
           : `${provider?.displayName ?? providerKey} verification marked failed.`,
       state,
+      inspection: inspectionPayload,
     });
   } catch (error) {
     console.error("[host.pro.channel.operator.provider-verify] failed:", error);
