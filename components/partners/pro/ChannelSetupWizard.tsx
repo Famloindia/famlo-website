@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 
+import { buildProviderConnectionModel } from "@/lib/channel-providers/connection-model";
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
 import {
@@ -336,6 +337,12 @@ export default function ChannelSetupWizard({
   const readinessItems = readinessModel.items;
   const assistedConnectionLabels = providerKey === "booking" ? null : getAssistedConnectionLabels(providerKey);
   const showAdvancedReadiness = false;
+  const connectionModel = buildProviderConnectionModel({
+    providerKey,
+    state,
+    readinessModel,
+    testSyncReadiness,
+  });
   const providerConnectionStatusLabel =
     state.metadata.provider_connection_status === "waiting_for_ota_approval"
       ? "Waiting for OTA approval"
@@ -817,6 +824,63 @@ export default function ChannelSetupWizard({
       </div>
 
       <section className={styles.listCard} style={{ marginBottom: 16 }}>
+        <div className={styles.listTitle}>Common OTA connection path</div>
+        <div className={styles.cardCopy}>{connectionModel.intro}</div>
+        <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+          <div className={styles.mappingHeader}>Shared stage</div>
+          <div className={styles.mappingHeader}>Status</div>
+          <div className={styles.mappingHeader}>What it means</div>
+          <div className={styles.mappingHeader}>Famlo reality</div>
+          {connectionModel.commonStages.map((stage) => (
+            <Fragment key={stage.key}>
+              <div className={styles.mappingCell}>
+                <div className={styles.mappingTitle}>{stage.label}</div>
+              </div>
+              <div className={styles.mappingCell}>
+                <span
+                  className={`${styles.readinessPill} ${
+                    stage.status === "done"
+                      ? styles.readinessPillOk
+                      : stage.status === "blocked"
+                        ? styles.readinessPillReview
+                        : styles.readinessPillMissing
+                  }`}
+                >
+                  {stage.status === "done"
+                    ? "Done"
+                    : stage.status === "in_progress"
+                      ? "In progress"
+                      : stage.status === "blocked"
+                        ? "Blocked"
+                        : "Needed"}
+                </span>
+              </div>
+              <div className={styles.mappingCellMuted}>{stage.note}</div>
+              <div className={styles.mappingCellMuted}>
+                {stage.key === "provider_access"
+                  ? connectionModel.whyNotFullyAutomatic
+                  : stage.key === "test_sync"
+                    ? connectionModel.automationReality
+                    : "This is common across OTAs even if the identifiers differ."}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+        <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+          {connectionModel.requiredFields.map((field) => (
+            <span key={field.key} className={styles.readinessPill}>
+              {field.label}
+              {field.required ? " required" : " optional"}
+              {field.sensitive ? " · secure" : ""}
+            </span>
+          ))}
+        </div>
+        <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
+          All OTAs do share one common structure: listing identification, provider approval, channel attachment, room mapping, rate mapping, and test sync. What changes OTA to OTA is the approval method and the exact connection fields.
+        </div>
+      </section>
+
+      <section className={styles.listCard} style={{ marginBottom: 16 }}>
         <div className={styles.listTitle}>Connect {provider.displayName}</div>
         <div className={styles.cardCopy}>
           Enter the provider details and press Connect. Famlo will verify the channel safely before any sync or go-live action.
@@ -856,7 +920,7 @@ export default function ChannelSetupWizard({
                 disabled={isSaving}
                 onClick={requestBookingVerification}
               >
-                {isSaving ? "Connecting..." : "Connect Booking.com"}
+                {isSaving ? "Connecting..." : connectionModel.hostActionLabel}
               </button>
               <button
                 type="button"
@@ -949,7 +1013,7 @@ export default function ChannelSetupWizard({
                 disabled={isSaving}
                 onClick={requestAssistedProviderVerification}
               >
-                {isSaving ? "Connecting..." : `Connect ${provider.displayName}`}
+                {isSaving ? "Connecting..." : connectionModel.hostActionLabel}
               </button>
               <button
                 type="button"
