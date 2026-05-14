@@ -7820,9 +7820,18 @@ function ProviderOperatorVerificationCard({
   const [isMarkingApproved, startMarkingApproved] = useTransition();
   const [isMarkingFailed, startMarkingFailed] = useTransition();
   const [isOpeningWorkspace, startOpeningWorkspace] = useTransition();
+  const [isVerifyingStructure, startVerifyingStructure] = useTransition();
   const [failureReason, setFailureReason] = useState(setupState.metadata.provider_connection_error ?? "");
   const [workspaceUrl, setWorkspaceUrl] = useState<string | null>(null);
   const [workspaceHint, setWorkspaceHint] = useState<string | null>(null);
+  const [structureFeedback, setStructureFeedback] = useState<{
+    ok: boolean;
+    status: string;
+    message: string;
+    nextAction?: string;
+    blockers?: string[];
+    readyForTestSyncReview?: boolean;
+  } | null>(null);
   const [feedback, setFeedback] = useState<{
     ok: boolean;
     status: string;
@@ -7862,6 +7871,13 @@ function ProviderOperatorVerificationCard({
     `Test sync ${testSyncReadiness.statusLabel}`,
     `Go live ${goLiveReadiness.statusLabel}`,
   ];
+  const providerStructureStatusLabel = setupState.metadata.provider_structure_verified
+    ? "Verified"
+    : setupState.metadata.provider_structure_blockers.length > 0
+      ? "Blocked"
+      : "Not verified";
+  const providerStructureBlockers = structureFeedback?.blockers ?? setupState.metadata.provider_structure_blockers;
+  const providerReadyForTestReview = structureFeedback?.readyForTestSyncReview ?? setupState.metadata.provider_ready_for_test_sync_review ?? false;
 
   const openWorkspace = (): void => {
     startOpeningWorkspace(async () => {
@@ -7973,6 +7989,52 @@ function ProviderOperatorVerificationCard({
     });
   };
 
+  const verifyMappedStructure = (): void => {
+    startVerifyingStructure(async () => {
+      setStructureFeedback(null);
+      try {
+        const response = await fetch("/api/host/pro/channel/channex/operator/provider-structure-verify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            familyId,
+            providerKey,
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          status?: string;
+          message?: string;
+          nextAction?: string;
+          blockers?: string[];
+          readyForTestSyncReview?: boolean;
+          error?: string;
+        };
+
+        setStructureFeedback({
+          ok: Boolean(response.ok && payload.ok),
+          status: payload.status ?? "failed",
+          message: payload.message ?? payload.error ?? `Unable to verify ${provider.displayName} mapped structure.`,
+          nextAction: payload.nextAction,
+          blockers: Array.isArray(payload.blockers) ? payload.blockers : [],
+          readyForTestSyncReview: payload.readyForTestSyncReview === true,
+        });
+        router.refresh();
+      } catch (error) {
+        setStructureFeedback({
+          ok: false,
+          status: "failed",
+          message: error instanceof Error ? error.message : `Unable to verify ${provider.displayName} mapped structure.`,
+          blockers: [],
+          readyForTestSyncReview: false,
+        });
+      }
+    });
+  };
+
   return (
     <article className={styles.listCard}>
       <div className={styles.listTitle}>{provider.displayName} operator verification</div>
@@ -8050,6 +8112,24 @@ function ProviderOperatorVerificationCard({
           <div className={styles.placeholderTitle}>Room types / Rate plans</div>
           <div className={styles.placeholderCopy}>{displayedRoomTypes} / {displayedRatePlans}</div>
         </div>
+        {providerKey === "mmt" ? (
+          <div className={styles.placeholderRow}>
+            <div className={styles.placeholderTitle}>MMT token storage</div>
+            <div className={styles.placeholderCopy}>
+              {setupState.metadata.provider_access_token_stored
+                ? `Stored securely${setupState.metadata.provider_access_token_last_four ? ` · ending ${setupState.metadata.provider_access_token_last_four}` : ""}`
+                : "Missing"}
+            </div>
+          </div>
+        ) : null}
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Mapped structure</div>
+          <div className={styles.placeholderCopy}>{providerStructureStatusLabel}</div>
+        </div>
+        <div className={styles.placeholderRow}>
+          <div className={styles.placeholderTitle}>Ready for test sync review</div>
+          <div className={styles.placeholderCopy}>{providerReadyForTestReview ? "Yes" : "No"}</div>
+        </div>
         <div className={styles.placeholderRow}>
           <div className={styles.placeholderTitle}>Last verification status</div>
           <div className={styles.placeholderCopy}>{setupState.metadata.provider_connection_status ?? "Not checked"}</div>
@@ -8063,6 +8143,12 @@ function ProviderOperatorVerificationCard({
       {feedback ? (
         <div className={`${styles.feedbackBox} ${feedback.ok ? styles.feedbackSuccess : styles.feedbackError}`} style={{ marginTop: 12 }}>
           {feedback.message}
+        </div>
+      ) : null}
+
+      {structureFeedback ? (
+        <div className={`${styles.feedbackBox} ${structureFeedback.ok ? styles.feedbackSuccess : styles.feedbackError}`} style={{ marginTop: 12 }}>
+          {structureFeedback.message}
         </div>
       ) : null}
 
@@ -8106,8 +8192,17 @@ function ProviderOperatorVerificationCard({
             ))}
         </div>
         <div className={styles.feedbackBox} style={{ marginTop: 8 }}>
-          {primaryBlockers[0] ?? "No blockers recorded."}
+          {structureFeedback?.nextAction ?? primaryBlockers[0] ?? "No blockers recorded."}
         </div>
+        {providerStructureBlockers.length > 0 ? (
+          <div className={styles.stack} style={{ marginTop: 8 }}>
+            {providerStructureBlockers.map((blocker) => (
+              <div key={blocker} className={styles.feedCopy}>
+                {blocker}
+              </div>
+            ))}
+          </div>
+        ) : null}
         {primaryBlockers.length > 1 ? (
           <div className={styles.stack} style={{ marginTop: 8 }}>
             {primaryBlockers.slice(1).map((blocker) => (
@@ -8135,6 +8230,14 @@ function ProviderOperatorVerificationCard({
           onClick={() => sendAction("check_channel_attachment")}
         >
           {isChecking ? "Checking..." : `Check ${provider.displayName} in Channex`}
+        </button>
+        <button
+          type="button"
+          className={styles.secondaryActionButton}
+          disabled={isVerifyingStructure}
+          onClick={verifyMappedStructure}
+        >
+          {isVerifyingStructure ? "Verifying..." : "Verify mapped structure"}
         </button>
         <button
           type="button"

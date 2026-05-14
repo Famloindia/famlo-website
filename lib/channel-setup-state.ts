@@ -54,6 +54,11 @@ export type ChannelSetupMetadata = {
   provider_room_types_found_count: number | null;
   provider_rate_plans_found_count: number | null;
   provider_structure_refreshed_at: string | null;
+  provider_structure_verified: boolean | null;
+  provider_structure_verified_at: string | null;
+  provider_structure_blockers: string[];
+  provider_ready_for_test_sync_review: boolean | null;
+  provider_ready_for_test_sync_review_at: string | null;
   connectivity_provider_requested: boolean | null;
   connectivity_provider_requested_at: string | null;
   booking_extranet_request_acknowledged: boolean | null;
@@ -368,6 +373,11 @@ export function readChannelSetupMetadata(value: unknown): ChannelSetupMetadata {
     provider_room_types_found_count: asNumberOrNull(setup.provider_room_types_found_count),
     provider_rate_plans_found_count: asNumberOrNull(setup.provider_rate_plans_found_count),
     provider_structure_refreshed_at: asString(setup.provider_structure_refreshed_at),
+    provider_structure_verified: asNullableBoolean(setup.provider_structure_verified),
+    provider_structure_verified_at: asString(setup.provider_structure_verified_at),
+    provider_structure_blockers: asStringArray(setup.provider_structure_blockers),
+    provider_ready_for_test_sync_review: asNullableBoolean(setup.provider_ready_for_test_sync_review),
+    provider_ready_for_test_sync_review_at: asString(setup.provider_ready_for_test_sync_review_at),
     connectivity_provider_requested: asNullableBoolean(setup.connectivity_provider_requested),
     connectivity_provider_requested_at: asString(setup.connectivity_provider_requested_at),
     booking_extranet_request_acknowledged: asNullableBoolean(setup.booking_extranet_request_acknowledged),
@@ -453,6 +463,11 @@ export function createDefaultChannelSetupState(familyId: string, providerKey: Ch
       provider_room_types_found_count: null,
       provider_rate_plans_found_count: null,
       provider_structure_refreshed_at: null,
+      provider_structure_verified: null,
+      provider_structure_verified_at: null,
+      provider_structure_blockers: [],
+      provider_ready_for_test_sync_review: null,
+      provider_ready_for_test_sync_review_at: null,
       connectivity_provider_requested: null,
       connectivity_provider_requested_at: null,
       booking_extranet_request_acknowledged: null,
@@ -536,6 +551,13 @@ export function mergeChannelSetupMetadata(
     provider_room_types_found_count: hasOwn(patchMetadata, "provider_room_types_found_count") ? asNumberOrNull(patchMetadata.provider_room_types_found_count) : undefined,
     provider_rate_plans_found_count: hasOwn(patchMetadata, "provider_rate_plans_found_count") ? asNumberOrNull(patchMetadata.provider_rate_plans_found_count) : undefined,
     provider_structure_refreshed_at: hasOwn(patchMetadata, "provider_structure_refreshed_at") ? asString(patchMetadata.provider_structure_refreshed_at) : undefined,
+    provider_structure_verified: hasOwn(patchMetadata, "provider_structure_verified") ? asBoolean(patchMetadata.provider_structure_verified) : undefined,
+    provider_structure_verified_at: hasOwn(patchMetadata, "provider_structure_verified_at") ? asString(patchMetadata.provider_structure_verified_at) : undefined,
+    provider_structure_blockers: Array.isArray(patchMetadata.provider_structure_blockers)
+      ? asStringArray(patchMetadata.provider_structure_blockers)
+      : undefined,
+    provider_ready_for_test_sync_review: hasOwn(patchMetadata, "provider_ready_for_test_sync_review") ? asBoolean(patchMetadata.provider_ready_for_test_sync_review) : undefined,
+    provider_ready_for_test_sync_review_at: hasOwn(patchMetadata, "provider_ready_for_test_sync_review_at") ? asString(patchMetadata.provider_ready_for_test_sync_review_at) : undefined,
     connectivity_provider_requested: hasOwn(patchMetadata, "connectivity_provider_requested") ? asBoolean(patchMetadata.connectivity_provider_requested) : undefined,
     connectivity_provider_requested_at: hasOwn(patchMetadata, "connectivity_provider_requested_at") ? asString(patchMetadata.connectivity_provider_requested_at) : undefined,
     booking_extranet_request_acknowledged: hasOwn(patchMetadata, "booking_extranet_request_acknowledged") ? asBoolean(patchMetadata.booking_extranet_request_acknowledged) : undefined,
@@ -569,6 +591,7 @@ export function mergeChannelSetupMetadata(
     required_items_acknowledged: safePatch.requirements_acknowledged ?? currentSetup.required_items_acknowledged ?? null,
     hotel_id_entered: safePatch.hotel_id_available ?? currentSetup.hotel_id_entered ?? null,
     assisted_go_live_blockers: safePatch.assisted_go_live_blockers ?? asStringArray(currentSetup.assisted_go_live_blockers),
+    provider_structure_blockers: safePatch.provider_structure_blockers ?? asStringArray(currentSetup.provider_structure_blockers),
     status: patch.status ?? currentSetup.status ?? "not_started",
     setup_mode: patch.setupMode ?? currentSetup.setup_mode ?? null,
     current_step: patch.currentStep ?? currentSetup.current_step ?? "listing",
@@ -603,6 +626,8 @@ function hasSafeSetupProgress(state: ChannelSetupState): boolean {
       state.metadata.provider_access_token_stored ||
       state.metadata.provider_channel_attached ||
       state.metadata.provider_discovered_channel_id ||
+      state.metadata.provider_structure_verified ||
+      state.metadata.provider_ready_for_test_sync_review ||
       state.metadata.connectivity_provider_requested ||
       state.metadata.booking_extranet_request_acknowledged ||
       state.metadata.booking_connection_status ||
@@ -711,19 +736,63 @@ export function buildChannelGoLiveReadinessModel(
   const live = providerKey === "booking" && hasRealConnection && state.status === "live";
 
   if (providerKey !== "booking") {
+    const providerReadyForTestSyncReview = state.metadata.provider_ready_for_test_sync_review === true;
+    const providerStructureVerified = state.metadata.provider_structure_verified === true;
+    const blockers = state.metadata.provider_structure_blockers.filter(Boolean);
+    const nonBookingReviewRequested = state.status === "review_requested" || state.metadata.go_live_review_requested === true;
     return {
-      status: hasSetupRow ? "assisted_only" : "not_ready",
-      statusLabel: hasSetupRow ? "Go-live review unavailable until channel connection is completed." : "Go-live review unavailable.",
-      nextRequiredAction: hasSetupRow
-        ? "Request Famlo setup help and finish provider connection before go-live review."
-        : "Request Famlo setup help to begin the assisted setup flow.",
+      status: nonBookingReviewRequested
+        ? "review_requested"
+        : providerReadyForTestSyncReview
+          ? "blocked"
+          : hasSetupRow
+            ? "assisted_only"
+            : "not_ready",
+      statusLabel: nonBookingReviewRequested
+        ? "Review requested"
+        : providerReadyForTestSyncReview
+          ? "Blocked until operator test sync review is complete"
+          : hasSetupRow
+            ? "Go-live review unavailable until channel connection is completed."
+            : "Go-live review unavailable.",
+      nextRequiredAction: nonBookingReviewRequested
+        ? "Famlo review has been requested. Await operator action."
+        : providerReadyForTestSyncReview
+          ? "Run operator test sync review before requesting go-live."
+          : hasSetupRow
+            ? "Request Famlo setup help and finish provider connection before go-live review."
+            : "Request Famlo setup help to begin the assisted setup flow.",
       checklist: [
-        buildGoLiveChecklistItem("provider", "Provider connection", hasSetupRow ? "assisted_only" : "not_ready", "This provider stays assisted-only until real connection data exists.", "No live provider state exists yet."),
-        buildGoLiveChecklistItem("mapping", "Room and price matching", hasSetupRow ? "assisted_only" : "not_ready", "Go-live review remains unavailable until mapping can be verified.", "Provider data is not available."),
-        buildGoLiveChecklistItem("sync", "Test sync readiness", hasSetupRow ? "assisted_only" : "not_ready", "Test sync remains operator-controlled for assisted providers.", "No safe limited test sync can be inferred."),
+        buildGoLiveChecklistItem(
+          "provider",
+          "Provider connection",
+          hasRealConnection ? "ready" : hasSetupRow ? "assisted_only" : "not_ready",
+          hasRealConnection ? "A real provider connection is present in Channex." : "This provider stays assisted-only until real connection data exists.",
+          hasRealConnection ? null : "No live provider state exists yet."
+        ),
+        buildGoLiveChecklistItem(
+          "mapping",
+          "Room and price matching",
+          providerStructureVerified ? "ready" : hasRealConnection ? "blocked" : hasSetupRow ? "assisted_only" : "not_ready",
+          providerStructureVerified ? "Mapped provider structure is verified." : "Go-live review remains unavailable until mapping can be verified.",
+          providerStructureVerified ? null : hasRealConnection ? (blockers[0] ?? "Verify the mapped provider structure first.") : "Provider data is not available."
+        ),
+        buildGoLiveChecklistItem(
+          "sync",
+          "Test sync readiness",
+          providerReadyForTestSyncReview ? "blocked" : hasSetupRow ? "assisted_only" : "not_ready",
+          providerReadyForTestSyncReview
+            ? "Ready for operator test sync review, but no provider test sync result has been approved yet."
+            : "Test sync remains operator-controlled for assisted providers.",
+          providerReadyForTestSyncReview ? "Operator must complete the test sync review before go-live." : "No safe limited test sync can be inferred."
+        ),
       ],
-      operatorNote: "Assisted providers need a real connection before go-live review can be requested.",
-      reviewPending: false,
+      operatorNote: nonBookingReviewRequested
+        ? "Go-live review has been requested safely. No activation was performed."
+        : providerReadyForTestSyncReview
+          ? "Structure verification passed, but an operator test sync review is still required before go-live."
+          : "Assisted providers need a real connection before go-live review can be requested.",
+      reviewPending: nonBookingReviewRequested,
     };
   }
 
@@ -807,6 +876,9 @@ export function buildChannelTestSyncReadinessModel(
   const mappedPricesReady = activeRoomsCount > 0 && rateMappingsReadyCount >= activeRoomsCount;
   const propertyExists = activeRoomsCount > 0;
   const hasCriticalSyncIssue = !context.bookingFeedHealthy || !context.ariSyncHealthy || context.channelHealthNeedsAttention;
+  const providerStructureVerified = state.metadata.provider_structure_verified === true;
+  const providerReadyForTestSyncReview = state.metadata.provider_ready_for_test_sync_review === true;
+  const providerStructureBlockers = state.metadata.provider_structure_blockers.filter(Boolean);
 
   if (providerKey !== "booking") {
     const checklist = [
@@ -834,49 +906,83 @@ export function buildChannelTestSyncReadinessModel(
       buildTestSyncChecklistItem(
         "connection",
         "Channel/provider connection",
-        hasSetupRow ? "assisted_only" : "unavailable",
-        "Test sync is unavailable until the channel connection is completed.",
-        hasSetupRow ? "Assisted setup stays on until the provider connection exists." : "Request Famlo setup help to continue the assisted flow."
+        hasRealConnection ? "not_ready" : hasSetupRow ? "assisted_only" : "unavailable",
+        hasRealConnection
+          ? "The provider channel is visible in Channex for this selected property."
+          : "Test sync is unavailable until the channel connection is completed.",
+        hasRealConnection
+          ? "A real connection exists, but Famlo still requires mapped-structure verification."
+          : hasSetupRow
+            ? "Assisted setup stays on until the provider connection exists."
+            : "Request Famlo setup help to continue the assisted flow."
       ),
       buildTestSyncChecklistItem(
         "room_matching",
         "Room matching",
         mappedRoomsReady ? "not_ready" : activeRoomsCount > 0 ? "blocked" : "unavailable",
-        mappedRoomsReady ? "Room matching is ready, but the provider is still assisted-only." : "Room matching remains blocked until provider data exists.",
-        "Provider room data is not available yet."
+        mappedRoomsReady ? "Room matching is ready for operator structure verification." : "Room matching remains blocked until provider data exists.",
+        mappedRoomsReady ? null : "Provider room data is not available yet."
       ),
       buildTestSyncChecklistItem(
         "price_matching",
         "Price matching",
         mappedPricesReady ? "not_ready" : activeRoomsCount > 0 ? "blocked" : "unavailable",
-        mappedPricesReady ? "Price matching is ready, but the provider is still assisted-only." : "Price matching remains blocked until provider data exists.",
-        "Provider rate data is not available yet."
+        mappedPricesReady ? "Price matching is ready for operator structure verification." : "Price matching remains blocked until provider data exists.",
+        mappedPricesReady ? null : "Provider rate data is not available yet."
       ),
       buildTestSyncChecklistItem(
         "calendar",
         "Calendar / availability data",
-        "assisted_only",
-        "Calendar and availability readiness stays assisted until the provider connection exists.",
-        "No safe provider feed is available for this channel yet."
+        providerStructureVerified ? "not_ready" : hasRealConnection ? "blocked" : "assisted_only",
+        providerStructureVerified
+          ? "Mapped provider structure is verified and can move to operator test sync review."
+          : hasRealConnection
+            ? "Run operator structure verification after room and rate mapping."
+            : "Calendar and availability readiness stays assisted until the provider connection exists.",
+        providerStructureVerified
+          ? "A real sync route is not exposed yet for this provider."
+          : hasRealConnection
+            ? (providerStructureBlockers[0] ?? "Structure verification has not been completed yet.")
+            : "No safe provider feed is available for this channel yet."
       ),
       buildTestSyncChecklistItem(
         "sync_issue",
         "No critical sync issue",
-        "assisted_only",
-        "Operator review is required before any test sync can be considered.",
-        "Test sync remains operator-controlled for this provider."
+        providerReadyForTestSyncReview ? "ready" : hasRealConnection ? "blocked" : "assisted_only",
+        providerReadyForTestSyncReview
+          ? "Operator structure verification says this provider is ready for limited sync review."
+          : "Operator review is required before any test sync can be considered.",
+        providerReadyForTestSyncReview
+          ? "Ready for operator test sync review."
+          : hasRealConnection
+            ? (providerStructureBlockers[0] ?? "Verify the mapped provider structure first.")
+            : "Test sync remains operator-controlled for this provider."
       ),
     ];
 
     return {
-      status: hasSetupRow ? "assisted_only" : "unavailable",
-      statusLabel: hasSetupRow ? "Test sync unavailable until channel connection is completed." : "Test sync unavailable.",
-      nextRequiredAction: hasSetupRow
-        ? "Request Famlo setup help, then complete provider connection details before any test sync review."
-        : "Request Famlo setup help to begin the assisted setup flow.",
+      status: providerReadyForTestSyncReview ? "ready" : hasRealConnection ? "blocked" : hasSetupRow ? "assisted_only" : "unavailable",
+      statusLabel: providerReadyForTestSyncReview
+        ? "Ready for operator test sync review"
+        : hasRealConnection
+          ? "Blocked until mapped structure is verified"
+          : hasSetupRow
+            ? "Test sync unavailable until channel connection is completed."
+            : "Test sync unavailable.",
+      nextRequiredAction: providerReadyForTestSyncReview
+        ? "Ready for operator test sync review."
+        : hasRealConnection
+          ? providerStructureBlockers[0] ?? "Verify mapped structure before operator test sync review."
+          : hasSetupRow
+            ? "Request Famlo setup help, then complete provider connection details before any test sync review."
+            : "Request Famlo setup help to begin the assisted setup flow.",
       checklist,
-      operatorNote: "This provider remains assisted-only until real channel data exists.",
-      readyForLimitedTestSync: false,
+      operatorNote: providerReadyForTestSyncReview
+        ? "A real connection and mapped structure now exist. Actual provider test sync still remains operator-controlled."
+        : hasRealConnection
+          ? "Use Verify mapped structure in operator diagnostics after the real provider channel is attached."
+          : "This provider remains assisted-only until real channel data exists.",
+      readyForLimitedTestSync: providerReadyForTestSyncReview,
     };
   }
 

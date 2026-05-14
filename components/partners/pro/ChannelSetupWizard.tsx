@@ -737,6 +737,11 @@ export default function ChannelSetupWizard({
         provider_room_types_found_count: state.metadata.provider_room_types_found_count,
         provider_rate_plans_found_count: state.metadata.provider_rate_plans_found_count,
         provider_structure_refreshed_at: state.metadata.provider_structure_refreshed_at,
+        provider_structure_verified: state.metadata.provider_structure_verified,
+        provider_structure_verified_at: state.metadata.provider_structure_verified_at,
+        provider_structure_blockers: state.metadata.provider_structure_blockers,
+        provider_ready_for_test_sync_review: state.metadata.provider_ready_for_test_sync_review,
+        provider_ready_for_test_sync_review_at: state.metadata.provider_ready_for_test_sync_review_at,
         operator_verified_booking_connection: state.metadata.operator_verified_booking_connection,
         operator_verified_booking_connection_at: state.metadata.operator_verified_booking_connection_at,
         operator_notes: state.metadata.operator_notes,
@@ -1391,6 +1396,16 @@ export default function ChannelSetupWizard({
                   ? ` · Requested ${state.metadata.provider_verification_requested_at}`
                   : ""}
               </div>
+              <div className={styles.inlineBadgeRow}>
+                {providerKey === "mmt" ? (
+                  <span className={styles.readinessPill}>
+                    Token: {state.metadata.provider_access_token_stored ? `Stored${state.metadata.provider_access_token_last_four ? ` · ${state.metadata.provider_access_token_last_four}` : ""}` : "Missing"}
+                  </span>
+                ) : null}
+                <span className={styles.readinessPill}>
+                  Structure: {state.metadata.provider_structure_verified ? "Verified" : state.metadata.provider_structure_blockers.length > 0 ? "Blocked" : "Not verified"}
+                </span>
+              </div>
               {state.metadata.provider_connection_error ? (
                 <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.provider_connection_error}</div>
               ) : null}
@@ -1500,9 +1515,26 @@ export default function ChannelSetupWizard({
         <section className={styles.listCard}>
           <div className={styles.listTitle}>6. Test sync readiness</div>
           <div className={styles.feedCopy}>{testSyncReadiness.statusLabel}</div>
+          <div className={styles.inlineBadgeRow} style={{ marginTop: 8 }}>
+            <span className={styles.readinessPill}>
+              Structure verification: {state.metadata.provider_structure_verified ? "Verified" : "Pending"}
+            </span>
+            <span className={styles.readinessPill}>
+              Ready for review: {state.metadata.provider_ready_for_test_sync_review ? "Yes" : "No"}
+            </span>
+          </div>
           <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
             {testSyncReadiness.nextRequiredAction}
           </div>
+          {state.metadata.provider_structure_blockers.length > 0 ? (
+            <div className={styles.stack} style={{ marginTop: 8 }}>
+              {state.metadata.provider_structure_blockers.map((blocker) => (
+                <div key={blocker} className={styles.feedCopy}>
+                  {blocker}
+                </div>
+              ))}
+            </div>
+          ) : null}
           {testSyncReadiness.operatorNote ? (
             <div className={styles.feedCopy} style={{ marginTop: 8 }}>
               {testSyncReadiness.operatorNote}
@@ -1523,7 +1555,11 @@ export default function ChannelSetupWizard({
             ))}
           </div>
           <div className={styles.feedCopy} style={{ marginTop: 10 }}>
-            {testSyncReadiness.readyForLimitedTestSync ? "Ready for limited test sync." : "Operator test sync required."}
+            {testSyncReadiness.readyForLimitedTestSync
+              ? providerKey === "booking"
+                ? "Ready for limited test sync."
+                : "Ready for operator test sync review."
+              : "Operator test sync required."}
           </div>
           <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
             <button type="button" className={styles.primaryActionButton} disabled={isSaving} onClick={requestTestSyncReview}>
