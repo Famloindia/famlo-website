@@ -45,6 +45,7 @@ import {
   getChannelProviderDefinition,
   type ChannelProviderKey,
 } from "@/lib/channel-providers/provider-registry";
+import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
 import {
   createDefaultChannelSetupState,
   buildChannelReadinessModel,
@@ -2594,6 +2595,88 @@ export default function FamloProDashboardShell({
       warningLabel: readinessModel.warningLabel,
     };
   });
+  const connectedProviderCount = CHANNEL_PROVIDER_REGISTRY.filter((provider) => {
+    const setupState = channelSetupStatesByKey[provider.key];
+    return provider.key === "booking"
+      ? currentChannelAttached || setupState.metadata.provider_channel_attached === true
+      : setupState.metadata.provider_channel_attached === true;
+  }).length;
+  const anyProviderReadyForTestSyncReview = CHANNEL_PROVIDER_REGISTRY.some((provider) => {
+    const testSyncModel = channelTestSyncReadinessByKey[provider.key];
+    const setupState = channelSetupStatesByKey[provider.key];
+    return testSyncModel.readyForLimitedTestSync || setupState.metadata.provider_ready_for_test_sync_review === true;
+  });
+  const famloControlSurfaces = [
+    {
+      key: "connection",
+      title: "Channel connection",
+      status: connectedProviderCount > 0 ? "Live" : "Needed",
+      tone: connectedProviderCount > 0 ? styles.readinessPillOk : styles.readinessPillMissing,
+      detail:
+        connectedProviderCount > 0
+          ? `${connectedProviderCount} provider ${connectedProviderCount === 1 ? "is" : "are"} visible for this property.`
+          : "Connect at least one OTA first.",
+    },
+    {
+      key: "pricing",
+      title: "Pricing control",
+      status: currentChannelAttached && allActiveRoomsHaveRatePlans ? "Prepared" : "Blocked",
+      tone: currentChannelAttached && allActiveRoomsHaveRatePlans ? styles.readinessPillOk : styles.readinessPillReview,
+      detail:
+        currentChannelAttached && allActiveRoomsHaveRatePlans
+          ? "Famlo prices are mapped. Limited sync review is the next safe gate before live OTA rate control."
+          : "Finish channel connection and rate mapping before Famlo can safely control OTA pricing.",
+    },
+    {
+      key: "calendar",
+      title: "Calendar / inventory control",
+      status: anyProviderReadyForTestSyncReview ? "Review ready" : currentChannelAttached ? "Blocked" : "Needed",
+      tone: anyProviderReadyForTestSyncReview
+        ? styles.readinessPillOk
+        : currentChannelAttached
+          ? styles.readinessPillReview
+          : styles.readinessPillMissing,
+      detail:
+        anyProviderReadyForTestSyncReview
+          ? "Channel structure and mapping are strong enough for operator test-sync review."
+          : currentChannelAttached
+            ? "Connection exists, but sync review still blocks Famlo from becoming the OTA availability source."
+            : "Connect the channel first.",
+    },
+    {
+      key: "bookings",
+      title: "Bookings import",
+      status: bookingFeedHealthy ? "Live" : currentChannelAttached ? "Partial" : "Needed",
+      tone: bookingFeedHealthy
+        ? styles.readinessPillOk
+        : currentChannelAttached
+          ? styles.readinessPillReview
+          : styles.readinessPillMissing,
+      detail:
+        bookingFeedHealthy
+          ? "Booking.com operator feed path is available for selected-property import preview and acknowledgement."
+          : currentChannelAttached
+            ? "Connected channels exist, but booking-feed proof is not complete for every provider."
+            : "No OTA booking import path is active yet.",
+    },
+    {
+      key: "messages",
+      title: "Messages",
+      status: "Famlo inbox",
+      tone: styles.readinessPillOk,
+      detail: "Famlo direct guest messaging is live. OTA guest threads still stay outside this phase.",
+    },
+    {
+      key: "revenue",
+      title: "Revenue",
+      status: proBookings.length > 0 ? "Visible" : "Waiting",
+      tone: proBookings.length > 0 ? styles.readinessPillOk : styles.readinessPillMissing,
+      detail:
+        proBookings.length > 0
+          ? "Famlo Pro already reports booking value from current direct and imported reservations."
+          : "Revenue view activates as soon as this property has bookings in Famlo.",
+    },
+  ] as const;
   const channelMatchingSnapshotsByKey = CHANNEL_PROVIDER_REGISTRY.reduce((acc, provider) => {
     const setupState = channelSetupStatesByKey[provider.key];
     const hasRealProviderData = provider.key === "booking" ? currentChannelAttached : false;
@@ -5271,6 +5354,29 @@ export default function FamloProDashboardShell({
 
                 <div className={styles.listGrid}>
                   <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Famlo control status</div>
+                    <div className={styles.cardCopy}>
+                      This shows what Famlo actually controls after connection, mapping, and sync review. It stays honest and does not pretend every OTA is fully live.
+                    </div>
+                    <div className={styles.mappingTable} style={{ marginTop: 12 }}>
+                      <div className={styles.mappingHeader}>Surface</div>
+                      <div className={styles.mappingHeader}>Status</div>
+                      <div className={styles.mappingHeader}>Reality</div>
+                      {famloControlSurfaces.map((surface) => (
+                        <Fragment key={surface.key}>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{surface.title}</div>
+                          </div>
+                          <div className={styles.mappingCell}>
+                            <span className={`${styles.readinessPill} ${surface.tone}`}>{surface.status}</span>
+                          </div>
+                          <div className={styles.mappingCellMuted}>{surface.detail}</div>
+                        </Fragment>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
                     <div className={styles.listTitle}>What this engine does now</div>
                     <div className={styles.stack}>
                       <div className={styles.feedItem}>
@@ -6277,6 +6383,13 @@ export default function FamloProDashboardShell({
                       OTA guest threads, review ingestion, and response queues are not being introduced in this safe pilot phase.
                     </div>
                   </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Channel-manager reality</div>
+                    <div className={styles.metricValue}>{connectedProviderCount > 0 ? "Connected" : "Not connected"}</div>
+                    <div className={styles.metricHint}>
+                      Famlo inbox is live today. OTA guest threads do not become part of Famlo just because a channel was connected.
+                    </div>
+                  </article>
                 </div>
 
                 {hostUserId ? (
@@ -6560,6 +6673,23 @@ export default function FamloProDashboardShell({
                       <span className={styles.readinessPill}>Pending approvals: {pendingApprovalBookingsCount}</span>
                       <span className={styles.readinessPill}>Action needed: {actionNeededBookingsCount}</span>
                       <span className={styles.readinessPill}>Cancelled: {cancelledBookingsCount}</span>
+                    </div>
+                  </article>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Channel-manager revenue reality</div>
+                    <div className={styles.stack}>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Visible now</div>
+                        <div className={styles.feedCopy}>
+                          Famlo Pro can already show booking value from current direct reservations and any OTA reservations that have been safely imported.
+                        </div>
+                      </div>
+                      <div className={styles.feedItem}>
+                        <div className={styles.feedTitle}>Still later</div>
+                        <div className={styles.feedCopy}>
+                          Final payout, commission, and settlement automation do not become real just because a provider was connected.
+                        </div>
+                      </div>
                     </div>
                   </article>
                 </div>
@@ -7878,6 +8008,7 @@ function ProviderOperatorVerificationCard({
       : "Not verified";
   const providerStructureBlockers = structureFeedback?.blockers ?? setupState.metadata.provider_structure_blockers;
   const providerReadyForTestReview = structureFeedback?.readyForTestSyncReview ?? setupState.metadata.provider_ready_for_test_sync_review ?? false;
+  const mutationAudit = getProviderMutationPrimitiveAudit(providerKey);
 
   const openWorkspace = (): void => {
     startOpeningWorkspace(async () => {
@@ -8058,6 +8189,33 @@ function ProviderOperatorVerificationCard({
               : providerKey === "expedia"
                 ? "Real Expedia create and test-connection steps still happen inside Channex after Expedia connectivity approval. Famlo checks the result after the real connection flow."
                 : "Real Google Hotel feed/channel setup still happens inside Channex. Famlo checks the resulting channel state after the real setup flow."}
+      </div>
+      <div className={styles.stack} style={{ marginTop: 12 }}>
+        <div className={styles.listTitle}>Provider mutation primitive audit</div>
+        <div className={styles.feedCopy}>{mutationAudit.summary}</div>
+        <div className={styles.inlineBadgeRow} style={{ marginTop: 8 }}>
+          <span className={`${styles.readinessPill} ${mutationAudit.createChannelApiAvailable ? styles.readinessPillOk : styles.readinessPillReview}`}>
+            Create API: {mutationAudit.createChannelApiAvailable ? "Available" : "Missing"}
+          </span>
+          <span className={`${styles.readinessPill} ${mutationAudit.testConnectionApiAvailable ? styles.readinessPillOk : styles.readinessPillReview}`}>
+            Test API: {mutationAudit.testConnectionApiAvailable ? "Available" : "Missing"}
+          </span>
+          <span className={styles.readinessPill}>
+            Path: {mutationAudit.workspaceRequired ? "Real Channex workspace" : "Famlo API"}
+          </span>
+        </div>
+        {mutationAudit.missingPrimitive ? (
+          <div className={styles.feedbackBox} style={{ marginTop: 8 }}>
+            {mutationAudit.missingPrimitive}
+          </div>
+        ) : null}
+        <div className={styles.stack} style={{ marginTop: 8 }}>
+          {mutationAudit.notes.map((note) => (
+            <div key={note} className={styles.feedCopy}>
+              {note}
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className={styles.placeholderGrid} style={{ marginTop: 12 }}>

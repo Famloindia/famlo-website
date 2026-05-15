@@ -1,0 +1,90 @@
+diff --git a/components/partners/pro/ChannelSetupWizard.tsx b/components/partners/pro/ChannelSetupWizard.tsx
+index 976e1768..9784188b 100644
+--- a/components/partners/pro/ChannelSetupWizard.tsx
++++ b/components/partners/pro/ChannelSetupWizard.tsx
+@@ -3,6 +3,7 @@
+ import { Fragment, useEffect, useMemo, useState } from "react";
+ 
+ import { buildProviderConnectionModel } from "@/lib/channel-providers/connection-model";
++import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
+ import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+ import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+ import {
+@@ -355,6 +356,7 @@ export default function ChannelSetupWizard({
+           : state.metadata.provider_connection_status === "verification_failed"
+             ? "Verification failed"
+             : state.metadata.provider_connection_status ?? "Not requested";
++  const mutationAudit = getProviderMutationPrimitiveAudit(providerKey);
+ 
+   const savedStateSummary = useMemo(
+     () => [
+@@ -1405,7 +1407,15 @@ export default function ChannelSetupWizard({
+                 <span className={styles.readinessPill}>
+                   Structure: {state.metadata.provider_structure_verified ? "Verified" : state.metadata.provider_structure_blockers.length > 0 ? "Blocked" : "Not verified"}
+                 </span>
++                <span className={styles.readinessPill}>
++                  Direct create/test API: {mutationAudit.createChannelApiAvailable || mutationAudit.testConnectionApiAvailable ? "Available" : "Missing"}
++                </span>
+               </div>
++              {!mutationAudit.createChannelApiAvailable || !mutationAudit.testConnectionApiAvailable ? (
++                <div className={styles.feedbackBox}>
++                  {mutationAudit.missingPrimitive ?? mutationAudit.nextAction}
++                </div>
++              ) : null}
+               {state.metadata.provider_connection_error ? (
+                 <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.provider_connection_error}</div>
+               ) : null}
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index 9ab2f410..be63473e 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -45,6 +45,7 @@ import {
+   getChannelProviderDefinition,
+   type ChannelProviderKey,
+ } from "@/lib/channel-providers/provider-registry";
++import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
+ import {
+   createDefaultChannelSetupState,
+   buildChannelReadinessModel,
+@@ -7878,6 +7879,7 @@ function ProviderOperatorVerificationCard({
+       : "Not verified";
+   const providerStructureBlockers = structureFeedback?.blockers ?? setupState.metadata.provider_structure_blockers;
+   const providerReadyForTestReview = structureFeedback?.readyForTestSyncReview ?? setupState.metadata.provider_ready_for_test_sync_review ?? false;
++  const mutationAudit = getProviderMutationPrimitiveAudit(providerKey);
+ 
+   const openWorkspace = (): void => {
+     startOpeningWorkspace(async () => {
+@@ -8059,6 +8061,33 @@ function ProviderOperatorVerificationCard({
+                 ? "Real Expedia create and test-connection steps still happen inside Channex after Expedia connectivity approval. Famlo checks the result after the real connection flow."
+                 : "Real Google Hotel feed/channel setup still happens inside Channex. Famlo checks the resulting channel state after the real setup flow."}
+       </div>
++      <div className={styles.stack} style={{ marginTop: 12 }}>
++        <div className={styles.listTitle}>Provider mutation primitive audit</div>
++        <div className={styles.feedCopy}>{mutationAudit.summary}</div>
++        <div className={styles.inlineBadgeRow} style={{ marginTop: 8 }}>
++          <span className={`${styles.readinessPill} ${mutationAudit.createChannelApiAvailable ? styles.readinessPillOk : styles.readinessPillReview}`}>
++            Create API: {mutationAudit.createChannelApiAvailable ? "Available" : "Missing"}
++          </span>
++          <span className={`${styles.readinessPill} ${mutationAudit.testConnectionApiAvailable ? styles.readinessPillOk : styles.readinessPillReview}`}>
++            Test API: {mutationAudit.testConnectionApiAvailable ? "Available" : "Missing"}
++          </span>
++          <span className={styles.readinessPill}>
++            Path: {mutationAudit.workspaceRequired ? "Real Channex workspace" : "Famlo API"}
++          </span>
++        </div>
++        {mutationAudit.missingPrimitive ? (
++          <div className={styles.feedbackBox} style={{ marginTop: 8 }}>
++            {mutationAudit.missingPrimitive}
++          </div>
++        ) : null}
++        <div className={styles.stack} style={{ marginTop: 8 }}>
++          {mutationAudit.notes.map((note) => (
++            <div key={note} className={styles.feedCopy}>
++              {note}
++            </div>
++          ))}
++        </div>
++      </div>
+ 
+       <div className={styles.placeholderGrid} style={{ marginTop: 12 }}>
+         <div className={styles.placeholderRow}>

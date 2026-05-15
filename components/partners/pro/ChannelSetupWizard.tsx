@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { buildProviderConnectionModel } from "@/lib/channel-providers/connection-model";
+import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
 import {
@@ -55,6 +56,24 @@ type ProviderMappingWorkspace = {
   roomTypes: ProviderMappingOption[];
   ratePlans: ProviderMappingOption[];
   rooms: ProviderMappingRoom[];
+};
+
+type ProviderPreviewRow = {
+  roomId: string;
+  famloRoomName: string;
+  famloRoomType: string;
+  suggestedRoomTypeId: string | null;
+  suggestedRoomTypeTitle: string | null;
+  suggestedRatePlanId: string | null;
+  suggestedRatePlanTitle: string | null;
+  confidence: "high" | "medium" | "low";
+  autoApplicable: boolean;
+};
+
+type ProviderPreviewWorkspace = {
+  refreshedAt: string | null;
+  autoApplicableCount: number;
+  suggestions: ProviderPreviewRow[];
 };
 
 type ChannelSetupWizardProps = {
@@ -211,6 +230,9 @@ export default function ChannelSetupWizard({
   const [mappingWorkspace, setMappingWorkspace] = useState<ProviderMappingWorkspace | null>(null);
   const [roomTypeDrafts, setRoomTypeDrafts] = useState<Record<string, string>>({});
   const [ratePlanDrafts, setRatePlanDrafts] = useState<Record<string, string>>({});
+  const [previewWorkspace, setPreviewWorkspace] = useState<ProviderPreviewWorkspace | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [isApplyingPreview, setIsApplyingPreview] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -309,8 +331,42 @@ export default function ChannelSetupWizard({
     }
   };
 
+  const loadPreviewWorkspace = async (): Promise<void> => {
+    setIsLoadingPreview(true);
+    try {
+      const response = await fetch(
+        `/api/host/pro/channel/preview?familyId=${encodeURIComponent(familyId)}&providerKey=${encodeURIComponent(providerKey)}`
+      );
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        refreshedAt?: string | null;
+        autoApplicableCount?: number;
+        suggestions?: ProviderPreviewRow[];
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load provider preview.");
+      }
+
+      setPreviewWorkspace({
+        refreshedAt: typeof payload.refreshedAt === "string" ? payload.refreshedAt : null,
+        autoApplicableCount: typeof payload.autoApplicableCount === "number" ? payload.autoApplicableCount : 0,
+        suggestions: Array.isArray(payload.suggestions) ? payload.suggestions : [],
+      });
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Unable to load provider preview.");
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  };
+
   useEffect(() => {
     void loadMappingWorkspace();
+  }, [familyId, providerKey]);
+
+  useEffect(() => {
+    void loadPreviewWorkspace();
   }, [familyId, providerKey]);
 
   useEffect(() => {
@@ -355,6 +411,7 @@ export default function ChannelSetupWizard({
           : state.metadata.provider_connection_status === "verification_failed"
             ? "Verification failed"
             : state.metadata.provider_connection_status ?? "Not requested";
+  const mutationAudit = getProviderMutationPrimitiveAudit(providerKey);
 
   const savedStateSummary = useMemo(
     () => [
@@ -507,11 +564,124 @@ export default function ChannelSetupWizard({
 
       setFeedback(payload.message ?? "Mapping saved.");
       await loadMappingWorkspace();
+      await loadPreviewWorkspace();
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Unable to save mapping.");
     } finally {
       setIsSavingMappingByRoomId((current) => ({ ...current, [roomId]: false }));
     }
+  };
+
+  const connectProvider = (): void => {
+    void (async () => {
+      setIsSaving(true);
+      setFeedback(null);
+
+      try {
+        const response = await fetch("/api/host/pro/channel/connect", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            familyId,
+            providerKey,
+            bookingHotelId: bookingHotelIdInput,
+            bookingPropertyCode: bookingPropertyCodeInput,
+            bookingExtranetRequested: bookingExtranetRequested,
+            providerListingId: providerListingIdInput,
+            providerPropertyCode: providerPropertyCodeInput,
+            providerListingUrl: providerListingUrlInput,
+            providerExtranetRequested: providerExtranetRequested,
+            providerAccessToken: providerAccessTokenInput,
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          message?: string;
+          iframeUrl?: string | null;
+          providerHint?: string | null;
+          state?: ChannelSetupState | null;
+          mode?: "workspace_required" | "ready_for_preview";
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to start provider connection.");
+        }
+
+        if (payload.state) {
+          setState(payload.state);
+          onSaved?.(payload.state);
+        }
+
+        if (payload.iframeUrl) {
+          setChannexWorkspaceUrl(payload.iframeUrl);
+          setChannexWorkspaceHint(payload.providerHint ?? null);
+        }
+
+        if (providerKey === "mmt") {
+          setProviderAccessTokenInput("");
+        }
+
+        setFeedback(
+          payload.mode === "ready_for_preview"
+            ? payload.message ?? "Channel is already visible. Load preview and confirm the suggested mappings."
+            : payload.message ?? "Connection details saved. Continue inside the embedded secure connector."
+        );
+
+        await loadPreviewWorkspace();
+        await loadMappingWorkspace();
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : "Unable to start provider connection.");
+      } finally {
+        setIsSaving(false);
+      }
+    })();
+  };
+
+  const applyPreviewMappings = (): void => {
+    void (async () => {
+      setIsApplyingPreview(true);
+      setFeedback(null);
+      try {
+        const response = await fetch("/api/host/pro/channel/preview", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            familyId,
+            providerKey,
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          message?: string;
+          state?: ChannelSetupState | null;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to apply suggested mappings.");
+        }
+
+        if (payload.state) {
+          setState(payload.state);
+          onSaved?.(payload.state);
+        }
+
+        setFeedback(payload.message ?? "Suggested mappings applied.");
+        await loadPreviewWorkspace();
+        await loadMappingWorkspace();
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : "Unable to apply suggested mappings.");
+      } finally {
+        setIsApplyingPreview(false);
+      }
+    })();
   };
 
   const selectListingMode = (setupMode: ChannelSetupState["setupMode"], hasExistingListing: boolean): void => {
@@ -923,7 +1093,7 @@ export default function ChannelSetupWizard({
                 type="button"
                 className={styles.primaryActionButton}
                 disabled={isSaving}
-                onClick={requestBookingVerification}
+                onClick={connectProvider}
               >
                 {isSaving ? "Connecting..." : connectionModel.hostActionLabel}
               </button>
@@ -1016,7 +1186,7 @@ export default function ChannelSetupWizard({
                 type="button"
                 className={styles.primaryActionButton}
                 disabled={isSaving}
-                onClick={requestAssistedProviderVerification}
+                onClick={connectProvider}
               >
                 {isSaving ? "Connecting..." : connectionModel.hostActionLabel}
               </button>
@@ -1101,6 +1271,77 @@ export default function ChannelSetupWizard({
             />
           </div>
         ) : null}
+      </section>
+
+      <section className={styles.listCard} style={{ marginBottom: 16 }}>
+        <div className={styles.listTitle}>Connection preview</div>
+        <div className={styles.cardCopy}>
+          Once the provider channel and structures are visible, Famlo can suggest room and rate matches before you confirm them.
+        </div>
+        <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+          <span className={styles.readinessPill}>Preview rows: {previewWorkspace?.suggestions.length ?? 0}</span>
+          <span className={styles.readinessPill}>Auto-applicable: {previewWorkspace?.autoApplicableCount ?? 0}</span>
+          <span className={styles.readinessPill}>Refreshed: {previewWorkspace?.refreshedAt ?? "Not loaded"}</span>
+        </div>
+        <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className={styles.secondaryActionButton}
+            disabled={isLoadingPreview}
+            onClick={() => {
+              void loadPreviewWorkspace();
+            }}
+          >
+            {isLoadingPreview ? "Loading preview..." : "Load preview"}
+          </button>
+          <button
+            type="button"
+            className={styles.primaryActionButton}
+            disabled={isApplyingPreview || !previewWorkspace || previewWorkspace.autoApplicableCount === 0}
+            onClick={applyPreviewMappings}
+          >
+            {isApplyingPreview ? "Applying..." : "Confirm preview & apply suggested mappings"}
+          </button>
+        </div>
+        {!previewWorkspace || previewWorkspace.suggestions.length === 0 ? (
+          <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
+            Save the connection details, finish provider create or test if needed, then refresh from Channex. After that Famlo can generate a room and rate preview here.
+          </div>
+        ) : (
+          <div className={styles.mappingTable} style={{ marginTop: 14 }}>
+            <div className={styles.mappingHeader}>Famlo room</div>
+            <div className={styles.mappingHeader}>Suggested provider room</div>
+            <div className={styles.mappingHeader}>Suggested rate plan</div>
+            <div className={styles.mappingHeader}>Confidence</div>
+            {previewWorkspace.suggestions.map((row) => (
+              <Fragment key={row.roomId}>
+                <div className={styles.mappingCell}>
+                  <div className={styles.mappingTitle}>{row.famloRoomName}</div>
+                  <div className={styles.mappingSubcopy}>{row.famloRoomType || "Famlo room"}</div>
+                </div>
+                <div className={styles.mappingCellMuted}>
+                  {row.suggestedRoomTypeTitle ?? "No room match yet"}
+                </div>
+                <div className={styles.mappingCellMuted}>
+                  {row.suggestedRatePlanTitle ?? "No rate match yet"}
+                </div>
+                <div className={styles.mappingCell}>
+                  <span
+                    className={`${styles.readinessPill} ${
+                      row.confidence === "high"
+                        ? styles.readinessPillOk
+                        : row.confidence === "medium"
+                          ? styles.readinessPillReview
+                          : styles.readinessPillMissing
+                    }`}
+                  >
+                    {row.autoApplicable ? `${row.confidence} · ready` : `${row.confidence} · review`}
+                  </span>
+                </div>
+              </Fragment>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className={styles.listCard} style={{ marginBottom: 16 }}>
@@ -1405,7 +1646,15 @@ export default function ChannelSetupWizard({
                 <span className={styles.readinessPill}>
                   Structure: {state.metadata.provider_structure_verified ? "Verified" : state.metadata.provider_structure_blockers.length > 0 ? "Blocked" : "Not verified"}
                 </span>
+                <span className={styles.readinessPill}>
+                  Direct create/test API: {mutationAudit.createChannelApiAvailable || mutationAudit.testConnectionApiAvailable ? "Available" : "Missing"}
+                </span>
               </div>
+              {!mutationAudit.createChannelApiAvailable || !mutationAudit.testConnectionApiAvailable ? (
+                <div className={styles.feedbackBox}>
+                  {mutationAudit.missingPrimitive ?? mutationAudit.nextAction}
+                </div>
+              ) : null}
               {state.metadata.provider_connection_error ? (
                 <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{state.metadata.provider_connection_error}</div>
               ) : null}
