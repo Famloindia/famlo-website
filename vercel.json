@@ -3,6 +3,10 @@
     {
       "path": "/api/internal/cron/platform-maintenance",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/internal/cron/channel-sync-jobs",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
