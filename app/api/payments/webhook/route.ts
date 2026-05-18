@@ -13,9 +13,11 @@ import {
   assertBookingCanFinalizePayment,
   loadBookingForPaymentFinalization,
   markBookingPaymentInventoryConflict,
+  recordBookingInventoryTransition,
   resolveBookingApprovalRequirement,
 } from "@/lib/payment-booking-finalization";
 import { verifyRazorpayWebhookSignature } from "@/lib/razorpay";
+import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { loadUserProfileCompatibility } from "@/lib/user-profile";
 
@@ -493,6 +495,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       } as never)
       .eq("id", payment.booking_id);
 
+    if (update.bookingPaymentStatus === "paid") {
+      await recordBookingInventoryTransition(supabase, {
+        booking: {
+          ...(booking as Record<string, unknown> | null),
+          status: bookingStatus,
+          payment_status: update.bookingPaymentStatus,
+        },
+        eventType: "booking_confirmed",
+        eventSource: "payments.webhook",
+        payload: {
+          payment_id: payment.id,
+          webhook_event: eventName,
+          approval_required: approvalRequired,
+        },
+      });
+    }
+
     await supabase.from("booking_status_history_v2").insert({
       booking_id: payment.booking_id,
       old_status: booking?.status ?? null,
@@ -501,6 +520,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       reason: `payment_webhook:${eventName}`,
       created_at: now,
     } as never);
+
+    await syncReservationFromBooking(supabase, {
+      bookingId: payment.booking_id,
+      source: "payments.webhook",
+      eventType: "status_synced",
+      payload: {
+        payment_id: payment.id,
+        webhook_event: eventName,
+        next_status: bookingStatus,
+      },
+    });
 
     if (update.paymentStatus === "paid") {
       try {

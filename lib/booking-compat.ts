@@ -9,6 +9,13 @@ import { getCalendarEventStayUnitId, loadCanonicalCalendar } from "@/lib/calenda
 import { ensureHostProfileForFamily } from "@/lib/family-approval";
 import { toPctFromBps } from "@/lib/finance/money";
 import { buildHostStayOccupancy } from "@/lib/host-stay-availability";
+import {
+  appendInventoryEvent,
+  projectInventoryRange,
+  recordInventoryParityCheck,
+  resolveCanonicalInventoryPrice,
+} from "@/lib/inventory";
+import { ensureReservationForBooking } from "@/lib/reservations";
 import { resolvePrimaryStayUnitId } from "@/lib/stay-units";
 
 type JsonRecord = Record<string, unknown>;
@@ -163,6 +170,21 @@ async function loadCoupon(
   return data as CouponRow;
 }
 
+async function resolveStayUnitFamilyId(
+  supabase: SupabaseClient,
+  stayUnitId: string | null | undefined
+): Promise<string | null> {
+  const cleanStayUnitId = asString(stayUnitId);
+  if (!cleanStayUnitId) return null;
+  const { data, error } = await supabase
+    .from("stay_units_v2")
+    .select("legacy_family_id")
+    .eq("id", cleanStayUnitId)
+    .maybeSingle();
+  if (error) throw error;
+  return asString((data as JsonRecord | null)?.legacy_family_id);
+}
+
 async function countCouponRedemptions(
   supabase: SupabaseClient,
   couponId: string,
@@ -262,6 +284,11 @@ function couponMatchesLocation(
 
 function slotToken(dateStr: string, slotKey: string): string {
   return `${dateStr}::${slotKey}`;
+}
+
+function isCanonicalDayInventoryEligible(quarterType: string | null | undefined): boolean {
+  const normalized = asString(quarterType)?.toLowerCase();
+  return !normalized || normalized === "fullday";
 }
 
 function enumerateDates(from: string, to: string): string[] {
@@ -388,6 +415,7 @@ export async function assertHostStayAvailability(
   const blockedDates = familyRow && Array.isArray(familyRow.blocked_dates) ? familyRow.blocked_dates : [];
   const endDate = input.endDate ?? input.startDate;
   const quarterType = asString(input.quarterType);
+  const useCanonicalDayInventory = isCanonicalDayInventoryEligible(quarterType);
   const requestedGuests = Math.max(1, Math.trunc(input.guestsCount || 1));
   const maxGuests = requestedStayUnitId ? Math.max(1, Math.trunc(roomRow?.max_guests ?? 1)) : Math.max(1, Math.trunc(familyRow?.max_guests ?? 1));
 
@@ -403,7 +431,54 @@ export async function assertHostStayAvailability(
     throw new Error("This quarter is currently unavailable for this home.");
   }
 
-  for (const date of enumerateDates(input.startDate, endDate)) {
+  const requestedDates = enumerateDates(input.startDate, endDate);
+
+  if (useCanonicalDayInventory && requestedStayUnitId && legacyFamilyId) {
+    const canonicalDays = await projectInventoryRange(supabase, {
+      familyId: legacyFamilyId,
+      stayUnitId: requestedStayUnitId,
+      from: input.startDate,
+      to: endDate,
+      excludeBookingId: options?.excludeBookingId ?? null,
+    });
+
+    for (const day of canonicalDays) {
+      const legacyManualBlocked =
+        blockedDates.includes(day.date) ||
+        blockedDates.includes(slotToken(day.date, "fullday")) ||
+        (quarterType ? blockedDates.includes(slotToken(day.date, quarterType)) : false);
+
+      if (legacyManualBlocked !== day.manualBlockPresent) {
+        await recordInventoryParityCheck(supabase, {
+          familyId: legacyFamilyId,
+          stayUnitId: requestedStayUnitId,
+          date: day.date,
+          checkType: "manual_block_shadow_read",
+          legacyValue: { manual_blocked: legacyManualBlocked },
+          canonicalValue: {
+            manual_blocked: day.manualBlockPresent,
+            block_reason: day.blockReason,
+            last_event_id: day.lastEventId,
+          },
+          severity: "warning",
+          context: { host_id: hostId, quarter_type: quarterType ?? null },
+        });
+      }
+    }
+
+    const firstBlocked = canonicalDays.find((day) => !day.isSellable);
+    if (firstBlocked) {
+      throw new Error(
+        firstBlocked.blockReason === "manual_block"
+          ? "This room is manually blocked for the selected date."
+          : firstBlocked.blockReason === "sold_out"
+            ? "This room is already booked for the selected date."
+            : "This room is not available for the selected date."
+      );
+    }
+  }
+
+  for (const date of requestedDates) {
     if (
       blockedDates.includes(date) ||
       blockedDates.includes(slotToken(date, "fullday")) ||
@@ -594,24 +669,47 @@ export async function buildBookingQuote(
             .maybeSingle();
           if (error) throw error;
           return asString((data as any)?.user_id);
-        })()
+      })()
       : null;
 
-  const pricingResolution = await resolveBookingUnitPrice(supabase, {
-    bookingType: input.bookingType,
-    hostId: resolvedHostTarget.hostId ?? input.hostId ?? null,
-    hommieId: input.hommieId ?? null,
-    activityId: input.activityId ?? null,
-    stayUnitId: input.stayUnitId ?? null,
-    startDate: input.startDate,
-    quarterType: input.quarterType ?? null,
-    clientUnitPrice: typeof input.unitPrice === "number" ? input.unitPrice : null,
-    allowClientFallback,
-  });
+  const canonicalFamilyId =
+    input.bookingType === "host_stay"
+      ? asString(input.legacyFamilyId) ?? (await resolveStayUnitFamilyId(supabase, input.stayUnitId))
+      : null;
+  const useCanonicalDayInventory = isCanonicalDayInventoryEligible(input.quarterType);
+  const canonicalPricing =
+    useCanonicalDayInventory && input.bookingType === "host_stay" && canonicalFamilyId && input.stayUnitId
+      ? await resolveCanonicalInventoryPrice(supabase, {
+          familyId: canonicalFamilyId,
+          stayUnitId: input.stayUnitId,
+          startDate: input.startDate,
+          endDate: input.endDate ?? input.startDate,
+        })
+      : null;
+
+  const pricingResolution =
+    canonicalPricing && canonicalPricing.unitPrice > 0
+      ? {
+          unitPrice: canonicalPricing.unitPrice,
+          source: "inventory_day_projection" as const,
+          warnings: [`Canonical inventory pricing applied from ${canonicalPricing.source}.`],
+          seasonalRuleCodes: [],
+        }
+      : await resolveBookingUnitPrice(supabase, {
+          bookingType: input.bookingType,
+          hostId: resolvedHostTarget.hostId ?? input.hostId ?? null,
+          hommieId: input.hommieId ?? null,
+          activityId: input.activityId ?? null,
+          stayUnitId: input.stayUnitId ?? null,
+          startDate: input.startDate,
+          quarterType: input.quarterType ?? null,
+          clientUnitPrice: typeof input.unitPrice === "number" ? input.unitPrice : null,
+          allowClientFallback,
+        });
 
   const subtotal = Math.max(
     0,
-    Math.round(pricingResolution.unitPrice * dayCount)
+    Math.round(canonicalPricing ? canonicalPricing.totalPrice : pricingResolution.unitPrice * dayCount)
   );
 
   let discountAmount = 0;
@@ -766,6 +864,10 @@ export async function buildBookingQuote(
         allow_client_fallback: allowClientFallback,
         client_unit_price_received: typeof input.unitPrice === "number" ? input.unitPrice : null,
         client_commission_pct_received: typeof input.commissionPct === "number" ? input.commissionPct : null,
+        canonical_currency: canonicalPricing?.currency ?? null,
+        canonical_days: canonicalPricing?.days.length ?? 0,
+        canonical_total_price: canonicalPricing?.totalPrice ?? null,
+        canonical_day_inventory_applied: Boolean(canonicalPricing),
       },
       guests_count: guestsCount,
       day_count: dayCount,
@@ -1408,6 +1510,7 @@ export async function createBookingCompatibility(
   }
 
   const v2Status = input.bookingType === "host_stay" ? "awaiting_payment" : "pending";
+  const holdExpiresAt = input.bookingType === "host_stay" ? computeHoldExpiry() : null;
 
   const bookingPayload: JsonRecord = {
     user_id: input.userId,
@@ -1420,7 +1523,7 @@ export async function createBookingCompatibility(
     hommie_id: resolvedHommieId,
     activity_id: input.activityId ?? null,
     status: v2Status,
-    hold_expires_at: input.bookingType === "host_stay" ? computeHoldExpiry() : null,
+    hold_expires_at: holdExpiresAt,
     start_date: input.startDate,
     end_date: input.endDate ?? input.startDate,
     quarter_type: input.quarterType ?? null,
@@ -1458,6 +1561,43 @@ export async function createBookingCompatibility(
   if (v2Error || !v2Booking) {
     throw v2Error ?? new Error("Could not create booking in v2.");
   }
+
+  const canonicalFamilyId =
+    input.bookingType === "host_stay"
+      ? asString(input.legacyFamilyId) ?? (await resolveStayUnitFamilyId(supabase, resolvedStayUnitId))
+      : null;
+  if (input.bookingType === "host_stay" && canonicalFamilyId && resolvedStayUnitId) {
+    await appendInventoryEvent(supabase, {
+      familyId: canonicalFamilyId,
+      stayUnitId: resolvedStayUnitId,
+      eventType: "booking_hold_created",
+      eventSource: "famlo_booking",
+      sourceReference: asString((v2Booking as JsonRecord).id),
+      effectiveDateStart: input.startDate,
+      effectiveDateEnd: input.endDate ?? input.startDate,
+      slotKey: input.quarterType ?? null,
+      payload: {
+        booking_id: asString((v2Booking as JsonRecord).id),
+        hold_expires_at: holdExpiresAt,
+        hold_expiry_authoritative: true,
+      },
+      actorUserId: input.userId,
+      actorRole: "guest",
+    });
+
+    await projectInventoryRange(supabase, {
+      familyId: canonicalFamilyId,
+      stayUnitId: resolvedStayUnitId,
+      from: input.startDate,
+      to: input.endDate ?? input.startDate,
+    });
+  }
+
+  await ensureReservationForBooking(supabase, {
+    bookingId: asString((v2Booking as JsonRecord).id) ?? "",
+    source: "booking_create",
+    sourceKind: "direct",
+  });
 
   let legacyBookingId: string | null = null;
   const legacyInsert =

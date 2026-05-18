@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { assertBookingSlotStillAvailableForPayment } from "@/lib/booking-compat";
 import { createCalendarConflict } from "@/lib/calendar";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
+import { appendInventoryEvent, projectInventoryRange, type InventoryEventType } from "@/lib/inventory";
+import { syncReservationFromBooking } from "@/lib/reservations";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -59,6 +61,16 @@ function resolveStayUnitId(record: PaymentConflictBooking | JsonRecord | null | 
       : null;
 
   return asString(snapshot?.stay_unit_id);
+}
+
+function resolveBookingFamilyId(record: PaymentConflictBooking | JsonRecord | null | undefined): string | null {
+  const relation = (record as JsonRecord | null | undefined)?.hosts;
+  const hostRelation = Array.isArray(relation) ? relation[0] : relation;
+  const hostRecord =
+    hostRelation && typeof hostRelation === "object" && !Array.isArray(hostRelation)
+      ? (hostRelation as JsonRecord)
+      : null;
+  return asString(hostRecord?.legacy_family_id);
 }
 
 export async function loadBookingForPaymentFinalization(
@@ -331,6 +343,54 @@ export async function assertBookingCanFinalizePayment(
   }
 }
 
+export async function recordBookingInventoryTransition(
+  supabase: SupabaseClient,
+  input: {
+    booking: PaymentConflictBooking | JsonRecord | null | undefined;
+    eventType: Extract<InventoryEventType, "booking_confirmed" | "booking_cancelled" | "booking_modified">;
+    eventSource: string;
+    actorUserId?: string | null;
+    actorRole?: string | null;
+    payload?: JsonRecord;
+  }
+): Promise<void> {
+  const bookingId = asString(input.booking?.id);
+  const familyId = resolveBookingFamilyId(input.booking);
+  const stayUnitId = resolveStayUnitId(input.booking);
+  const startDate = asString(input.booking?.start_date);
+  const endDate = asString(input.booking?.end_date) ?? startDate;
+
+  if (!bookingId || !familyId || !stayUnitId || !startDate || !endDate) {
+    return;
+  }
+
+  await appendInventoryEvent(supabase, {
+    familyId,
+    stayUnitId,
+    eventType: input.eventType,
+    eventSource: input.eventSource,
+    sourceReference: bookingId,
+    effectiveDateStart: startDate,
+    effectiveDateEnd: endDate,
+    slotKey: asString(input.booking?.quarter_type),
+    payload: {
+      booking_id: bookingId,
+      status: asString(input.booking?.status),
+      payment_status: asString(input.booking?.payment_status),
+      ...(input.payload ?? {}),
+    },
+    actorUserId: input.actorUserId ?? null,
+    actorRole: input.actorRole ?? null,
+  });
+
+  await projectInventoryRange(supabase, {
+    familyId,
+    stayUnitId,
+    from: startDate,
+    to: endDate,
+  });
+}
+
 export async function markBookingPaymentInventoryConflict(
   supabase: SupabaseClient,
   input: {
@@ -368,6 +428,28 @@ export async function markBookingPaymentInventoryConflict(
       updated_at: now,
     } as never)
     .eq("id", bookingId);
+
+  await recordBookingInventoryTransition(supabase, {
+    booking: input.booking,
+    eventType: "booking_cancelled",
+    eventSource: input.provider,
+    payload: {
+      reason,
+      conflict_payment_id: input.paymentId,
+      conflict_summary: input.conflictSummary ?? null,
+    },
+  });
+
+  await syncReservationFromBooking(supabase, {
+    bookingId,
+    source: input.provider,
+    eventType: "cancellation_applied",
+    payload: {
+      reason,
+      conflict_payment_id: input.paymentId,
+      conflict_summary: input.conflictSummary ?? null,
+    },
+  });
 
   if (legacyBookingId) {
     await supabase

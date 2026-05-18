@@ -13,9 +13,11 @@ import {
   assertBookingCanFinalizePayment,
   loadBookingForPaymentFinalization,
   markBookingPaymentInventoryConflict,
+  recordBookingInventoryTransition,
   resolveBookingApprovalRequirement,
 } from "@/lib/payment-booking-finalization";
 import { verifyRazorpayPaymentSignature } from "@/lib/razorpay";
+import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { loadUserProfileCompatibility } from "@/lib/user-profile";
 
@@ -237,6 +239,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       throw bookingUpdateError;
     }
 
+    await recordBookingInventoryTransition(supabase, {
+      booking: {
+        ...(booking as Record<string, unknown> | null),
+        status: nextStatus,
+        payment_status: "paid",
+      },
+      eventType: "booking_confirmed",
+      eventSource: "payments.verify",
+      payload: {
+        payment_id: payment.id,
+        approval_required: approvalRequired,
+      },
+    });
+
     const legacyBookingId =
       typeof booking?.legacy_booking_id === "string" && booking.legacy_booking_id.trim().length > 0
         ? booking.legacy_booking_id
@@ -264,6 +280,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       reason: "payment_verified",
       created_at: now,
     } as never);
+
+    await syncReservationFromBooking(supabase, {
+      bookingId: payment.booking_id,
+      source: "payments.verify",
+      eventType: "status_synced",
+      payload: {
+        payment_id: payment.id,
+        approval_required: approvalRequired,
+        next_status: nextStatus,
+      },
+    });
 
     await appendLedgerEntryIfMissing(supabase, {
       bookingId: payment.booking_id,

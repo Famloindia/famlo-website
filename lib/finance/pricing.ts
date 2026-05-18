@@ -4,6 +4,7 @@ import { clampMoney } from "@/lib/finance/money";
 import { resolveSeasonalPrice } from "@/lib/booking-platform";
 
 export type PricingAuthoritySource =
+  | "inventory_day_projection"
   | "hosts.price_quarter"
   | "stay_units_v2.price_quarter"
   | "hommie_profiles_v2.hourly_price"

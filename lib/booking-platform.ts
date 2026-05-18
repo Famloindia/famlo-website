@@ -4,9 +4,11 @@ import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { processBookingActionJobBatch } from "@/lib/booking-whatsapp-actions";
 import { createCalendarConflict, loadCanonicalCalendar, logCalendarSync, parseIcs, upsertCalendarEvent, toCalendarEventUid, type CanonicalCalendarEvent } from "@/lib/calendar";
 import { renderBookingReceipt, renderCompliancePack, renderPayoutStatement } from "@/lib/document-templates";
+import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
 import { enqueueNotificationRecord } from "@/lib/notifications/enqueue";
 import { processNotificationQueueBatch } from "@/lib/notifications/notification-worker";
 import type { NotificationRecipientRole } from "@/lib/notifications/types";
+import { recordReservationModificationRequest, syncReservationFromBooking } from "@/lib/reservations";
 import { escapeHtml, enumerateDateRange, asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
 
 const HOLD_TTL_MINUTES = Number(process.env.FAMLO_HOLD_TTL_MINUTES ?? "20");
@@ -203,6 +205,16 @@ export async function expireBookingHolds(supabase: SupabaseClient): Promise<{ ex
       created_at: now,
     } as never);
 
+    await syncReservationFromBooking(supabase, {
+      bookingId,
+      source: "hold_expiry",
+      eventType: "cancellation_applied",
+      idempotencyKey: `reservation_hold_expiry:${bookingId}`,
+      payload: {
+        reason: "hold_expired",
+      },
+    });
+
     const hostId = asString((row as JsonRecord).host_id);
     if (hostId) {
       await upsertCalendarEvent(supabase, {
@@ -226,6 +238,37 @@ export async function expireBookingHolds(supabase: SupabaseClient): Promise<{ ex
 
     const stayUnitId = asString((row as JsonRecord).stay_unit_id);
     if (stayUnitId) {
+      const { data: stayUnitRow } = await supabase
+        .from("stay_units_v2")
+        .select("legacy_family_id")
+        .eq("id", stayUnitId)
+        .maybeSingle();
+      const familyId = asString((stayUnitRow as JsonRecord | null)?.legacy_family_id);
+      if (familyId) {
+        await appendInventoryEvent(supabase, {
+          familyId,
+          stayUnitId,
+          eventType: "booking_hold_released",
+          eventSource: "hold_expiry",
+          sourceReference: bookingId,
+          effectiveDateStart: asString((row as JsonRecord).start_date) ?? getTodayInIndia(),
+          effectiveDateEnd: asString((row as JsonRecord).end_date) ?? asString((row as JsonRecord).start_date) ?? getTodayInIndia(),
+          slotKey: asString((row as JsonRecord).quarter_type),
+          payload: {
+            booking_id: bookingId,
+            reason: "hold_expired",
+            hold_expiry_authoritative: true,
+          },
+        });
+
+        await projectInventoryRange(supabase, {
+          familyId,
+          stayUnitId,
+          from: asString((row as JsonRecord).start_date) ?? getTodayInIndia(),
+          to: asString((row as JsonRecord).end_date) ?? asString((row as JsonRecord).start_date) ?? getTodayInIndia(),
+        });
+      }
+
       await upsertCalendarEvent(supabase, {
         eventUid: toCalendarEventUid("booking_hold", bookingId, asString((row as JsonRecord).start_date) ?? getTodayInIndia(), asString((row as JsonRecord).quarter_type)),
         ownerType: "stay_unit",
@@ -430,7 +473,17 @@ export async function createBookingModification(
     .select("id")
     .single();
   if (error) throw error;
-  return asString(data?.id);
+  const modificationId = asString(data?.id);
+  await recordReservationModificationRequest(supabase, {
+    bookingId: input.bookingId,
+    modificationId,
+    requestedByUserId: input.requestedByUserId ?? null,
+    payload: {
+      financial_delta: input.financialDelta,
+      reason: input.reason ?? null,
+    },
+  });
+  return modificationId;
 }
 
 export async function enqueueNotification(

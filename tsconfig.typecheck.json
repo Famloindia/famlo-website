@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", ".next", "supabase/functions/**"]
+  "exclude": ["node_modules", ".next", "supabase/functions/**", "supabase/functions 2/**", "supabase/migrations 2/**"]
 }

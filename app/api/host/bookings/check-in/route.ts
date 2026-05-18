@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { deriveGuestCheckInCode, isGuestCheckInWindowOpen, normalizeGuestCheckInCode } from "@/lib/guest-check-in";
 import { resolveMessageThread } from "@/lib/chat-thread";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 function isValidBookingStatus(status: string | null | undefined): boolean {
@@ -135,6 +136,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       reason: "guest_secret_code_verified",
       created_at: now,
     } as never);
+
+    await syncReservationFromBooking(supabase, {
+      bookingId: cleanBookingId,
+      source: "host_check_in",
+      actorUserId: hostAccess.hostUserId ?? null,
+      actorRole: hostAccess.isAdmin ? "admin" : "host",
+      eventType: "guest_checked_in",
+      payload: {
+        family_id: cleanFamilyId,
+      },
+    });
 
     const thread = await resolveMessageThread(supabase, cleanBookingId, { createIfMissing: true });
     if (thread?.conversationId) {

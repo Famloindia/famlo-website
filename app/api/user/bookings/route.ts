@@ -5,6 +5,7 @@ import { loadGuestBookingsCompatibility } from "@/lib/booking-compat";
 import { getTodayInIndia } from "@/lib/booking-time";
 import { getGuestCookieName, readGuestSessionToken } from "@/lib/guest-auth";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
+import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type AuthenticatedUser = {
@@ -110,6 +111,16 @@ async function markElapsedBookingsCompleted(
         error: historyError,
       });
     }
+
+    await syncReservationFromBooking(supabase, {
+      bookingId: booking.id,
+      source: "auto_checkout",
+      eventType: "auto_completed",
+      idempotencyKey: `auto_completed:${booking.id}:${todayInIndia}`,
+      payload: {
+        completed_on: todayInIndia,
+      },
+    });
   }
 
   return changed;

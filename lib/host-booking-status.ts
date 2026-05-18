@@ -5,6 +5,7 @@ import { enqueueNotification } from "@/lib/booking-platform";
 import { updateHostBookingStatusCompatibility } from "@/lib/booking-compat";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { asString, type JsonRecord } from "@/lib/platform-utils";
+import { syncReservationFromBooking } from "@/lib/reservations";
 
 type HostBookingStatusMessageContext = {
   guestName?: string | null;
@@ -186,6 +187,15 @@ export async function applyHostBookingStatusUpdate(
     reason: "host_booking_status_update",
     created_at: new Date().toISOString(),
   } as never);
+
+  await syncReservationFromBooking(supabase, {
+    bookingId: String(updated.id ?? bookingId),
+    source: "host_booking_status",
+    eventType: "status_synced",
+    payload: {
+      booking_status: status,
+    },
+  });
 
   if (!thread) {
     if (guestUserId && !skipGuestNotifications) {

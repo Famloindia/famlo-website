@@ -1,0 +1,597 @@
+diff --git a/app/api/host/pro/calendar/manual-block/route.ts b/app/api/host/pro/calendar/manual-block/route.ts
+index 5651b9ca..6b9d47d3 100644
+--- a/app/api/host/pro/calendar/manual-block/route.ts
++++ b/app/api/host/pro/calendar/manual-block/route.ts
+@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
+ 
+ import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
++import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+ 
+ type JsonRecord = Record<string, unknown>;
+@@ -69,6 +70,28 @@ export async function POST(request: Request): Promise<NextResponse> {
+     if (familyError) throw familyError;
+     if (hostError) throw hostError;
+ 
++    await appendInventoryEvent(supabase, {
++      familyId: hostAccess.familyId,
++      stayUnitId: roomId,
++      eventType: action === "block" ? "manual_block_set" : "manual_block_removed",
++      eventSource: "famlo_pro_calendar",
++      sourceReference: date,
++      effectiveDateStart: date,
++      effectiveDateEnd: date,
++      payload: {
++        updated_via: "famlo_pro_calendar",
++      },
++      actorUserId: hostAccess.hostUserId ?? null,
++      actorRole: hostAccess.isAdmin ? "admin" : "host",
++    });
++
++    await projectInventoryRange(supabase, {
++      familyId: hostAccess.familyId,
++      stayUnitId: roomId,
++      from: date,
++      to: date,
++    });
++
+     const [familyUpdateResult, hostUpdateResult] = await Promise.all([
+       supabase
+         .from("families")
+@@ -76,7 +99,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+           blocked_dates: nextBlockedDates(
+             asStringArray((familyRow as JsonRecord | null)?.blocked_dates),
+             date,
+-            "unblock"
++            action
+           ),
+         })
+         .eq("id", hostAccess.familyId),
+@@ -86,7 +109,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+           blocked_dates: nextBlockedDates(
+             asStringArray((hostRow as JsonRecord | null)?.blocked_dates),
+             date,
+-            "unblock"
++            action
+           ),
+         })
+         .eq("id", hostAccess.hostId),
+diff --git a/app/api/host/pro/calendar/manual-rate/route.ts b/app/api/host/pro/calendar/manual-rate/route.ts
+index f65a358d..1ff39e66 100644
+--- a/app/api/host/pro/calendar/manual-rate/route.ts
++++ b/app/api/host/pro/calendar/manual-rate/route.ts
+@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
+ 
+ import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
++import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+ 
+ function asString(value: unknown): string | null {
+@@ -60,6 +61,46 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
+     }
+ 
++    const { data: settings, error: settingsError } = await supabase
++      .from("host_pro_settings")
++      .select("currency")
++      .eq("family_id", hostAccess.familyId)
++      .maybeSingle();
++    if (settingsError) throw settingsError;
++    const currency = typeof settings?.currency === "string" && settings.currency.trim().length > 0
++      ? settings.currency.trim()
++      : "INR";
++
++    await appendInventoryEvent(supabase, {
++      familyId: hostAccess.familyId,
++      stayUnitId: roomId,
++      eventType: action === "save" ? "manual_rate_set" : "manual_rate_removed",
++      eventSource: "famlo_pro_calendar",
++      sourceReference: date,
++      effectiveDateStart: date,
++      effectiveDateEnd: date,
++      payload:
++        action === "save"
++          ? {
++              amount,
++              currency,
++              updated_via: "famlo_pro_calendar",
++            }
++          : {
++              reset: true,
++              updated_via: "famlo_pro_calendar",
++            },
++      actorUserId: hostAccess.hostUserId ?? null,
++      actorRole: hostAccess.isAdmin ? "admin" : "host",
++    });
++
++    await projectInventoryRange(supabase, {
++      familyId: hostAccess.familyId,
++      stayUnitId: roomId,
++      from: date,
++      to: date,
++    });
++
+     const eventUid = toCalendarEventUid("manual_rate", roomId, date, null);
+     await upsertCalendarEvent(supabase, {
+       eventUid,
+@@ -79,7 +120,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+               family_id: hostAccess.familyId,
+               room_id: roomId,
+               amount,
+-              currency: "INR",
++              currency,
+               updated_via: "famlo_pro_calendar",
+             }
+           : {
+diff --git a/app/api/payments/verify/route.ts b/app/api/payments/verify/route.ts
+index f81bd32c..eed92f94 100644
+--- a/app/api/payments/verify/route.ts
++++ b/app/api/payments/verify/route.ts
+@@ -13,6 +13,7 @@ import {
+   assertBookingCanFinalizePayment,
+   loadBookingForPaymentFinalization,
+   markBookingPaymentInventoryConflict,
++  recordBookingInventoryTransition,
+   resolveBookingApprovalRequirement,
+ } from "@/lib/payment-booking-finalization";
+ import { verifyRazorpayPaymentSignature } from "@/lib/razorpay";
+@@ -237,6 +238,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
+       throw bookingUpdateError;
+     }
+ 
++    await recordBookingInventoryTransition(supabase, {
++      booking: {
++        ...(booking as Record<string, unknown> | null),
++        status: nextStatus,
++        payment_status: "paid",
++      },
++      eventType: "booking_confirmed",
++      eventSource: "payments.verify",
++      payload: {
++        payment_id: payment.id,
++        approval_required: approvalRequired,
++      },
++    });
++
+     const legacyBookingId =
+       typeof booking?.legacy_booking_id === "string" && booking.legacy_booking_id.trim().length > 0
+         ? booking.legacy_booking_id
+diff --git a/app/api/payments/webhook/route.ts b/app/api/payments/webhook/route.ts
+index 7f339b9d..8f45e8a7 100644
+--- a/app/api/payments/webhook/route.ts
++++ b/app/api/payments/webhook/route.ts
+@@ -13,6 +13,7 @@ import {
+   assertBookingCanFinalizePayment,
+   loadBookingForPaymentFinalization,
+   markBookingPaymentInventoryConflict,
++  recordBookingInventoryTransition,
+   resolveBookingApprovalRequirement,
+ } from "@/lib/payment-booking-finalization";
+ import { verifyRazorpayWebhookSignature } from "@/lib/razorpay";
+@@ -493,6 +494,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
+       } as never)
+       .eq("id", payment.booking_id);
+ 
++    if (update.bookingPaymentStatus === "paid") {
++      await recordBookingInventoryTransition(supabase, {
++        booking: {
++          ...(booking as Record<string, unknown> | null),
++          status: bookingStatus,
++          payment_status: update.bookingPaymentStatus,
++        },
++        eventType: "booking_confirmed",
++        eventSource: "payments.webhook",
++        payload: {
++          payment_id: payment.id,
++          webhook_event: eventName,
++          approval_required: approvalRequired,
++        },
++      });
++    }
++
+     await supabase.from("booking_status_history_v2").insert({
+       booking_id: payment.booking_id,
+       old_status: booking?.status ?? null,
+diff --git a/lib/booking-compat.ts b/lib/booking-compat.ts
+index aa3e8af0..aaaa176b 100644
+--- a/lib/booking-compat.ts
++++ b/lib/booking-compat.ts
+@@ -9,6 +9,12 @@ import { getCalendarEventStayUnitId, loadCanonicalCalendar } from "@/lib/calenda
+ import { ensureHostProfileForFamily } from "@/lib/family-approval";
+ import { toPctFromBps } from "@/lib/finance/money";
+ import { buildHostStayOccupancy } from "@/lib/host-stay-availability";
++import {
++  appendInventoryEvent,
++  projectInventoryRange,
++  recordInventoryParityCheck,
++  resolveCanonicalInventoryPrice,
++} from "@/lib/inventory";
+ import { resolvePrimaryStayUnitId } from "@/lib/stay-units";
+ 
+ type JsonRecord = Record<string, unknown>;
+@@ -163,6 +169,21 @@ async function loadCoupon(
+   return data as CouponRow;
+ }
+ 
++async function resolveStayUnitFamilyId(
++  supabase: SupabaseClient,
++  stayUnitId: string | null | undefined
++): Promise<string | null> {
++  const cleanStayUnitId = asString(stayUnitId);
++  if (!cleanStayUnitId) return null;
++  const { data, error } = await supabase
++    .from("stay_units_v2")
++    .select("legacy_family_id")
++    .eq("id", cleanStayUnitId)
++    .maybeSingle();
++  if (error) throw error;
++  return asString((data as JsonRecord | null)?.legacy_family_id);
++}
++
+ async function countCouponRedemptions(
+   supabase: SupabaseClient,
+   couponId: string,
+@@ -403,7 +424,54 @@ export async function assertHostStayAvailability(
+     throw new Error("This quarter is currently unavailable for this home.");
+   }
+ 
+-  for (const date of enumerateDates(input.startDate, endDate)) {
++  const requestedDates = enumerateDates(input.startDate, endDate);
++
++  if (requestedStayUnitId && legacyFamilyId) {
++    const canonicalDays = await projectInventoryRange(supabase, {
++      familyId: legacyFamilyId,
++      stayUnitId: requestedStayUnitId,
++      from: input.startDate,
++      to: endDate,
++      excludeBookingId: options?.excludeBookingId ?? null,
++    });
++
++    for (const day of canonicalDays) {
++      const legacyManualBlocked =
++        blockedDates.includes(day.date) ||
++        blockedDates.includes(slotToken(day.date, "fullday")) ||
++        (quarterType ? blockedDates.includes(slotToken(day.date, quarterType)) : false);
++
++      if (legacyManualBlocked !== day.manualBlockPresent) {
++        await recordInventoryParityCheck(supabase, {
++          familyId: legacyFamilyId,
++          stayUnitId: requestedStayUnitId,
++          date: day.date,
++          checkType: "manual_block_shadow_read",
++          legacyValue: { manual_blocked: legacyManualBlocked },
++          canonicalValue: {
++            manual_blocked: day.manualBlockPresent,
++            block_reason: day.blockReason,
++            last_event_id: day.lastEventId,
++          },
++          severity: "warning",
++          context: { host_id: hostId, quarter_type: quarterType ?? null },
++        });
++      }
++    }
++
++    const firstBlocked = canonicalDays.find((day) => !day.isSellable);
++    if (firstBlocked) {
++      throw new Error(
++        firstBlocked.blockReason === "manual_block"
++          ? "This room is manually blocked for the selected date."
++          : firstBlocked.blockReason === "sold_out"
++            ? "This room is already booked for the selected date."
++            : "This room is not available for the selected date."
++      );
++    }
++  }
++
++  for (const date of requestedDates) {
+     if (
+       blockedDates.includes(date) ||
+       blockedDates.includes(slotToken(date, "fullday")) ||
+@@ -594,20 +662,42 @@ export async function buildBookingQuote(
+             .maybeSingle();
+           if (error) throw error;
+           return asString((data as any)?.user_id);
+-        })()
++      })()
+       : null;
+ 
+-  const pricingResolution = await resolveBookingUnitPrice(supabase, {
+-    bookingType: input.bookingType,
+-    hostId: resolvedHostTarget.hostId ?? input.hostId ?? null,
+-    hommieId: input.hommieId ?? null,
+-    activityId: input.activityId ?? null,
+-    stayUnitId: input.stayUnitId ?? null,
+-    startDate: input.startDate,
+-    quarterType: input.quarterType ?? null,
+-    clientUnitPrice: typeof input.unitPrice === "number" ? input.unitPrice : null,
+-    allowClientFallback,
+-  });
++  const canonicalFamilyId =
++    input.bookingType === "host_stay"
++      ? asString(input.legacyFamilyId) ?? (await resolveStayUnitFamilyId(supabase, input.stayUnitId))
++      : null;
++  const canonicalPricing =
++    input.bookingType === "host_stay" && canonicalFamilyId && input.stayUnitId
++      ? await resolveCanonicalInventoryPrice(supabase, {
++          familyId: canonicalFamilyId,
++          stayUnitId: input.stayUnitId,
++          startDate: input.startDate,
++          endDate: input.endDate ?? input.startDate,
++        })
++      : null;
++
++  const pricingResolution =
++    canonicalPricing && canonicalPricing.unitPrice > 0
++      ? {
++          unitPrice: canonicalPricing.unitPrice,
++          source: "inventory_day_projection" as const,
++          warnings: [`Canonical inventory pricing applied from ${canonicalPricing.source}.`],
++          seasonalRuleCodes: [],
++        }
++      : await resolveBookingUnitPrice(supabase, {
++          bookingType: input.bookingType,
++          hostId: resolvedHostTarget.hostId ?? input.hostId ?? null,
++          hommieId: input.hommieId ?? null,
++          activityId: input.activityId ?? null,
++          stayUnitId: input.stayUnitId ?? null,
++          startDate: input.startDate,
++          quarterType: input.quarterType ?? null,
++          clientUnitPrice: typeof input.unitPrice === "number" ? input.unitPrice : null,
++          allowClientFallback,
++        });
+ 
+   const subtotal = Math.max(
+     0,
+@@ -766,6 +856,8 @@ export async function buildBookingQuote(
+         allow_client_fallback: allowClientFallback,
+         client_unit_price_received: typeof input.unitPrice === "number" ? input.unitPrice : null,
+         client_commission_pct_received: typeof input.commissionPct === "number" ? input.commissionPct : null,
++        canonical_currency: canonicalPricing?.currency ?? null,
++        canonical_days: canonicalPricing?.days.length ?? 0,
+       },
+       guests_count: guestsCount,
+       day_count: dayCount,
+@@ -1408,6 +1500,7 @@ export async function createBookingCompatibility(
+   }
+ 
+   const v2Status = input.bookingType === "host_stay" ? "awaiting_payment" : "pending";
++  const holdExpiresAt = input.bookingType === "host_stay" ? computeHoldExpiry() : null;
+ 
+   const bookingPayload: JsonRecord = {
+     user_id: input.userId,
+@@ -1420,7 +1513,7 @@ export async function createBookingCompatibility(
+     hommie_id: resolvedHommieId,
+     activity_id: input.activityId ?? null,
+     status: v2Status,
+-    hold_expires_at: input.bookingType === "host_stay" ? computeHoldExpiry() : null,
++    hold_expires_at: holdExpiresAt,
+     start_date: input.startDate,
+     end_date: input.endDate ?? input.startDate,
+     quarter_type: input.quarterType ?? null,
+@@ -1459,6 +1552,37 @@ export async function createBookingCompatibility(
+     throw v2Error ?? new Error("Could not create booking in v2.");
+   }
+ 
++  const canonicalFamilyId =
++    input.bookingType === "host_stay"
++      ? asString(input.legacyFamilyId) ?? (await resolveStayUnitFamilyId(supabase, resolvedStayUnitId))
++      : null;
++  if (input.bookingType === "host_stay" && canonicalFamilyId && resolvedStayUnitId) {
++    await appendInventoryEvent(supabase, {
++      familyId: canonicalFamilyId,
++      stayUnitId: resolvedStayUnitId,
++      eventType: "booking_hold_created",
++      eventSource: "famlo_booking",
++      sourceReference: asString((v2Booking as JsonRecord).id),
++      effectiveDateStart: input.startDate,
++      effectiveDateEnd: input.endDate ?? input.startDate,
++      slotKey: input.quarterType ?? null,
++      payload: {
++        booking_id: asString((v2Booking as JsonRecord).id),
++        hold_expires_at: holdExpiresAt,
++        hold_expiry_authoritative: true,
++      },
++      actorUserId: input.userId,
++      actorRole: "guest",
++    });
++
++    await projectInventoryRange(supabase, {
++      familyId: canonicalFamilyId,
++      stayUnitId: resolvedStayUnitId,
++      from: input.startDate,
++      to: input.endDate ?? input.startDate,
++    });
++  }
++
+   let legacyBookingId: string | null = null;
+   const legacyInsert =
+     shouldMirrorLegacyBooking(input)
+diff --git a/lib/booking-platform.ts b/lib/booking-platform.ts
+index a481a2a5..a7147948 100644
+--- a/lib/booking-platform.ts
++++ b/lib/booking-platform.ts
+@@ -4,6 +4,7 @@ import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
+ import { processBookingActionJobBatch } from "@/lib/booking-whatsapp-actions";
+ import { createCalendarConflict, loadCanonicalCalendar, logCalendarSync, parseIcs, upsertCalendarEvent, toCalendarEventUid, type CanonicalCalendarEvent } from "@/lib/calendar";
+ import { renderBookingReceipt, renderCompliancePack, renderPayoutStatement } from "@/lib/document-templates";
++import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
+ import { enqueueNotificationRecord } from "@/lib/notifications/enqueue";
+ import { processNotificationQueueBatch } from "@/lib/notifications/notification-worker";
+ import type { NotificationRecipientRole } from "@/lib/notifications/types";
+@@ -226,6 +227,37 @@ export async function expireBookingHolds(supabase: SupabaseClient): Promise<{ ex
+ 
+     const stayUnitId = asString((row as JsonRecord).stay_unit_id);
+     if (stayUnitId) {
++      const { data: stayUnitRow } = await supabase
++        .from("stay_units_v2")
++        .select("legacy_family_id")
++        .eq("id", stayUnitId)
++        .maybeSingle();
++      const familyId = asString((stayUnitRow as JsonRecord | null)?.legacy_family_id);
++      if (familyId) {
++        await appendInventoryEvent(supabase, {
++          familyId,
++          stayUnitId,
++          eventType: "booking_hold_released",
++          eventSource: "hold_expiry",
++          sourceReference: bookingId,
++          effectiveDateStart: asString((row as JsonRecord).start_date) ?? getTodayInIndia(),
++          effectiveDateEnd: asString((row as JsonRecord).end_date) ?? asString((row as JsonRecord).start_date) ?? getTodayInIndia(),
++          slotKey: asString((row as JsonRecord).quarter_type),
++          payload: {
++            booking_id: bookingId,
++            reason: "hold_expired",
++            hold_expiry_authoritative: true,
++          },
++        });
++
++        await projectInventoryRange(supabase, {
++          familyId,
++          stayUnitId,
++          from: asString((row as JsonRecord).start_date) ?? getTodayInIndia(),
++          to: asString((row as JsonRecord).end_date) ?? asString((row as JsonRecord).start_date) ?? getTodayInIndia(),
++        });
++      }
++
+       await upsertCalendarEvent(supabase, {
+         eventUid: toCalendarEventUid("booking_hold", bookingId, asString((row as JsonRecord).start_date) ?? getTodayInIndia(), asString((row as JsonRecord).quarter_type)),
+         ownerType: "stay_unit",
+diff --git a/lib/finance/pricing.ts b/lib/finance/pricing.ts
+index 08e3fa63..e009c203 100644
+--- a/lib/finance/pricing.ts
++++ b/lib/finance/pricing.ts
+@@ -4,6 +4,7 @@ import { clampMoney } from "@/lib/finance/money";
+ import { resolveSeasonalPrice } from "@/lib/booking-platform";
+ 
+ export type PricingAuthoritySource =
++  | "inventory_day_projection"
+   | "hosts.price_quarter"
+   | "stay_units_v2.price_quarter"
+   | "hommie_profiles_v2.hourly_price"
+diff --git a/lib/payment-booking-finalization.ts b/lib/payment-booking-finalization.ts
+index 56b35344..382384ff 100644
+--- a/lib/payment-booking-finalization.ts
++++ b/lib/payment-booking-finalization.ts
+@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
+ import { assertBookingSlotStillAvailableForPayment } from "@/lib/booking-compat";
+ import { createCalendarConflict } from "@/lib/calendar";
+ import { parseHostListingMeta } from "@/lib/host-listing-meta";
++import { appendInventoryEvent, projectInventoryRange, type InventoryEventType } from "@/lib/inventory";
+ 
+ type JsonRecord = Record<string, unknown>;
+ 
+@@ -61,6 +62,16 @@ function resolveStayUnitId(record: PaymentConflictBooking | JsonRecord | null |
+   return asString(snapshot?.stay_unit_id);
+ }
+ 
++function resolveBookingFamilyId(record: PaymentConflictBooking | JsonRecord | null | undefined): string | null {
++  const relation = (record as JsonRecord | null | undefined)?.hosts;
++  const hostRelation = Array.isArray(relation) ? relation[0] : relation;
++  const hostRecord =
++    hostRelation && typeof hostRelation === "object" && !Array.isArray(hostRelation)
++      ? (hostRelation as JsonRecord)
++      : null;
++  return asString(hostRecord?.legacy_family_id);
++}
++
+ export async function loadBookingForPaymentFinalization(
+   supabase: SupabaseClient,
+   bookingId: string
+@@ -331,6 +342,54 @@ export async function assertBookingCanFinalizePayment(
+   }
+ }
+ 
++export async function recordBookingInventoryTransition(
++  supabase: SupabaseClient,
++  input: {
++    booking: PaymentConflictBooking | JsonRecord | null | undefined;
++    eventType: Extract<InventoryEventType, "booking_confirmed" | "booking_cancelled" | "booking_modified">;
++    eventSource: string;
++    actorUserId?: string | null;
++    actorRole?: string | null;
++    payload?: JsonRecord;
++  }
++): Promise<void> {
++  const bookingId = asString(input.booking?.id);
++  const familyId = resolveBookingFamilyId(input.booking);
++  const stayUnitId = resolveStayUnitId(input.booking);
++  const startDate = asString(input.booking?.start_date);
++  const endDate = asString(input.booking?.end_date) ?? startDate;
++
++  if (!bookingId || !familyId || !stayUnitId || !startDate || !endDate) {
++    return;
++  }
++
++  await appendInventoryEvent(supabase, {
++    familyId,
++    stayUnitId,
++    eventType: input.eventType,
++    eventSource: input.eventSource,
++    sourceReference: bookingId,
++    effectiveDateStart: startDate,
++    effectiveDateEnd: endDate,
++    slotKey: asString(input.booking?.quarter_type),
++    payload: {
++      booking_id: bookingId,
++      status: asString(input.booking?.status),
++      payment_status: asString(input.booking?.payment_status),
++      ...(input.payload ?? {}),
++    },
++    actorUserId: input.actorUserId ?? null,
++    actorRole: input.actorRole ?? null,
++  });
++
++  await projectInventoryRange(supabase, {
++    familyId,
++    stayUnitId,
++    from: startDate,
++    to: endDate,
++  });
++}
++
+ export async function markBookingPaymentInventoryConflict(
+   supabase: SupabaseClient,
+   input: {
+@@ -369,6 +428,17 @@ export async function markBookingPaymentInventoryConflict(
+     } as never)
+     .eq("id", bookingId);
+ 
++  await recordBookingInventoryTransition(supabase, {
++    booking: input.booking,
++    eventType: "booking_cancelled",
++    eventSource: input.provider,
++    payload: {
++      reason,
++      conflict_payment_id: input.paymentId,
++      conflict_summary: input.conflictSummary ?? null,
++    },
++  });
++
+   if (legacyBookingId) {
+     await supabase
+       .from("bookings")
+diff --git a/package.json b/package.json
+index 780d8bbf..9247291f 100644
+--- a/package.json
++++ b/package.json
+@@ -10,6 +10,7 @@
+     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+     "db:v2:verify": "node scripts/verify-v2.mjs",
+     "db:v2:backfill": "node scripts/backfill-v2.mjs",
++    "inventory:backfill": "node scripts/backfill-canonical-inventory.mjs",
+     "images:backfill": "node scripts/backfill-image-variants.mjs",
+     "images:cache-backfill": "node scripts/backfill-r2-cache-control.mjs",
+     "stay-units:scan": "node scripts/scan-stay-unit-integrity.cjs"
+diff --git a/tsconfig.typecheck.json b/tsconfig.typecheck.json
+index 4f5a2700..7d6a295a 100644
+--- a/tsconfig.typecheck.json
++++ b/tsconfig.typecheck.json
+@@ -1,5 +1,5 @@
+ {
+   "extends": "./tsconfig.json",
+   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
+-  "exclude": ["node_modules", ".next", "supabase/functions/**"]
++  "exclude": ["node_modules", ".next", "supabase/functions/**", "supabase/functions 2/**", "supabase/migrations 2/**"]
+ }

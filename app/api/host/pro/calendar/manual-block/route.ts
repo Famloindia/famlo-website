@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type JsonRecord = Record<string, unknown>;
@@ -69,6 +70,28 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (familyError) throw familyError;
     if (hostError) throw hostError;
 
+    await appendInventoryEvent(supabase, {
+      familyId: hostAccess.familyId,
+      stayUnitId: roomId,
+      eventType: action === "block" ? "manual_block_set" : "manual_block_removed",
+      eventSource: "famlo_pro_calendar",
+      sourceReference: date,
+      effectiveDateStart: date,
+      effectiveDateEnd: date,
+      payload: {
+        updated_via: "famlo_pro_calendar",
+      },
+      actorUserId: hostAccess.hostUserId ?? null,
+      actorRole: hostAccess.isAdmin ? "admin" : "host",
+    });
+
+    await projectInventoryRange(supabase, {
+      familyId: hostAccess.familyId,
+      stayUnitId: roomId,
+      from: date,
+      to: date,
+    });
+
     const [familyUpdateResult, hostUpdateResult] = await Promise.all([
       supabase
         .from("families")
@@ -76,7 +99,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           blocked_dates: nextBlockedDates(
             asStringArray((familyRow as JsonRecord | null)?.blocked_dates),
             date,
-            "unblock"
+            action
           ),
         })
         .eq("id", hostAccess.familyId),
@@ -86,7 +109,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           blocked_dates: nextBlockedDates(
             asStringArray((hostRow as JsonRecord | null)?.blocked_dates),
             date,
-            "unblock"
+            action
           ),
         })
         .eq("id", hostAccess.hostId),

@@ -6,6 +6,7 @@ import { appendLedgerEntryIfMissing } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
+import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 const CANCELLABLE_STATUSES = new Set(["awaiting_payment", "pending", "pending_host_approval", "accepted", "confirmed"]);
@@ -190,6 +191,18 @@ async function cancelV2Booking(
     reason,
     created_at: now,
   } as never);
+
+  await syncReservationFromBooking(supabase, {
+    bookingId: booking.id,
+    source: "bookings.cancel",
+    actorUserId,
+    actorRole: reason === "host_cancelled" ? "host" : "guest",
+    eventType: "cancellation_applied",
+    payload: {
+      reason,
+      cancelled_status: cancelledStatus,
+    },
+  });
 
   const legacyBookingId = asString(updateResult.data.legacy_booking_id);
   if (legacyBookingId) {

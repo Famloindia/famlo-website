@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 function asString(value: unknown): string | null {
@@ -60,6 +61,46 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
     }
 
+    const { data: settings, error: settingsError } = await supabase
+      .from("host_pro_settings")
+      .select("currency")
+      .eq("family_id", hostAccess.familyId)
+      .maybeSingle();
+    if (settingsError) throw settingsError;
+    const currency = typeof settings?.currency === "string" && settings.currency.trim().length > 0
+      ? settings.currency.trim()
+      : "INR";
+
+    await appendInventoryEvent(supabase, {
+      familyId: hostAccess.familyId,
+      stayUnitId: roomId,
+      eventType: action === "save" ? "manual_rate_set" : "manual_rate_removed",
+      eventSource: "famlo_pro_calendar",
+      sourceReference: date,
+      effectiveDateStart: date,
+      effectiveDateEnd: date,
+      payload:
+        action === "save"
+          ? {
+              amount,
+              currency,
+              updated_via: "famlo_pro_calendar",
+            }
+          : {
+              reset: true,
+              updated_via: "famlo_pro_calendar",
+            },
+      actorUserId: hostAccess.hostUserId ?? null,
+      actorRole: hostAccess.isAdmin ? "admin" : "host",
+    });
+
+    await projectInventoryRange(supabase, {
+      familyId: hostAccess.familyId,
+      stayUnitId: roomId,
+      from: date,
+      to: date,
+    });
+
     const eventUid = toCalendarEventUid("manual_rate", roomId, date, null);
     await upsertCalendarEvent(supabase, {
       eventUid,
@@ -79,7 +120,7 @@ export async function POST(request: Request): Promise<NextResponse> {
               family_id: hostAccess.familyId,
               room_id: roomId,
               amount,
-              currency: "INR",
+              currency,
               updated_via: "famlo_pro_calendar",
             }
           : {
