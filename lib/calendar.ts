@@ -21,6 +21,18 @@ export type CanonicalCalendarEvent = {
   connectionId?: string | null;
 };
 
+function isCalendarSourceTypeConstraintError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { message?: unknown; details?: unknown };
+  const message = typeof record.message === "string" ? record.message : "";
+  const details = typeof record.details === "string" ? record.details : "";
+  return (
+    message.includes("calendar_events_source_type_check") ||
+    details.includes("calendar_events_source_type_check") ||
+    (message.includes("source_type") && message.includes("check constraint"))
+  );
+}
+
 type CalendarSyncLogInput = {
   connectionId?: string | null;
   ownerType: string;
@@ -228,23 +240,30 @@ export async function loadCanonicalCalendar(
     bookingsResult = { data: [], error: null };
   }
 
-  const stored = ((storedResult.data ?? []) as JsonRecord[]).map((row) => ({
-    id: asString(row.id) ?? undefined,
-    eventUid: asString(row.event_uid) ?? "",
-    ownerType: asString(row.owner_type) ?? input.ownerType,
-    ownerId: asString(row.owner_id) ?? input.ownerId,
-    bookingId: asString(row.booking_id),
-    title: asString(row.title) ?? "Famlo calendar event",
-    startDate: asString(row.start_date) ?? input.from,
-    endDate: asString(row.end_date) ?? input.from,
-    slotKey: asString(row.slot_key),
-    status: asString(row.status) ?? "confirmed",
-    sourceType: (asString(row.source_type) as CanonicalCalendarEvent["sourceType"]) ?? "manual_block",
-    sourceReference: asString(row.source_reference),
-    isBlocking: Boolean(row.is_blocking),
-    payload: (row.payload as JsonRecord | null) ?? {},
-    connectionId: asString(row.connection_id),
-  }));
+  const stored = ((storedResult.data ?? []) as JsonRecord[]).map((row) => {
+    const payload = (row.payload as JsonRecord | null) ?? {};
+    const sourceType =
+      asString(row.source_type) === "external_import" && asString(payload.__calendar_source_type) === "manual_rate"
+        ? "manual_rate"
+        : ((asString(row.source_type) as CanonicalCalendarEvent["sourceType"]) ?? "manual_block");
+    return {
+      id: asString(row.id) ?? undefined,
+      eventUid: asString(row.event_uid) ?? "",
+      ownerType: asString(row.owner_type) ?? input.ownerType,
+      ownerId: asString(row.owner_id) ?? input.ownerId,
+      bookingId: asString(row.booking_id),
+      title: asString(row.title) ?? "Famlo calendar event",
+      startDate: asString(row.start_date) ?? input.from,
+      endDate: asString(row.end_date) ?? input.from,
+      slotKey: asString(row.slot_key),
+      status: asString(row.status) ?? "confirmed",
+      sourceType,
+      sourceReference: asString(row.source_reference),
+      isBlocking: Boolean(row.is_blocking),
+      payload,
+      connectionId: asString(row.connection_id),
+    };
+  });
 
   if (storedResult.error) throw storedResult.error;
   if (bookingsResult?.error) throw bookingsResult.error;
@@ -357,7 +376,25 @@ export async function upsertCalendarEvent(
   };
 
   const { error } = await supabase.from("calendar_events").upsert(payload, { onConflict: "owner_type,owner_id,event_uid" });
-  if (error) throw error;
+  if (!error) return;
+
+  if (event.sourceType === "manual_rate" && isCalendarSourceTypeConstraintError(error)) {
+    const compatibilityPayload = {
+      ...payload,
+      source_type: "external_import",
+      payload: {
+        ...(event.payload ?? {}),
+        __calendar_source_type: "manual_rate",
+      },
+    };
+    const { error: compatibilityError } = await supabase
+      .from("calendar_events")
+      .upsert(compatibilityPayload, { onConflict: "owner_type,owner_id,event_uid" });
+    if (!compatibilityError) return;
+    throw compatibilityError;
+  }
+
+  throw error;
 }
 
 export async function logCalendarSync(
