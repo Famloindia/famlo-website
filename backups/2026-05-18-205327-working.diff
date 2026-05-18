@@ -1,0 +1,65 @@
+diff --git a/app/api/host/bookings/check-in/route.ts b/app/api/host/bookings/check-in/route.ts
+index 8694bdda..aaf9b292 100644
+--- a/app/api/host/bookings/check-in/route.ts
++++ b/app/api/host/bookings/check-in/route.ts
+@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
+ import { deriveGuestCheckInCode, isGuestCheckInWindowOpen, normalizeGuestCheckInCode } from "@/lib/guest-check-in";
+ import { resolveMessageThread } from "@/lib/chat-thread";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
++import { assertBookingHasAssignedReservation } from "@/lib/reservation-assignment-guards";
+ import { syncReservationFromBooking } from "@/lib/reservations";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+ 
+@@ -70,6 +71,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "This guest is already checked in." }, { status: 409 });
+     }
+ 
++    await assertBookingHasAssignedReservation(supabase, cleanBookingId);
++
+     const recentFailures = await supabase
+       .from("booking_checkin_attempts_v2")
+       .select("id", { count: "exact", head: true })
+diff --git a/app/api/host/bookings/early-checkout/route.ts b/app/api/host/bookings/early-checkout/route.ts
+index 28f1ff20..ff2a9918 100644
+--- a/app/api/host/bookings/early-checkout/route.ts
++++ b/app/api/host/bookings/early-checkout/route.ts
+@@ -1,7 +1,7 @@
+ import { NextResponse } from "next/server";
+ 
+ import { getTodayInIndia } from "@/lib/booking-time";
+-import { projectInventoryRange } from "@/lib/inventory";
++import { projectInventoryRangeIfStayUnitExists } from "@/lib/reservation-assignment-guards";
+ import { syncReservationFromBooking } from "@/lib/reservations";
+ import { resolveAuthenticatedUser } from "@/lib/request-user";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -113,7 +113,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const stayUnitId = asString(booking.stay_unit_id);
+     if (stayUnitId) {
+-      await projectInventoryRange(supabase, {
++      await projectInventoryRangeIfStayUnitExists(supabase, {
+         familyId: cleanFamilyId,
+         stayUnitId,
+         from: targetCheckoutDate,
+diff --git a/app/api/host/bookings/no-show/route.ts b/app/api/host/bookings/no-show/route.ts
+index 6e7aab0f..949f110d 100644
+--- a/app/api/host/bookings/no-show/route.ts
++++ b/app/api/host/bookings/no-show/route.ts
+@@ -1,7 +1,7 @@
+ import { NextResponse } from "next/server";
+ 
+ import { getTodayInIndia } from "@/lib/booking-time";
+-import { projectInventoryRange } from "@/lib/inventory";
++import { projectInventoryRangeIfStayUnitExists } from "@/lib/reservation-assignment-guards";
+ import { setReservationOperationalStatus, syncReservationFromBooking } from "@/lib/reservations";
+ import { resolveAuthenticatedUser } from "@/lib/request-user";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -118,7 +118,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const stayUnitId = asString(booking.stay_unit_id);
+     if (stayUnitId) {
+-      await projectInventoryRange(supabase, {
++      await projectInventoryRangeIfStayUnitExists(supabase, {
+         familyId: cleanFamilyId,
+         stayUnitId,
+         from: bookingStartDate,

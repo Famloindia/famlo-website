@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getTodayInIndia } from "@/lib/booking-time";
-import { projectInventoryRange } from "@/lib/inventory";
+import { projectInventoryRangeIfStayUnitExists } from "@/lib/reservation-assignment-guards";
 import { syncReservationFromBooking } from "@/lib/reservations";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -113,7 +113,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const stayUnitId = asString(booking.stay_unit_id);
     if (stayUnitId) {
-      await projectInventoryRange(supabase, {
+      await projectInventoryRangeIfStayUnitExists(supabase, {
         familyId: cleanFamilyId,
         stayUnitId,
         from: targetCheckoutDate,

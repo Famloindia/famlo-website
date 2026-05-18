@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { deriveGuestCheckInCode, isGuestCheckInWindowOpen, normalizeGuestCheckInCode } from "@/lib/guest-check-in";
 import { resolveMessageThread } from "@/lib/chat-thread";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { assertBookingHasAssignedReservation } from "@/lib/reservation-assignment-guards";
 import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -69,6 +70,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (String(booking.checked_in_at ?? "").length > 0) {
       return NextResponse.json({ error: "This guest is already checked in." }, { status: 409 });
     }
+
+    await assertBookingHasAssignedReservation(supabase, cleanBookingId);
 
     const recentFailures = await supabase
       .from("booking_checkin_attempts_v2")
