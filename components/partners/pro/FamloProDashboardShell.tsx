@@ -172,6 +172,9 @@ type BookingWorkspaceFilter =
   | "Modified / Review needed"
   | "Action needed";
 
+type RevenueWindowFilter = "Today" | "This week" | "This month" | "All time";
+type ReportWindowFilter = "This week" | "This month" | "This year";
+
 type RoomEditorTabId =
   | "details"
   | "pricing"
@@ -991,6 +994,49 @@ function formatCalendarDetailDateRange(startDate: string, endDate: string): stri
   return `${formatter.format(start)} → ${formatter.format(end)}`;
 }
 
+function formatShortDate(dateValue: string): string {
+  const value = new Date(`${dateValue}T12:00:00+05:30`);
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+  }).format(value);
+}
+
+function isoDateFromLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatMonthShort(dateValue: string): string {
+  const value = new Date(`${dateValue}T12:00:00+05:30`);
+  return new Intl.DateTimeFormat("en-IN", { month: "short" }).format(value);
+}
+
+function formatWeekdayShort(dateValue: string): string {
+  const value = new Date(`${dateValue}T12:00:00+05:30`);
+  return new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(value);
+}
+
+function shiftLocalDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function buildSvgLinePath(values: number[], width: number, height: number, maxValue: number): string {
+  if (values.length === 0) return "";
+  const safeMax = Math.max(maxValue, 1);
+  return values
+    .map((value, index) => {
+      const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+      const y = height - (value / safeMax) * height;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+}
+
 function summarizeSafePayload(payload: Record<string, unknown>): string[] {
   const hiddenKeys = new Set(["token", "api_key", "authorization", "raw_payload", "secret"]);
   const lines: string[] = [];
@@ -1548,6 +1594,8 @@ export default function FamloProDashboardShell({
   const [calendarActionDate, setCalendarActionDate] = useState<string | null>(null);
   const [isCalendarActionPending, startCalendarAction] = useTransition();
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
+  const [revenueWindow, setRevenueWindow] = useState<RevenueWindowFilter>("This month");
+  const [reportWindow, setReportWindow] = useState<ReportWindowFilter>("This month");
   const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
   const [bookingActionFeedback, setBookingActionFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -1587,7 +1635,7 @@ export default function FamloProDashboardShell({
     );
   };
 
-  const handleCalendarCellAction = (cell: CalendarCell): void => {
+  const handleCalendarCellAction = (cell: CalendarCell, roomId: string, roomName: string): void => {
     if (cell.status === "past") return;
 
     if (cell.bookingDetail) {
@@ -1610,6 +1658,7 @@ export default function FamloProDashboardShell({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             familyId,
+            roomId,
             date: cell.date,
             action,
           }),
@@ -1624,8 +1673,8 @@ export default function FamloProDashboardShell({
           type: "success",
           text:
             action === "block"
-              ? `Blocked ${cell.date} across this property calendar.`
-              : `Unblocked ${cell.date} across this property calendar.`,
+              ? `Blocked ${cell.date} for ${roomName}.`
+              : `Unblocked ${cell.date} for ${roomName}.`,
         });
         router.refresh();
       } catch (error) {
@@ -1783,6 +1832,14 @@ export default function FamloProDashboardShell({
       isConfirmedBooking(booking)
       )
   );
+  const todayDate = new Date();
+  const todayIsoDate = isoDateFromLocalDate(todayDate);
+  const weekStartDate = new Date(todayDate);
+  weekStartDate.setDate(todayDate.getDate() - todayDate.getDay());
+  const weekEndDate = new Date(weekStartDate);
+  weekEndDate.setDate(weekStartDate.getDate() + 6);
+  const weekStartIsoDate = isoDateFromLocalDate(weekStartDate);
+  const weekEndIsoDate = isoDateFromLocalDate(weekEndDate);
   const currentMonthPrefix = (() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -1811,7 +1868,33 @@ export default function FamloProDashboardShell({
         booking.startDate.startsWith(currentMonthPrefix)
     )
     .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const revenueTodayBookings = revenueEligibleBookings.filter((booking) => booking.startDate === todayIsoDate);
+  const revenueThisWeekBookings = revenueEligibleBookings.filter(
+    (booking) => booking.startDate >= weekStartIsoDate && booking.startDate <= weekEndIsoDate
+  );
+  const revenueTodayNetPayout = revenueTodayBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const revenueThisWeekNetPayout = revenueThisWeekBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
   const totalNetPayout = revenueEligibleBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const revenueBookingsByWindow: Record<RevenueWindowFilter, typeof revenueEligibleBookings> = {
+    Today: revenueTodayBookings,
+    "This week": revenueThisWeekBookings,
+    "This month": revenueEligibleBookings.filter((booking) => booking.startDate.startsWith(currentMonthPrefix)),
+    "All time": revenueEligibleBookings,
+  };
+  const selectedRevenueBookings = revenueBookingsByWindow[revenueWindow];
+  const selectedRevenueNetPayout = selectedRevenueBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const selectedRevenueGrossValue = selectedRevenueBookings.reduce(
+    (sum, booking) => sum + (parseBookingAmount(booking.amount) ?? 0),
+    0
+  );
+  const selectedRevenueWindowHint =
+    revenueWindow === "Today"
+      ? `Payout view for bookings starting on ${formatShortDate(todayIsoDate)}.`
+      : revenueWindow === "This week"
+        ? `Payout view from ${formatShortDate(weekStartIsoDate)} to ${formatShortDate(weekEndIsoDate)}.`
+        : revenueWindow === "This month"
+          ? "Payout view for the current month."
+          : "Payout view across all eligible visible bookings.";
   const confirmedNetPayout = bookingsWithNetPayout
     .filter((booking) => isConfirmedBooking(booking))
     .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
@@ -1819,6 +1902,88 @@ export default function FamloProDashboardShell({
     .filter((booking) => isPendingApprovalBooking(booking) || normalizeToken(booking.paymentStatus) === "awaiting_payment")
     .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
   const averageBookingValue = bookingsWithValue.length > 0 ? totalBookingValue / bookingsWithValue.length : null;
+  const directAverageBookingValue = (() => {
+    const directValues = bookingsWithValue.filter((entry) => !entry.booking.isOta);
+    return directValues.length > 0
+      ? directValues.reduce((sum, entry) => sum + entry.parsedAmount, 0) / directValues.length
+      : null;
+  })();
+  const otaAverageBookingValue = (() => {
+    const otaValues = bookingsWithValue.filter((entry) => entry.booking.isOta);
+    return otaValues.length > 0
+      ? otaValues.reduce((sum, entry) => sum + entry.parsedAmount, 0) / otaValues.length
+      : null;
+  })();
+  const sourceCountEntries = Object.entries(
+    proBookings.reduce<Record<string, number>>((acc, booking) => {
+      const key = booking.sourceLabel || (booking.isOta ? "OTA" : "Famlo Direct");
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {})
+  ).sort((left, right) => right[1] - left[1]);
+  const topSourceByBookingCount = sourceCountEntries[0] ?? null;
+  const reportWindowAnchors = (() => {
+    const today = new Date();
+    if (reportWindow === "This week") {
+      const start = new Date(today);
+      start.setDate(today.getDate() - today.getDay());
+      return Array.from({ length: 7 }, (_, index) => {
+        const date = shiftLocalDays(start, index);
+        const iso = isoDateFromLocalDate(date);
+        return {
+          key: iso,
+          label: formatWeekdayShort(iso),
+        };
+      });
+    }
+
+    if (reportWindow === "This month") {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1);
+      const last = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      return Array.from({ length: last.getDate() }, (_, index) => {
+        const date = shiftLocalDays(first, index);
+        const iso = isoDateFromLocalDate(date);
+        return {
+          key: iso,
+          label: String(index + 1),
+        };
+      });
+    }
+
+    return Array.from({ length: 12 }, (_, index) => {
+      const date = new Date(today.getFullYear(), index, 1);
+      const iso = isoDateFromLocalDate(date);
+      return {
+        key: `${today.getFullYear()}-${String(index + 1).padStart(2, "0")}`,
+        label: formatMonthShort(iso),
+      };
+    });
+  })();
+  const reportTrendRows = reportWindowAnchors.map((anchor) => {
+    const directCount = proBookings.filter((booking) => {
+      if (booking.isOta) return false;
+      return reportWindow === "This year"
+        ? booking.startDate.startsWith(anchor.key)
+        : booking.startDate === anchor.key;
+    }).length;
+    const otaCount = proBookings.filter((booking) => {
+      if (!booking.isOta) return false;
+      return reportWindow === "This year"
+        ? booking.startDate.startsWith(anchor.key)
+        : booking.startDate === anchor.key;
+    }).length;
+    return {
+      ...anchor,
+      directCount,
+      otaCount,
+      totalCount: directCount + otaCount,
+    };
+  });
+  const reportMaxCount = reportTrendRows.reduce((max, row) => Math.max(max, row.directCount, row.otaCount, row.totalCount), 0);
+  const chartWidth = 640;
+  const chartHeight = 220;
+  const directTrendPath = buildSvgLinePath(reportTrendRows.map((row) => row.directCount), chartWidth, chartHeight, reportMaxCount);
+  const otaTrendPath = buildSvgLinePath(reportTrendRows.map((row) => row.otaCount), chartWidth, chartHeight, reportMaxCount);
   const topRoomByBookingCount =
     Object.entries(
       proBookings.reduce<Record<string, number>>((acc, booking) => {
@@ -1988,8 +2153,11 @@ export default function FamloProDashboardShell({
       value: channelFeedHealth?.lastSuccessfulPollAt
         ? `Last success ${formatDateTime(channelFeedHealth.lastSuccessfulPollAt)}`
         : "No successful poll yet",
-    },
-  ];
+  },
+];
+
+const REVENUE_WINDOWS: RevenueWindowFilter[] = ["Today", "This week", "This month", "All time"];
+const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This year"];
   const ariSyncEligibleRooms = rooms.filter((room) => {
     if (!room.isActive) return false;
     const roomMapping = roomMappingsByRoomId.get(room.id);
@@ -4418,7 +4586,7 @@ export default function FamloProDashboardShell({
             </>
           )}
 
-          {activeSection !== "dashboard" && activeSection !== "properties-home" && activeSection !== "bookings" && activeSection !== "inventory-calendar" && activeSection !== "messages-reviews" && activeSection !== "revenue" && (
+          {activeSection !== "dashboard" && activeSection !== "properties-home" && activeSection !== "bookings" && activeSection !== "inventory-calendar" && activeSection !== "messages-reviews" && activeSection !== "revenue" && activeSection !== "reports" && (
             <section className={styles.sectionIntro}>
               <div>
                 <div className={styles.sectionEyebrow}>{sectionDescriptor.eyebrow}</div>
@@ -4960,14 +5128,6 @@ export default function FamloProDashboardShell({
                     </span>
                   ))}
                 </div>
-                <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Manual day blocking</div>
-                    <div className={styles.feedCopy}>
-                      Click any available calendar cell to block that date across this property. Click a manual-blocked cell to unblock it. Booking-backed cells still open details only.
-                    </div>
-                  </article>
-                </div>
                 {calendarActionFeedback ? (
                   <div
                     className={`${styles.feedbackBox} ${calendarActionFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
@@ -5016,7 +5176,7 @@ export default function FamloProDashboardShell({
                                 key={`${row.roomId}-${cell.date}-availability`}
                                 className={`${styles.calendarCell} ${calendarCellClass(cell.status)} ${isActionable ? styles.calendarCellInteractive : ""}`}
                                 title={title}
-                                onClick={() => handleCalendarCellAction(cell)}
+                                onClick={() => handleCalendarCellAction(cell, row.roomId, row.roomName)}
                                 disabled={!isActionable || isBusy}
                               >
                                 {isBusy ? "..." : cell.status === "available" ? "1" : cell.status === "past" ? "—" : "0"}
@@ -6447,78 +6607,102 @@ export default function FamloProDashboardShell({
           {activeSection === "revenue" && (
             <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
               <div>
+                <div className={styles.sectionEyebrow}>Revenue</div>
                 <h3 className={styles.propertyCenterTitle}>Revenue</h3>
+                <p className={styles.heroText}>
+                  Keep one active time lens in focus while the important PMS numbers stay fixed underneath.
+                </p>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.filterRow} style={{ marginBottom: "24px" }}>
+                  {REVENUE_WINDOWS.map((window) => (
+                    <button
+                      key={window}
+                      type="button"
+                      className={`${styles.propertyTabLinkButton} ${revenueWindow === window ? styles.propertyTabLinkButtonActive : ""}`}
+                      onClick={() => setRevenueWindow(window)}
+                    >
+                      <span className={styles.propertyTabTitle}>{window}</span>
+                    </button>
+                  ))}
+                </div>
                 <div className={styles.listGrid}>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Revenue this month</div>
-                    <div className={styles.metricValue}>{formatCurrency(revenueThisMonthNetPayout)}</div>
-                    <div className={styles.metricHint}>Monthly host payout using the same confirmed-stay payout logic as the simple dashboard.</div>
+                    <div className={styles.miniLabel}>{revenueWindow}</div>
+                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueNetPayout)}</div>
+                    <div className={styles.metricHint}>
+                      {selectedRevenueBookings.length} booking{selectedRevenueBookings.length === 1 ? "" : "s"} · {selectedRevenueWindowHint}
+                    </div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Total portfolio (all-time)</div>
+                    <div className={styles.miniLabel}>{revenueWindow} gross value</div>
+                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueGrossValue)}</div>
+                    <div className={styles.metricHint}>What guests paid in the selected time window before payout split.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>All time</div>
                     <div className={styles.metricValue}>{formatCurrency(totalNetPayout)}</div>
-                    <div className={styles.metricHint}>All-time host payout using recorded payout when available and the same paid-or-confirmed eligibility as the simple dashboard.</div>
+                    <div className={styles.metricHint}>Static net payout anchor across all eligible visible bookings.</div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Confirmed net payout</div>
-                    <div className={styles.metricValue}>{formatCurrency(confirmedNetPayout)}</div>
-                    <div className={styles.metricHint}>Host payout from reservations already confirmed, checked in, or completed.</div>
+                    <div className={styles.miniLabel}>This month</div>
+                    <div className={styles.metricValue}>{formatCurrency(revenueThisMonthNetPayout)}</div>
+                    <div className={styles.metricHint}>Static monthly payout reference for the current month.</div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Pending net payout</div>
+                    <div className={styles.miniLabel}>Pending payout</div>
                     <div className={styles.metricValue}>{formatCurrency(pendingNetPayout)}</div>
-                    <div className={styles.metricHint}>Estimated payout still sitting in pending approval or awaiting-payment bookings.</div>
+                    <div className={styles.metricHint}>Expected payout still waiting on approval or payment.</div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Total booking value</div>
-                    <div className={styles.metricValue}>{formatCurrency(totalBookingValue)}</div>
-                    <div className={styles.metricHint}>Combined gross booking value from all visible reservations in the current Pro workspace.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Famlo direct / OTA value</div>
+                    <div className={styles.miniLabel}>Direct / OTA</div>
                     <div className={styles.metricValue}>
                       {formatCurrency(famloDirectBookingValue)} / {formatCurrency(otaBookingValue)}
                     </div>
-                    <div className={styles.metricHint}>Gross booking split between direct Famlo reservations and OTA-connected reservations.</div>
+                    <div className={styles.metricHint}>Gross booking split by source for quick comparison.</div>
                   </article>
                 </div>
 
-                {proBookings.length > 0 ? (
+                {selectedRevenueBookings.length > 0 ? (
                   <div className={styles.listGrid}>
-                    {proBookings.map((booking) => (
-                      <article key={`revenue-${booking.bookingId}`} className={styles.listCard} style={{ padding: 0 }}>
-                        <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", borderBottom: "1px solid rgba(255, 255, 255, 0.08)" }}>
-                          <div>
-                            <div className={styles.listTitle}>{booking.sourceLabel}</div>
-                            <div className={styles.feedCopy}>{booking.isOta ? "OTA reservation" : "Famlo direct reservation"}</div>
-                          </div>
+                    {selectedRevenueBookings.map((booking) => (
+                      <article key={`revenue-${booking.bookingId}`} className={styles.listCard} style={{ padding: "20px", display: "grid", gap: "16px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", flexWrap: "wrap" }}>
                           <div>
                             <div className={styles.listTitle}>{booking.guestDisplayName}</div>
                             <div className={styles.feedCopy}>{booking.roomName}</div>
                           </div>
                           <div>
-                            <div className={styles.listTitle}>{booking.startDate} → {booking.endDate}</div>
-                            <div className={styles.feedCopy}>Created {formatDateTime(booking.createdAt)}</div>
-                          </div>
-                        </div>
-                        <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }}>
-                          <div>
                             <div className={styles.listTitle}>{booking.amount ?? "Not available"}</div>
                             <div className={styles.feedCopy}>
-                              {booking.netPayoutAmount != null
-                                ? `Net payout ${formatCurrency(booking.netPayoutAmount)}`
-                                : "Net payout not available"}
+                              {booking.netPayoutAmount != null ? `Net payout ${formatCurrency(booking.netPayoutAmount)}` : "Net payout not available"}
                             </div>
                           </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px" }}>
                           <div>
-                            <div className={styles.listTitle}>{labelizeToken(booking.paymentStatus, "unknown")}</div>
-                            <div className={styles.feedCopy}>Current payment state only</div>
+                            <div className={styles.miniLabel}>Guest</div>
+                            <div className={styles.feedCopy}>{booking.guestDisplayName}</div>
                           </div>
                           <div>
-                            <div className={styles.listTitle}>{labelizeToken(booking.status, "unknown")}</div>
-                            <div className={styles.feedCopy}>{bookingHealthLabel(booking)}</div>
+                            <div className={styles.miniLabel}>Source</div>
+                            <div className={styles.feedCopy}>{booking.sourceLabel}</div>
+                          </div>
+                          <div>
+                            <div className={styles.miniLabel}>Dates</div>
+                            <div className={styles.feedCopy}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
+                          </div>
+                          <div>
+                            <div className={styles.miniLabel}>Paid amount</div>
+                            <div className={styles.feedCopy}>{booking.amount ?? "Not available"}</div>
+                          </div>
+                          <div>
+                            <div className={styles.miniLabel}>Payment</div>
+                            <div className={styles.feedCopy}>{labelizeToken(booking.paymentStatus, "unknown")}</div>
+                          </div>
+                          <div>
+                            <div className={styles.miniLabel}>Status</div>
+                            <div className={styles.feedCopy}>{labelizeToken(booking.status, "unknown")}</div>
                           </div>
                         </div>
                       </article>
@@ -6526,9 +6710,9 @@ export default function FamloProDashboardShell({
                   </div>
                 ) : (
                   <div className={styles.emptyState}>
-                    <div className={styles.emptyTitle}>No booking value to summarize yet</div>
+                    <div className={styles.emptyTitle}>No revenue bookings in this view yet</div>
                     <div className={styles.emptyCopy}>
-                      Once this property has direct or OTA reservations, their booking value and payment-status summary will appear here.
+                      Switch the revenue filter above to another time window, or wait for direct and OTA bookings to land in this selected range.
                     </div>
                   </div>
                 )}
@@ -6539,13 +6723,117 @@ export default function FamloProDashboardShell({
           {activeSection === "reports" && (
             <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
               <div>
-                <div className={styles.sectionEyebrow}>Reports</div>
-                <h3 className={styles.propertyCenterTitle}>Reports with the same luxury Pro treatment</h3>
-                <p className={styles.heroText}>
-                  Review booking mix, room activity, and early performance signals inside the same dark glass UI.
-                </p>
+                <h3 className={styles.propertyCenterTitle}>Reports</h3>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.filterRow} style={{ marginBottom: "24px" }}>
+                  {REPORT_WINDOWS.map((window) => (
+                    <button
+                      key={window}
+                      type="button"
+                      className={`${styles.propertyTabLinkButton} ${reportWindow === window ? styles.propertyTabLinkButtonActive : ""}`}
+                      onClick={() => setReportWindow(window)}
+                    >
+                      <span className={styles.propertyTabTitle}>{window}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
+                  <article className={styles.listCard} style={{ gridColumn: "1 / -1", display: "grid", gap: "18px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
+                      <div>
+                        <div className={styles.listTitle}>Booking trend</div>
+                        <div className={styles.feedCopy}>
+                          Blue shows Famlo Direct. Green shows OTA bookings. The selected filter changes the timeline.
+                        </div>
+                      </div>
+                      <div className={styles.inlineBadgeRow} style={{ marginTop: 0 }}>
+                        <span className={styles.readinessPill} style={{ background: "rgba(37, 99, 235, 0.16)", color: "#93c5fd", borderColor: "rgba(59, 130, 246, 0.35)" }}>
+                          Famlo Direct
+                        </span>
+                        <span className={styles.readinessPill} style={{ background: "rgba(16, 185, 129, 0.14)", color: "#6ee7b7", borderColor: "rgba(16, 185, 129, 0.35)" }}>
+                          OTA
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ position: "relative", borderRadius: "20px", border: "1px solid rgba(255, 255, 255, 0.08)", background: "linear-gradient(180deg, rgba(15, 23, 42, 0.88) 0%, rgba(11, 18, 32, 0.98) 100%)", padding: "18px" }}>
+                      <svg viewBox={`0 0 ${chartWidth} ${chartHeight + 36}`} style={{ width: "100%", height: "280px", display: "block" }} role="img" aria-label="Booking trend chart">
+                        {[0, 1, 2, 3].map((step) => {
+                          const y = (chartHeight / 3) * step;
+                          return (
+                            <line
+                              key={`grid-${step}`}
+                              x1="0"
+                              y1={y}
+                              x2={chartWidth}
+                              y2={y}
+                              stroke="rgba(148, 163, 184, 0.18)"
+                              strokeWidth="1"
+                            />
+                          );
+                        })}
+                        {reportTrendRows.map((row, index) => {
+                          const x = reportTrendRows.length === 1 ? chartWidth / 2 : (index / (reportTrendRows.length - 1)) * chartWidth;
+                          return (
+                            <g key={row.key}>
+                              <line
+                                x1={x}
+                                y1="0"
+                                x2={x}
+                                y2={chartHeight}
+                                stroke="rgba(148, 163, 184, 0.08)"
+                                strokeWidth="1"
+                              />
+                              <text
+                                x={x}
+                                y={chartHeight + 22}
+                                textAnchor="middle"
+                                fill="rgba(226, 232, 240, 0.72)"
+                                fontSize="11"
+                                fontWeight="700"
+                              >
+                                {row.label}
+                              </text>
+                            </g>
+                          );
+                        })}
+                        {directTrendPath ? (
+                          <path
+                            d={directTrendPath}
+                            fill="none"
+                            stroke="#3b82f6"
+                            strokeWidth="4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        ) : null}
+                        {otaTrendPath ? (
+                          <path
+                            d={otaTrendPath}
+                            fill="none"
+                            stroke="#10b981"
+                            strokeWidth="4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        ) : null}
+                        {reportTrendRows.map((row, index) => {
+                          const x = reportTrendRows.length === 1 ? chartWidth / 2 : (index / (reportTrendRows.length - 1)) * chartWidth;
+                          const directY = chartHeight - (row.directCount / Math.max(reportMaxCount, 1)) * chartHeight;
+                          const otaY = chartHeight - (row.otaCount / Math.max(reportMaxCount, 1)) * chartHeight;
+                          return (
+                            <g key={`dots-${row.key}`}>
+                              <circle cx={x} cy={directY} r="5" fill="#3b82f6" />
+                              <circle cx={x} cy={otaY} r="5" fill="#10b981" />
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  </article>
+                </div>
+
                 <div className={styles.listGrid}>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Total bookings</div>
@@ -6577,6 +6865,20 @@ export default function FamloProDashboardShell({
                     <div className={styles.metricValue}>{actionNeededBookingsCount}</div>
                     <div className={styles.metricHint}>Bookings that still need approval, OTA review, payment attention, or sync follow-up.</div>
                   </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Average booking value</div>
+                    <div className={styles.metricValue}>{averageBookingValue != null ? formatCurrency(averageBookingValue) : "N/A"}</div>
+                    <div className={styles.metricHint}>Average gross booking value across bookings that expose a safe amount.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Top source</div>
+                    <div className={styles.metricValue}>{topSourceByBookingCount ? topSourceByBookingCount[0] : "N/A"}</div>
+                    <div className={styles.metricHint}>
+                      {topSourceByBookingCount
+                        ? `${topSourceByBookingCount[1]} booking${topSourceByBookingCount[1] === 1 ? "" : "s"} currently come from this source.`
+                        : "No source leader yet."}
+                    </div>
+                  </article>
                 </div>
 
                 <div className={styles.listGrid}>
@@ -6596,6 +6898,16 @@ export default function FamloProDashboardShell({
                             ? `${topRoomByBookingCount[1]} booking${topRoomByBookingCount[1] === 1 ? "" : "s"} currently surfaced for this room.`
                             : "No booking mix is available yet for room ranking."}
                         </div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Famlo Direct average</div>
+                        <div className={styles.placeholderValue}>{directAverageBookingValue != null ? formatCurrency(directAverageBookingValue) : "Not available"}</div>
+                        <div className={styles.placeholderCopy}>Average booking value for direct Famlo reservations only.</div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>OTA average</div>
+                        <div className={styles.placeholderValue}>{otaAverageBookingValue != null ? formatCurrency(otaAverageBookingValue) : "Not available"}</div>
+                        <div className={styles.placeholderCopy}>Average booking value for OTA-connected reservations only.</div>
                       </div>
                     </div>
                   </article>

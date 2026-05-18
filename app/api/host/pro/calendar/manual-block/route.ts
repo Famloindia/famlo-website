@@ -32,23 +32,33 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     const body = (await request.json()) as {
       familyId?: unknown;
+      roomId?: unknown;
       date?: unknown;
       action?: unknown;
     };
 
     const familyId = asString(body.familyId);
+    const roomId = asString(body.roomId);
     const date = asString(body.date);
     const action = body.action === "unblock" ? "unblock" : body.action === "block" ? "block" : null;
 
-    if (!familyId || !date || !action || !isIsoDate(date)) {
-      return NextResponse.json({ error: "Valid familyId, date, and action are required." }, { status: 400 });
+    if (!familyId || !roomId || !date || !action || !isIsoDate(date)) {
+      return NextResponse.json({ error: "Valid familyId, roomId, date, and action are required." }, { status: 400 });
     }
 
     const supabase = createAdminSupabaseClient();
-    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { familyId });
+    const hostAccess = await resolveAuthorizedHostResource(supabase, request, {
+      ownerType: "stay_unit",
+      ownerId: roomId,
+    });
 
-    if (!hostAccess?.familyId || !hostAccess.hostId) {
-      return NextResponse.json({ error: "You do not have access to this property calendar." }, { status: 403 });
+    if (
+      !hostAccess?.familyId ||
+      !hostAccess.hostId ||
+      hostAccess.stayUnitId !== roomId ||
+      hostAccess.familyId !== familyId
+    ) {
+      return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
     }
 
     const [{ data: familyRow, error: familyError }, { data: hostRow, error: hostError }] = await Promise.all([
@@ -59,31 +69,37 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (familyError) throw familyError;
     if (hostError) throw hostError;
 
-    const currentFamilyBlockedDates = asStringArray((familyRow as JsonRecord | null)?.blocked_dates);
-    const currentHostBlockedDates = asStringArray((hostRow as JsonRecord | null)?.blocked_dates);
-    const baseBlockedDates =
-      currentFamilyBlockedDates.length > 0 ? currentFamilyBlockedDates : currentHostBlockedDates;
-    const blockedDates = nextBlockedDates(baseBlockedDates, date, action);
-
     const [familyUpdateResult, hostUpdateResult] = await Promise.all([
       supabase
         .from("families")
-        .update({ blocked_dates: blockedDates })
+        .update({
+          blocked_dates: nextBlockedDates(
+            asStringArray((familyRow as JsonRecord | null)?.blocked_dates),
+            date,
+            "unblock"
+          ),
+        })
         .eq("id", hostAccess.familyId),
       supabase
         .from("hosts")
-        .update({ blocked_dates: blockedDates })
+        .update({
+          blocked_dates: nextBlockedDates(
+            asStringArray((hostRow as JsonRecord | null)?.blocked_dates),
+            date,
+            "unblock"
+          ),
+        })
         .eq("id", hostAccess.hostId),
     ]);
 
     if (familyUpdateResult.error) throw familyUpdateResult.error;
     if (hostUpdateResult.error) throw hostUpdateResult.error;
 
-    const eventUid = toCalendarEventUid("manual_block", `host:${hostAccess.hostId}`, date, null);
+    const eventUid = toCalendarEventUid("manual_block", roomId, date, null);
     await upsertCalendarEvent(supabase, {
       eventUid,
-      ownerType: "host",
-      ownerId: hostAccess.hostId,
+      ownerType: "stay_unit",
+      ownerId: roomId,
       title: "Famlo manual block",
       startDate: date,
       endDate: date,
@@ -94,6 +110,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       isBlocking: action === "block",
       payload: {
         family_id: hostAccess.familyId,
+        room_id: roomId,
         updated_via: "famlo_pro_calendar",
       },
       connectionId: null,
@@ -103,7 +120,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       ok: true,
       action,
       date,
-      blockedDatesCount: blockedDates.length,
+      roomId,
     });
   } catch (error) {
     console.error("[host.pro.calendar.manual-block] error", error);

@@ -955,29 +955,33 @@ export async function renderFamloProDashboardPage({
     }
   }
 
-  const hostCalendarEvents =
-    host?.id
-      ? await loadCanonicalCalendar(supabase, {
-          ownerType: "host",
-          ownerId: host.id,
+  const roomManualBlockDates = new Map<string, Set<string>>();
+  if (rooms.length > 0) {
+    const roomCalendarEvents = await Promise.all(
+      rooms.map(async (room) => ({
+        roomId: room.id,
+        events: await loadCanonicalCalendar(supabase, {
+          ownerType: "stay_unit",
+          ownerId: room.id,
           from: calendarFrom,
           to: calendarTo,
-        })
-      : [];
+        }),
+      }))
+    );
 
-  const manualBlockDates = new Set(
-    hostCalendarEvents
-      .filter((event) => event.sourceType === "manual_block" && event.isBlocking)
-      .flatMap((event) => {
-        const dates: string[] = [];
+    for (const roomCalendar of roomCalendarEvents) {
+      const blockedDates = new Set<string>();
+      for (const event of roomCalendar.events) {
+        if (event.sourceType !== "manual_block" || !event.isBlocking) continue;
         let cursor = event.startDate;
         while (cursor <= event.endDate) {
-          dates.push(cursor);
+          blockedDates.add(cursor);
           cursor = addIndiaDays(cursor, 1);
         }
-        return dates;
-      })
-  );
+      }
+      roomManualBlockDates.set(roomCalendar.roomId, blockedDates);
+    }
+  }
 
   const bookingStatusByRoomDate = new Map<string, CalendarCellStatus>();
   const bookingDetailByRoomDate = new Map<string, CalendarBookingDetail>();
@@ -1192,7 +1196,7 @@ export async function renderFamloProDashboardPage({
       const status: CalendarCellStatus =
         column.isPast
           ? "past"
-          : bookingStatus ?? (manualBlockDates.has(column.date) ? "manual_block" : "available");
+          : bookingStatus ?? (roomManualBlockDates.get(room.id)?.has(column.date) ? "manual_block" : "available");
 
       return {
         date: column.date,
