@@ -4870,13 +4870,31 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "inventory-calendar" && (
-            <section className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.cardTitle}>Calendar</h3>
-                  <p className={styles.cardCopy}>
-                    Calendar for this property. View Famlo bookings, OTA bookings, manual blocks, and availability from one place. Checkout-day availability rules are preserved.
-                  </p>
+            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.calendarLuxuryShell}`}>
+              <div>
+                <div className={styles.sectionEyebrow}>Calendar</div>
+                <h3 className={styles.propertyCenterTitle}>Glass calendar for property availability</h3>
+                <p className={styles.heroText}>
+                  View Famlo bookings, OTA bookings, manual blocks, and availability in the same frosted Famlo Pro
+                  visual language, without changing checkout-day rules or current calendar behavior.
+                </p>
+                <div className={styles.heroMeta}>
+                  <div className={styles.heroMetaItem}>
+                    <div className={styles.heroMetaLabel}>Visible rooms</div>
+                    <div className={styles.heroMetaValue}>{visibleRoomsInCalendar}</div>
+                  </div>
+                  <div className={styles.heroMetaItem}>
+                    <div className={styles.heroMetaLabel}>Famlo / OTA</div>
+                    <div className={styles.heroMetaValue}>{famloCalendarCells} / {otaCalendarCells}</div>
+                  </div>
+                  <div className={styles.heroMetaItem}>
+                    <div className={styles.heroMetaLabel}>Attention</div>
+                    <div className={styles.heroMetaValue}>{calendarAttentionCount}</div>
+                  </div>
+                  <div className={styles.heroMetaItem}>
+                    <div className={styles.heroMetaLabel}>Manual blocks</div>
+                    <div className={styles.heroMetaValue}>{manualBlockCalendarCells}</div>
+                  </div>
                 </div>
               </div>
               <div className={styles.cardBody}>
@@ -5006,7 +5024,7 @@ export default function FamloProDashboardShell({
                     {calendarVerification.checkoutDate} {calendarVerification.checkoutDateBlocked ? "is blocked" : "stays available"}.
                   </div>
                 ) : null}
-                <div className={styles.filterRow}>
+                <div className={`${styles.filterRow} ${styles.calendarLuxuryLegend}`}>
                   {CALENDAR_LEGEND.map((item) => (
                     <span key={item.title} className={styles.filterChip}>
                       {item.title} = {item.copy}
@@ -5014,7 +5032,7 @@ export default function FamloProDashboardShell({
                   ))}
                 </div>
                 {calendarRows.length > 0 ? (
-                  <div className={styles.calendarBoard}>
+                  <div className={`${styles.calendarBoard} ${styles.calendarBoardLuxury}`}>
                     <div className={styles.calendarGrid}>
                       <div className={`${styles.calendarHeaderCell} ${styles.calendarRoomHeader}`}>Room / Unit</div>
                       {calendarColumns.map((column) => (

@@ -2078,6 +2078,91 @@
   background: #fbfdff;
 }
 
+.calendarLuxuryShell .summaryCard,
+.calendarLuxuryShell .listCard,
+.calendarLuxuryShell .placeholderRow,
+.calendarLuxuryShell .emptyState {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.calendarLuxuryShell .metricValue,
+.calendarLuxuryShell .cardTitle,
+.calendarLuxuryShell .listTitle,
+.calendarLuxuryShell .emptyTitle,
+.calendarLuxuryShell .placeholderTitle {
+  color: white;
+}
+
+.calendarLuxuryShell .metricHint,
+.calendarLuxuryShell .cardCopy,
+.calendarLuxuryShell .feedCopy,
+.calendarLuxuryShell .emptyCopy,
+.calendarLuxuryShell .placeholderCopy,
+.calendarLuxuryShell .placeholderLabel {
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.calendarLuxuryShell .miniLabel {
+  color: rgba(191, 219, 254, 0.58);
+}
+
+.calendarLuxuryShell .placeholderValue {
+  color: #93c5fd;
+}
+
+.calendarLuxuryLegend .filterChip {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.calendarBoardLuxury {
+  border-color: rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(12, 21, 39, 0.96), rgba(7, 14, 28, 0.98));
+  box-shadow: 0 24px 48px rgba(2, 6, 23, 0.28);
+}
+
+.calendarBoardLuxury .calendarHeaderCell {
+  background: rgba(255, 255, 255, 0.08);
+  border-right-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.calendarBoardLuxury .calendarRoomHeader,
+.calendarBoardLuxury .calendarHeaderDate,
+.calendarBoardLuxury .calendarRoomName {
+  color: white;
+}
+
+.calendarBoardLuxury .calendarHeaderDay,
+.calendarBoardLuxury .calendarRoomType,
+.calendarBoardLuxury .calendarMetricLabel {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.calendarBoardLuxury .calendarRoomCell {
+  background: rgba(255, 255, 255, 0.03);
+  border-right-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.calendarBoardLuxury .calendarRateLabel {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.calendarBoardLuxury .calendarCell {
+  border-right-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.calendarBoardLuxury .calendarRateCell {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.86);
+}
+
 .calendarGrid {
   display: grid;
   grid-template-columns: 220px repeat(30, minmax(76px, 1fr));
