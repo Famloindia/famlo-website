@@ -132,13 +132,22 @@ type CalendarCell = {
   bookingDetail: CalendarBookingDetail | null;
 };
 
+type CalendarRateCell = {
+  date: string;
+  displayValue: string;
+  amount: number | null;
+  baseAmount: number;
+  isPast: boolean;
+  isOverridden: boolean;
+};
+
 type CalendarRow = {
   roomId: string;
   roomName: string;
   unitType: string;
   rate: number;
   availabilityCells: CalendarCell[];
-  rateCells: string[];
+  rateCells: CalendarRateCell[];
 };
 
 type ProBookingSummary = {
@@ -171,6 +180,8 @@ type BookingWorkspaceFilter =
   | "Cancelled"
   | "Modified / Review needed"
   | "Action needed";
+
+type BookingDateFilter = "Check-in" | "Check-out" | "Booking Dates" | "Staying Today";
 
 type RevenueWindowFilter = "Today" | "This week" | "This month" | "All time";
 type ReportWindowFilter = "This week" | "This month" | "This year";
@@ -697,6 +708,7 @@ const BOOKING_FILTERS: BookingWorkspaceFilter[] = [
   "Modified / Review needed",
   "Action needed",
 ];
+const BOOKING_DATE_FILTERS: BookingDateFilter[] = ["Check-in", "Check-out", "Booking Dates", "Staying Today"];
 const MEAL_PLAN_OPTIONS = [
   { value: "room_only", label: "Room Only" },
   { value: "breakfast", label: "Breakfast" },
@@ -999,6 +1011,14 @@ function formatShortDate(dateValue: string): string {
   return new Intl.DateTimeFormat("en-IN", {
     day: "numeric",
     month: "short",
+  }).format(value);
+}
+
+function formatMonthLong(dateValue: string): string {
+  const value = new Date(`${dateValue}T12:00:00+05:30`);
+  return new Intl.DateTimeFormat("en-IN", {
+    month: "long",
+    year: "numeric",
   }).format(value);
 }
 
@@ -1593,7 +1613,21 @@ export default function FamloProDashboardShell({
   const [calendarActionFeedback, setCalendarActionFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [calendarActionDate, setCalendarActionDate] = useState<string | null>(null);
   const [isCalendarActionPending, startCalendarAction] = useTransition();
+  const [selectedCalendarRateCell, setSelectedCalendarRateCell] = useState<{
+    roomId: string;
+    roomName: string;
+    date: string;
+    displayValue: string;
+    amount: number | null;
+    baseAmount: number;
+    isOverridden: boolean;
+  } | null>(null);
+  const [calendarRateDraft, setCalendarRateDraft] = useState("");
+  const [calendarRateFeedback, setCalendarRateFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [calendarRateActionDate, setCalendarRateActionDate] = useState<string | null>(null);
+  const [isCalendarRatePending, startCalendarRateTransition] = useTransition();
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
+  const [bookingDateFilter, setBookingDateFilter] = useState<BookingDateFilter>("Check-in");
   const [revenueWindow, setRevenueWindow] = useState<RevenueWindowFilter>("This month");
   const [reportWindow, setReportWindow] = useState<ReportWindowFilter>("This month");
   const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
@@ -1604,16 +1638,35 @@ export default function FamloProDashboardShell({
   const [selectedChannelToAdd, setSelectedChannelToAdd] = useState<ChannelProviderKey>("booking");
   const [channelSetupOverrides, setChannelSetupOverrides] = useState<Partial<Record<ChannelProviderKey, ChannelSetupState>>>({});
   const [timeAnchor] = useState(() => Date.now());
+  const initialCalendarDate = new Date(`${calendarWindow.startDate}T12:00:00+05:30`);
+  const [calendarJumpMonth, setCalendarJumpMonth] = useState(String(initialCalendarDate.getMonth() + 1).padStart(2, "0"));
+  const [calendarJumpYear, setCalendarJumpYear] = useState(String(initialCalendarDate.getFullYear()));
   useEffect(() => {
     setChannelSetupOverrides({});
     setCalendarActionFeedback(null);
     setCalendarActionDate(null);
+    setCalendarRateFeedback(null);
+    setCalendarRateActionDate(null);
+    setSelectedCalendarRateCell(null);
   }, [familyId]);
+  useEffect(() => {
+    const nextDate = new Date(`${calendarWindow.startDate}T12:00:00+05:30`);
+    setCalendarJumpMonth(String(nextDate.getMonth() + 1).padStart(2, "0"));
+    setCalendarJumpYear(String(nextDate.getFullYear()));
+  }, [calendarWindow.startDate]);
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
   const activePropertyTabLinks = PROPERTY_TAB_SECTION_LINKS[activePropertyTab];
   const isPropertiesHomeView = activeSection === "properties-home" && !roomRouteState;
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
+  const calendarJumpYearOptions = Array.from({ length: 5 }, (_, index) => String(initialCalendarDate.getFullYear() - 1 + index));
+  const calendarJumpMonthOptions = Array.from({ length: 12 }, (_, index) => {
+    const monthValue = String(index + 1).padStart(2, "0");
+    return {
+      value: monthValue,
+      label: new Intl.DateTimeFormat("en-IN", { month: "long" }).format(new Date(`2026-${monthValue}-01T12:00:00+05:30`)),
+    };
+  });
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
   const roomById = new Map(rooms.map((room) => [room.id, room]));
   const showChannelOperatorDiagnostics = isAdminView;
@@ -1684,6 +1737,95 @@ export default function FamloProDashboardShell({
         });
       } finally {
         setCalendarActionDate(null);
+      }
+    });
+  };
+
+  const handleCalendarRateCellAction = (cell: CalendarRateCell, row: CalendarRow): void => {
+    if (cell.isPast) return;
+    setCalendarRateFeedback(null);
+    setSelectedCalendarRateCell({
+      roomId: row.roomId,
+      roomName: row.roomName,
+      date: cell.date,
+      displayValue: cell.displayValue,
+      amount: cell.amount,
+      baseAmount: cell.baseAmount,
+      isOverridden: cell.isOverridden,
+    });
+    setCalendarRateDraft(cell.amount != null && cell.amount > 0 ? String(cell.amount) : cell.baseAmount > 0 ? String(cell.baseAmount) : "");
+  };
+
+  const handleCalendarJump = (): void => {
+    const nextCalendarStart = `${calendarJumpYear}-${calendarJumpMonth}-01`;
+    router.push(
+      `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=inventory-calendar&calendarStart=${encodeURIComponent(nextCalendarStart)}`
+    );
+  };
+
+  const submitCalendarRate = (action: "save" | "reset"): void => {
+    if (!selectedCalendarRateCell) return;
+    const parsedAmount = Number(calendarRateDraft);
+    if (action === "save" && (!Number.isFinite(parsedAmount) || parsedAmount <= 0)) {
+      setCalendarRateFeedback({ type: "error", text: "Enter a valid positive daily rate." });
+      return;
+    }
+
+    setCalendarRateFeedback(null);
+    setCalendarRateActionDate(selectedCalendarRateCell.date);
+
+    startCalendarRateTransition(async () => {
+      try {
+        const response = await fetch("/api/host/pro/calendar/manual-rate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            familyId,
+            roomId: selectedCalendarRateCell.roomId,
+            date: selectedCalendarRateCell.date,
+            action,
+            amount: action === "save" ? parsedAmount : null,
+          }),
+        });
+        const payload = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to update daily room rate.");
+        }
+
+        setCalendarRateFeedback({
+          type: "success",
+          text:
+            action === "save"
+              ? `Saved ${formatCurrency(parsedAmount)} for ${selectedCalendarRateCell.roomName} on ${formatShortDate(selectedCalendarRateCell.date)}.`
+              : `Reset ${selectedCalendarRateCell.roomName} on ${formatShortDate(selectedCalendarRateCell.date)} back to base price.`,
+        });
+        if (action === "save") {
+          setSelectedCalendarRateCell({
+            ...selectedCalendarRateCell,
+            amount: parsedAmount,
+            displayValue: formatCurrency(parsedAmount),
+            isOverridden: true,
+          });
+          setCalendarRateDraft(String(parsedAmount));
+        } else {
+          setSelectedCalendarRateCell({
+            ...selectedCalendarRateCell,
+            amount: selectedCalendarRateCell.baseAmount > 0 ? selectedCalendarRateCell.baseAmount : null,
+            displayValue: selectedCalendarRateCell.baseAmount > 0 ? formatCurrency(selectedCalendarRateCell.baseAmount) : "Missing",
+            isOverridden: false,
+          });
+          setCalendarRateDraft(
+            selectedCalendarRateCell.baseAmount > 0 ? String(selectedCalendarRateCell.baseAmount) : ""
+          );
+        }
+        router.refresh();
+      } catch (error) {
+        setCalendarRateFeedback({
+          type: "error",
+          text: error instanceof Error ? error.message : "Failed to update daily room rate.",
+        });
+      } finally {
+        setCalendarRateActionDate(null);
       }
     });
   };
@@ -1817,7 +1959,24 @@ export default function FamloProDashboardShell({
   const modifiedReviewBookingsCount = proBookings.filter(isModifiedReviewBooking).length;
   const actionNeededBookingsCount = proBookings.filter(isActionNeededBooking).length;
   const confirmedBookingsCount = proBookings.filter(isConfirmedBooking).length;
-  const filteredProBookings = proBookings.filter((booking) => matchesBookingFilter(booking, bookingFilter));
+  const bookingsTodayIsoDate = isoDateFromLocalDate(new Date());
+  const filteredProBookings = proBookings
+    .filter((booking) => matchesBookingFilter(booking, bookingFilter))
+    .filter((booking) => {
+      if (bookingDateFilter !== "Staying Today") return true;
+      return booking.startDate <= bookingsTodayIsoDate && booking.endDate >= bookingsTodayIsoDate;
+    })
+    .sort((left, right) => {
+      if (bookingDateFilter === "Check-out") {
+        return right.endDate.localeCompare(left.endDate);
+      }
+      if (bookingDateFilter === "Booking Dates") {
+        const leftTime = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+        const rightTime = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+        return rightTime - leftTime;
+      }
+      return right.startDate.localeCompare(left.startDate);
+    });
   const bookingsWithValue = proBookings
     .map((booking) => ({ booking, parsedAmount: parseBookingAmount(booking.amount) }))
     .filter((entry): entry is { booking: ProBookingSummary; parsedAmount: number } => entry.parsedAmount != null);
@@ -1828,8 +1987,8 @@ export default function FamloProDashboardShell({
     (booking) =>
       isHostBookingVisibleToPartner(booking.status, booking.paymentStatus) &&
       (
-      normalizeToken(booking.paymentStatus) === "paid" ||
-      isConfirmedBooking(booking)
+        normalizeToken(booking.paymentStatus) === "paid" ||
+        isConfirmedBooking(booking)
       )
   );
   const todayDate = new Date();
@@ -2153,11 +2312,11 @@ export default function FamloProDashboardShell({
       value: channelFeedHealth?.lastSuccessfulPollAt
         ? `Last success ${formatDateTime(channelFeedHealth.lastSuccessfulPollAt)}`
         : "No successful poll yet",
-  },
-];
+    },
+  ];
 
-const REVENUE_WINDOWS: RevenueWindowFilter[] = ["Today", "This week", "This month", "All time"];
-const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This year"];
+  const REVENUE_WINDOWS: RevenueWindowFilter[] = ["Today", "This week", "This month", "All time"];
+  const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This year"];
   const ariSyncEligibleRooms = rooms.filter((room) => {
     if (!room.isActive) return false;
     const roomMapping = roomMappingsByRoomId.get(room.id);
@@ -5121,6 +5280,92 @@ const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This y
                 <h3 className={styles.propertyCenterTitle}>Calendar</h3>
               </div>
               <div className={styles.cardBody}>
+                <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Jump to month</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
+                      Move the board to the month where you want to block dates or edit room pricing.
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(120px, 160px) auto", gap: "12px", alignItems: "end" }}>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Month</span>
+                        <select className={styles.fieldInput} value={calendarJumpMonth} onChange={(event) => setCalendarJumpMonth(event.target.value)}>
+                          {calendarJumpMonthOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Year</span>
+                        <select className={styles.fieldInput} value={calendarJumpYear} onChange={(event) => setCalendarJumpYear(event.target.value)}>
+                          {calendarJumpYearOptions.map((year) => (
+                            <option key={year} value={year}>
+                              {year}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button type="button" className={styles.secondaryActionButton} onClick={handleCalendarJump}>
+                        Go to month
+                      </button>
+                    </div>
+                    <div className={styles.roomReadinessRow} style={{ marginTop: 14 }}>
+                      <span className={styles.readinessPill}>Showing {formatMonthLong(calendarWindow.startDate)}</span>
+                      <span className={styles.readinessPill}>{calendarWindow.startDate} → {calendarWindow.endDate}</span>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Daily room rate</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
+                      Click any future rate cell to set a room-specific daily rate override for that exact date.
+                    </div>
+                    {selectedCalendarRateCell ? (
+                      <div className={styles.stack}>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>{selectedCalendarRateCell.roomName}</div>
+                          <div className={styles.placeholderValue}>{formatShortDate(selectedCalendarRateCell.date)}</div>
+                          <div className={styles.placeholderCopy}>
+                            Base price {selectedCalendarRateCell.baseAmount > 0 ? formatCurrency(selectedCalendarRateCell.baseAmount) : "Missing"}
+                            {selectedCalendarRateCell.isOverridden ? ` · Override active (${selectedCalendarRateCell.displayValue})` : " · No override yet"}
+                          </div>
+                        </div>
+                        <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>Daily rate (INR)</span>
+                          <input
+                            className={styles.fieldInput}
+                            inputMode="numeric"
+                            value={calendarRateDraft}
+                            onChange={(event) => setCalendarRateDraft(event.target.value)}
+                            placeholder={selectedCalendarRateCell.baseAmount > 0 ? String(selectedCalendarRateCell.baseAmount) : "1500"}
+                          />
+                        </label>
+                        <div className={styles.roomReadinessRow}>
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            onClick={() => submitCalendarRate("save")}
+                            disabled={isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date}
+                          >
+                            {isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date ? "Saving..." : "Save daily rate"}
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            onClick={() => submitCalendarRate("reset")}
+                            disabled={isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date}
+                          >
+                            Reset to base
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={styles.feedCopy}>No day selected yet. Click a future rate cell below to edit one room on one date.</div>
+                    )}
+                  </article>
+                </div>
                 <div className={`${styles.filterRow} ${styles.calendarLuxuryLegend}`} style={{ marginBottom: "24px" }}>
                   {CALENDAR_LEGEND.map((item) => (
                     <span key={item.title} className={styles.filterChip}>
@@ -5134,6 +5379,14 @@ const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This y
                     style={{ marginBottom: "24px" }}
                   >
                     {calendarActionFeedback.text}
+                  </div>
+                ) : null}
+                {calendarRateFeedback ? (
+                  <div
+                    className={`${styles.feedbackBox} ${calendarRateFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
+                    style={{ marginBottom: "24px" }}
+                  >
+                    {calendarRateFeedback.text}
                   </div>
                 ) : null}
                 {calendarRows.length > 0 ? (
@@ -5165,9 +5418,9 @@ const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This y
                               cell.bookingDetail
                                 ? cell.label
                                 : cell.status === "available"
-                                  ? `${cell.label}. Click to block this date across the property.`
+                                  ? `${cell.label}. Click to block this date for ${row.roomName}.`
                                   : cell.status === "manual_block"
-                                    ? `${cell.label}. Click to unblock this date across the property.`
+                                    ? `${cell.label}. Click to unblock this date for ${row.roomName}.`
                                     : cell.label;
 
                             return (
@@ -5186,15 +5439,32 @@ const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This y
 
                           <div className={`${styles.calendarRoomCell} ${styles.calendarRateLabel}`}>
                             <div className={styles.calendarMetricLabel}>Rate</div>
-                            <div className={styles.calendarRoomType}>Read-only base price</div>
+                            <div className={styles.calendarRoomType}>Click a future date to edit room price</div>
                           </div>
-                          {row.rateCells.map((value, index) => (
-                            <div
+                          {row.rateCells.map((cell, index) => (
+                            <button
+                              type="button"
                               key={`${row.roomId}-${calendarColumns[index]?.date ?? index}-rate`}
-                              className={`${styles.calendarCell} ${calendarColumns[index]?.isPast ? styles.calendarCellPast : styles.calendarRateCell}`}
+                              className={`${styles.calendarCell} ${cell.isPast ? styles.calendarCellPast : styles.calendarRateCell} ${!cell.isPast ? styles.calendarCellInteractive : ""}`}
+                              disabled={cell.isPast}
+                              onClick={() => handleCalendarRateCellAction(cell, row)}
+                              title={
+                                cell.isPast
+                                  ? `${row.roomName} rate on ${cell.date}`
+                                  : cell.isOverridden
+                                    ? `${row.roomName} has a custom rate on ${cell.date}. Click to edit or reset it.`
+                                    : `Click to set a daily rate for ${row.roomName} on ${cell.date}.`
+                              }
                             >
-                              {value}
-                            </div>
+                              <span style={{ display: "grid", gap: "4px", justifyItems: "center" }}>
+                                <span>{cell.displayValue}</span>
+                                {!cell.isPast ? (
+                                  <span style={{ fontSize: "10px", opacity: 0.72 }}>
+                                    {cell.isOverridden ? "Custom" : "Base"}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </button>
                           ))}
 
                           {/* Spacer between different rooms */}
@@ -6132,10 +6402,10 @@ const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This y
                         <div className={styles.logMeta}>
                           <span
                             className={`${styles.readinessPill} ${item.severity === "critical"
-                                ? styles.readinessPillMissing
-                                : item.severity === "warning"
-                                  ? styles.readinessPillReview
-                                  : styles.readinessPillOk
+                              ? styles.readinessPillMissing
+                              : item.severity === "warning"
+                                ? styles.readinessPillReview
+                                : styles.readinessPillOk
                               }`}
                           >
                             {item.severity === "critical"
@@ -6220,6 +6490,61 @@ const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This y
                     );
                   })}
                 </div>
+                <div className={styles.listGrid} style={{ marginTop: "24px" }}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Date Filters</div>
+                    <div style={{ display: "grid", gap: "14px" }}>
+                      {BOOKING_DATE_FILTERS.map((filter) => {
+                        const active = bookingDateFilter === filter;
+                        return (
+                          <button
+                            key={filter}
+                            type="button"
+                            onClick={() => setBookingDateFilter(filter)}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "14px",
+                              background: "transparent",
+                              border: "none",
+                              color: "#ffffff",
+                              padding: 0,
+                              cursor: "pointer",
+                              textAlign: "left",
+                              fontSize: "16px",
+                              fontWeight: active ? 800 : 600,
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: "18px",
+                                height: "18px",
+                                borderRadius: "999px",
+                                border: active ? "5px solid #4f5bd5" : "2px solid rgba(255, 255, 255, 0.75)",
+                                boxSizing: "border-box",
+                                flexShrink: 0,
+                                background: active ? "#ffffff" : "transparent",
+                              }}
+                            />
+                            <span>{filter}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </article>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Current booking view</div>
+                    <div className={styles.feedCopy}>
+                      {bookingDateFilter === "Check-in"
+                        ? "Bookings are ordered by check-in date."
+                        : bookingDateFilter === "Check-out"
+                          ? "Bookings are ordered by check-out date."
+                          : bookingDateFilter === "Booking Dates"
+                            ? "Bookings are ordered by the date they were created."
+                            : "Only bookings that are staying today are shown."}
+                    </div>
+                  </article>
+                </div>
                 {proBookings.length > 0 ? (
                   <>
                     <div className={styles.propertiesRoomShowcaseGrid} style={{ marginTop: "24px" }}>
@@ -6260,9 +6585,8 @@ const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This y
                                   {booking.sourceLabel}
                                 </span>
                                 <span
-                                  className={`${styles.propertyRoomStatePill} ${
-                                    isCancelled ? styles.propertyRoomStatePillMuted : styles.propertyRoomStatePillActive
-                                  }`}
+                                  className={`${styles.propertyRoomStatePill} ${isCancelled ? styles.propertyRoomStatePillMuted : styles.propertyRoomStatePillActive
+                                    }`}
                                   style={{
                                     background: isCancelled ? "rgba(239, 68, 68, 0.2)" : isActionNeeded ? "rgba(245, 158, 11, 0.2)" : "rgba(16, 185, 129, 0.2)",
                                     color: isCancelled ? "#ef4444" : isActionNeeded ? "#f59e0b" : "#10b981",
@@ -6908,20 +7232,6 @@ const REPORT_WINDOWS: ReportWindowFilter[] = ["This week", "This month", "This y
                         <div className={styles.placeholderTitle}>OTA average</div>
                         <div className={styles.placeholderValue}>{otaAverageBookingValue != null ? formatCurrency(otaAverageBookingValue) : "Not available"}</div>
                         <div className={styles.placeholderCopy}>Average booking value for OTA-connected reservations only.</div>
-                      </div>
-                    </div>
-                  </article>
-
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>What this report covers today</div>
-                    <div className={styles.stack}>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Bookings and source mix</div>
-                        <div className={styles.feedCopy}>This shell reports on direct versus OTA booking mix, room activity, and visible calendar usage using existing Pro data only.</div>
-                      </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Advanced reporting comes later</div>
-                        <div className={styles.feedCopy}>ADR, RevPAR, occupancy trends, monthly exports, and finance-grade settlement reporting are intentionally out of scope in this pilot phase.</div>
                       </div>
                     </div>
                   </article>
@@ -8429,10 +8739,10 @@ function ProviderOperatorVerificationCard({
                 <div className={styles.inlineBadgeRow} style={{ marginTop: 6 }}>
                   <span
                     className={`${styles.readinessPill} ${item.status === "ready"
-                        ? styles.readinessPillOk
-                        : item.status === "blocked" || item.status === "in_progress"
-                          ? styles.readinessPillReview
-                          : styles.readinessPillMissing
+                      ? styles.readinessPillOk
+                      : item.status === "blocked" || item.status === "in_progress"
+                        ? styles.readinessPillReview
+                        : styles.readinessPillMissing
                       }`}
                   >
                     {item.status === "ready"

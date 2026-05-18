@@ -258,13 +258,22 @@ type CalendarCell = {
   bookingDetail: CalendarBookingDetail | null;
 };
 
+type CalendarRateCell = {
+  date: string;
+  displayValue: string;
+  amount: number | null;
+  baseAmount: number;
+  isPast: boolean;
+  isOverridden: boolean;
+};
+
 type CalendarRow = {
   roomId: string;
   roomName: string;
   unitType: string;
   rate: number;
   availabilityCells: CalendarCell[];
-  rateCells: string[];
+  rateCells: CalendarRateCell[];
 };
 
 type ProBookingSummary = {
@@ -956,6 +965,7 @@ export async function renderFamloProDashboardPage({
   }
 
   const roomManualBlockDates = new Map<string, Set<string>>();
+  const roomDailyRateOverrides = new Map<string, Map<string, number>>();
   if (rooms.length > 0) {
     const roomCalendarEvents = await Promise.all(
       rooms.map(async (room) => ({
@@ -971,15 +981,33 @@ export async function renderFamloProDashboardPage({
 
     for (const roomCalendar of roomCalendarEvents) {
       const blockedDates = new Set<string>();
+      const rateOverrides = new Map<string, number>();
       for (const event of roomCalendar.events) {
-        if (event.sourceType !== "manual_block" || !event.isBlocking) continue;
-        let cursor = event.startDate;
-        while (cursor <= event.endDate) {
-          blockedDates.add(cursor);
-          cursor = addIndiaDays(cursor, 1);
+        if (event.sourceType === "manual_block" && event.isBlocking) {
+          let cursor = event.startDate;
+          while (cursor <= event.endDate) {
+            blockedDates.add(cursor);
+            cursor = addIndiaDays(cursor, 1);
+          }
+          continue;
+        }
+
+        if (event.sourceType === "manual_rate" && event.status !== "released") {
+          const amountRaw =
+            event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+              ? event.payload.amount
+              : null;
+          const amount = asNumber(amountRaw);
+          if (amount <= 0) continue;
+          let cursor = event.startDate;
+          while (cursor <= event.endDate) {
+            rateOverrides.set(cursor, amount);
+            cursor = addIndiaDays(cursor, 1);
+          }
         }
       }
       roomManualBlockDates.set(roomCalendar.roomId, blockedDates);
+      roomDailyRateOverrides.set(roomCalendar.roomId, rateOverrides);
     }
   }
 
@@ -1216,9 +1244,23 @@ export async function renderFamloProDashboardPage({
         bookingDetail: bookingDetailByRoomDate.get(`${room.id}:${column.date}`) ?? null,
       };
     }),
-    rateCells: calendarColumns.map((column) =>
-      column.isPast ? "Past" : room.priceFullday > 0 ? formatCurrency(room.priceFullday) : "Missing"
-    ),
+    rateCells: calendarColumns.map((column) => {
+      const overrideAmount = roomDailyRateOverrides.get(room.id)?.get(column.date) ?? null;
+      const displayAmount = overrideAmount ?? (room.priceFullday > 0 ? room.priceFullday : null);
+      return {
+        date: column.date,
+        displayValue:
+          column.isPast
+            ? "Past"
+            : displayAmount != null && displayAmount > 0
+              ? formatCurrency(displayAmount)
+              : "Missing",
+        amount: displayAmount,
+        baseAmount: room.priceFullday,
+        isPast: column.isPast,
+        isOverridden: overrideAmount != null,
+      } satisfies CalendarRateCell;
+    }),
   }));
 
   const bookingComVerificationTarget =

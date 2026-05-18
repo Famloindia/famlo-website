@@ -14,7 +14,7 @@ export type CanonicalCalendarEvent = {
   endDate: string;
   slotKey?: string | null;
   status: string;
-  sourceType: "internal_booking" | "manual_block" | "booking_hold" | "external_import";
+  sourceType: "internal_booking" | "manual_block" | "manual_rate" | "booking_hold" | "external_import";
   sourceReference?: string | null;
   isBlocking: boolean;
   payload?: JsonRecord;
