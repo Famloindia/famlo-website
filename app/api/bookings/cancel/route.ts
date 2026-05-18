@@ -4,6 +4,7 @@ import { enqueueNotification } from "@/lib/booking-platform";
 import { getErrorMessage } from "@/lib/error-utils";
 import { appendLedgerEntryIfMissing } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
+import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -133,12 +134,15 @@ async function loadCancellationTarget(supabase: ReturnType<typeof createAdminSup
 async function cancelV2Booking(
   supabase: ReturnType<typeof createAdminSupabaseClient>,
   booking: CancellationBookingRow,
-  now: string
+  now: string,
+  reason: "user_cancelled" | "host_cancelled",
+  cancelledStatus: "cancelled_by_user" | "cancelled_by_partner",
+  actorUserId: string | null
 ): Promise<void> {
   const bookingUpdatePayload = {
-    status: "cancelled_by_user",
+    status: cancelledStatus,
     cancelled_at: now,
-    cancellation_reason: "user_cancelled",
+    cancellation_reason: reason,
     hold_expires_at: null,
     updated_at: now,
   } as never;
@@ -162,7 +166,7 @@ async function cancelV2Booking(
     updateResult = await supabase
       .from("bookings_v2")
       .update({
-        status: "cancelled_by_user",
+        status: cancelledStatus,
         updated_at: now,
       } as never)
       .eq("id", booking.id)
@@ -181,9 +185,9 @@ async function cancelV2Booking(
   await supabase.from("booking_status_history_v2").insert({
     booking_id: booking.id,
     old_status: asString(booking.status) ?? "unknown",
-    new_status: "cancelled_by_user",
-    changed_by_user_id: updateResult.data.user_id ?? null,
-    reason: "user_cancelled",
+    new_status: cancelledStatus,
+    changed_by_user_id: actorUserId,
+    reason,
     created_at: now,
   } as never);
 
@@ -193,7 +197,7 @@ async function cancelV2Booking(
       .from("bookings")
       .update(
         {
-          status: "cancelled_by_user",
+          status: cancelledStatus,
           updated_at: now,
         } as never
       )
@@ -204,7 +208,7 @@ async function cancelV2Booking(
         .from("bookings")
         .update(
           {
-            status: "cancelled_by_user",
+            status: cancelledStatus,
           } as never
         )
         .eq("id", legacyBookingId);
@@ -235,13 +239,14 @@ async function cancelV2Booking(
 async function cancelLegacyBooking(
   supabase: ReturnType<typeof createAdminSupabaseClient>,
   booking: CancellationBookingRow,
-  now: string
+  now: string,
+  cancelledStatus: "cancelled_by_user" | "cancelled_by_partner"
 ): Promise<void> {
   const legacyUpdate = await supabase
     .from("bookings")
     .update(
       {
-        status: "cancelled_by_user",
+        status: cancelledStatus,
         updated_at: now,
       } as never
     )
@@ -255,7 +260,7 @@ async function cancelLegacyBooking(
         .from("bookings")
         .update(
           {
-            status: "cancelled_by_user",
+            status: cancelledStatus,
           } as never
         )
         .eq("id", booking.id)
@@ -447,9 +452,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const ownerId = asString(target.booking.user_id);
-    if (!ownerId || ownerId !== authUser.id) {
-      return NextResponse.json({ error: "You can only manage your own bookings." }, { status: 403 });
+    const hostAccess =
+      target.source === "v2" && asString(target.booking.host_id)
+        ? await resolveAuthorizedHostResource(supabase, request, { hostId: asString(target.booking.host_id) })
+        : null;
+    const canActAsGuest = Boolean(ownerId && ownerId === authUser.id);
+    const canActAsHost = Boolean(hostAccess);
+
+    if (!canActAsGuest && !canActAsHost) {
+      return NextResponse.json({ error: "You can only manage your own bookings or the bookings for your property." }, { status: 403 });
     }
+
+    const actorMode = canActAsGuest ? "guest" : "host";
+    const cancellationReason = actorMode === "host" ? "host_cancelled" : "user_cancelled";
+    const cancelledStatus = actorMode === "host" ? "cancelled_by_partner" : "cancelled_by_user";
 
     const bookingStatus = asString(target.booking.status);
     const quote = buildCancellationQuote(target.booking);
@@ -491,7 +507,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const now = new Date().toISOString();
 
     if (target.source === "v2") {
-      await cancelV2Booking(supabase, target.booking, now);
+      await cancelV2Booking(supabase, target.booking, now, cancellationReason, cancelledStatus, authUser.id);
       await ensurePendingRefundForPaidCancellation(supabase, {
         bookingId: target.booking.id,
         actorUserId: authUser.id,
@@ -499,7 +515,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         now,
       });
     } else {
-      await cancelLegacyBooking(supabase, target.booking, now);
+      await cancelLegacyBooking(supabase, target.booking, now, cancelledStatus);
     }
 
     let hostUserId = target.source === "v2" ? asString(target.booking.host_id) : null;
@@ -520,14 +536,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (hostUserId) {
       void enqueueNotification(supabase, {
-        eventType: "booking_cancelled_by_guest",
+        eventType: actorMode === "host" ? "booking_cancelled" : "booking_cancelled_by_guest",
         channel: "email",
         userId: hostUserId,
         bookingId,
-        dedupeKey: `booking_cancelled_by_guest:host:${bookingId}`,
-        subject: "A guest cancelled their Famlo booking",
+        dedupeKey: `${actorMode === "host" ? "booking_cancelled_by_host" : "booking_cancelled_by_guest"}:host:${bookingId}`,
+        subject: actorMode === "host" ? "A host cancelled a Famlo booking" : "A guest cancelled their Famlo booking",
         payload: {
-          message: `Booking ${bookingId} was cancelled by the guest. The room is open again for new bookings.`,
+          message:
+            actorMode === "host"
+              ? `Booking ${bookingId} was cancelled by the host. The room is open again for new bookings.`
+              : `Booking ${bookingId} was cancelled by the guest. The room is open again for new bookings.`,
         },
       }).catch((notificationError) => {
         console.error("[bookings.cancel] host notification failed:", notificationError);
@@ -535,7 +554,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const adminMessage = [
-      `Guest cancellation for booking ${bookingId}.`,
+      `${actorMode === "host" ? "Host" : "Guest"} cancellation for booking ${bookingId}.`,
       `Booking amount: INR ${quote.bookingAmount}.`,
       `Penalty: ${quote.penaltyPercent}% / INR ${quote.penaltyAmount}.`,
       `Amount Famlo should return to guest: INR ${quote.refundableAmount}.`,
@@ -550,7 +569,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       dedupeKey: `booking_cancelled:${bookingId}`,
       subject: "Your Famlo booking cancellation was processed",
       payload: {
-        message: `Your cancellation has been recorded. ${quote.refundRule} Refundable amount: INR ${quote.refundableAmount}.`,
+        message:
+          actorMode === "host"
+            ? `This booking was cancelled by the host. ${quote.refundRule} Refundable amount: INR ${quote.refundableAmount}.`
+            : `Your cancellation has been recorded. ${quote.refundRule} Refundable amount: INR ${quote.refundableAmount}.`,
       },
     }).catch((notificationError) => {
       console.error("[bookings.cancel] guest notification failed:", notificationError);

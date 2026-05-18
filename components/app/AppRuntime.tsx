@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { CalendarDays, Compass, MessageCircle, WalletCards } from "lucide-react";
+import { CalendarDays, Compass, FileBarChart2, MessageCircle, WalletCards } from "lucide-react";
 
 import { useUser } from "@/components/auth/UserContext";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
@@ -52,15 +52,31 @@ function AppRuntimeContent(): React.JSX.Element | null {
     pathname.includes("/submitted");
   const showMobileNav = appMode !== "none" && !hiddenRoutes;
   const currentTab = searchParams.get("tab") ?? "dashboard";
+  const currentSection = searchParams.get("section") ?? "dashboard";
+  const isProDashboard = pathname.startsWith("/partnerslogin/home/pro/dashboard");
+  const isBasicDashboard = pathname.startsWith("/partnerslogin/home/dashboard");
+  const hostDashboardUrl = hostSession.dashboardUrl ?? "/partnerslogin/home/dashboard";
+  const hostDashboardMode = hostSession.active && hostDashboardUrl.startsWith("/partnerslogin/home/pro/dashboard") ? "pro" : "basic";
 
   const navItems = useMemo(() => {
     if (appMode === "host") {
-      const dashboardUrl = hostSession.dashboardUrl ?? "/partnerslogin/home/dashboard";
+      if (hostDashboardMode === "pro") {
+        const dashboardUrl = hostDashboardUrl;
+        return [
+          { href: `${dashboardUrl}`, label: "Home", icon: Compass, active: isProDashboard && currentSection === "dashboard" },
+          { href: `${dashboardUrl}&section=bookings`, label: "Bookings", icon: WalletCards, active: isProDashboard && currentSection === "bookings" },
+          { href: `${dashboardUrl}&section=inventory-calendar`, label: "Calendar", icon: CalendarDays, active: isProDashboard && currentSection === "inventory-calendar" },
+          { href: `${dashboardUrl}&section=revenue`, label: "Revenue", icon: WalletCards, active: isProDashboard && currentSection === "revenue" },
+          { href: `${dashboardUrl}&section=reports`, label: "Reports", icon: FileBarChart2, active: isProDashboard && currentSection === "reports" },
+        ];
+      }
+
+      const dashboardUrl = hostDashboardUrl;
       return [
-        { href: `${dashboardUrl}`, label: "Home", icon: Compass, active: pathname.startsWith("/partnerslogin/home/dashboard") && currentTab === "dashboard" },
-        { href: `${dashboardUrl}&tab=bookings`, label: "Bookings", icon: WalletCards, active: pathname.startsWith("/partnerslogin/home/dashboard") && currentTab === "bookings" },
-        { href: `${dashboardUrl}&tab=messages`, label: "Messages", icon: MessageCircle, active: pathname.startsWith("/partnerslogin/home/dashboard") && currentTab === "messages" },
-        { href: `${dashboardUrl}&tab=calendar`, label: "Calendar", icon: CalendarDays, active: pathname.startsWith("/partnerslogin/home/dashboard") && currentTab === "calendar" },
+        { href: `${dashboardUrl}`, label: "Home", icon: Compass, active: isBasicDashboard && currentTab === "dashboard" },
+        { href: `${dashboardUrl}&tab=bookings`, label: "Bookings", icon: WalletCards, active: isBasicDashboard && currentTab === "bookings" },
+        { href: `${dashboardUrl}&tab=messages`, label: "Messages", icon: MessageCircle, active: isBasicDashboard && currentTab === "messages" },
+        { href: `${dashboardUrl}&tab=calendar`, label: "Calendar", icon: CalendarDays, active: isBasicDashboard && currentTab === "calendar" },
       ];
     }
 
@@ -69,7 +85,7 @@ function AppRuntimeContent(): React.JSX.Element | null {
       { href: user ? "/bookings?app=1" : "/bookings?auth=true&app=1", label: "Bookings", icon: WalletCards, active: pathname === "/bookings" },
       { href: user ? "/messages?app=1" : "/messages?auth=true&app=1", label: "Messages", icon: MessageCircle, active: pathname === "/messages" },
     ];
-  }, [appMode, currentTab, hostSession.dashboardUrl, pathname, user]);
+  }, [appMode, currentSection, currentTab, hostDashboardMode, hostDashboardUrl, isBasicDashboard, isProDashboard, pathname, user]);
 
   useEffect(() => {
     let ignore = false;
@@ -193,7 +209,12 @@ function AppRuntimeContent(): React.JSX.Element | null {
               icon: "/icon-192x192.png",
               badge: "/icon-96x96.png",
               data: {
-                url: hostSession.active ? `${hostSession.dashboardUrl ?? "/partnerslogin/home/dashboard"}&tab=messages` : "/messages",
+                url:
+                  hostSession.active
+                    ? hostDashboardMode === "pro"
+                      ? `${hostDashboardUrl}&section=messages-reviews`
+                      : `${hostDashboardUrl}&tab=messages`
+                    : "/messages",
               },
             });
           } else {
@@ -219,7 +240,7 @@ function AppRuntimeContent(): React.JSX.Element | null {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [hostSession.active, hostSession.dashboardUrl, hostSession.familyId, hostSession.hostUserId, notificationPermission, serviceWorkerReady, supabase, user?.id]);
+  }, [hostDashboardMode, hostDashboardUrl, hostSession.active, hostSession.familyId, hostSession.hostUserId, notificationPermission, serviceWorkerReady, supabase, user?.id]);
 
   return (
     <>

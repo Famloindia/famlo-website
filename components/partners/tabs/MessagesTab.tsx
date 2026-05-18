@@ -676,7 +676,7 @@ export default function MessagesTab({
                 className={`${styles.chatThreadItem} ${activeConvId === conversation.id ? styles.activeThread : ""}`}
               >
                 <div style={{ position: "relative" }}>
-                {conversation.guest?.avatar_url ? (
+                  {conversation.guest?.avatar_url ? (
                     <img
                       src={conversation.guest.avatar_url}
                       className={styles.chatAvatar}

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export async function GET(): Promise<NextResponse> {
@@ -33,10 +34,18 @@ export async function GET(): Promise<NextResponse> {
 
     if (hostError) throw hostError;
 
+    const proDashboardEnabled = isFamloProDashboardEnabled();
+    const proAccess = proDashboardEnabled ? await loadHostProAccess(supabase, family?.id ?? familyId).catch(() => null) : null;
+    const resolvedFamilyId = family?.id ?? familyId;
+    const dashboardUrl =
+      proDashboardEnabled && proAccess?.allowed
+        ? `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(resolvedFamilyId)}`
+        : `/partnerslogin/home/dashboard?family=${encodeURIComponent(resolvedFamilyId)}`;
+
     return NextResponse.json({
       hostSession: {
         active: Boolean(family?.id),
-        familyId: family?.id ?? familyId,
+        familyId: resolvedFamilyId,
         hostUserId:
           (typeof host?.user_id === "string" && host.user_id.length > 0
             ? host.user_id
@@ -49,7 +58,7 @@ export async function GET(): Promise<NextResponse> {
             : typeof family?.name === "string" && family.name.length > 0
               ? family.name
               : "Famlo Host"),
-        dashboardUrl: `/partnerslogin/home/dashboard?family=${encodeURIComponent(family?.id ?? familyId)}`,
+        dashboardUrl,
       },
     });
   } catch (error) {

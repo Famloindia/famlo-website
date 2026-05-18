@@ -278,6 +278,7 @@ type ProBookingSummary = {
   status: string;
   paymentStatus: string | null;
   amount: string | null;
+  netPayoutAmount: number | null;
   sourceLabel: string;
   externalBookingId: string | null;
   externalRevisionId: string | null;
@@ -728,6 +729,12 @@ export async function renderFamloProDashboardPage({
           .limit(120)
       : { data: [] };
 
+  const { data: platformSettings } = await supabase
+    .from("admin_platform_settings")
+    .select("global_family_commission_pct")
+    .maybeSingle();
+  const globalCommission = Number(platformSettings?.global_family_commission_pct) || 18;
+
   const now = new Date();
   const openRooms = rooms.filter((room) => room.isActive).length;
   const closedRooms = rooms.length - openRooms;
@@ -918,9 +925,9 @@ export async function renderFamloProDashboardPage({
     }
 
     const workspaceSelectWithStayUnit =
-      "id,status,payment_status,total_price,start_date,end_date,created_at,stay_unit_id,pricing_snapshot,users!user_id(name)";
+      "id,status,payment_status,total_price,partner_payout_amount,start_date,end_date,created_at,stay_unit_id,pricing_snapshot,users!user_id(name)";
     const workspaceSelectFallback =
-      "id,status,payment_status,total_price,start_date,end_date,created_at,pricing_snapshot,users!user_id(name)";
+      "id,status,payment_status,total_price,partner_payout_amount,start_date,end_date,created_at,pricing_snapshot,users!user_id(name)";
 
     const bookingWorkspaceInitialResult = await supabase
       .from("bookings_v2")
@@ -1032,6 +1039,12 @@ export async function renderFamloProDashboardPage({
             : matchedRevision?.amount != null
               ? formatCalendarAmount(matchedRevision.amount, matchedRevision.currency ?? bookingCurrency)
               : null,
+        netPayoutAmount: (() => {
+          const payout = asNumber(row.partner_payout_amount);
+          if (payout > 0) return payout;
+          if (totalPrice <= 0) return null;
+          return Math.round(totalPrice * ((100 - globalCommission) / 100));
+        })(),
         sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : "Famlo Direct",
         externalBookingId: externalBookingId ?? matchedRevision?.externalBookingId ?? null,
         externalRevisionId:
@@ -1275,6 +1288,7 @@ export async function renderFamloProDashboardPage({
       initialSettings={proSettings}
       channelFoundation={channelFoundation}
       channexConfig={channexConfig}
+      globalCommission={globalCommission}
       proBookings={proBookings}
       calendarColumns={calendarColumns}
       calendarRows={calendarRows}

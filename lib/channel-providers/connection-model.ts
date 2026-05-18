@@ -67,7 +67,7 @@ function buildRequiredFields(providerKey: ChannelProviderKey): ProviderConnectio
   if (providerKey === "airbnb") {
     return [
       { key: "listing_id", label: "Airbnb Listing ID", required: false },
-      { key: "property_code", label: "Host / account reference", required: false },
+      { key: "property_code", label: "Owner host account reference", required: false },
       { key: "listing_url", label: "Listing URL", required: true },
     ];
   }
@@ -75,7 +75,7 @@ function buildRequiredFields(providerKey: ChannelProviderKey): ProviderConnectio
   if (providerKey === "agoda") {
     return [
       { key: "listing_id", label: "Agoda / YCS Property ID", required: true },
-      { key: "property_code", label: "Hotel Code", required: false },
+      { key: "property_code", label: "Hotel / YCS reference", required: false },
       { key: "listing_url", label: "Agoda or YCS reference URL", required: false },
     ];
   }
@@ -83,15 +83,15 @@ function buildRequiredFields(providerKey: ChannelProviderKey): ProviderConnectio
   if (providerKey === "expedia") {
     return [
       { key: "listing_id", label: "Expedia Property ID", required: true },
-      { key: "property_code", label: "Expedia Hotel Code", required: false },
+      { key: "property_code", label: "Min stay type setting", required: true },
       { key: "listing_url", label: "PartnerCentral reference URL", required: false },
     ];
   }
 
   return [
-    { key: "listing_id", label: "Google Hotel / Place ID", required: false },
-    { key: "property_code", label: "Business profile reference", required: false },
-    { key: "listing_url", label: "Property / search URL", required: true },
+    { key: "listing_id", label: "Google Hotel feed / property reference", required: false },
+    { key: "property_code", label: "Booking link template or GBP reference", required: false },
+    { key: "listing_url", label: "Property / landing page URL", required: true },
   ];
 }
 

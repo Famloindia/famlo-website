@@ -50,17 +50,18 @@ export const CHANNEL_PROVIDER_REGISTRY: ChannelProviderDefinition[] = [
     setupMode: "assisted",
     requiredSetupItems: [
       "Existing MakeMyTrip or Goibibo listing",
-      "Hotel ID or Hotel Code",
-      "Connection details from the channel or channel manager",
+      "MMT Hotel ID",
+      "Access token if MMT provides one",
+      "MMT extranet or support confirmation that Channex is enabled",
       "Room and rate mapping after the listing is prepared",
     ],
     supportsRoomMatching: true,
     supportsPriceMatching: true,
     supportsCalendarRateSync: true,
     hostInstructions: [
-      "Keep the Hotel ID / Hotel Code ready before setup begins.",
-      "Treat this as an assisted flow until secure token storage exists.",
-      "Match rooms and prices only after the listing has been confirmed.",
+      "Open MMT / Goibibo, collect the Hotel ID, and enable Channex as the channel manager.",
+      "Add the access token only when MMT actually issues one for this property.",
+      "Expect assisted fallback until the provider becomes visible in Channex.",
     ],
     operatorNotes: [
       "Do not persist credentials yet.",
@@ -74,18 +75,19 @@ export const CHANNEL_PROVIDER_REGISTRY: ChannelProviderDefinition[] = [
     connectionMode: "Host authorization and listing access",
     setupMode: "self-serve",
     requiredSetupItems: [
-      "Airbnb account authorization",
+      "Airbnb owner account authorization",
       "Listing access for the property",
-      "Room or listing identity to map",
+      "Listing URL or safe listing identity",
+      "No conflicting old channel manager on the listing",
       "Readiness review before activation",
     ],
     supportsRoomMatching: true,
     supportsPriceMatching: true,
     supportsCalendarRateSync: true,
     hostInstructions: [
-      "Authorize the Airbnb account that already owns the listing.",
-      "Confirm which listing should be connected before any mapping starts.",
-      "Use the wizard to prepare room and price matching before activation.",
+      "Use the Airbnb owner host account, not a co-host-only account.",
+      "Disconnect any old PMS or channel manager first if Airbnb blocks the new connection.",
+      "After approval, return to Famlo to preview and confirm room matching.",
     ],
     operatorNotes: [
       "Keep this flow honest: authorization is required before any connected state appears.",
@@ -99,8 +101,9 @@ export const CHANNEL_PROVIDER_REGISTRY: ChannelProviderDefinition[] = [
     connectionMode: "Agoda / YCS channel-manager setup",
     setupMode: "assisted",
     requiredSetupItems: [
-      "Agoda or YCS channel-manager access",
-      "Property assignment from Agoda or the provider",
+      "Agoda Hotel ID",
+      "Agoda YCS channel-manager mode enabled",
+      "Channex selected in Agoda / YCS",
       "Room mapping identifiers",
       "Rate plan mapping identifiers",
     ],
@@ -108,9 +111,9 @@ export const CHANNEL_PROVIDER_REGISTRY: ChannelProviderDefinition[] = [
     supportsPriceMatching: true,
     supportsCalendarRateSync: true,
     hostInstructions: [
-      "Treat Agoda as an assisted setup path.",
-      "Prepare the property and mapping details before asking for activation.",
-      "Do not expect a one-click connection.",
+      "Open Agoda YCS, enable channel manager mode, and select Channex.",
+      "Keep the Agoda property already created before you connect it in Famlo.",
+      "Use Famlo to preview and confirm mappings after Agoda becomes visible through Channex.",
     ],
     operatorNotes: [
       "Use the registry-driven wizard instead of custom Agoda screens.",
@@ -124,7 +127,9 @@ export const CHANNEL_PROVIDER_REGISTRY: ChannelProviderDefinition[] = [
     connectionMode: "Expedia partner / channel-manager setup",
     setupMode: "assisted",
     requiredSetupItems: [
-      "Expedia property or partner setup",
+      "Expedia Property ID",
+      "Min stay type setting",
+      "Channex selected in Expedia Connectivity Settings",
       "Property and room identity mapping",
       "Rate plan mapping",
       "Readiness check after the mapping pass",
@@ -133,9 +138,9 @@ export const CHANNEL_PROVIDER_REGISTRY: ChannelProviderDefinition[] = [
     supportsPriceMatching: true,
     supportsCalendarRateSync: true,
     hostInstructions: [
-      "Start with the Expedia property that is already owned or approved.",
-      "Collect the property and rate-plan details before any activation attempt.",
-      "Complete mapping and test sync before the property can go live.",
+      "Open Expedia Connectivity Settings and select Channex for Rates, Availability, and Reservations.",
+      "Keep the Expedia Property ID and min stay type setting ready for Famlo.",
+      "Complete preview, mapping, and sync review before any live expectation.",
     ],
     operatorNotes: [
       "This is an assisted setup surface, not a fake connected channel.",
@@ -149,18 +154,19 @@ export const CHANNEL_PROVIDER_REGISTRY: ChannelProviderDefinition[] = [
     connectionMode: "Feed and visibility setup",
     setupMode: "assisted",
     requiredSetupItems: [
-      "Google Hotel / feed visibility requirements",
-      "Property profile and landing page readiness",
+      "Full property content: name, address, phone, country, latitude, longitude, timezone",
+      "Policies: hotel policy, cancellation policy, facility list",
+      "Photos and descriptions",
       "Room and rate feed readiness",
-      "Policy and booking-link validation",
+      "Booking-link template if using own booking engine",
     ],
     supportsRoomMatching: true,
     supportsPriceMatching: true,
     supportsCalendarRateSync: true,
     hostInstructions: [
-      "Treat Google Hotel as a feed-readiness workflow, not a live OTA toggle.",
-      "Prepare the property story, room data, and pricing before asking for visibility setup.",
-      "Use the readiness checks to decide when the feed is clean enough to publish.",
+      "Treat Google Hotel as a content and feed-readiness workflow, not a simple hotel-id connect.",
+      "Prepare property content, geo details, policies, photos, and room/rate data first.",
+      "Use Famlo readiness and mapping before expecting Google visibility to stabilize.",
     ],
     operatorNotes: [
       "Google Hotel should remain honest about being feed-driven.",
@@ -172,4 +178,3 @@ export const CHANNEL_PROVIDER_REGISTRY: ChannelProviderDefinition[] = [
 export function getChannelProviderDefinition(key: ChannelProviderKey): ChannelProviderDefinition {
   return CHANNEL_PROVIDER_REGISTRY.find((provider) => provider.key === key) ?? CHANNEL_PROVIDER_REGISTRY[0];
 }
-

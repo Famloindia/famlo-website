@@ -76,6 +76,20 @@ type ProviderPreviewWorkspace = {
   suggestions: ProviderPreviewRow[];
 };
 
+type HostConnectFlowStatus =
+  | "not_started"
+  | "credentials_entered"
+  | "connecting"
+  | "fallback_required"
+  | "provider_structure_found"
+  | "auto_mapping_ready"
+  | "mapping_confirmed"
+  | "sync_ready"
+  | "sync_running"
+  | "sync_success"
+  | "sync_failed"
+  | "assisted_only";
+
 type ChannelSetupWizardProps = {
   providerKey: ChannelProviderKey;
   familyId: string;
@@ -115,6 +129,85 @@ type ChannelSetupWizardProps = {
   onOpenPriceMatching?: () => void;
 };
 
+function buildMappingWorkspaceFromPayload(payload: {
+  catalog?: {
+    refreshedAt?: string | null;
+    roomTypes?: Array<{ id: string; title: string | null }>;
+    ratePlans?: Array<{ id: string; title: string | null; room_type_id?: string | null }>;
+  } | null;
+  rooms?: Array<{
+    id: string;
+    name: string;
+    unitType: string;
+    isActive: boolean;
+    basePrice: number;
+    currentRoomTypeId: string | null;
+    currentRatePlanId: string | null;
+  }>;
+}): ProviderMappingWorkspace {
+  return {
+    refreshedAt: typeof payload.catalog?.refreshedAt === "string" ? payload.catalog.refreshedAt : null,
+    roomTypes: Array.isArray(payload.catalog?.roomTypes)
+      ? payload.catalog.roomTypes.map((item) => ({ id: item.id, title: item.title ?? null }))
+      : [],
+    ratePlans: Array.isArray(payload.catalog?.ratePlans)
+      ? payload.catalog.ratePlans.map((item) => ({ id: item.id, title: item.title ?? null, roomTypeId: item.room_type_id ?? null }))
+      : [],
+    rooms: Array.isArray(payload.rooms)
+      ? payload.rooms.map((room) => ({
+          id: room.id,
+          name: room.name,
+          unitType: room.unitType,
+          isActive: Boolean(room.isActive),
+          basePrice: typeof room.basePrice === "number" ? room.basePrice : 0,
+          currentRoomTypeId: room.currentRoomTypeId ?? null,
+          currentRatePlanId: room.currentRatePlanId ?? null,
+        }))
+      : [],
+  };
+}
+
+function buildPreviewWorkspaceFromPayload(payload: {
+  refreshedAt?: string | null;
+  autoApplicableCount?: number;
+  suggestions?: ProviderPreviewRow[];
+}): ProviderPreviewWorkspace {
+  return {
+    refreshedAt: typeof payload.refreshedAt === "string" ? payload.refreshedAt : null,
+    autoApplicableCount: typeof payload.autoApplicableCount === "number" ? payload.autoApplicableCount : 0,
+    suggestions: Array.isArray(payload.suggestions) ? payload.suggestions : [],
+  };
+}
+
+function getHostFlowLabel(status: HostConnectFlowStatus): string {
+  switch (status) {
+    case "credentials_entered":
+      return "Credentials entered";
+    case "connecting":
+      return "Connecting";
+    case "fallback_required":
+      return "Fallback required";
+    case "provider_structure_found":
+      return "Provider structure found";
+    case "auto_mapping_ready":
+      return "Auto-mapping ready";
+    case "mapping_confirmed":
+      return "Mapping confirmed";
+    case "sync_ready":
+      return "Sync ready";
+    case "sync_running":
+      return "Sync running";
+    case "sync_success":
+      return "Sync success";
+    case "sync_failed":
+      return "Sync failed";
+    case "assisted_only":
+      return "Assisted only";
+    default:
+      return "Not started";
+  }
+}
+
 const STEP_ORDER: ChannelSetupStep[] = [
   "listing",
   "requirements",
@@ -133,6 +226,8 @@ function getAssistedConnectionLabels(providerKey: ChannelProviderKey): {
   placeholderCode: string;
   placeholderUrl: string;
   instruction: string;
+  checkboxLabel: string | null;
+  helperNote: string | null;
 } {
   if (providerKey === "mmt") {
     return {
@@ -143,53 +238,63 @@ function getAssistedConnectionLabels(providerKey: ChannelProviderKey): {
       placeholderCode: "Example: GI hotel code",
       placeholderUrl: "Optional listing or extranet URL",
       instruction: "Enter the safe hotel identifiers. Do not paste access tokens, passwords, or private contract credentials.",
+      checkboxLabel: "I have enabled or requested Channex as channel manager in MMT / Goibibo.",
+      helperNote: "Property should already be live or ready on MakeMyTrip / Goibibo before you try to connect it here.",
     };
   }
 
   if (providerKey === "airbnb") {
     return {
       listingIdLabel: "Airbnb Listing ID",
-      propertyCodeLabel: "Airbnb account / host reference",
+      propertyCodeLabel: "Owner host account reference",
       listingUrlLabel: "Airbnb listing URL",
       placeholderId: "Example: listing id",
-      placeholderCode: "Optional host/account reference",
+      placeholderCode: "Owner account email or safe reference",
       placeholderUrl: "https://www.airbnb.com/rooms/...",
       instruction: "Add the listing reference only. OAuth/login authorization is still assisted and no password is stored here.",
+      checkboxLabel: "I will authorize with the owner host account and any old channel manager has been removed.",
+      helperNote: "Co-host access is usually not enough. The owner host account is the safe path for Airbnb connection approval.",
     };
   }
 
   if (providerKey === "agoda") {
     return {
       listingIdLabel: "Agoda / YCS Property ID",
-      propertyCodeLabel: "Agoda Hotel Code",
+      propertyCodeLabel: "Agoda hotel / YCS reference",
       listingUrlLabel: "Agoda or YCS reference URL",
       placeholderId: "Example: Agoda property id",
-      placeholderCode: "Optional hotel code",
+      placeholderCode: "Optional YCS or hotel reference",
       placeholderUrl: "Optional Agoda/YCS URL",
       instruction: "Collect the Agoda/YCS property reference so Famlo can verify channel-manager setup manually.",
+      checkboxLabel: "I enabled channel manager mode in Agoda YCS and selected Channex.",
+      helperNote: "The Agoda property should already exist in Agoda/YCS before Famlo tries to preview or map anything.",
     };
   }
 
   if (providerKey === "expedia") {
     return {
       listingIdLabel: "Expedia Property ID",
-      propertyCodeLabel: "Expedia Hotel Code",
+      propertyCodeLabel: "Min stay type setting",
       listingUrlLabel: "Expedia PartnerCentral reference URL",
       placeholderId: "Example: Expedia property id",
-      placeholderCode: "Optional hotel code",
+      placeholderCode: "Example: Through / Arrival / Stay-through",
       placeholderUrl: "Optional PartnerCentral URL",
       instruction: "Collect the Expedia property reference only. Contract credentials and secure provider access are not stored here.",
+      checkboxLabel: "I selected Channex in Expedia Connectivity Settings for Rates, Availability, and Reservations.",
+      helperNote: "Expedia property should already exist, and connectivity should be approved before Famlo expects a visible provider structure.",
     };
   }
 
   return {
-    listingIdLabel: "Google Hotel / Place ID",
-    propertyCodeLabel: "Google Business Profile reference",
-    listingUrlLabel: "Google property / search URL",
-    placeholderId: "Example: Place ID or hotel feed id",
-    placeholderCode: "Optional GBP reference",
-    placeholderUrl: "Optional Google listing URL",
+    listingIdLabel: "Google Hotel feed / property reference",
+    propertyCodeLabel: "Booking link template or GBP reference",
+    listingUrlLabel: "Google property / landing page URL",
+    placeholderId: "Example: feed id, place id, or property ref",
+    placeholderCode: "Optional booking link template ref",
+    placeholderUrl: "Property landing page or Google listing URL",
     instruction: "Google Hotel is feed/readiness driven. Capture only safe identifiers for operator review.",
+    checkboxLabel: null,
+    helperNote: "Google Hotel usually depends on property content, policies, geo details, photos, and booking-link readiness more than a classic OTA hotel-id connect.",
   };
 }
 
@@ -220,6 +325,7 @@ export default function ChannelSetupWizard({
   const [providerPropertyCodeInput, setProviderPropertyCodeInput] = useState("");
   const [providerListingUrlInput, setProviderListingUrlInput] = useState("");
   const [providerAccessTokenInput, setProviderAccessTokenInput] = useState("");
+  const [providerNotesInput, setProviderNotesInput] = useState("");
   const [providerExtranetRequested, setProviderExtranetRequested] = useState(false);
   const [isOpeningChannexWorkspace, setIsOpeningChannexWorkspace] = useState(false);
   const [isRefreshingFromChannex, setIsRefreshingFromChannex] = useState(false);
@@ -233,6 +339,8 @@ export default function ChannelSetupWizard({
   const [previewWorkspace, setPreviewWorkspace] = useState<ProviderPreviewWorkspace | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isApplyingPreview, setIsApplyingPreview] = useState(false);
+  const [isRunningSync, setIsRunningSync] = useState(false);
+  const [hostFlowOverride, setHostFlowOverride] = useState<HostConnectFlowStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -361,6 +469,145 @@ export default function ChannelSetupWizard({
     }
   };
 
+  const persistHostNotes = async (): Promise<void> => {
+    const normalizedNotes = providerNotesInput.trim();
+    const currentNotes = state.metadata.operator_notes ?? "";
+    if (normalizedNotes === currentNotes) {
+      return;
+    }
+
+    const response = await fetch("/api/host/pro/channel/setup", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        familyId,
+        providerKey,
+        metadataPatch: {
+          operator_notes: normalizedNotes || null,
+        },
+      }),
+    });
+
+    const payload = (await response.json()) as { state?: ChannelSetupState; error?: string };
+    if (!response.ok || !payload.state) {
+      throw new Error(payload.error ?? "Unable to save the OTA notes.");
+    }
+
+    setState(payload.state);
+    onSaved?.(payload.state);
+  };
+
+  const hydrateFromProviderStructure = (payload: {
+    state?: ChannelSetupState | null;
+    catalog?: {
+      refreshedAt?: string | null;
+      roomTypes?: Array<{ id: string; title: string | null }>;
+      ratePlans?: Array<{ id: string; title: string | null; room_type_id?: string | null }>;
+    } | null;
+    rooms?: Array<{
+      id: string;
+      name: string;
+      unitType: string;
+      isActive: boolean;
+      basePrice: number;
+      currentRoomTypeId: string | null;
+      currentRatePlanId: string | null;
+    }>;
+    suggestions?: ProviderPreviewRow[];
+    autoApplicableCount?: number;
+  }): void => {
+    if (payload.state) {
+      setState(payload.state);
+      onSaved?.(payload.state);
+    }
+
+    const workspace = buildMappingWorkspaceFromPayload({
+      catalog: payload.catalog ?? null,
+      rooms: payload.rooms ?? [],
+    });
+    setMappingWorkspace(workspace);
+    setRoomTypeDrafts(Object.fromEntries(workspace.rooms.map((room) => [room.id, room.currentRoomTypeId ?? ""])));
+    setRatePlanDrafts(Object.fromEntries(workspace.rooms.map((room) => [room.id, room.currentRatePlanId ?? ""])));
+    setPreviewWorkspace(
+      buildPreviewWorkspaceFromPayload({
+        refreshedAt: workspace.refreshedAt,
+        autoApplicableCount: payload.autoApplicableCount ?? 0,
+        suggestions: payload.suggestions ?? [],
+      })
+    );
+  };
+
+  const runProviderStructureFlow = async (): Promise<void> => {
+    const response = await fetch("/api/host/pro/channel/provider-structure", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        familyId,
+        providerKey,
+      }),
+    });
+
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      error?: string;
+      message?: string;
+      state?: ChannelSetupState | null;
+      catalog?: {
+        refreshedAt?: string | null;
+        roomTypes?: Array<{ id: string; title: string | null }>;
+        ratePlans?: Array<{ id: string; title: string | null; room_type_id?: string | null }>;
+      } | null;
+      rooms?: Array<{
+        id: string;
+        name: string;
+        unitType: string;
+        isActive: boolean;
+        basePrice: number;
+        currentRoomTypeId: string | null;
+        currentRatePlanId: string | null;
+      }>;
+      suggestions?: ProviderPreviewRow[];
+      autoApplicableCount?: number;
+    };
+
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error ?? "Unable to load provider structure.");
+    }
+
+    hydrateFromProviderStructure(payload);
+  };
+
+  const runAutoMapFlow = async (): Promise<void> => {
+    const response = await fetch("/api/host/pro/channel/auto-map", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        familyId,
+        providerKey,
+      }),
+    });
+
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      error?: string;
+      refreshedAt?: string | null;
+      autoApplicableCount?: number;
+      suggestions?: ProviderPreviewRow[];
+    };
+
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error ?? "Unable to build the OTA preview.");
+    }
+
+    setPreviewWorkspace(buildPreviewWorkspaceFromPayload(payload));
+  };
+
   useEffect(() => {
     void loadMappingWorkspace();
   }, [familyId, providerKey]);
@@ -376,11 +623,13 @@ export default function ChannelSetupWizard({
     setProviderListingIdInput(state.metadata.provider_listing_id ?? "");
     setProviderPropertyCodeInput(state.metadata.provider_property_code ?? "");
     setProviderListingUrlInput(state.metadata.provider_listing_url ?? "");
+    setProviderNotesInput(state.metadata.operator_notes ?? "");
     setProviderExtranetRequested(state.metadata.provider_extranet_request_acknowledged === true);
   }, [
     state.metadata.booking_extranet_request_acknowledged,
     state.metadata.booking_hotel_id,
     state.metadata.booking_property_code,
+    state.metadata.operator_notes,
     state.metadata.provider_listing_id,
     state.metadata.provider_listing_url,
     state.metadata.provider_property_code,
@@ -412,6 +661,51 @@ export default function ChannelSetupWizard({
             ? "Verification failed"
             : state.metadata.provider_connection_status ?? "Not requested";
   const mutationAudit = getProviderMutationPrimitiveAudit(providerKey);
+  const hasEnteredCredentials =
+    providerKey === "booking"
+      ? Boolean(bookingHotelIdInput.trim() || bookingPropertyCodeInput.trim() || state.metadata.booking_hotel_id || state.metadata.booking_property_code)
+      : Boolean(
+          providerListingIdInput.trim() ||
+            providerPropertyCodeInput.trim() ||
+            providerListingUrlInput.trim() ||
+            providerAccessTokenInput.trim() ||
+            state.metadata.provider_listing_id ||
+            state.metadata.provider_property_code ||
+            state.metadata.provider_listing_url ||
+            state.metadata.provider_access_token_stored
+        );
+  const activeMappingRooms = mappingWorkspace?.rooms.filter((room) => room.isActive) ?? [];
+  const mappedRoomCount = activeMappingRooms.filter((room) => room.currentRoomTypeId).length;
+  const mappedRateCount = activeMappingRooms.filter((room) => room.currentRatePlanId).length;
+  const hasProviderCatalog = Boolean(mappingWorkspace && (mappingWorkspace.roomTypes.length > 0 || mappingWorkspace.ratePlans.length > 0));
+  const mappingConfirmed =
+    activeMappingRooms.length > 0 &&
+    mappedRoomCount === activeMappingRooms.length &&
+    mappedRateCount === activeMappingRooms.length;
+  const providerStructureFound = Boolean(
+    hasProviderCatalog ||
+      state.metadata.provider_channel_attached === true ||
+      (state.metadata.provider_room_types_found_count ?? 0) > 0 ||
+      (state.metadata.provider_rate_plans_found_count ?? 0) > 0
+  );
+  const hasPreviewSuggestions = Boolean(previewWorkspace && previewWorkspace.suggestions.length > 0);
+  const derivedHostFlowStatus: HostConnectFlowStatus =
+    mappingConfirmed
+      ? providerKey === "booking"
+        ? "sync_ready"
+        : "mapping_confirmed"
+      : hasPreviewSuggestions
+        ? "auto_mapping_ready"
+        : providerStructureFound
+          ? "provider_structure_found"
+          : channexWorkspaceUrl
+            ? providerKey === "booking"
+              ? "fallback_required"
+              : "assisted_only"
+            : hasEnteredCredentials
+              ? "credentials_entered"
+              : "not_started";
+  const hostFlowStatus = hostFlowOverride ?? derivedHostFlowStatus;
 
   const savedStateSummary = useMemo(
     () => [
@@ -511,26 +805,10 @@ export default function ChannelSetupWizard({
     setFeedback(null);
 
     try {
-      const response = await fetch("/api/host/pro/channel/channex/provider-refresh", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          familyId,
-          providerKey,
-        }),
-      });
-
-      const payload = (await response.json()) as { state?: ChannelSetupState; message?: string; error?: string };
-      if (!response.ok || !payload.state) {
-        throw new Error(payload.error ?? "Unable to refresh provider state from Channex.");
-      }
-
-      setState(payload.state);
-      onSaved?.(payload.state);
-      setFeedback(payload.message ?? "Refreshed provider state from Channex.");
-      void loadMappingWorkspace();
+      await runProviderStructureFlow();
+      await runAutoMapFlow();
+      setHostFlowOverride(null);
+      setFeedback("Refreshed provider structure from Channex and rebuilt the preview.");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Unable to refresh provider state from Channex.");
     } finally {
@@ -565,6 +843,7 @@ export default function ChannelSetupWizard({
       setFeedback(payload.message ?? "Mapping saved.");
       await loadMappingWorkspace();
       await loadPreviewWorkspace();
+      setHostFlowOverride(null);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Unable to save mapping.");
     } finally {
@@ -575,10 +854,13 @@ export default function ChannelSetupWizard({
   const connectProvider = (): void => {
     void (async () => {
       setIsSaving(true);
+      setHostFlowOverride("connecting");
       setFeedback(null);
 
       try {
-        const response = await fetch("/api/host/pro/channel/connect", {
+        await persistHostNotes();
+
+        const response = await fetch("/api/host/pro/channel/create", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -601,13 +883,20 @@ export default function ChannelSetupWizard({
           ok?: boolean;
           error?: string;
           message?: string;
-          iframeUrl?: string | null;
-          providerHint?: string | null;
+          fallbackRequired?: boolean;
+          fallback?: {
+            workspaceUrl?: string | null;
+            hint?: string | null;
+          } | null;
           state?: ChannelSetupState | null;
-          mode?: "workspace_required" | "ready_for_preview";
+          preview?: {
+            refreshedAt?: string | null;
+            autoApplicableCount?: number;
+            suggestions?: ProviderPreviewRow[];
+          } | null;
         };
 
-        if (!response.ok) {
+        if (!response.ok || payload.ok === false) {
           throw new Error(payload.error ?? "Unable to start provider connection.");
         }
 
@@ -616,24 +905,30 @@ export default function ChannelSetupWizard({
           onSaved?.(payload.state);
         }
 
-        if (payload.iframeUrl) {
-          setChannexWorkspaceUrl(payload.iframeUrl);
-          setChannexWorkspaceHint(payload.providerHint ?? null);
-        }
-
         if (providerKey === "mmt") {
           setProviderAccessTokenInput("");
         }
 
-        setFeedback(
-          payload.mode === "ready_for_preview"
-            ? payload.message ?? "Channel is already visible. Load preview and confirm the suggested mappings."
-            : payload.message ?? "Connection details saved. Continue inside the embedded secure connector."
-        );
+        if (payload.fallbackRequired) {
+          setChannexWorkspaceUrl(payload.fallback?.workspaceUrl ?? null);
+          setChannexWorkspaceHint(payload.fallback?.hint ?? null);
+          setFeedback(
+            payload.message ??
+              "Assisted setup needed. Famlo can preview and map after the provider becomes visible in Channex."
+          );
+          setHostFlowOverride("fallback_required");
+          return;
+        }
 
-        await loadPreviewWorkspace();
-        await loadMappingWorkspace();
+        await runProviderStructureFlow();
+        await runAutoMapFlow();
+        setFeedback(
+          payload.message ??
+            "Connection details accepted. Famlo found the provider structure and prepared the preview."
+        );
+        setHostFlowOverride(null);
       } catch (error) {
+        setHostFlowOverride("credentials_entered");
         setFeedback(error instanceof Error ? error.message : "Unable to start provider connection.");
       } finally {
         setIsSaving(false);
@@ -641,12 +936,37 @@ export default function ChannelSetupWizard({
     })();
   };
 
-  const applyPreviewMappings = (): void => {
+  const refreshProviderPreview = (): void => {
+    void (async () => {
+      setIsLoadingPreview(true);
+      setFeedback(null);
+      try {
+        await runProviderStructureFlow();
+        await runAutoMapFlow();
+        setFeedback("Preview refreshed from the latest visible provider structure.");
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : "Unable to refresh the preview.");
+      } finally {
+        setIsLoadingPreview(false);
+      }
+    })();
+  };
+
+  const confirmPreviewMappings = (roomIds?: string[]): void => {
     void (async () => {
       setIsApplyingPreview(true);
       setFeedback(null);
       try {
-        const response = await fetch("/api/host/pro/channel/preview", {
+        const selectedRoomIds =
+          Array.isArray(roomIds) && roomIds.length > 0
+            ? roomIds
+            : (previewWorkspace?.suggestions.filter((row) => row.autoApplicable).map((row) => row.roomId) ?? []);
+
+        if (selectedRoomIds.length === 0) {
+          throw new Error("No preview rows are ready to confirm yet.");
+        }
+
+        const response = await fetch("/api/host/pro/channel/confirm-mapping", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -654,6 +974,8 @@ export default function ChannelSetupWizard({
           body: JSON.stringify({
             familyId,
             providerKey,
+            mode: "preview",
+            roomIds: selectedRoomIds,
           }),
         });
 
@@ -662,10 +984,11 @@ export default function ChannelSetupWizard({
           error?: string;
           message?: string;
           state?: ChannelSetupState | null;
+          appliedCount?: number | null;
         };
 
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Unable to apply suggested mappings.");
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.error ?? "Unable to confirm the preview mapping.");
         }
 
         if (payload.state) {
@@ -673,13 +996,59 @@ export default function ChannelSetupWizard({
           onSaved?.(payload.state);
         }
 
-        setFeedback(payload.message ?? "Suggested mappings applied.");
-        await loadPreviewWorkspace();
         await loadMappingWorkspace();
+        await loadPreviewWorkspace();
+        setHostFlowOverride(null);
+        setFeedback(
+          payload.message ??
+            (selectedRoomIds.length === 1
+              ? "Room mapping confirmed."
+              : `Confirmed ${payload.appliedCount ?? selectedRoomIds.length} room mappings.`)
+        );
       } catch (error) {
-        setFeedback(error instanceof Error ? error.message : "Unable to apply suggested mappings.");
+        setFeedback(error instanceof Error ? error.message : "Unable to confirm the preview mapping.");
       } finally {
         setIsApplyingPreview(false);
+      }
+    })();
+  };
+
+  const runBookingSyncTest = (): void => {
+    void (async () => {
+      setIsRunningSync(true);
+      setHostFlowOverride("sync_running");
+      setFeedback(null);
+      try {
+        const response = await fetch("/api/host/pro/channel/sync", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            familyId,
+            providerKey,
+            windowDays: 7,
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          message?: string;
+          status?: string;
+        };
+
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.error ?? "Unable to run the selected-property sync test.");
+        }
+
+        setHostFlowOverride("sync_success");
+        setFeedback(payload.message ?? "Limited Booking.com sync test completed.");
+      } catch (error) {
+        setHostFlowOverride("sync_failed");
+        setFeedback(error instanceof Error ? error.message : "Unable to run the selected-property sync test.");
+      } finally {
+        setIsRunningSync(false);
       }
     })();
   };
@@ -953,8 +1322,6 @@ export default function ChannelSetupWizard({
     return "Not ready";
   };
 
-  const hasProviderCatalog = Boolean(mappingWorkspace && (mappingWorkspace.roomTypes.length > 0 || mappingWorkspace.ratePlans.length > 0));
-
   return (
     <article className={styles.cardInset}>
       <div className={styles.cardHeaderCompact}>
@@ -1058,7 +1425,7 @@ export default function ChannelSetupWizard({
       <section className={styles.listCard} style={{ marginBottom: 16 }}>
         <div className={styles.listTitle}>Connect {provider.displayName}</div>
         <div className={styles.cardCopy}>
-          Enter the provider details and press Connect. Famlo will verify the channel safely before any sync or go-live action.
+          Enter the provider details and press Connect. Famlo will try to connect in the background, fetch the provider structure, and prepare a preview before any sync or go-live action.
         </div>
         {providerKey === "booking" ? (
           <div className={styles.stack} style={{ marginTop: 12 }}>
@@ -1088,6 +1455,16 @@ export default function ChannelSetupWizard({
               />
               I have requested Channex or Famlo as the connectivity provider in Booking.com extranet.
             </label>
+            <label>
+              <span className={styles.fieldLabel}>Connection notes</span>
+              <textarea
+                className={styles.fieldInput}
+                value={providerNotesInput}
+                onChange={(event) => setProviderNotesInput(event.target.value)}
+                placeholder="Optional notes for this OTA connection"
+                rows={3}
+              />
+            </label>
             <div className={styles.inlineActionRow}>
               <button
                 type="button"
@@ -1097,29 +1474,33 @@ export default function ChannelSetupWizard({
               >
                 {isSaving ? "Connecting..." : connectionModel.hostActionLabel}
               </button>
-              <button
-                type="button"
-                className={styles.secondaryActionButton}
-                disabled={isOpeningChannexWorkspace || !channexPropertyId}
-                onClick={() => {
-                  void openRealChannexWorkspace();
-                }}
-              >
-                {isOpeningChannexWorkspace ? "Opening real workspace..." : "Open real Channex setup"}
-              </button>
-              <button
-                type="button"
-                className={styles.secondaryActionButton}
-                disabled={isRefreshingFromChannex || !channexPropertyId}
-                onClick={() => {
-                  void refreshFromChannex();
-                }}
-              >
-                {isRefreshingFromChannex ? "Refreshing..." : "Refresh from Channex"}
-              </button>
+              {hostFlowStatus === "fallback_required" && channexPropertyId ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.secondaryActionButton}
+                    disabled={isOpeningChannexWorkspace}
+                    onClick={() => {
+                      void openRealChannexWorkspace();
+                    }}
+                  >
+                    {isOpeningChannexWorkspace ? "Opening fallback..." : "Open assisted fallback"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryActionButton}
+                    disabled={isRefreshingFromChannex}
+                    onClick={() => {
+                      void refreshFromChannex();
+                    }}
+                  >
+                    {isRefreshingFromChannex ? "Refreshing..." : "Refresh from Channex"}
+                  </button>
+                </>
+              ) : null}
             </div>
             <div className={styles.feedbackBox}>
-              This sends the real Booking.com connection request to Famlo operators. It does not activate Booking.com or run sync until Channex verification passes.
+              Famlo keeps Booking.com as the main host flow. Channex fallback appears only if the provider still needs assisted visibility or workspace help.
             </div>
           </div>
         ) : assistedConnectionLabels ? (
@@ -1156,30 +1537,40 @@ export default function ChannelSetupWizard({
                 placeholder={assistedConnectionLabels.placeholderUrl}
               />
             </label>
+            <label>
+              <span className={styles.fieldLabel}>Connection notes</span>
+              <textarea
+                className={styles.fieldInput}
+                value={providerNotesInput}
+                onChange={(event) => setProviderNotesInput(event.target.value)}
+                placeholder="Optional notes for this OTA connection"
+                rows={3}
+              />
+            </label>
             {providerKey === "mmt" ? (
-              <>
-                <label>
-                  <span className={styles.fieldLabel}>Access token</span>
-                  <input
-                    className={styles.fieldInput}
-                    value={providerAccessTokenInput}
-                    onChange={(event) => setProviderAccessTokenInput(event.target.value)}
-                    placeholder={
-                      state.metadata.provider_access_token_stored
-                        ? `Stored securely ending ${state.metadata.provider_access_token_last_four ?? "****"}. Leave blank to keep.`
-                        : "Paste MMT access token only when secure storage is configured"
-                    }
-                  />
-                </label>
-                <label className={styles.feedCopy} style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={providerExtranetRequested}
-                    onChange={(event) => setProviderExtranetRequested(event.target.checked)}
-                  />
-                  I have enabled or requested Channex as channel manager in MMT / Goibibo.
-                </label>
-              </>
+              <label>
+                <span className={styles.fieldLabel}>Access token</span>
+                <input
+                  className={styles.fieldInput}
+                  value={providerAccessTokenInput}
+                  onChange={(event) => setProviderAccessTokenInput(event.target.value)}
+                  placeholder={
+                    state.metadata.provider_access_token_stored
+                      ? `Stored securely ending ${state.metadata.provider_access_token_last_four ?? "****"}. Leave blank to keep.`
+                      : "Paste MMT access token only when secure storage is configured"
+                  }
+                />
+              </label>
+            ) : null}
+            {assistedConnectionLabels.checkboxLabel ? (
+              <label className={styles.feedCopy} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={providerExtranetRequested}
+                  onChange={(event) => setProviderExtranetRequested(event.target.checked)}
+                />
+                {assistedConnectionLabels.checkboxLabel}
+              </label>
             ) : null}
             <div className={styles.inlineActionRow}>
               <button
@@ -1190,33 +1581,53 @@ export default function ChannelSetupWizard({
               >
                 {isSaving ? "Connecting..." : connectionModel.hostActionLabel}
               </button>
-              <button
-                type="button"
-                className={styles.secondaryActionButton}
-                disabled={isOpeningChannexWorkspace || !channexPropertyId}
-                onClick={() => {
-                  void openRealChannexWorkspace();
-                }}
-              >
-                {isOpeningChannexWorkspace ? "Opening real workspace..." : "Open real Channex setup"}
-              </button>
-              <button
-                type="button"
-                className={styles.secondaryActionButton}
-                disabled={isRefreshingFromChannex || !channexPropertyId}
-                onClick={() => {
-                  void refreshFromChannex();
-                }}
-              >
-                {isRefreshingFromChannex ? "Refreshing..." : "Refresh from Channex"}
-              </button>
+              {(hostFlowStatus === "fallback_required" || hostFlowStatus === "assisted_only") && channexPropertyId ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.secondaryActionButton}
+                    disabled={isOpeningChannexWorkspace}
+                    onClick={() => {
+                      void openRealChannexWorkspace();
+                    }}
+                  >
+                    {isOpeningChannexWorkspace ? "Opening fallback..." : "Open assisted fallback"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryActionButton}
+                    disabled={isRefreshingFromChannex}
+                    onClick={() => {
+                      void refreshFromChannex();
+                    }}
+                  >
+                    {isRefreshingFromChannex ? "Refreshing..." : "Refresh from Channex"}
+                  </button>
+                </>
+              ) : null}
             </div>
             <div className={styles.feedbackBox}>
               {assistedConnectionLabels.instruction} Famlo stores access tokens only through encrypted credential storage and never returns them to the browser after saving.
             </div>
+            {assistedConnectionLabels.helperNote ? (
+              <div className={styles.feedCopy} style={{ marginTop: 8 }}>
+                {assistedConnectionLabels.helperNote}
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+          <span
+            className={`${styles.readinessPill} ${
+              hostFlowStatus === "mapping_confirmed" || hostFlowStatus === "sync_ready" || hostFlowStatus === "sync_success"
+                ? styles.readinessPillOk
+                : hostFlowStatus === "fallback_required" || hostFlowStatus === "sync_failed" || hostFlowStatus === "assisted_only"
+                  ? styles.readinessPillReview
+                  : styles.readinessPillMissing
+            }`}
+          >
+            Host flow: {getHostFlowLabel(hostFlowStatus)}
+          </span>
           <span className={styles.readinessPill}>Connection state: {state.metadata.booking_connection_status ?? providerConnectionStatusLabel}</span>
           <span className={styles.readinessPill}>Live status: {state.status === "live" ? "Live" : "Not live"}</span>
           <span className={styles.readinessPill}>Channex property: {channexPropertyId ? "Ready" : "Missing"}</span>
@@ -1242,7 +1653,12 @@ export default function ChannelSetupWizard({
             ) : null}
           </div>
         ) : null}
-        {channexWorkspaceUrl ? (
+        {hostFlowStatus === "fallback_required" || hostFlowStatus === "assisted_only" ? (
+          <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
+            Assisted setup needed. Famlo can preview and map after the Channex provider becomes visible. We are not marking this channel connected yet.
+          </div>
+        ) : null}
+        {channexWorkspaceUrl && (hostFlowStatus === "fallback_required" || hostFlowStatus === "assisted_only") ? (
           <div className={styles.stack} style={{ marginTop: 16 }}>
             <div className={styles.feedbackBox}>
               {channexWorkspaceHint ??
@@ -1276,7 +1692,7 @@ export default function ChannelSetupWizard({
       <section className={styles.listCard} style={{ marginBottom: 16 }}>
         <div className={styles.listTitle}>Connection preview</div>
         <div className={styles.cardCopy}>
-          Once the provider channel and structures are visible, Famlo can suggest room and rate matches before you confirm them.
+          Famlo shows the OTA room and rate plan preview here. Confirm a room only when the suggested Famlo match looks correct.
         </div>
         <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
           <span className={styles.readinessPill}>Preview rows: {previewWorkspace?.suggestions.length ?? 0}</span>
@@ -1288,44 +1704,50 @@ export default function ChannelSetupWizard({
             type="button"
             className={styles.secondaryActionButton}
             disabled={isLoadingPreview}
-            onClick={() => {
-              void loadPreviewWorkspace();
-            }}
+            onClick={refreshProviderPreview}
           >
-            {isLoadingPreview ? "Loading preview..." : "Load preview"}
+            {isLoadingPreview ? "Refreshing preview..." : "Refresh preview"}
           </button>
           <button
             type="button"
             className={styles.primaryActionButton}
             disabled={isApplyingPreview || !previewWorkspace || previewWorkspace.autoApplicableCount === 0}
-            onClick={applyPreviewMappings}
+            onClick={() => confirmPreviewMappings()}
           >
-            {isApplyingPreview ? "Applying..." : "Confirm preview & apply suggested mappings"}
+            {isApplyingPreview ? "Confirming..." : "Confirm all ready rooms"}
           </button>
         </div>
         {!previewWorkspace || previewWorkspace.suggestions.length === 0 ? (
           <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
-            Save the connection details, finish provider create or test if needed, then refresh from Channex. After that Famlo can generate a room and rate preview here.
+            Connect the OTA first. If the provider becomes visible, Famlo will fetch the structure and prepare the preview automatically. If fallback is required, complete the assisted step and then refresh the preview here.
           </div>
         ) : (
           <div className={styles.mappingTable} style={{ marginTop: 14 }}>
-            <div className={styles.mappingHeader}>Famlo room</div>
-            <div className={styles.mappingHeader}>Suggested provider room</div>
-            <div className={styles.mappingHeader}>Suggested rate plan</div>
-            <div className={styles.mappingHeader}>Confidence</div>
+            <div className={styles.mappingHeader}>OTA room name</div>
+            <div className={styles.mappingHeader}>Famlo room matched</div>
+            <div className={styles.mappingHeader}>OTA rate plan</div>
+            <div className={styles.mappingHeader}>Famlo rate / status</div>
+            <div className={styles.mappingHeader}>Action</div>
             {previewWorkspace.suggestions.map((row) => (
               <Fragment key={row.roomId}>
+                <div className={styles.mappingCell}>
+                  <div className={styles.mappingTitle}>{row.suggestedRoomTypeTitle ?? "No OTA room match yet"}</div>
+                  <div className={styles.mappingSubcopy}>{row.suggestedRoomTypeId ?? "Waiting for provider structure"}</div>
+                </div>
                 <div className={styles.mappingCell}>
                   <div className={styles.mappingTitle}>{row.famloRoomName}</div>
                   <div className={styles.mappingSubcopy}>{row.famloRoomType || "Famlo room"}</div>
                 </div>
                 <div className={styles.mappingCellMuted}>
-                  {row.suggestedRoomTypeTitle ?? "No room match yet"}
-                </div>
-                <div className={styles.mappingCellMuted}>
-                  {row.suggestedRatePlanTitle ?? "No rate match yet"}
+                  {row.suggestedRatePlanTitle ?? "No OTA rate plan match yet"}
                 </div>
                 <div className={styles.mappingCell}>
+                  <div className={styles.mappingTitle}>
+                    {(() => {
+                      const matchedRoom = mappingWorkspace?.rooms.find((item) => item.id === row.roomId);
+                      return matchedRoom && matchedRoom.basePrice > 0 ? `Famlo base price ${matchedRoom.basePrice}` : "Famlo price missing";
+                    })()}
+                  </div>
                   <span
                     className={`${styles.readinessPill} ${
                       row.confidence === "high"
@@ -1338,6 +1760,16 @@ export default function ChannelSetupWizard({
                     {row.autoApplicable ? `${row.confidence} · ready` : `${row.confidence} · review`}
                   </span>
                 </div>
+                <div className={styles.mappingCell}>
+                  <button
+                    type="button"
+                    className={styles.secondaryActionButton}
+                    disabled={isApplyingPreview || !row.autoApplicable}
+                    onClick={() => confirmPreviewMappings([row.roomId])}
+                  >
+                    {isApplyingPreview ? "Saving..." : "Confirm this room"}
+                  </button>
+                </div>
               </Fragment>
             ))}
           </div>
@@ -1347,7 +1779,7 @@ export default function ChannelSetupWizard({
       <section className={styles.listCard} style={{ marginBottom: 16 }}>
         <div className={styles.listTitle}>Provider mapping workspace</div>
         <div className={styles.cardCopy}>
-          After refreshing from Channex, map each Famlo room to a real provider room and rate plan. This saves mapping only. It does not activate the channel or push inventory.
+          After preview confirmation, Famlo saves room and rate mapping in the background. You can still adjust any room manually here if needed. This saves mapping only and does not activate the channel.
         </div>
         <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
           <span className={styles.readinessPill}>
@@ -1435,6 +1867,37 @@ export default function ChannelSetupWizard({
                 </Fragment>
               );
             })}
+          </div>
+        )}
+      </section>
+
+      <section className={styles.listCard} style={{ marginBottom: 16 }}>
+        <div className={styles.listTitle}>Sync control</div>
+        <div className={styles.cardCopy}>
+          Booking.com can run a limited selected-property sync test after mapping is confirmed. Non-Booking providers stay assisted until their direct provider mutation path exists.
+        </div>
+        <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+          <span className={styles.readinessPill}>Current host flow: {getHostFlowLabel(hostFlowStatus)}</span>
+          <span className={styles.readinessPill}>Mapped rooms: {mappedRoomCount}/{activeMappingRooms.length || 0}</span>
+          <span className={styles.readinessPill}>Mapped rates: {mappedRateCount}/{activeMappingRooms.length || 0}</span>
+        </div>
+        {providerKey === "booking" ? (
+          <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className={styles.primaryActionButton}
+              disabled={isRunningSync || !mappingConfirmed}
+              onClick={runBookingSyncTest}
+            >
+              {isRunningSync ? "Running sync..." : "Run Booking.com sync test"}
+            </button>
+            <span className={`${styles.readinessPill} ${hostFlowStatus === "sync_success" ? styles.readinessPillOk : hostFlowStatus === "sync_failed" ? styles.readinessPillReview : styles.readinessPillMissing}`}>
+              {getHostFlowLabel(hostFlowStatus)}
+            </span>
+          </div>
+        ) : (
+          <div className={styles.feedbackBox} style={{ marginTop: 12 }}>
+            Assisted setup needed. Famlo can preview and map after Channex provider is visible.
           </div>
         )}
       </section>
