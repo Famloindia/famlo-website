@@ -232,12 +232,6 @@ type FeedItem = {
   tone: "info" | "warning" | "success";
 };
 
-type ActionItem = {
-  title: string;
-  body: string;
-  badge: string;
-};
-
 type DashboardMetric = {
   label: string;
   value: string;
@@ -417,7 +411,6 @@ interface FamloProDashboardShellProps {
   rooms: RoomSummary[];
   metrics: DashboardMetric[];
   setupItems: SetupItem[];
-  actionItems: ActionItem[];
   feedItems: FeedItem[];
   basicDashboardUrl: string;
   basicRoomUrl: string;
@@ -1582,7 +1575,6 @@ export default function FamloProDashboardShell({
   rooms,
   metrics,
   setupItems,
-  actionItems,
   feedItems,
   basicDashboardUrl,
   basicRoomUrl,
@@ -1626,6 +1618,7 @@ export default function FamloProDashboardShell({
   const [calendarRateFeedback, setCalendarRateFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [calendarRateActionDate, setCalendarRateActionDate] = useState<string | null>(null);
   const [isCalendarRatePending, startCalendarRateTransition] = useTransition();
+  const [isCalendarJumpPending, startCalendarJumpTransition] = useTransition();
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
   const [bookingDateFilter, setBookingDateFilter] = useState<BookingDateFilter>("Check-in");
   const [revenueWindow, setRevenueWindow] = useState<RevenueWindowFilter>("This month");
@@ -1756,11 +1749,26 @@ export default function FamloProDashboardShell({
     setCalendarRateDraft(cell.amount != null && cell.amount > 0 ? String(cell.amount) : cell.baseAmount > 0 ? String(cell.baseAmount) : "");
   };
 
+  const goToCalendarStart = (nextCalendarStart: string): void => {
+    startCalendarJumpTransition(() => {
+      router.replace(
+        `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=inventory-calendar&calendarStart=${encodeURIComponent(nextCalendarStart)}`
+      );
+      router.refresh();
+    });
+  };
+
   const handleCalendarJump = (): void => {
     const nextCalendarStart = `${calendarJumpYear}-${calendarJumpMonth}-01`;
-    router.push(
-      `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=inventory-calendar&calendarStart=${encodeURIComponent(nextCalendarStart)}`
-    );
+    goToCalendarStart(nextCalendarStart);
+  };
+
+  const handleCalendarToday = (): void => {
+    const today = new Date();
+    const todayIsoDate = isoDateFromLocalDate(today);
+    setCalendarJumpMonth(String(today.getMonth() + 1).padStart(2, "0"));
+    setCalendarJumpYear(String(today.getFullYear()));
+    goToCalendarStart(todayIsoDate);
   };
 
   const submitCalendarRate = (action: "save" | "reset"): void => {
@@ -4004,6 +4012,30 @@ export default function FamloProDashboardShell({
       targetSection: "revenue" as const,
     },
   ];
+  const dashboardSummaryCards = [
+    {
+      label: "Active rooms",
+      value: `${activeRoomsCount}`,
+      hint: inactiveRoomsCount > 0 ? `${inactiveRoomsCount} inactive room${inactiveRoomsCount === 1 ? "" : "s"}` : "All surfaced rooms are active",
+    },
+    {
+      label: "Content ready",
+      value: `${propertyContentReadyCount}/${propertyContentChecks.length}`,
+      hint: propertyContentReadyCount === propertyContentChecks.length ? "Property basics are ready" : `Missing: ${joinMissingLabels(propertyContentChecks)}`,
+    },
+    {
+      label: "Bookings",
+      value: `${totalBookingsCount}`,
+      hint: actionNeededBookingsCount > 0 ? `${actionNeededBookingsCount} still need attention` : "No booking action pending",
+    },
+    {
+      label: "Calendar attention",
+      value: `${calendarAttentionCount}`,
+      hint: calendarAttentionCount > 0 ? "Review pending or verification signals" : "Calendar looks clear",
+    },
+  ];
+  const dashboardPrimaryActions = quickActionItems.slice(0, 6);
+  const dashboardChecklistItems = goLiveHostChecklist.slice(0, 5);
   const sectionDescriptor = buildSectionDescriptor(
     activeSection,
     setupProgressPercent,
@@ -4559,56 +4591,51 @@ export default function FamloProDashboardShell({
                   <div>
                     <div className={styles.eyebrow}>Famlo Pro</div>
                     <h2 className={styles.heroTitle}>
-                      Famlo Pro command center
+                      Property dashboard
                     </h2>
                     <p className={styles.heroText}>
-                      Manage this property&apos;s rooms, content, pricing, bookings, calendar, channels, and sync
-                      health from one place. Existing provider, sync, and OTA workflows continue to run safely
-                      underneath without changing their current logic.
+                      A simple home for this property. Use it to check readiness fast and jump into the main PMS
+                      workspaces without repeating everything that already exists in the other sections.
                     </p>
                     <div className={styles.heroMeta}>
                       <div className={styles.heroMetaItem}>
                         <span className={styles.heroMetaLabel}>Selected property</span>
-                        <span className={styles.heroMetaValue}>{propertyName}</span>
+                        <span className={styles.heroMetaValue}>{selectedPropertyDisplayLabel}</span>
                       </div>
                       <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Location</span>
-                        <span className={styles.heroMetaValue}>{selectedPropertyLocation}</span>
+                        <span className={styles.heroMetaLabel}>Go-live status</span>
+                        <span className={styles.heroMetaValue}>{goLiveSummary.label}</span>
                       </div>
                       <div className={styles.heroMetaItem}>
-                        <span className={styles.heroMetaLabel}>Family scope</span>
-                        <span className={styles.heroMetaValue}>{familyId}</span>
+                        <span className={styles.heroMetaLabel}>Channel</span>
+                        <span className={styles.heroMetaValue}>{selectedPropertyChannelStatus}</span>
                       </div>
                     </div>
                   </div>
 
                   <div className={styles.heroPanel}>
-                    <div className={styles.heroPanelTitle}>Pilot go-live snapshot</div>
+                    <div className={styles.heroPanelTitle}>Today&apos;s focus</div>
                     <div className={styles.inlineBadgeRow}>
                       <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
-                      <span className={styles.readinessPill}>{goLiveChecklist.filter((item) => item.status === "ready").length}/{goLiveChecklist.length} ready</span>
+                      <span className={styles.readinessPill}>{completedSetupCount}/{setupItems.length} ready</span>
                     </div>
                     <div className={styles.feedCopy}>{goLiveSummary.explanation}</div>
                     <div className={styles.heroPanelList}>
                       <div className={styles.heroPanelItem}>
-                        <span>Channel status</span>
-                        <strong>{selectedPropertyChannelStatus}</strong>
+                        <span>Rooms to fix</span>
+                        <strong>{roomsMissingPrice + photosReadiness.missingRooms === 0 ? "All set" : `${roomsMissingPrice + photosReadiness.missingRooms} open`}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Active rooms</span>
-                        <strong>{activeRoomsCount === 0 ? "None yet" : `${activeRoomsCount} ready`}</strong>
+                        <span>Bookings needing attention</span>
+                        <strong>{actionNeededBookingsCount === 0 ? "All clear" : `${actionNeededBookingsCount} open`}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Rooms missing setup</span>
-                        <strong>{roomsMissingPrice + photosReadiness.missingRooms === 0 ? "None open" : `${roomsMissingPrice + photosReadiness.missingRooms} open`}</strong>
+                        <span>Open calendar issues</span>
+                        <strong>{calendarAttentionCount === 0 ? "None" : `${calendarAttentionCount} flagged`}</strong>
                       </div>
                       <div className={styles.heroPanelItem}>
-                        <span>Bookings</span>
-                        <strong>{totalBookingsCount === 0 ? "No reservations yet" : `${totalBookingsCount} total`}</strong>
-                      </div>
-                      <div className={styles.heroPanelItem}>
-                        <span>Action needed</span>
-                        <strong>{conflictItems.length + actionNeededBookingsCount === 0 ? "All clear" : `${conflictItems.length + actionNeededBookingsCount} open`}</strong>
+                        <span>Next best place</span>
+                        <strong>{roomsMissingPrice > 0 ? "Pricing" : photosReadiness.missingRooms > 0 ? "Rooms" : actionNeededBookingsCount > 0 ? "Bookings" : "Calendar"}</strong>
                       </div>
                     </div>
                   </div>
@@ -4616,7 +4643,7 @@ export default function FamloProDashboardShell({
               </section>
 
               <section className={styles.statGrid}>
-                {pilotHomeCards.map((metric) => (
+                {dashboardSummaryCards.map((metric) => (
                   <article key={metric.label} className={`${styles.card} ${styles.statCard}`}>
                     <div className={styles.statLabel}>{metric.label}</div>
                     <div className={styles.statValue}>{metric.value}</div>
@@ -4629,47 +4656,17 @@ export default function FamloProDashboardShell({
                 <article className={styles.card}>
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardTitle}>Pilot go-live checklist</h3>
+                      <h3 className={styles.cardTitle}>Core actions</h3>
                       <p className={styles.cardCopy}>
-                        See what is ready for this property, what still needs attention, and what Famlo team may need
-                        to review before pilot go-live.
+                        Open the main PMS areas directly. This keeps the dashboard simple and avoids a second layer of
+                        workspace clutter.
                       </p>
                     </div>
-                    <span className={styles.badge}>{setupProgressPercent}% ready</span>
-                  </div>
-                  <div className={styles.cardBody}>
-                    <div className={styles.checkGrid}>
-                      {goLiveHostChecklist.slice(0, 6).map((item) => (
-                        <div key={item.title} className={styles.checkItem}>
-                          <div>
-                            <div className={styles.checkTitle}>{item.title}</div>
-                            <div className={styles.checkMeta}>{item.detail}</div>
-                          </div>
-                          <span className={`${styles.readinessPill} ${item.statusClass}`}>{item.statusLabel}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className={styles.inlineActionRow}>
-                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("setup-guide")}>
-                        Open setup guide
-                      </button>
-                    </div>
-                  </div>
-                </article>
-
-                <article className={styles.card}>
-                  <div className={styles.cardHeader}>
-                    <div>
-                      <h3 className={styles.cardTitle}>Quick actions</h3>
-                      <p className={styles.cardCopy}>
-                        Jump straight into the place where you need to manage this property next.
-                      </p>
-                    </div>
-                    <span className={`${styles.readinessPill} ${goLiveSummary.toneClass}`}>{goLiveSummary.label}</span>
+                    <span className={styles.badge}>{propertyName}</span>
                   </div>
                   <div className={styles.cardBody}>
                     <div className={styles.stack}>
-                      {quickActionItems.slice(0, 6).map((item) => (
+                      {dashboardPrimaryActions.map((item) => (
                         <div key={item.title} className={styles.actionItem}>
                           <div>
                             <div className={styles.actionTitle}>{item.title}</div>
@@ -4686,58 +4683,34 @@ export default function FamloProDashboardShell({
                     </div>
                   </div>
                 </article>
-              </section>
 
-              <section className={styles.twoCol}>
                 <article className={styles.card}>
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardTitle}>Property readiness focus</h3>
+                      <h3 className={styles.cardTitle}>Setup checklist</h3>
                       <p className={styles.cardCopy}>
-                        Priority signals that tell you whether this property is ready for cleaner pilot operations.
+                        The essentials only. If these are healthy, the property is ready to be managed from the deeper
+                        pages without needing more dashboard layers.
                       </p>
                     </div>
+                    <span className={styles.badge}>{setupProgressPercent}% ready</span>
                   </div>
                   <div className={styles.cardBody}>
-                    <div className={styles.stack}>
-                      {actionItems.map((item) => (
-                        <div key={item.title} className={styles.actionItem}>
+                    <div className={styles.checkGrid}>
+                      {dashboardChecklistItems.map((item) => (
+                        <div key={item.title} className={styles.checkItem}>
                           <div>
-                            <div className={styles.actionTitle}>{item.title}</div>
-                            <div className={styles.actionCopy}>{item.body}</div>
+                            <div className={styles.checkTitle}>{item.title}</div>
+                            <div className={styles.checkMeta}>{item.detail}</div>
                           </div>
-                          <span className={styles.badge}>{item.badge}</span>
+                          <span className={`${styles.readinessPill} ${item.statusClass}`}>{item.statusLabel}</span>
                         </div>
                       ))}
                     </div>
-                  </div>
-                </article>
-
-                <article className={styles.card}>
-                  <div className={styles.cardHeader}>
-                    <div>
-                      <h3 className={styles.cardTitle}>Workspace shortcuts</h3>
-                      <p className={styles.cardCopy}>
-                        Open the right section fast when a host asks what to do next for this property.
-                      </p>
-                    </div>
-                  </div>
-                  <div className={styles.cardBody}>
-                    <div className={styles.stack}>
-                      {quickActionItems.slice(6).map((item) => (
-                        <div key={item.title} className={styles.feedItem}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                            <div className={styles.feedTitle}>{item.title}</div>
-                            <span className={styles.badge}>{item.badge}</span>
-                          </div>
-                          <div className={styles.feedCopy}>{item.body}</div>
-                          <div className={styles.inlineActionRow}>
-                            <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection(item.targetSection)}>
-                              Open section
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                    <div className={styles.inlineActionRow}>
+                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("setup-guide")}>
+                        Open setup guide
+                      </button>
                     </div>
                   </div>
                 </article>
@@ -5280,92 +5253,6 @@ export default function FamloProDashboardShell({
                 <h3 className={styles.propertyCenterTitle}>Calendar</h3>
               </div>
               <div className={styles.cardBody}>
-                <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Jump to month</div>
-                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
-                      Move the board to the month where you want to block dates or edit room pricing.
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(120px, 160px) auto", gap: "12px", alignItems: "end" }}>
-                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
-                        <span className={styles.fieldLabel}>Month</span>
-                        <select className={styles.fieldInput} value={calendarJumpMonth} onChange={(event) => setCalendarJumpMonth(event.target.value)}>
-                          {calendarJumpMonthOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
-                        <span className={styles.fieldLabel}>Year</span>
-                        <select className={styles.fieldInput} value={calendarJumpYear} onChange={(event) => setCalendarJumpYear(event.target.value)}>
-                          {calendarJumpYearOptions.map((year) => (
-                            <option key={year} value={year}>
-                              {year}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <button type="button" className={styles.secondaryActionButton} onClick={handleCalendarJump}>
-                        Go to month
-                      </button>
-                    </div>
-                    <div className={styles.roomReadinessRow} style={{ marginTop: 14 }}>
-                      <span className={styles.readinessPill}>Showing {formatMonthLong(calendarWindow.startDate)}</span>
-                      <span className={styles.readinessPill}>{calendarWindow.startDate} → {calendarWindow.endDate}</span>
-                    </div>
-                  </article>
-
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Daily room rate</div>
-                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
-                      Click any future rate cell to set a room-specific daily rate override for that exact date.
-                    </div>
-                    {selectedCalendarRateCell ? (
-                      <div className={styles.stack}>
-                        <div className={styles.placeholderRow}>
-                          <div className={styles.placeholderTitle}>{selectedCalendarRateCell.roomName}</div>
-                          <div className={styles.placeholderValue}>{formatShortDate(selectedCalendarRateCell.date)}</div>
-                          <div className={styles.placeholderCopy}>
-                            Base price {selectedCalendarRateCell.baseAmount > 0 ? formatCurrency(selectedCalendarRateCell.baseAmount) : "Missing"}
-                            {selectedCalendarRateCell.isOverridden ? ` · Override active (${selectedCalendarRateCell.displayValue})` : " · No override yet"}
-                          </div>
-                        </div>
-                        <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
-                          <span className={styles.fieldLabel}>Daily rate (INR)</span>
-                          <input
-                            className={styles.fieldInput}
-                            inputMode="numeric"
-                            value={calendarRateDraft}
-                            onChange={(event) => setCalendarRateDraft(event.target.value)}
-                            placeholder={selectedCalendarRateCell.baseAmount > 0 ? String(selectedCalendarRateCell.baseAmount) : "1500"}
-                          />
-                        </label>
-                        <div className={styles.roomReadinessRow}>
-                          <button
-                            type="button"
-                            className={styles.secondaryActionButton}
-                            onClick={() => submitCalendarRate("save")}
-                            disabled={isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date}
-                          >
-                            {isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date ? "Saving..." : "Save daily rate"}
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.secondaryActionButton}
-                            onClick={() => submitCalendarRate("reset")}
-                            disabled={isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date}
-                          >
-                            Reset to base
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={styles.feedCopy}>No day selected yet. Click a future rate cell below to edit one room on one date.</div>
-                    )}
-                  </article>
-                </div>
                 <div className={`${styles.filterRow} ${styles.calendarLuxuryLegend}`} style={{ marginBottom: "24px" }}>
                   {CALENDAR_LEGEND.map((item) => (
                     <span key={item.title} className={styles.filterChip}>
@@ -5652,6 +5539,100 @@ export default function FamloProDashboardShell({
                     </div>
                   </div>
                 )}
+                <div className={styles.listGrid} style={{ marginTop: "24px" }}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Daily room rate</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
+                      Click any future rate cell above to set a room-specific daily rate override for that exact date.
+                    </div>
+                    {selectedCalendarRateCell ? (
+                      <div className={styles.stack}>
+                        <div className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>{selectedCalendarRateCell.roomName}</div>
+                          <div className={styles.placeholderValue}>{formatShortDate(selectedCalendarRateCell.date)}</div>
+                          <div className={styles.placeholderCopy}>
+                            Base price {selectedCalendarRateCell.baseAmount > 0 ? formatCurrency(selectedCalendarRateCell.baseAmount) : "Missing"}
+                            {selectedCalendarRateCell.isOverridden ? ` · Override active (${selectedCalendarRateCell.displayValue})` : " · No override yet"}
+                          </div>
+                        </div>
+                        <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>Daily rate (INR)</span>
+                          <input
+                            className={styles.fieldInput}
+                            inputMode="numeric"
+                            value={calendarRateDraft}
+                            onChange={(event) => setCalendarRateDraft(event.target.value)}
+                            placeholder={selectedCalendarRateCell.baseAmount > 0 ? String(selectedCalendarRateCell.baseAmount) : "1500"}
+                          />
+                        </label>
+                        <div className={styles.roomReadinessRow}>
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            onClick={() => submitCalendarRate("save")}
+                            disabled={isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date}
+                          >
+                            {isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date ? "Saving..." : "Save daily rate"}
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            onClick={() => submitCalendarRate("reset")}
+                            disabled={isCalendarRatePending && calendarRateActionDate === selectedCalendarRateCell.date}
+                          >
+                            Reset to base
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={styles.feedCopy}>No day selected yet. Click a future rate cell above to edit one room on one date.</div>
+                    )}
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Jump to month</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
+                      Move the calendar above to the month where you want to block dates or edit room pricing.
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(120px, 160px) auto", gap: "12px", alignItems: "end" }}>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Month</span>
+                        <select className={styles.fieldInput} value={calendarJumpMonth} onChange={(event) => setCalendarJumpMonth(event.target.value)}>
+                          {calendarJumpMonthOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Year</span>
+                        <select className={styles.fieldInput} value={calendarJumpYear} onChange={(event) => setCalendarJumpYear(event.target.value)}>
+                          {calendarJumpYearOptions.map((year) => (
+                            <option key={year} value={year}>
+                              {year}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button type="button" className={styles.secondaryActionButton} onClick={handleCalendarJump} disabled={isCalendarJumpPending}>
+                        {isCalendarJumpPending ? "Opening..." : "Go to month"}
+                      </button>
+                    </div>
+                    <div className={styles.roomReadinessRow} style={{ marginTop: 12 }}>
+                      <button type="button" className={styles.secondaryActionButton} onClick={handleCalendarToday} disabled={isCalendarJumpPending}>
+                        {isCalendarJumpPending ? "Opening..." : "Go to today"}
+                      </button>
+                    </div>
+                    <div className={styles.roomReadinessRow} style={{ marginTop: 14 }}>
+                      <span className={styles.readinessPill}>Showing {formatMonthLong(calendarWindow.startDate)}</span>
+                      <span className={styles.readinessPill}>{calendarWindow.startDate} → {calendarWindow.endDate}</span>
+                    </div>
+                    <div className={styles.feedCopy} style={{ marginTop: 12 }}>
+                      Calendar jump is slower because this action reloads the full Pro dashboard data, not just the calendar grid.
+                    </div>
+                  </article>
+                </div>
               </div>
             </section>
           )}
@@ -6491,8 +6472,8 @@ export default function FamloProDashboardShell({
                   })}
                 </div>
                 <div className={styles.listGrid} style={{ marginTop: "24px" }}>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Date Filters</div>
+                  <article className={styles.listCard} style={{ background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                    <div className={styles.listTitle} style={{ color: "#ffffff" }}>Date Filters</div>
                     <div style={{ display: "grid", gap: "14px" }}>
                       {BOOKING_DATE_FILTERS.map((filter) => {
                         const active = bookingDateFilter === filter;
@@ -6507,7 +6488,7 @@ export default function FamloProDashboardShell({
                               gap: "14px",
                               background: "transparent",
                               border: "none",
-                              color: "#ffffff",
+                              color: active ? "#ffffff" : "rgba(255, 255, 255, 0.62)",
                               padding: 0,
                               cursor: "pointer",
                               textAlign: "left",
@@ -6520,7 +6501,7 @@ export default function FamloProDashboardShell({
                                 width: "18px",
                                 height: "18px",
                                 borderRadius: "999px",
-                                border: active ? "5px solid #4f5bd5" : "2px solid rgba(255, 255, 255, 0.75)",
+                                border: active ? "5px solid #4f5bd5" : "2px solid rgba(255, 255, 255, 0.62)",
                                 boxSizing: "border-box",
                                 flexShrink: 0,
                                 background: active ? "#ffffff" : "transparent",
@@ -6532,9 +6513,9 @@ export default function FamloProDashboardShell({
                       })}
                     </div>
                   </article>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Current booking view</div>
-                    <div className={styles.feedCopy}>
+                  <article className={styles.listCard} style={{ background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                    <div className={styles.listTitle} style={{ color: "#ffffff" }}>Current booking view</div>
+                    <div className={styles.feedCopy} style={{ color: "rgba(255, 255, 255, 0.62)" }}>
                       {bookingDateFilter === "Check-in"
                         ? "Bookings are ordered by check-in date."
                         : bookingDateFilter === "Check-out"

@@ -821,40 +821,6 @@ export async function renderFamloProDashboardPage({
     },
   ];
 
-  const actionItems = [
-    {
-      title: "Confirm room structure",
-      body: rooms.length > 0
-        ? "Review the stay units surfaced from existing Famlo inventory before channel mapping begins."
-        : "No stay units were found through the safe inventory helper, so inventory review is still blocked.",
-      badge: rooms.length > 0 ? "Ready" : "Blocked",
-    },
-    {
-      title: "Set up operating rules",
-      body: "Min stay, max stay, stop-sell, and arrival restrictions are visible as shells but not configured yet.",
-      badge: "Next",
-    },
-    {
-      title: "Prepare standard rate plan",
-      body: setupReadiness.completedItems.some((item) => item.key === "room-base-price")
-        ? "Base pricing exists across the surfaced rooms, but provider-neutral rate plans will be introduced in a later phase."
-        : "One or more rooms still need base pricing before future rate mapping becomes viable.",
-      badge: setupReadiness.completedItems.some((item) => item.key === "room-base-price") ? "Draft" : "Needed",
-    },
-    {
-      title: "Wait for provider pilot",
-      body: "Channel connections, mappings, sync jobs, and OTA booking import remain intentionally disabled.",
-      badge: "Coming soon",
-    },
-    {
-      title: "Prepare provider foundation",
-      body: providerRowsExist
-        ? "Provider seed rows exist. The next future step is mapping Famlo property, rooms, and rates without making the provider the source of truth."
-        : "Provider foundation rows are missing, so future mapping cannot begin until the provider-neutral base is present.",
-      badge: providerRowsExist ? "Foundation ready" : "Needed",
-    },
-  ];
-
   const feedItems = [
     {
       title: "Famlo+ entitlement confirmed",
@@ -1323,7 +1289,6 @@ export async function renderFamloProDashboardPage({
       rooms={rooms}
       metrics={metrics}
       setupItems={setupItems}
-      actionItems={actionItems}
       feedItems={feedItems}
       basicDashboardUrl={basicDashboardUrl}
       basicRoomUrl={basicRoomUrl}
