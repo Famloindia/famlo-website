@@ -2163,10 +2163,120 @@
   color: rgba(255, 255, 255, 0.86);
 }
 
+.proLuxurySection .summaryCard,
+.proLuxurySection .listCard,
+.proLuxurySection .placeholderRow,
+.proLuxurySection .emptyState,
+.proLuxurySection .cardInset,
+.proLuxurySection .roomCard,
+.proLuxurySection .roleCard,
+.proLuxurySection .fieldGroup,
+.proLuxurySection .feedbackBox,
+.proLuxurySection .propertySwitcherCard {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.proLuxurySection .metricValue,
+.proLuxurySection .listTitle,
+.proLuxurySection .emptyTitle,
+.proLuxurySection .placeholderTitle,
+.proLuxurySection .roomTitle,
+.proLuxurySection .roleTitle,
+.proLuxurySection .groupTitle,
+.proLuxurySection .mappingTitle,
+.proLuxurySection .fieldLabel,
+.proLuxurySection .summaryValue,
+.proLuxurySection .summaryLabel,
+.proLuxurySection .summaryTitle {
+  color: white;
+}
+
+.proLuxurySection .metricHint,
+.proLuxurySection .feedCopy,
+.proLuxurySection .cardCopy,
+.proLuxurySection .emptyCopy,
+.proLuxurySection .placeholderCopy,
+.proLuxurySection .roomCopy,
+.proLuxurySection .roleCopy,
+.proLuxurySection .mappingSubcopy,
+.proLuxurySection .summaryCopy,
+.proLuxurySection .placeholderLabel,
+.proLuxurySection .fieldHelp {
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.proLuxurySection .miniLabel,
+.proLuxurySection .summaryLabel,
+.proLuxurySection .fieldLabel {
+  color: rgba(191, 219, 254, 0.58);
+}
+
+.proLuxurySection .placeholderValue,
+.proLuxurySection .miniValue {
+  color: #93c5fd;
+}
+
+.proLuxurySection .mappingTable,
+.proLuxurySection .drawerDetailTable,
+.proLuxurySection .rateTable {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.proLuxurySection .mappingHeader {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.68);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.proLuxurySection .mappingCell,
+.proLuxurySection .mappingCellMuted {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.proLuxurySection .mappingCellMuted {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.proLuxurySection .fieldInput,
+.proLuxurySection .fieldTextarea {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
+.proLuxurySection .fieldInput::placeholder,
+.proLuxurySection .fieldTextarea::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.proLuxurySection .propertySwitcherLabel,
+.proLuxurySection .propertySwitcherFieldLabel {
+  color: rgba(191, 219, 254, 0.58);
+}
+
+.proLuxurySection .propertySwitcherCopy,
+.proLuxurySection .propertySwitcherStatusPill {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.proLuxurySection .propertySwitcherSelect {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
 .calendarGrid {
   display: grid;
   grid-template-columns: 220px repeat(30, minmax(76px, 1fr));
   min-width: 2520px;
+}
+
+.calendarRowSpacer {
+  height: 18px;
+  background: transparent;
 }
 
 .calendarHeaderCell {

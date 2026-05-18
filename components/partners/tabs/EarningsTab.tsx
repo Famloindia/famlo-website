@@ -23,6 +23,13 @@ export default function EarningsTab({
   // Determine "This Month" for sync with mobile app
   const now = new Date();
   const currentMonthStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+  const payoutFromBooking = (booking: any) => {
+    const payout = Number(booking.family_payout);
+    if (payout > 0) return payout;
+
+    const gross = Number(booking.total_price) || 0;
+    return Math.round(gross * ((100 - globalCommission) / 100));
+  };
 
   // Filter confirmed/completed only for revenue listing
   const revenueBookings = bookingRows.filter(
@@ -31,7 +38,7 @@ export default function EarningsTab({
 
   const monthlyEarnings = revenueBookings
     .filter((b: any) => String(b.date_from).startsWith(currentMonthStr))
-    .reduce((sum: number, b: any) => sum + (Number(b.family_payout) || 0), 0);
+    .reduce((sum: number, b: any) => sum + payoutFromBooking(b), 0);
 
   return (
     <div className={`${styles.flexCol} ${styles.animateIn}`} style={{ gap: "32px" }}>
@@ -142,10 +149,7 @@ export default function EarningsTab({
           ) : (
             revenueBookings.map((b: any) => {
               // SCHEMA FIX: use family_payout directly — that IS the host's net amount.
-              const netPayout =
-                Number(b.family_payout) > 0
-                  ? Number(b.family_payout)
-                  : Math.round(Number(b.total_price || 0) * (1 - feePercentage / 100));
+              const netPayout = payoutFromBooking(b);
 
               const userData = b.users || {};
               const guestName = String(userData.name || "Verified Guest");

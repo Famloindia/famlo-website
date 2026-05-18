@@ -1043,7 +1043,7 @@ export async function renderFamloProDashboardPage({
           const payout = asNumber(row.partner_payout_amount);
           if (payout > 0) return payout;
           if (totalPrice <= 0) return null;
-          return Math.round(totalPrice * ((100 - globalCommission) / 100));
+          return totalPrice * ((100 - globalCommission) / 100);
         })(),
         sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : "Famlo Direct",
         externalBookingId: externalBookingId ?? matchedRevision?.externalBookingId ?? null,

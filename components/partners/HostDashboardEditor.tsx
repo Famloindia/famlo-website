@@ -662,8 +662,7 @@ export function HostDashboardEditor({
         if (payout > 0) return acc + payout;
 
         const gross = Number(b.total_price) || 0;
-        const commissionFactor = (100 - globalCommission) / 100;
-        return acc + (gross * commissionFactor);
+        return acc + Math.round(gross * ((100 - globalCommission) / 100));
       }, 0),
     }),
     [globalCommission, revenueBookings]

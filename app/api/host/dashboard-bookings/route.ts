@@ -223,7 +223,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       const totalEarnings = revenueRows.reduce((acc, row) => {
         const payout = Number(row.partner_payout_amount);
         if (payout > 0) return acc + payout;
-        return acc + (Number(row.total_price) || 0);
+        const gross = Number(row.total_price) || 0;
+        return acc + Math.round(gross * 0.82);
       }, 0);
 
       return NextResponse.json({

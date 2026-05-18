@@ -70,6 +70,7 @@ import {
   formatChannexEnvironmentLabel,
   type ChannexConfigSummary as ChannexSummary,
 } from "@/lib/channel-providers/channex/client";
+import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
 import styles from "./pro-dashboard.module.css";
 
 type ProSectionId =
@@ -1543,6 +1544,9 @@ export default function FamloProDashboardShell({
   const [pendingPropertyLabel, setPendingPropertyLabel] = useState<string | null>(null);
   const [propertyContentFeedback, setPropertyContentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
+  const [calendarActionFeedback, setCalendarActionFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [calendarActionDate, setCalendarActionDate] = useState<string | null>(null);
+  const [isCalendarActionPending, startCalendarAction] = useTransition();
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
   const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
@@ -1554,6 +1558,8 @@ export default function FamloProDashboardShell({
   const [timeAnchor] = useState(() => Date.now());
   useEffect(() => {
     setChannelSetupOverrides({});
+    setCalendarActionFeedback(null);
+    setCalendarActionDate(null);
   }, [familyId]);
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
@@ -1579,6 +1585,58 @@ export default function FamloProDashboardShell({
         options?.section ?? "properties-home"
       )}`
     );
+  };
+
+  const handleCalendarCellAction = (cell: CalendarCell): void => {
+    if (cell.status === "past") return;
+
+    if (cell.bookingDetail) {
+      setSelectedCalendarBooking(cell.bookingDetail);
+      return;
+    }
+
+    if (cell.status !== "available" && cell.status !== "manual_block") {
+      return;
+    }
+
+    const action = cell.status === "manual_block" ? "unblock" : "block";
+    setCalendarActionFeedback(null);
+    setCalendarActionDate(cell.date);
+
+    startCalendarAction(async () => {
+      try {
+        const response = await fetch("/api/host/pro/calendar/manual-block", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            familyId,
+            date: cell.date,
+            action,
+          }),
+        });
+        const payload = (await response.json()) as { error?: string };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to update the property calendar block.");
+        }
+
+        setCalendarActionFeedback({
+          type: "success",
+          text:
+            action === "block"
+              ? `Blocked ${cell.date} across this property calendar.`
+              : `Unblocked ${cell.date} across this property calendar.`,
+        });
+        router.refresh();
+      } catch (error) {
+        setCalendarActionFeedback({
+          type: "error",
+          text: error instanceof Error ? error.message : "Failed to update the property calendar block.",
+        });
+      } finally {
+        setCalendarActionDate(null);
+      }
+    });
   };
 
   const handleHostBookingCancel = async (booking: ProBookingSummary): Promise<void> => {
@@ -1717,6 +1775,18 @@ export default function FamloProDashboardShell({
   const bookingsWithNetPayout = proBookings.filter(
     (booking): booking is ProBookingSummary & { netPayoutAmount: number } => booking.netPayoutAmount != null
   );
+  const revenueEligibleBookings = bookingsWithNetPayout.filter(
+    (booking) =>
+      isHostBookingVisibleToPartner(booking.status, booking.paymentStatus) &&
+      (
+      normalizeToken(booking.paymentStatus) === "paid" ||
+      isConfirmedBooking(booking)
+      )
+  );
+  const currentMonthPrefix = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  })();
   const totalBookingValue = bookingsWithValue.reduce((sum, entry) => sum + entry.parsedAmount, 0);
   const famloDirectBookingValue = bookingsWithValue
     .filter((entry) => !entry.booking.isOta)
@@ -1733,7 +1803,15 @@ export default function FamloProDashboardShell({
   const cancelledBookingValue = bookingsWithValue
     .filter((entry) => isCancelledBooking(entry.booking))
     .reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const totalNetPayout = bookingsWithNetPayout.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const revenueThisMonthNetPayout = bookingsWithNetPayout
+    .filter(
+      (booking) =>
+        isHostBookingVisibleToPartner(booking.status, booking.paymentStatus) &&
+        isConfirmedBooking(booking) &&
+        booking.startDate.startsWith(currentMonthPrefix)
+    )
+    .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const totalNetPayout = revenueEligibleBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
   const confirmedNetPayout = bookingsWithNetPayout
     .filter((booking) => isConfirmedBooking(booking))
     .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
@@ -4340,7 +4418,7 @@ export default function FamloProDashboardShell({
             </>
           )}
 
-          {activeSection !== "dashboard" && activeSection !== "properties-home" && activeSection !== "bookings" && (
+          {activeSection !== "dashboard" && activeSection !== "properties-home" && activeSection !== "bookings" && activeSection !== "inventory-calendar" && activeSection !== "messages-reviews" && activeSection !== "revenue" && (
             <section className={styles.sectionIntro}>
               <div>
                 <div className={styles.sectionEyebrow}>{sectionDescriptor.eyebrow}</div>
@@ -4872,165 +4950,32 @@ export default function FamloProDashboardShell({
           {activeSection === "inventory-calendar" && (
             <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.calendarLuxuryShell}`}>
               <div>
-                <div className={styles.sectionEyebrow}>Calendar</div>
-                <h3 className={styles.propertyCenterTitle}>Glass calendar for property availability</h3>
-                <p className={styles.heroText}>
-                  View Famlo bookings, OTA bookings, manual blocks, and availability in the same frosted Famlo Pro
-                  visual language, without changing checkout-day rules or current calendar behavior.
-                </p>
-                <div className={styles.heroMeta}>
-                  <div className={styles.heroMetaItem}>
-                    <div className={styles.heroMetaLabel}>Visible rooms</div>
-                    <div className={styles.heroMetaValue}>{visibleRoomsInCalendar}</div>
-                  </div>
-                  <div className={styles.heroMetaItem}>
-                    <div className={styles.heroMetaLabel}>Famlo / OTA</div>
-                    <div className={styles.heroMetaValue}>{famloCalendarCells} / {otaCalendarCells}</div>
-                  </div>
-                  <div className={styles.heroMetaItem}>
-                    <div className={styles.heroMetaLabel}>Attention</div>
-                    <div className={styles.heroMetaValue}>{calendarAttentionCount}</div>
-                  </div>
-                  <div className={styles.heroMetaItem}>
-                    <div className={styles.heroMetaLabel}>Manual blocks</div>
-                    <div className={styles.heroMetaValue}>{manualBlockCalendarCells}</div>
-                  </div>
-                </div>
+                <h3 className={styles.propertyCenterTitle}>Calendar</h3>
               </div>
               <div className={styles.cardBody}>
-                <div className={styles.listGrid}>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Visible rooms</div>
-                    <div className={styles.metricValue}>{visibleRoomsInCalendar}</div>
-                    <div className={styles.metricHint}>Room rows currently shown in this property calendar window.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Famlo bookings</div>
-                    <div className={styles.metricValue}>{famloCalendarCells}</div>
-                    <div className={styles.metricHint}>Calendar cells blocked by direct Famlo reservations.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>OTA bookings</div>
-                    <div className={styles.metricValue}>{otaCalendarCells}</div>
-                    <div className={styles.metricHint}>Cells blocked by Booking.com or other OTA-linked stays.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Pending / attention</div>
-                    <div className={styles.metricValue}>{pendingCalendarCells}</div>
-                    <div className={styles.metricHint}>Pending approval or awaiting-payment cells that still need review.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Manual blocks</div>
-                    <div className={styles.metricValue}>{manualBlockCalendarCells}</div>
-                    <div className={styles.metricHint}>Manual blocked dates derived from the current Famlo calendar path.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Past dates</div>
-                    <div className={styles.metricValue}>{pastCalendarCells}</div>
-                    <div className={styles.metricHint}>Older dates remain visible for context but stay read-only here.</div>
-                  </article>
-                </div>
-
-                <div className={styles.listGrid}>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Property calendar grid</div>
-                    <div className={styles.feedCopy}>
-                      This page shows the current room-by-room calendar window using existing bookings, blocks, and availability data. Block/unblock rules are unchanged.
-                    </div>
-                    <div className={styles.roomReadinessRow}>
-                      <span className={styles.readinessPill}>Famlo booking</span>
-                      <span className={styles.readinessPill}>OTA booking</span>
-                      <span className={styles.readinessPill}>Pending approval</span>
-                      <span className={styles.readinessPill}>Manual block</span>
-                      <span className={styles.readinessPill}>Past date</span>
-                      <span className={styles.readinessPill}>Available</span>
-                    </div>
-                  </article>
-
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Calendar attention</div>
-                    <div className={styles.feedCopy}>
-                      Use this summary to spot whether the current property window needs operational review before you rely on availability.
-                    </div>
-                    <div className={styles.stack}>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Checkout-day rule</div>
-                        <div className={styles.feedCopy}>
-                          {calendarVerification
-                            ? calendarVerification.targetDateBlocked && !calendarVerification.checkoutDateBlocked
-                              ? `${calendarVerification.roomName} keeps checkout-day availability correct in the current verification window.`
-                              : `${calendarVerification.roomName} needs review because the verification window does not match the expected checkout-day state.`
-                            : "Checkout-day verification remains available below whenever a Booking.com verification target is present."}
-                        </div>
-                      </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Calendar attention count</div>
-                        <div className={styles.feedCopy}>
-                          {calendarAttentionCount > 0
-                            ? `${calendarAttentionCount} calendar signal${calendarAttentionCount === 1 ? "" : "s"} currently need review across pending stays, verification, or open sync issues.`
-                            : "No open calendar attention signals are visible in the current Pro calendar."}
-                        </div>
-                      </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Sync health context</div>
-                        <div className={styles.feedCopy}>
-                          {conflictItems.length > 0
-                            ? `${conflictItems.length} broader sync health issue${conflictItems.length === 1 ? "" : "s"} are open for this property. Review Sync Health if the calendar looks unexpected.`
-                            : "No broader sync-health blocker is currently flagged for this property."}
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                </div>
-
-                {occupiedOrBlockedCalendarCells === 0 ? (
-                  <div className={styles.emptyState}>
-                    <div className={styles.emptyTitle}>No bookings or blocks in this window</div>
-                    <div className={styles.emptyCopy}>No calendar blocks or bookings are visible for this window.</div>
-                  </div>
-                ) : null}
-
-                <div className={styles.placeholderGrid}>
-                  <div className={styles.placeholderRow}>
-                    <div className={styles.placeholderTitle}>Calendar window</div>
-                    <div className={styles.placeholderValue}>
-                      {calendarWindow.startDate} → {calendarWindow.endDate}
-                    </div>
-                    <div className={styles.placeholderCopy}>
-                      {calendarWindow.isCustomRange
-                        ? "Custom verification window is active for this Pro calendar view."
-                        : "Default rolling 30-day Pro calendar window."}
-                    </div>
-                  </div>
-                  {calendarWindow.verificationUrl ? (
-                    <div className={styles.placeholderRow}>
-                      <div className={styles.placeholderTitle}>Booking.com verification</div>
-                      <div className={styles.placeholderValue}>{calendarWindow.verificationTargetLabel ?? "Ready"}</div>
-                      <div className={styles.placeholderCopy}>
-                        Open the June verification window to inspect the real Booking.com test stay without changing booking logic.
-                      </div>
-                      <div className={styles.inlineActionRow}>
-                        <Link href={calendarWindow.verificationUrl} className={styles.secondaryActionLink}>
-                          Open June verification window
-                        </Link>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                {calendarVerification ? (
-                  <div className={`${styles.feedbackBox} ${calendarVerification.targetDateBlocked && !calendarVerification.checkoutDateBlocked ? styles.feedbackSuccess : styles.feedbackError}`}>
-                    {calendarVerification.sourceLabel} for {calendarVerification.roomName}:{" "}
-                    {calendarVerification.targetDate} {calendarVerification.targetDateBlocked ? "is blocked" : "is not blocked"} and{" "}
-                    {calendarVerification.checkoutDate} {calendarVerification.checkoutDateBlocked ? "is blocked" : "stays available"}.
-                  </div>
-                ) : null}
-                <div className={`${styles.filterRow} ${styles.calendarLuxuryLegend}`}>
+                <div className={`${styles.filterRow} ${styles.calendarLuxuryLegend}`} style={{ marginBottom: "24px" }}>
                   {CALENDAR_LEGEND.map((item) => (
                     <span key={item.title} className={styles.filterChip}>
                       {item.title} = {item.copy}
                     </span>
                   ))}
                 </div>
+                <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Manual day blocking</div>
+                    <div className={styles.feedCopy}>
+                      Click any available calendar cell to block that date across this property. Click a manual-blocked cell to unblock it. Booking-backed cells still open details only.
+                    </div>
+                  </article>
+                </div>
+                {calendarActionFeedback ? (
+                  <div
+                    className={`${styles.feedbackBox} ${calendarActionFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
+                    style={{ marginBottom: "24px" }}
+                  >
+                    {calendarActionFeedback.text}
+                  </div>
+                ) : null}
                 {calendarRows.length > 0 ? (
                   <div className={`${styles.calendarBoard} ${styles.calendarBoardLuxury}`}>
                     <div className={styles.calendarGrid}>
@@ -5042,6 +4987,9 @@ export default function FamloProDashboardShell({
                         </div>
                       ))}
 
+                      {/* Spacer between header row and first room row */}
+                      <div className={styles.calendarRowSpacer} style={{ gridColumn: `span ${calendarColumns.length + 1}` }} />
+
                       {calendarRows.map((row) => (
                         <Fragment key={row.roomId}>
                           <div className={styles.calendarRoomCell}>
@@ -5049,22 +4997,32 @@ export default function FamloProDashboardShell({
                             <div className={styles.calendarRoomType}>{row.unitType}</div>
                             <div className={styles.calendarMetricLabel}>Availability</div>
                           </div>
-                          {row.availabilityCells.map((cell) => (
-                            <button
-                              type="button"
-                              key={`${row.roomId}-${cell.date}-availability`}
-                              className={`${styles.calendarCell} ${calendarCellClass(cell.status)} ${cell.bookingDetail ? styles.calendarCellInteractive : ""}`}
-                              title={cell.label}
-                              onClick={() => {
-                                if (cell.bookingDetail) {
-                                  setSelectedCalendarBooking(cell.bookingDetail);
-                                }
-                              }}
-                              disabled={!cell.bookingDetail}
-                            >
-                              {cell.status === "available" ? "1" : cell.status === "past" ? "—" : "0"}
-                            </button>
-                          ))}
+                          {row.availabilityCells.map((cell) => {
+                            const isActionable =
+                              Boolean(cell.bookingDetail) || cell.status === "available" || cell.status === "manual_block";
+                            const isBusy = isCalendarActionPending && calendarActionDate === cell.date;
+                            const title =
+                              cell.bookingDetail
+                                ? cell.label
+                                : cell.status === "available"
+                                  ? `${cell.label}. Click to block this date across the property.`
+                                  : cell.status === "manual_block"
+                                    ? `${cell.label}. Click to unblock this date across the property.`
+                                    : cell.label;
+
+                            return (
+                              <button
+                                type="button"
+                                key={`${row.roomId}-${cell.date}-availability`}
+                                className={`${styles.calendarCell} ${calendarCellClass(cell.status)} ${isActionable ? styles.calendarCellInteractive : ""}`}
+                                title={title}
+                                onClick={() => handleCalendarCellAction(cell)}
+                                disabled={!isActionable || isBusy}
+                              >
+                                {isBusy ? "..." : cell.status === "available" ? "1" : cell.status === "past" ? "—" : "0"}
+                              </button>
+                            );
+                          })}
 
                           <div className={`${styles.calendarRoomCell} ${styles.calendarRateLabel}`}>
                             <div className={styles.calendarMetricLabel}>Rate</div>
@@ -5078,6 +5036,9 @@ export default function FamloProDashboardShell({
                               {value}
                             </div>
                           ))}
+
+                          {/* Spacer between different rooms */}
+                          <div className={styles.calendarRowSpacer} style={{ gridColumn: `span ${calendarColumns.length + 1}` }} />
                         </Fragment>
                       ))}
                     </div>
@@ -5261,14 +5222,6 @@ export default function FamloProDashboardShell({
                     </div>
                   </div>
                 )}
-                <div className={styles.listGrid}>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Operational calendar checks</div>
-                    <div className={styles.feedCopy}>
-                      Advanced calendar verification stays available here so OTA and checkout-day correctness can still be reviewed without changing any current availability logic.
-                    </div>
-                  </article>
-                </div>
               </div>
             </section>
           )}
@@ -6320,11 +6273,9 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "messages-reviews" && (
-            <section className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.cardTitle}>Messages</h3>
-                </div>
+            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
+              <div>
+                <h3 className={styles.propertyCenterTitle}>Messages</h3>
               </div>
               <div className={styles.cardBody} style={{ padding: 0 }}>
                 {hostUserId ? (
@@ -6352,15 +6303,14 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "host-profile" && (
-            <section className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.cardTitle}>Host Profile</h3>
-                  <p className={styles.cardCopy}>
-                    This is the shared host identity used across your Famlo Pro workspace. Each property can still customize its local story, vibe, photos, and host presence.
-                  </p>
-                </div>
-                <span className={`${styles.badge} ${styles.badgeMuted}`}>Shared host identity</span>
+            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
+              <div>
+                <div className={styles.sectionEyebrow}>Host Profile</div>
+                <h3 className={styles.propertyCenterTitle}>Shared host identity in the same Pro glass style</h3>
+                <p className={styles.heroText}>
+                  Keep the shared host account, contact identity, and workspace ownership details in the same premium
+                  shell as the rest of Famlo Pro.
+                </p>
               </div>
               <div className={styles.cardBody}>
                 <div className={styles.listGrid}>
@@ -6495,21 +6445,21 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "revenue" && (
-            <section className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.cardTitle}>Revenue</h3>
-                  <p className={styles.cardCopy}>
-                    Revenue for this property. This view shows booking value and payment status from existing reservations. Final payouts and settlements will be added later.
-                  </p>
-                </div>
+            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
+              <div>
+                <h3 className={styles.propertyCenterTitle}>Revenue</h3>
               </div>
               <div className={styles.cardBody}>
                 <div className={styles.listGrid}>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Total net payout</div>
+                    <div className={styles.miniLabel}>Revenue this month</div>
+                    <div className={styles.metricValue}>{formatCurrency(revenueThisMonthNetPayout)}</div>
+                    <div className={styles.metricHint}>Monthly host payout using the same confirmed-stay payout logic as the simple dashboard.</div>
+                  </article>
+                  <article className={styles.summaryCard}>
+                    <div className={styles.miniLabel}>Total portfolio (all-time)</div>
                     <div className={styles.metricValue}>{formatCurrency(totalNetPayout)}</div>
-                    <div className={styles.metricHint}>Combined host payout across visible reservations, using recorded payout when available and a {globalCommission}% fallback service fee otherwise.</div>
+                    <div className={styles.metricHint}>All-time host payout using recorded payout when available and the same paid-or-confirmed eligibility as the simple dashboard.</div>
                   </article>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Confirmed net payout</div>
@@ -6527,99 +6477,51 @@ export default function FamloProDashboardShell({
                     <div className={styles.metricHint}>Combined gross booking value from all visible reservations in the current Pro workspace.</div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Famlo direct value</div>
-                    <div className={styles.metricValue}>{formatCurrency(famloDirectBookingValue)}</div>
-                    <div className={styles.metricHint}>Gross booking value currently coming from direct Famlo reservations.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>OTA value</div>
-                    <div className={styles.metricValue}>{formatCurrency(otaBookingValue)}</div>
-                    <div className={styles.metricHint}>Gross booking value currently linked to OTA or Booking.com reservations.</div>
-                  </article>
-                </div>
-
-                <div className={styles.listGrid}>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Revenue notes</div>
-                    <div className={styles.stack}>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Net payout now visible</div>
-                        <div className={styles.feedCopy}>Famlo Pro now shows host payout using the recorded payout when it exists, with a fallback estimate based on the current {globalCommission}% service fee.</div>
-                      </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Gross value still shown too</div>
-                        <div className={styles.feedCopy}>Gross booking value, OTA mix, and cancelled value are still kept below so you can compare reservation volume against expected host payout.</div>
-                      </div>
+                    <div className={styles.miniLabel}>Famlo direct / OTA value</div>
+                    <div className={styles.metricValue}>
+                      {formatCurrency(famloDirectBookingValue)} / {formatCurrency(otaBookingValue)}
                     </div>
-                  </article>
-
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Payment status snapshot</div>
-                    <div className={styles.roomReadinessRow}>
-                      <span className={styles.readinessPill}>Confirmed bookings: {confirmedBookingsCount}</span>
-                      <span className={styles.readinessPill}>Pending approvals: {pendingApprovalBookingsCount}</span>
-                      <span className={styles.readinessPill}>Action needed: {actionNeededBookingsCount}</span>
-                      <span className={styles.readinessPill}>Cancelled: {cancelledBookingsCount}</span>
-                    </div>
-                  </article>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Gross booking value breakdown</div>
-                    <div className={styles.stack}>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Confirmed gross value</div>
-                        <div className={styles.feedCopy}>
-                          {formatCurrency(confirmedBookingValue)} in gross booking value is already in confirmed, checked-in, or completed reservations.
-                        </div>
-                      </div>
-                      <div className={styles.feedItem}>
-                        <div className={styles.feedTitle}>Cancelled gross value</div>
-                        <div className={styles.feedCopy}>
-                          {formatCurrency(cancelledBookingValue)} is currently tied to cancelled or rejected reservations and should not be treated as final payout.
-                        </div>
-                      </div>
-                    </div>
+                    <div className={styles.metricHint}>Gross booking split between direct Famlo reservations and OTA-connected reservations.</div>
                   </article>
                 </div>
 
                 {proBookings.length > 0 ? (
-                  <div className={styles.mappingTable}>
-                    <div className={styles.mappingHeader}>Source</div>
-                    <div className={styles.mappingHeader}>Guest / Room</div>
-                    <div className={styles.mappingHeader}>Date</div>
-                    <div className={styles.mappingHeader}>Gross / Net</div>
-                    <div className={styles.mappingHeader}>Payment status</div>
-                    <div className={styles.mappingHeader}>Booking status</div>
+                  <div className={styles.listGrid}>
                     {proBookings.map((booking) => (
-                      <Fragment key={`revenue-${booking.bookingId}`}>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.sourceLabel}</div>
-                          <div className={styles.mappingSubcopy}>{booking.isOta ? "OTA reservation" : "Famlo direct reservation"}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
-                          <div className={styles.mappingSubcopy}>{booking.roomName}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.startDate} → {booking.endDate}</div>
-                          <div className={styles.mappingSubcopy}>Created {formatDateTime(booking.createdAt)}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
-                          <div className={styles.mappingSubcopy}>
-                            {booking.netPayoutAmount != null
-                              ? `Net payout ${formatCurrency(booking.netPayoutAmount)}`
-                              : "Net payout not available"}
+                      <article key={`revenue-${booking.bookingId}`} className={styles.listCard} style={{ padding: 0 }}>
+                        <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", borderBottom: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                          <div>
+                            <div className={styles.listTitle}>{booking.sourceLabel}</div>
+                            <div className={styles.feedCopy}>{booking.isOta ? "OTA reservation" : "Famlo direct reservation"}</div>
+                          </div>
+                          <div>
+                            <div className={styles.listTitle}>{booking.guestDisplayName}</div>
+                            <div className={styles.feedCopy}>{booking.roomName}</div>
+                          </div>
+                          <div>
+                            <div className={styles.listTitle}>{booking.startDate} → {booking.endDate}</div>
+                            <div className={styles.feedCopy}>Created {formatDateTime(booking.createdAt)}</div>
                           </div>
                         </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{labelizeToken(booking.paymentStatus, "unknown")}</div>
-                          <div className={styles.mappingSubcopy}>Current payment state only</div>
+                        <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }}>
+                          <div>
+                            <div className={styles.listTitle}>{booking.amount ?? "Not available"}</div>
+                            <div className={styles.feedCopy}>
+                              {booking.netPayoutAmount != null
+                                ? `Net payout ${formatCurrency(booking.netPayoutAmount)}`
+                                : "Net payout not available"}
+                            </div>
+                          </div>
+                          <div>
+                            <div className={styles.listTitle}>{labelizeToken(booking.paymentStatus, "unknown")}</div>
+                            <div className={styles.feedCopy}>Current payment state only</div>
+                          </div>
+                          <div>
+                            <div className={styles.listTitle}>{labelizeToken(booking.status, "unknown")}</div>
+                            <div className={styles.feedCopy}>{bookingHealthLabel(booking)}</div>
+                          </div>
                         </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{labelizeToken(booking.status, "unknown")}</div>
-                          <div className={styles.mappingSubcopy}>{bookingHealthLabel(booking)}</div>
-                        </div>
-                      </Fragment>
+                      </article>
                     ))}
                   </div>
                 ) : (
@@ -6635,14 +6537,13 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "reports" && (
-            <section className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.cardTitle}>Reports</h3>
-                  <p className={styles.cardCopy}>
-                    Reports for this property. Use these early insights to understand bookings, source mix, and room activity. Advanced occupancy, ADR, RevPAR, and monthly exports will come later.
-                  </p>
-                </div>
+            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
+              <div>
+                <div className={styles.sectionEyebrow}>Reports</div>
+                <h3 className={styles.propertyCenterTitle}>Reports with the same luxury Pro treatment</h3>
+                <p className={styles.heroText}>
+                  Review booking mix, room activity, and early performance signals inside the same dark glass UI.
+                </p>
               </div>
               <div className={styles.cardBody}>
                 <div className={styles.listGrid}>
@@ -7028,14 +6929,13 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "settings" && (
-            <section className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.cardTitle}>Settings</h3>
-                  <p className={styles.cardCopy}>
-                    Save operational Pro setup so your property is genuinely ready for future OTA sync and channel mapping.
-                  </p>
-                </div>
+            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
+              <div>
+                <div className={styles.sectionEyebrow}>Settings</div>
+                <h3 className={styles.propertyCenterTitle}>Operational settings in the glass Pro system</h3>
+                <p className={styles.heroText}>
+                  Save OTA-readiness and property operations without dropping out of the same premium Famlo Pro design language.
+                </p>
               </div>
               <div className={styles.cardBody}>
                 <ProSettingsForm
@@ -7064,14 +6964,13 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "support" && (
-            <section className={styles.card}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.cardTitle}>Support</h3>
-                  <p className={styles.cardCopy}>
-                    Pilot support area for early Famlo Pro hosts before live provider connectivity is enabled.
-                  </p>
-                </div>
+            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
+              <div>
+                <div className={styles.sectionEyebrow}>Support</div>
+                <h3 className={styles.propertyCenterTitle}>Support that matches the rest of Famlo Pro</h3>
+                <p className={styles.heroText}>
+                  Keep support, launch guidance, and provider escalation notes inside the same glass-style workspace.
+                </p>
               </div>
               <div className={styles.cardBody}>
                 <div className={styles.feedGrid}>
