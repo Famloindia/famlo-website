@@ -10,6 +10,30 @@ type ApplyCancellationBody = {
 
 type JsonRecord = Record<string, unknown>;
 
+export function assessCancellationApplyEligibility(input: {
+  revisionStatus: string | null;
+  linkedBookingId: string | null;
+}): { ok: boolean; status: number; message: string; state: string } {
+  const revisionStatus = input.revisionStatus?.toLowerCase() ?? "";
+  if (revisionStatus !== "cancelled") {
+    return {
+      ok: false,
+      status: 409,
+      message: "Only real cancelled Channex revisions can be applied in this phase.",
+      state: revisionStatus || "unknown",
+    };
+  }
+  if (!input.linkedBookingId) {
+    return {
+      ok: false,
+      status: 409,
+      message: "A linked Famlo booking is required before applying a cancellation.",
+      state: "missing_linked_booking",
+    };
+  }
+  return { ok: true, status: 200, message: "Cancellation revision can be applied in Famlo.", state: "eligible" };
+}
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -108,15 +132,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     const externalBookingId = asStringOrNull(revisionRow.external_booking_id);
     const source = asStringOrNull(revisionRow.source) ?? "booking_revision_feed";
 
-    if (revisionStatus !== "cancelled") {
+    const eligibility = assessCancellationApplyEligibility({ revisionStatus, linkedBookingId });
+    if (!eligibility.ok && eligibility.state !== "missing_linked_booking") {
       return NextResponse.json(
-        { error: "Only real cancelled Channex revisions can be applied in this phase.", status: revisionStatus || "unknown" },
-        { status: 409 }
+        { error: eligibility.message, status: revisionStatus || "unknown" },
+        { status: eligibility.status }
       );
     }
 
-    if (!linkedBookingId) {
-      return NextResponse.json({ error: "A linked Famlo booking is required before applying a cancellation." }, { status: 409 });
+    if (!eligibility.ok) {
+      return NextResponse.json({ error: eligibility.message }, { status: eligibility.status });
     }
 
     let linkedBookingResult = await supabase

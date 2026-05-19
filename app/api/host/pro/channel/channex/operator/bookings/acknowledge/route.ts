@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { POST as acknowledgeRevision } from "@/app/api/host/pro/channel/channex/bookings/acknowledge/route";
+import {
+  POST as acknowledgeRevision,
+  assessAcknowledgementEligibility,
+} from "@/app/api/host/pro/channel/channex/bookings/acknowledge/route";
 import {
   getChannelProviderCapabilities,
   resolveProviderFromRevision,
@@ -109,29 +112,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
     const externalRevisionId = asStringOrNull(revisionRow.external_revision_id);
 
-    if (importStatus === "modified_applied") {
-      return NextResponse.json(
-        { error: "Modification acknowledgement is not supported in this phase yet.", status: importStatus },
-        { status: 409 }
-      );
-    }
-    if (importStatus === "cancelled_applied") {
-      return NextResponse.json(
-        { error: "Cancellation acknowledgement is not supported in this phase yet.", status: importStatus },
-        { status: 409 }
-      );
-    }
-    if (importStatus !== "imported") {
-      return NextResponse.json({ error: "Acknowledge only after successful import/apply.", status: importStatus }, { status: 409 });
-    }
-    if (ackStatus !== "not_acknowledged") {
-      return NextResponse.json({ error: `This revision is already ${ackStatus}.`, status: ackStatus }, { status: 409 });
-    }
-    if (!linkedBookingId) {
-      return NextResponse.json({ error: "A linked Famlo booking is required before acknowledgement." }, { status: 409 });
-    }
-    if (!externalRevisionId) {
-      return NextResponse.json({ error: "A Channex feed revision id is required before acknowledgement." }, { status: 409 });
+    const eligibility = assessAcknowledgementEligibility({
+      importStatus,
+      ackStatus,
+      linkedBookingId,
+      externalRevisionId,
+      source: "booking_revision_feed",
+    });
+    if (!eligibility.ok) {
+      return NextResponse.json({ error: eligibility.message, status: eligibility.state }, { status: eligibility.status });
     }
 
     return acknowledgeRevision(buildForwardedRequest(request, channelBookingRevisionId));

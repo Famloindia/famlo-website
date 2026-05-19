@@ -16,6 +16,43 @@ type ApplyModificationBody = {
 
 type JsonRecord = Record<string, unknown>;
 
+export function assessModificationApplyEligibility(input: {
+  importStatus: string | null;
+  ackStatus: string | null;
+  linkedBookingId: string | null;
+  externalBookingId: string | null;
+  externalRoomTypeId: string | null;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  amountNumber: number | null;
+  currency: string | null;
+}): { ok: boolean; status: number; message: string; state: string } {
+  const importStatus = input.importStatus ?? "preview";
+  const ackStatus = input.ackStatus ?? "not_acknowledged";
+  if (importStatus === "modified_applied" && ackStatus === "acknowledged") {
+    return { ok: true, status: 200, message: "This Channex modification was already applied and acknowledged.", state: "already_applied" };
+  }
+  if (!["modified_pending_review", "modified_applied"].includes(importStatus)) {
+    return { ok: false, status: 409, message: "Only modified_pending_review revisions can be applied in this phase.", state: importStatus };
+  }
+  if (!input.linkedBookingId) {
+    return { ok: false, status: 409, message: "A linked Famlo booking is required before applying a modification.", state: "missing_linked_booking" };
+  }
+  if (!input.externalRoomTypeId || !input.arrivalDate || !input.departureDate || !input.externalBookingId) {
+    return { ok: false, status: 409, message: "Revision is missing required booking, room, or date fields.", state: "missing_fields" };
+  }
+  if (input.arrivalDate >= input.departureDate) {
+    return { ok: false, status: 409, message: "Revision has an invalid date range.", state: "invalid_dates" };
+  }
+  if ((input.amountNumber != null && !input.currency) || (input.amountNumber == null && input.currency)) {
+    return { ok: false, status: 409, message: "Revision amount and currency must both be present together if provided.", state: "invalid_amount_currency" };
+  }
+  if (input.amountNumber != null && input.amountNumber < 0) {
+    return { ok: false, status: 409, message: "Revision amount must be zero or positive.", state: "negative_amount" };
+  }
+  return { ok: true, status: 200, message: "Modification revision can be applied in Famlo.", state: "eligible" };
+}
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -191,30 +228,33 @@ export async function POST(request: Request): Promise<NextResponse> {
     const amountNumber = asNumberOrNull(revisionRow.amount);
     const currency = asStringOrNull(revisionRow.currency);
 
-    if (importStatus === "modified_applied" && asStringOrNull(revisionRow.ack_status) === "acknowledged") {
+    const eligibility = assessModificationApplyEligibility({
+      importStatus,
+      ackStatus: asStringOrNull(revisionRow.ack_status),
+      linkedBookingId,
+      externalBookingId,
+      externalRoomTypeId,
+      arrivalDate,
+      departureDate,
+      amountNumber,
+      currency,
+    });
+
+    if (eligibility.state === "already_applied") {
       return NextResponse.json(
         {
           ok: true,
           status: "already_applied",
-          message: "This Channex modification was already applied and acknowledged.",
+          message: eligibility.message,
           bookingId: linkedBookingId,
         },
         { status: 200 }
       );
     }
-    if (!["modified_pending_review", "modified_applied"].includes(importStatus)) {
-      return NextResponse.json(
-        { error: "Only modified_pending_review revisions can be applied in this phase.", status: importStatus },
-        { status: 409 }
-      );
-    }
-    if (!linkedBookingId) {
-      return NextResponse.json({ error: "A linked Famlo booking is required before applying a modification." }, { status: 409 });
-    }
-    if (!externalRoomTypeId || !arrivalDate || !departureDate || !externalBookingId) {
+    if (!eligibility.ok && eligibility.state === "missing_fields") {
       return NextResponse.json(
         {
-          error: "Revision is missing required booking, room, or date fields.",
+          error: eligibility.message,
           missingFields: [
             !externalBookingId ? "external_booking_id" : null,
             !externalRoomTypeId ? "external_room_type_id" : null,
@@ -222,18 +262,15 @@ export async function POST(request: Request): Promise<NextResponse> {
             !departureDate ? "departure_date" : null,
           ].filter(Boolean),
         },
-        { status: 409 }
+        { status: eligibility.status }
       );
     }
-    if (arrivalDate >= departureDate) {
-      return NextResponse.json({ error: "Revision has an invalid date range." }, { status: 409 });
+    if (!eligibility.ok) {
+      return NextResponse.json({ error: eligibility.message, status: eligibility.state }, { status: eligibility.status });
     }
-    if ((amountNumber != null && !currency) || (amountNumber == null && currency)) {
-      return NextResponse.json({ error: "Revision amount and currency must both be present together if provided." }, { status: 409 });
-    }
-    if (amountNumber != null && amountNumber < 0) {
-      return NextResponse.json({ error: "Revision amount must be zero or positive." }, { status: 409 });
-    }
+
+    const assuredArrivalDate = arrivalDate as string;
+    const assuredDepartureDate = departureDate as string;
 
     const revisionProvider = resolveProviderFromRevision({
       otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
@@ -433,7 +470,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     if (overlapResult.error) throw overlapResult.error;
 
-    const candidateEndExclusive = departureDate;
+    const candidateEndExclusive = assuredDepartureDate;
     const overlappingRows = ((overlapResult.data ?? []) as JsonRecord[]).filter((row) => {
       const rowBookingId = asStringOrNull(row.id);
       const rowStayUnitId = resolveStayUnitId(row);
@@ -451,7 +488,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
 
       const rowEndExclusive = rowEndDate;
-      return rangesOverlapExclusive(arrivalDate, candidateEndExclusive, rowStartDate, rowEndExclusive);
+      return rangesOverlapExclusive(assuredArrivalDate, candidateEndExclusive, rowStartDate, rowEndExclusive);
     });
 
     if (overlappingRows.length > 0) {
@@ -467,8 +504,8 @@ export async function POST(request: Request): Promise<NextResponse> {
           external_booking_id: externalBookingId,
           linked_booking_id: linkedBookingId,
           target_stay_unit_id: targetStayUnitId,
-          target_arrival_date: arrivalDate,
-          target_departure_date: departureDate,
+          target_arrival_date: assuredArrivalDate,
+          target_departure_date: assuredDepartureDate,
           conflicting_booking_id: asStringOrNull(firstOverlap.id),
           conflicting_start_date: normalizeDateOnly(asStringOrNull(firstOverlap.start_date)),
           conflicting_end_date: normalizeDateOnly(asStringOrNull(firstOverlap.end_date)),
@@ -526,8 +563,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         total_price: asNumberOrNull(linkedBooking.total_price),
       },
       channel_modified_to: {
-        start_date: arrivalDate,
-        end_date: departureDate,
+        start_date: assuredArrivalDate,
+        end_date: assuredDepartureDate,
         stay_unit_id: targetStayUnitId,
         total_price: nextTotalPrice,
       },
@@ -547,8 +584,8 @@ export async function POST(request: Request): Promise<NextResponse> {
           guest_name: asStringOrNull(currentPricingSnapshot.channel_guest_name) ?? asStringOrNull(currentPricingSnapshot.guest_name),
         },
         to: {
-          start_date: arrivalDate,
-          end_date: departureDate,
+          start_date: assuredArrivalDate,
+          end_date: assuredDepartureDate,
           amount: nextTotalPrice,
           currency,
           guest_name: guestName,
@@ -566,8 +603,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const updatePayload: Record<string, unknown> = {
-      start_date: arrivalDate,
-      end_date: departureDate,
+      start_date: assuredArrivalDate,
+      end_date: assuredDepartureDate,
       pricing_snapshot: nextPricingSnapshot,
       updated_at: now,
       payment_status: "not_required",
@@ -684,8 +721,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         from_start_date: currentStartDate,
         from_end_date: currentEndDate,
         from_stay_unit_id: currentStayUnitId,
-        to_start_date: arrivalDate,
-        to_end_date: departureDate,
+        to_start_date: assuredArrivalDate,
+        to_end_date: assuredDepartureDate,
         to_stay_unit_id: targetStayUnitId,
       },
     });

@@ -142,7 +142,11 @@ export type ChannexRestrictionChange = {
   dateTo: string;
   rate: string;
   stopSell: boolean;
+  cta: boolean;
+  ctd: boolean;
   minStayThrough: number;
+  minStayArrival: number;
+  maxStay: number;
 };
 
 export type ChannexAriPushResult = {
@@ -1505,7 +1509,11 @@ export async function pushChannexRestrictions(
       date_to: value.dateTo,
       rate: value.rate,
       stop_sell: value.stopSell,
+      closed_to_arrival: value.cta,
+      closed_to_departure: value.ctd,
       min_stay_through: value.minStayThrough,
+      min_stay_arrival: value.minStayArrival,
+      max_stay: value.maxStay,
     })),
   });
 }

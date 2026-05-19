@@ -16,8 +16,13 @@ import {
   assertChannelProviderOperationPermission,
   ChannelProviderPermissionError,
 } from "@/lib/channel-provider-framework";
+import { findStaleMappingRebindCandidate } from "@/lib/channex-ari-jobs";
 import { resolveProviderOperationPolicy } from "@/app/api/host/pro/channel/providers/operation/route";
 import { verifyChannexWebhookRequest } from "@/app/api/webhooks/channex/bookings/route";
+import { assessImportPreviewEligibility } from "@/app/api/host/pro/channel/channex/bookings/import-preview/route";
+import { assessModificationApplyEligibility } from "@/app/api/host/pro/channel/channex/bookings/apply-modification/route";
+import { assessCancellationApplyEligibility } from "@/app/api/host/pro/channel/channex/bookings/apply-cancellation/route";
+import { assessAcknowledgementEligibility } from "@/app/api/host/pro/channel/channex/bookings/acknowledge/route";
 
 function buildAriSnapshot(label: string): ChannexAriHealthSnapshot {
   return {
@@ -318,4 +323,155 @@ test("Framework permission guard rejects host activation and allows admin activa
       dryRun: false,
     })
   );
+});
+
+test("Import preview route allows only clean not-acknowledged revisions and stays idempotent", () => {
+  const eligible = assessImportPreviewEligibility({
+    importStatus: "preview",
+    ackStatus: "not_acknowledged",
+    externalBookingId: "ext-booking-1",
+    arrivalDate: "2026-05-20",
+    departureDate: "2026-05-22",
+    externalRoomTypeId: "room-1",
+    amountNumber: 2500,
+    currency: "INR",
+    linkedBookingId: null,
+  });
+  assert.equal(eligible.ok, true);
+  assert.equal(eligible.state, "eligible");
+
+  const duplicate = assessImportPreviewEligibility({
+    importStatus: "imported",
+    ackStatus: "acknowledged",
+    externalBookingId: "ext-booking-1",
+    arrivalDate: "2026-05-20",
+    departureDate: "2026-05-22",
+    externalRoomTypeId: "room-1",
+    amountNumber: 2500,
+    currency: "INR",
+    linkedBookingId: "booking-1",
+  });
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.status, 409);
+});
+
+test("Modification apply route only allows reviewed revisions and blocks invalid payloads", () => {
+  const eligible = assessModificationApplyEligibility({
+    importStatus: "modified_pending_review",
+    ackStatus: "not_acknowledged",
+    linkedBookingId: "booking-1",
+    externalBookingId: "ext-booking-1",
+    externalRoomTypeId: "room-1",
+    arrivalDate: "2026-05-20",
+    departureDate: "2026-05-22",
+    amountNumber: 3200,
+    currency: "INR",
+  });
+  assert.equal(eligible.ok, true);
+  assert.equal(eligible.state, "eligible");
+
+  const invalid = assessModificationApplyEligibility({
+    importStatus: "preview",
+    ackStatus: "not_acknowledged",
+    linkedBookingId: "booking-1",
+    externalBookingId: "ext-booking-1",
+    externalRoomTypeId: "room-1",
+    arrivalDate: "2026-05-22",
+    departureDate: "2026-05-20",
+    amountNumber: 3200,
+    currency: "INR",
+  });
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.status, 409);
+});
+
+test("Cancellation apply route requires a cancelled revision linked to a Famlo booking", () => {
+  const eligible = assessCancellationApplyEligibility({
+    revisionStatus: "cancelled",
+    linkedBookingId: "booking-1",
+  });
+  assert.equal(eligible.ok, true);
+
+  const blocked = assessCancellationApplyEligibility({
+    revisionStatus: "modified",
+    linkedBookingId: "booking-1",
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.status, 409);
+});
+
+test("Acknowledgement route only allows applied revisions after successful Famlo apply", () => {
+  const imported = assessAcknowledgementEligibility({
+    importStatus: "imported",
+    ackStatus: "not_acknowledged",
+    linkedBookingId: "booking-1",
+    externalRevisionId: "revision-1",
+    source: "booking_revision_feed",
+  });
+  assert.equal(imported.ok, true);
+
+  const modified = assessAcknowledgementEligibility({
+    importStatus: "modified_applied",
+    ackStatus: "not_acknowledged",
+    linkedBookingId: "booking-1",
+    externalRevisionId: "revision-2",
+    source: "booking_revision_feed",
+  });
+  assert.equal(modified.ok, true);
+
+  const cancelled = assessAcknowledgementEligibility({
+    importStatus: "cancelled_applied",
+    ackStatus: "not_acknowledged",
+    linkedBookingId: "booking-1",
+    externalRevisionId: "revision-3",
+    source: "booking_revision_feed",
+  });
+  assert.equal(cancelled.ok, true);
+
+  const blocked = assessAcknowledgementEligibility({
+    importStatus: "modified_pending_review",
+    ackStatus: "not_acknowledged",
+    linkedBookingId: "booking-1",
+    externalRevisionId: "revision-4",
+    source: "booking_revision_feed",
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.status, 409);
+});
+
+test("Stale Channex room mappings can be rebound to the current Famlo room by matching rate-plan title", () => {
+  const candidate = findStaleMappingRebindCandidate(
+    "Twin Room",
+    ["ac04257c-b81a-4b69-b5a0-23a534b30328", "0faf57da-f72a-4e9e-89af-f136d5fe2640"],
+    [
+      {
+        roomMappingId: "mapping-1",
+        previousStayUnitId: "ed2cc187-9c3e-4ecc-b2e7-52aa386a7d99",
+        externalRoomTypeId: "room-type-1",
+        ratePlanIds: ["rate-plan-1"],
+        ratePlanTitles: ["Standard Rate - Twin Room"],
+      },
+    ]
+  );
+
+  assert.equal(candidate?.roomMappingId, "mapping-1");
+  assert.equal(candidate?.previousStayUnitId, "ed2cc187-9c3e-4ecc-b2e7-52aa386a7d99");
+});
+
+test("Active mapped rooms are not treated as stale rebind candidates", () => {
+  const candidate = findStaleMappingRebindCandidate(
+    "Twin Room",
+    ["ed2cc187-9c3e-4ecc-b2e7-52aa386a7d99"],
+    [
+      {
+        roomMappingId: "mapping-1",
+        previousStayUnitId: "ed2cc187-9c3e-4ecc-b2e7-52aa386a7d99",
+        externalRoomTypeId: "room-type-1",
+        ratePlanIds: ["rate-plan-1"],
+        ratePlanTitles: ["Standard Rate - Twin Room"],
+      },
+    ]
+  );
+
+  assert.equal(candidate, null);
 });

@@ -1,0 +1,1463 @@
+diff --git a/app/api/host/pro/calendar/manual-block/route.ts b/app/api/host/pro/calendar/manual-block/route.ts
+index baddce4f..a15d9dce 100644
+--- a/app/api/host/pro/calendar/manual-block/route.ts
++++ b/app/api/host/pro/calendar/manual-block/route.ts
+@@ -1,7 +1,7 @@
+ import { NextResponse } from "next/server";
+ 
+ import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
+-import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
++import { enqueueChannexAriSyncJobs, triggerQueuedChannexSyncWorker } from "@/lib/channex-ari-jobs";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -49,17 +49,18 @@ export async function POST(request: Request): Promise<NextResponse> {
+     }
+ 
+     const supabase = createAdminSupabaseClient();
+-    const hostAccess = await resolveAuthorizedHostResource(supabase, request, {
+-      ownerType: "stay_unit",
+-      ownerId: roomId,
+-    });
++    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { familyId });
++    if (!hostAccess?.familyId || hostAccess.familyId !== familyId) {
++      return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
++    }
+ 
+-    if (
+-      !hostAccess?.familyId ||
+-      !hostAccess.hostId ||
+-      hostAccess.stayUnitId !== roomId ||
+-      hostAccess.familyId !== familyId
+-    ) {
++    const { data: stayUnitRow, error: stayUnitError } = await supabase
++      .from("stay_units_v2")
++      .select("id,legacy_family_id")
++      .eq("id", roomId)
++      .maybeSingle();
++    if (stayUnitError) throw stayUnitError;
++    if (!stayUnitRow?.id || stayUnitRow.legacy_family_id !== familyId) {
+       return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
+     }
+ 
+@@ -152,6 +153,14 @@ export async function POST(request: Request): Promise<NextResponse> {
+       actorUserId: hostAccess.hostUserId ?? null,
+       actorRole: hostAccess.isAdmin ? "admin" : "host",
+     });
++    const stagingWorkerTriggered =
++      queuedJobIds.length > 0
++        ? await triggerQueuedChannexSyncWorker({
++            requestUrl: request.url,
++            workerId: "pms-calendar-manual-block",
++            limit: queuedJobIds.length,
++          })
++        : false;
+ 
+     return NextResponse.json({
+       ok: true,
+@@ -159,6 +168,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       date,
+       roomId,
+       queuedJobIds,
++      stagingWorkerTriggered,
+     });
+   } catch (error) {
+     console.error("[host.pro.calendar.manual-block] error", error);
+diff --git a/app/api/host/pro/calendar/manual-rate/route.ts b/app/api/host/pro/calendar/manual-rate/route.ts
+index aed4599a..c4dd32ca 100644
+--- a/app/api/host/pro/calendar/manual-rate/route.ts
++++ b/app/api/host/pro/calendar/manual-rate/route.ts
+@@ -1,7 +1,7 @@
+ import { NextResponse } from "next/server";
+ 
+ import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
+-import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
++import { enqueueChannexAriSyncJobs, triggerQueuedChannexSyncWorker } from "@/lib/channex-ari-jobs";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -48,17 +48,18 @@ export async function POST(request: Request): Promise<NextResponse> {
+     }
+ 
+     const supabase = createAdminSupabaseClient();
+-    const hostAccess = await resolveAuthorizedHostResource(supabase, request, {
+-      ownerType: "stay_unit",
+-      ownerId: roomId,
+-    });
++    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { familyId });
++    if (!hostAccess?.familyId || hostAccess.familyId !== familyId) {
++      return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
++    }
+ 
+-    if (
+-      !hostAccess?.familyId ||
+-      !hostAccess.hostId ||
+-      hostAccess.stayUnitId !== roomId ||
+-      hostAccess.familyId !== familyId
+-    ) {
++    const { data: stayUnitRow, error: stayUnitError } = await supabase
++      .from("stay_units_v2")
++      .select("id,legacy_family_id")
++      .eq("id", roomId)
++      .maybeSingle();
++    if (stayUnitError) throw stayUnitError;
++    if (!stayUnitRow?.id || stayUnitRow.legacy_family_id !== familyId) {
+       return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
+     }
+ 
+@@ -145,6 +146,14 @@ export async function POST(request: Request): Promise<NextResponse> {
+       actorUserId: hostAccess.hostUserId ?? null,
+       actorRole: hostAccess.isAdmin ? "admin" : "host",
+     });
++    const stagingWorkerTriggered =
++      queuedJobIds.length > 0
++        ? await triggerQueuedChannexSyncWorker({
++            requestUrl: request.url,
++            workerId: "pms-calendar-manual-rate",
++            limit: queuedJobIds.length,
++          })
++        : false;
+ 
+     return NextResponse.json({
+       ok: true,
+@@ -153,6 +162,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       roomId,
+       amount: action === "save" ? amount : null,
+       queuedJobIds,
++      stagingWorkerTriggered,
+     });
+   } catch (error) {
+     console.error("[host.pro.calendar.manual-rate] error", error);
+diff --git a/app/api/host/pro/channel/channex/bookings/acknowledge/route.ts b/app/api/host/pro/channel/channex/bookings/acknowledge/route.ts
+index bc48e551..09218af1 100644
+--- a/app/api/host/pro/channel/channex/bookings/acknowledge/route.ts
++++ b/app/api/host/pro/channel/channex/bookings/acknowledge/route.ts
+@@ -10,6 +10,38 @@ type AcknowledgeBody = {
+   channelBookingRevisionId?: string;
+ };
+ 
++export function assessAcknowledgementEligibility(input: {
++  importStatus: string | null;
++  ackStatus: string | null;
++  linkedBookingId: string | null;
++  externalRevisionId: string | null;
++  source: string | null;
++}): { ok: boolean; status: number; message: string; state: string } {
++  const importStatus = input.importStatus ?? "preview";
++  const ackStatus = input.ackStatus ?? "not_acknowledged";
++  if (!["imported", "modified_applied", "cancelled_applied"].includes(importStatus)) {
++    return { ok: false, status: 409, message: "Only successfully applied Famlo revisions can be acknowledged.", state: importStatus };
++  }
++  if (ackStatus !== "not_acknowledged") {
++    return { ok: false, status: 409, message: `This booking preview is already ${ackStatus}.`, state: ackStatus };
++  }
++  if (!input.linkedBookingId) {
++    return { ok: false, status: 409, message: "A linked Famlo booking is required before acknowledgement.", state: "missing_linked_booking" };
++  }
++  if (!input.externalRevisionId) {
++    return {
++      ok: false,
++      status: 409,
++      message:
++        input.source === "booking_list_api"
++          ? "Cannot acknowledge Booking List preview; requires feed revision id."
++          : "Cannot acknowledge this preview because external_revision_id is missing.",
++      state: "missing_revision_id",
++    };
++  }
++  return { ok: true, status: 200, message: "Revision can be acknowledged after successful apply.", state: "eligible" };
++}
++
+ function asString(value: unknown): string {
+   return typeof value === "string" ? value.trim() : "";
+ }
+@@ -99,14 +131,15 @@ export async function POST(request: Request): Promise<NextResponse> {
+     const source = asStringOrNull(revisionRow.source) ?? "booking_revision_feed";
+     const externalBookingId = asStringOrNull(revisionRow.external_booking_id);
+ 
+-    if (importStatus !== "imported") {
+-      return NextResponse.json({ error: "Only imported preview bookings can be acknowledged.", status: importStatus }, { status: 409 });
+-    }
+-    if (ackStatus !== "not_acknowledged") {
+-      return NextResponse.json({ error: `This booking preview is already ${ackStatus}.`, status: ackStatus }, { status: 409 });
+-    }
+-    if (!linkedBookingId) {
+-      return NextResponse.json({ error: "A linked Famlo booking is required before acknowledgement." }, { status: 409 });
++    const eligibility = assessAcknowledgementEligibility({
++      importStatus,
++      ackStatus,
++      linkedBookingId,
++      externalRevisionId,
++      source,
++    });
++    if (!eligibility.ok && eligibility.state !== "missing_revision_id") {
++      return NextResponse.json({ error: eligibility.message, status: eligibility.state }, { status: eligibility.status });
+     }
+ 
+     const { data: linkedBooking, error: linkedBookingError } = await supabase
+@@ -134,22 +167,18 @@ export async function POST(request: Request): Promise<NextResponse> {
+       }
+     }
+ 
+-    if (!externalRevisionId) {
+-      const message = source === "booking_list_api"
+-        ? "Cannot acknowledge Booking List preview; requires feed revision id."
+-        : "Cannot acknowledge this preview because external_revision_id is missing.";
+-
++    if (!eligibility.ok) {
+       return NextResponse.json(
+         {
+           ok: false,
+           status: "acknowledgement_requires_revision_id",
+-          message,
++          message: eligibility.message,
+         },
+-        { status: 409 }
++        { status: eligibility.status }
+       );
+     }
+ 
+-    const result = await acknowledgeChannexBookingRevision(externalRevisionId);
++    const result = await acknowledgeChannexBookingRevision(externalRevisionId as string);
+     if (!result.ok) {
+       await logAcknowledgeResult({
+         supabase,
+diff --git a/app/api/host/pro/channel/channex/bookings/apply-cancellation/route.ts b/app/api/host/pro/channel/channex/bookings/apply-cancellation/route.ts
+index 6400d3f9..99a2c851 100644
+--- a/app/api/host/pro/channel/channex/bookings/apply-cancellation/route.ts
++++ b/app/api/host/pro/channel/channex/bookings/apply-cancellation/route.ts
+@@ -10,6 +10,30 @@ type ApplyCancellationBody = {
+ 
+ type JsonRecord = Record<string, unknown>;
+ 
++export function assessCancellationApplyEligibility(input: {
++  revisionStatus: string | null;
++  linkedBookingId: string | null;
++}): { ok: boolean; status: number; message: string; state: string } {
++  const revisionStatus = input.revisionStatus?.toLowerCase() ?? "";
++  if (revisionStatus !== "cancelled") {
++    return {
++      ok: false,
++      status: 409,
++      message: "Only real cancelled Channex revisions can be applied in this phase.",
++      state: revisionStatus || "unknown",
++    };
++  }
++  if (!input.linkedBookingId) {
++    return {
++      ok: false,
++      status: 409,
++      message: "A linked Famlo booking is required before applying a cancellation.",
++      state: "missing_linked_booking",
++    };
++  }
++  return { ok: true, status: 200, message: "Cancellation revision can be applied in Famlo.", state: "eligible" };
++}
++
+ function asString(value: unknown): string {
+   return typeof value === "string" ? value.trim() : "";
+ }
+@@ -108,15 +132,16 @@ export async function POST(request: Request): Promise<NextResponse> {
+     const externalBookingId = asStringOrNull(revisionRow.external_booking_id);
+     const source = asStringOrNull(revisionRow.source) ?? "booking_revision_feed";
+ 
+-    if (revisionStatus !== "cancelled") {
++    const eligibility = assessCancellationApplyEligibility({ revisionStatus, linkedBookingId });
++    if (!eligibility.ok && eligibility.state !== "missing_linked_booking") {
+       return NextResponse.json(
+-        { error: "Only real cancelled Channex revisions can be applied in this phase.", status: revisionStatus || "unknown" },
+-        { status: 409 }
++        { error: eligibility.message, status: revisionStatus || "unknown" },
++        { status: eligibility.status }
+       );
+     }
+ 
+-    if (!linkedBookingId) {
+-      return NextResponse.json({ error: "A linked Famlo booking is required before applying a cancellation." }, { status: 409 });
++    if (!eligibility.ok) {
++      return NextResponse.json({ error: eligibility.message }, { status: eligibility.status });
+     }
+ 
+     let linkedBookingResult = await supabase
+diff --git a/app/api/host/pro/channel/channex/bookings/apply-modification/route.ts b/app/api/host/pro/channel/channex/bookings/apply-modification/route.ts
+index eef0e237..980287f2 100644
+--- a/app/api/host/pro/channel/channex/bookings/apply-modification/route.ts
++++ b/app/api/host/pro/channel/channex/bookings/apply-modification/route.ts
+@@ -16,6 +16,43 @@ type ApplyModificationBody = {
+ 
+ type JsonRecord = Record<string, unknown>;
+ 
++export function assessModificationApplyEligibility(input: {
++  importStatus: string | null;
++  ackStatus: string | null;
++  linkedBookingId: string | null;
++  externalBookingId: string | null;
++  externalRoomTypeId: string | null;
++  arrivalDate: string | null;
++  departureDate: string | null;
++  amountNumber: number | null;
++  currency: string | null;
++}): { ok: boolean; status: number; message: string; state: string } {
++  const importStatus = input.importStatus ?? "preview";
++  const ackStatus = input.ackStatus ?? "not_acknowledged";
++  if (importStatus === "modified_applied" && ackStatus === "acknowledged") {
++    return { ok: true, status: 200, message: "This Channex modification was already applied and acknowledged.", state: "already_applied" };
++  }
++  if (!["modified_pending_review", "modified_applied"].includes(importStatus)) {
++    return { ok: false, status: 409, message: "Only modified_pending_review revisions can be applied in this phase.", state: importStatus };
++  }
++  if (!input.linkedBookingId) {
++    return { ok: false, status: 409, message: "A linked Famlo booking is required before applying a modification.", state: "missing_linked_booking" };
++  }
++  if (!input.externalRoomTypeId || !input.arrivalDate || !input.departureDate || !input.externalBookingId) {
++    return { ok: false, status: 409, message: "Revision is missing required booking, room, or date fields.", state: "missing_fields" };
++  }
++  if (input.arrivalDate >= input.departureDate) {
++    return { ok: false, status: 409, message: "Revision has an invalid date range.", state: "invalid_dates" };
++  }
++  if ((input.amountNumber != null && !input.currency) || (input.amountNumber == null && input.currency)) {
++    return { ok: false, status: 409, message: "Revision amount and currency must both be present together if provided.", state: "invalid_amount_currency" };
++  }
++  if (input.amountNumber != null && input.amountNumber < 0) {
++    return { ok: false, status: 409, message: "Revision amount must be zero or positive.", state: "negative_amount" };
++  }
++  return { ok: true, status: 200, message: "Modification revision can be applied in Famlo.", state: "eligible" };
++}
++
+ function asString(value: unknown): string {
+   return typeof value === "string" ? value.trim() : "";
+ }
+@@ -191,30 +228,33 @@ export async function POST(request: Request): Promise<NextResponse> {
+     const amountNumber = asNumberOrNull(revisionRow.amount);
+     const currency = asStringOrNull(revisionRow.currency);
+ 
+-    if (importStatus === "modified_applied" && asStringOrNull(revisionRow.ack_status) === "acknowledged") {
++    const eligibility = assessModificationApplyEligibility({
++      importStatus,
++      ackStatus: asStringOrNull(revisionRow.ack_status),
++      linkedBookingId,
++      externalBookingId,
++      externalRoomTypeId,
++      arrivalDate,
++      departureDate,
++      amountNumber,
++      currency,
++    });
++
++    if (eligibility.state === "already_applied") {
+       return NextResponse.json(
+         {
+           ok: true,
+           status: "already_applied",
+-          message: "This Channex modification was already applied and acknowledged.",
++          message: eligibility.message,
+           bookingId: linkedBookingId,
+         },
+         { status: 200 }
+       );
+     }
+-    if (!["modified_pending_review", "modified_applied"].includes(importStatus)) {
+-      return NextResponse.json(
+-        { error: "Only modified_pending_review revisions can be applied in this phase.", status: importStatus },
+-        { status: 409 }
+-      );
+-    }
+-    if (!linkedBookingId) {
+-      return NextResponse.json({ error: "A linked Famlo booking is required before applying a modification." }, { status: 409 });
+-    }
+-    if (!externalRoomTypeId || !arrivalDate || !departureDate || !externalBookingId) {
++    if (!eligibility.ok && eligibility.state === "missing_fields") {
+       return NextResponse.json(
+         {
+-          error: "Revision is missing required booking, room, or date fields.",
++          error: eligibility.message,
+           missingFields: [
+             !externalBookingId ? "external_booking_id" : null,
+             !externalRoomTypeId ? "external_room_type_id" : null,
+@@ -222,19 +262,16 @@ export async function POST(request: Request): Promise<NextResponse> {
+             !departureDate ? "departure_date" : null,
+           ].filter(Boolean),
+         },
+-        { status: 409 }
++        { status: eligibility.status }
+       );
+     }
+-    if (arrivalDate >= departureDate) {
+-      return NextResponse.json({ error: "Revision has an invalid date range." }, { status: 409 });
+-    }
+-    if ((amountNumber != null && !currency) || (amountNumber == null && currency)) {
+-      return NextResponse.json({ error: "Revision amount and currency must both be present together if provided." }, { status: 409 });
+-    }
+-    if (amountNumber != null && amountNumber < 0) {
+-      return NextResponse.json({ error: "Revision amount must be zero or positive." }, { status: 409 });
++    if (!eligibility.ok) {
++      return NextResponse.json({ error: eligibility.message, status: eligibility.state }, { status: eligibility.status });
+     }
+ 
++    const assuredArrivalDate = arrivalDate as string;
++    const assuredDepartureDate = departureDate as string;
++
+     const revisionProvider = resolveProviderFromRevision({
+       otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+       otaName: asStringOrNull(revisionRow.ota_name),
+@@ -433,7 +470,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     if (overlapResult.error) throw overlapResult.error;
+ 
+-    const candidateEndExclusive = departureDate;
++    const candidateEndExclusive = assuredDepartureDate;
+     const overlappingRows = ((overlapResult.data ?? []) as JsonRecord[]).filter((row) => {
+       const rowBookingId = asStringOrNull(row.id);
+       const rowStayUnitId = resolveStayUnitId(row);
+@@ -451,7 +488,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       }
+ 
+       const rowEndExclusive = rowEndDate;
+-      return rangesOverlapExclusive(arrivalDate, candidateEndExclusive, rowStartDate, rowEndExclusive);
++      return rangesOverlapExclusive(assuredArrivalDate, candidateEndExclusive, rowStartDate, rowEndExclusive);
+     });
+ 
+     if (overlappingRows.length > 0) {
+@@ -467,8 +504,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+           external_booking_id: externalBookingId,
+           linked_booking_id: linkedBookingId,
+           target_stay_unit_id: targetStayUnitId,
+-          target_arrival_date: arrivalDate,
+-          target_departure_date: departureDate,
++          target_arrival_date: assuredArrivalDate,
++          target_departure_date: assuredDepartureDate,
+           conflicting_booking_id: asStringOrNull(firstOverlap.id),
+           conflicting_start_date: normalizeDateOnly(asStringOrNull(firstOverlap.start_date)),
+           conflicting_end_date: normalizeDateOnly(asStringOrNull(firstOverlap.end_date)),
+@@ -526,8 +563,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+         total_price: asNumberOrNull(linkedBooking.total_price),
+       },
+       channel_modified_to: {
+-        start_date: arrivalDate,
+-        end_date: departureDate,
++        start_date: assuredArrivalDate,
++        end_date: assuredDepartureDate,
+         stay_unit_id: targetStayUnitId,
+         total_price: nextTotalPrice,
+       },
+@@ -547,8 +584,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+           guest_name: asStringOrNull(currentPricingSnapshot.channel_guest_name) ?? asStringOrNull(currentPricingSnapshot.guest_name),
+         },
+         to: {
+-          start_date: arrivalDate,
+-          end_date: departureDate,
++          start_date: assuredArrivalDate,
++          end_date: assuredDepartureDate,
+           amount: nextTotalPrice,
+           currency,
+           guest_name: guestName,
+@@ -566,8 +603,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+     }
+ 
+     const updatePayload: Record<string, unknown> = {
+-      start_date: arrivalDate,
+-      end_date: departureDate,
++      start_date: assuredArrivalDate,
++      end_date: assuredDepartureDate,
+       pricing_snapshot: nextPricingSnapshot,
+       updated_at: now,
+       payment_status: "not_required",
+@@ -684,8 +721,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+         from_start_date: currentStartDate,
+         from_end_date: currentEndDate,
+         from_stay_unit_id: currentStayUnitId,
+-        to_start_date: arrivalDate,
+-        to_end_date: departureDate,
++        to_start_date: assuredArrivalDate,
++        to_end_date: assuredDepartureDate,
+         to_stay_unit_id: targetStayUnitId,
+       },
+     });
+diff --git a/app/api/host/pro/channel/channex/bookings/import-preview/route.ts b/app/api/host/pro/channel/channex/bookings/import-preview/route.ts
+index edc01b00..8569ea25 100644
+--- a/app/api/host/pro/channel/channex/bookings/import-preview/route.ts
++++ b/app/api/host/pro/channel/channex/bookings/import-preview/route.ts
+@@ -13,6 +13,37 @@ type ImportPreviewBody = {
+   channelBookingRevisionId?: string;
+ };
+ 
++export function assessImportPreviewEligibility(input: {
++  importStatus: string | null;
++  ackStatus: string | null;
++  externalBookingId: string | null;
++  arrivalDate: string | null;
++  departureDate: string | null;
++  externalRoomTypeId: string | null;
++  amountNumber: number | null;
++  currency: string | null;
++  linkedBookingId: string | null;
++}): { ok: boolean; status: number; message: string; state: string } {
++  const importStatus = input.importStatus ?? "preview";
++  const ackStatus = input.ackStatus ?? "not_acknowledged";
++  if (!["preview", "failed"].includes(importStatus)) {
++    return { ok: false, status: 409, message: `This preview is already ${importStatus}.`, state: importStatus };
++  }
++  if (ackStatus !== "not_acknowledged") {
++    return { ok: false, status: 409, message: "Only not_acknowledged preview bookings can be imported in this phase.", state: ackStatus };
++  }
++  if (!input.externalBookingId || !input.arrivalDate || !input.departureDate || !input.externalRoomTypeId) {
++    return { ok: false, status: 409, message: "Preview booking is missing required booking, room, or date fields.", state: "missing_fields" };
++  }
++  if (input.amountNumber == null || !input.currency) {
++    return { ok: false, status: 409, message: "Preview booking amount or currency is missing.", state: "missing_amount" };
++  }
++  if (input.linkedBookingId) {
++    return { ok: true, status: 200, message: "This preview is already linked to a Famlo booking.", state: "already_imported" };
++  }
++  return { ok: true, status: 200, message: "Preview booking can be imported into Famlo.", state: "eligible" };
++}
++
+ function asString(value: unknown): string {
+   return typeof value === "string" ? value.trim() : "";
+ }
+@@ -123,16 +154,21 @@ export async function POST(request: Request): Promise<NextResponse> {
+     });
+     const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
+ 
+-    if (!["preview", "failed"].includes(importStatus)) {
+-      return NextResponse.json({ error: `This preview is already ${importStatus}.` }, { status: 409 });
+-    }
+-    if (ackStatus !== "not_acknowledged") {
+-      return NextResponse.json({ error: "Only not_acknowledged preview bookings can be imported in this phase." }, { status: 409 });
+-    }
+-    if (!externalBookingId || !arrivalDate || !departureDate || !externalRoomTypeId) {
++    const eligibility = assessImportPreviewEligibility({
++      importStatus,
++      ackStatus,
++      externalBookingId,
++      arrivalDate,
++      departureDate,
++      externalRoomTypeId,
++      amountNumber,
++      currency,
++      linkedBookingId: asStringOrNull(revisionRow.linked_booking_id),
++    });
++    if (!eligibility.ok && eligibility.state === "missing_fields") {
+       return NextResponse.json(
+         {
+-          error: "Preview booking is missing required booking, room, or date fields.",
++          error: eligibility.message,
+           missingFields: [
+             !externalBookingId ? "external_booking_id" : null,
+             !arrivalDate ? "arrival_date" : null,
+@@ -140,34 +176,39 @@ export async function POST(request: Request): Promise<NextResponse> {
+             !externalRoomTypeId ? "external_room_type_id" : null,
+           ].filter(Boolean),
+         },
+-        { status: 409 }
++        { status: eligibility.status }
+       );
+     }
+-    if (amountNumber == null || !currency) {
++    if (!eligibility.ok && eligibility.state === "missing_amount") {
+       return NextResponse.json(
+         {
+-          error: "Preview booking amount or currency is missing.",
++          error: eligibility.message,
+           missingFields: [
+             amountNumber == null ? "amount" : null,
+             !currency ? "currency" : null,
+           ].filter(Boolean),
+         },
+-        { status: 409 }
++        { status: eligibility.status }
+       );
+     }
+-
+-    if (asStringOrNull(revisionRow.linked_booking_id)) {
++    if (!eligibility.ok) {
++      return NextResponse.json({ error: eligibility.message }, { status: eligibility.status });
++    }
++    if (eligibility.state === "already_imported") {
+       return NextResponse.json(
+         {
+           ok: true,
+           status: "already_imported",
+-          message: "This preview is already linked to a Famlo booking.",
++          message: eligibility.message,
+           bookingId: asStringOrNull(revisionRow.linked_booking_id),
+         },
+         { status: 200 }
+       );
+     }
+ 
++    const assuredAmountNumber = amountNumber as number;
++    const assuredCurrency = currency as string;
++
+     const { data: roomMappingRow, error: roomMappingError } = await supabase
+       .from("channel_room_mappings")
+       .select("stay_unit_id,external_room_type_id")
+@@ -245,7 +286,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const now = new Date().toISOString();
+     const guestName = asStringOrNull(revisionRow.guest_name) ?? "OTA Guest";
+-    const amountRounded = Math.round(amountNumber);
++    const amountRounded = Math.round(assuredAmountNumber);
+     const { data: familyRow, error: familyLookupError } = await supabase
+       .from("families")
+       .select("user_id")
+@@ -308,8 +349,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+       stay_unit_id: stayUnitId,
+       base_price: amountRounded,
+       unit_price: amountRounded,
+-      total_amount: amountNumber.toFixed(2),
+-      currency,
++      total_amount: assuredAmountNumber.toFixed(2),
++      currency: assuredCurrency,
+       channel_provider: "channex",
+       channel_source_type: "ota",
+       channel_source: asStringOrNull(revisionRow.source) ?? "booking_list_api",
+@@ -399,8 +440,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+         linked_booking_id: bookingId,
+         stay_unit_id: stayUnitId,
+         host_id: hostId,
+-        amount: amountNumber.toFixed(2),
+-        currency,
++        amount: assuredAmountNumber.toFixed(2),
++        currency: assuredCurrency,
+         technical_owner_user_id: technicalUserId,
+       },
+     });
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts b/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
+index 849e9f7f..756c1675 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
+@@ -1,6 +1,9 @@
+ import { NextResponse } from "next/server";
+ 
+-import { POST as acknowledgeRevision } from "@/app/api/host/pro/channel/channex/bookings/acknowledge/route";
++import {
++  POST as acknowledgeRevision,
++  assessAcknowledgementEligibility,
++} from "@/app/api/host/pro/channel/channex/bookings/acknowledge/route";
+ import {
+   getChannelProviderCapabilities,
+   resolveProviderFromRevision,
+@@ -109,29 +112,15 @@ export async function POST(request: Request): Promise<NextResponse> {
+     const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
+     const externalRevisionId = asStringOrNull(revisionRow.external_revision_id);
+ 
+-    if (importStatus === "modified_applied") {
+-      return NextResponse.json(
+-        { error: "Modification acknowledgement is not supported in this phase yet.", status: importStatus },
+-        { status: 409 }
+-      );
+-    }
+-    if (importStatus === "cancelled_applied") {
+-      return NextResponse.json(
+-        { error: "Cancellation acknowledgement is not supported in this phase yet.", status: importStatus },
+-        { status: 409 }
+-      );
+-    }
+-    if (importStatus !== "imported") {
+-      return NextResponse.json({ error: "Acknowledge only after successful import/apply.", status: importStatus }, { status: 409 });
+-    }
+-    if (ackStatus !== "not_acknowledged") {
+-      return NextResponse.json({ error: `This revision is already ${ackStatus}.`, status: ackStatus }, { status: 409 });
+-    }
+-    if (!linkedBookingId) {
+-      return NextResponse.json({ error: "A linked Famlo booking is required before acknowledgement." }, { status: 409 });
+-    }
+-    if (!externalRevisionId) {
+-      return NextResponse.json({ error: "A Channex feed revision id is required before acknowledgement." }, { status: 409 });
++    const eligibility = assessAcknowledgementEligibility({
++      importStatus,
++      ackStatus,
++      linkedBookingId,
++      externalRevisionId,
++      source: "booking_revision_feed",
++    });
++    if (!eligibility.ok) {
++      return NextResponse.json({ error: eligibility.message, status: eligibility.state }, { status: eligibility.status });
+     }
+ 
+     return acknowledgeRevision(buildForwardedRequest(request, channelBookingRevisionId));
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index 7c0f8a71..96f5f018 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -1627,6 +1627,32 @@ export default function FamloProDashboardShell({
+   const [calendarRateActionDate, setCalendarRateActionDate] = useState<string | null>(null);
+   const [calendarRateOverrides, setCalendarRateOverrides] = useState<Record<string, CalendarRateOverrideState>>({});
+   const [isCalendarRatePending, startCalendarRateTransition] = useTransition();
++  const [bulkCalendarDraft, setBulkCalendarDraft] = useState<{
++    roomId: string;
++    dateFrom: string;
++    dateTo: string;
++    availabilityAction: "none" | "block" | "unblock";
++    rateAmount: string;
++    minStay: string;
++    minStayArrival: string;
++    maxStay: string;
++    cta: "unchanged" | "true" | "false";
++    ctd: "unchanged" | "true" | "false";
++    stopSell: "unchanged" | "true" | "false";
++  }>(() => ({
++    roomId: rooms[0]?.id ?? "",
++    dateFrom: calendarWindow.startDate,
++    dateTo: calendarWindow.startDate,
++    availabilityAction: "none",
++    rateAmount: "",
++    minStay: "",
++    minStayArrival: "",
++    maxStay: "",
++    cta: "unchanged",
++    ctd: "unchanged",
++    stopSell: "unchanged",
++  }));
++  const [isBulkCalendarPending, startBulkCalendarTransition] = useTransition();
+   const [isCalendarJumpPending, startCalendarJumpTransition] = useTransition();
+   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
+   const [bookingDateFilter, setBookingDateFilter] = useState<BookingDateFilter>("Check-in");
+@@ -1656,6 +1682,12 @@ export default function FamloProDashboardShell({
+     const nextDate = new Date(`${calendarWindow.startDate}T12:00:00+05:30`);
+     setCalendarJumpMonth(String(nextDate.getMonth() + 1).padStart(2, "0"));
+     setCalendarJumpYear(String(nextDate.getFullYear()));
++    setBulkCalendarDraft((current) => ({
++      ...current,
++      roomId: current.roomId || rooms[0]?.id || "",
++      dateFrom: calendarWindow.startDate,
++      dateTo: calendarWindow.startDate,
++    }));
+   }, [calendarWindow.startDate]);
+   const activeTopLevel = resolveTopLevelSection(activeSection);
+   const activePropertyTab = resolvePropertyTab(activeSection);
+@@ -1864,6 +1896,86 @@ export default function FamloProDashboardShell({
+     });
+   };
+ 
++  const submitBulkCalendarUpdate = (): void => {
++    const targetRoomIds =
++      bulkCalendarDraft.roomId === "__all__"
++        ? calendarRows.map((row) => row.roomId)
++        : bulkCalendarDraft.roomId
++          ? [bulkCalendarDraft.roomId]
++          : [];
++
++    const hasRestrictionPayload =
++      bulkCalendarDraft.minStay.trim().length > 0 ||
++      bulkCalendarDraft.minStayArrival.trim().length > 0 ||
++      bulkCalendarDraft.maxStay.trim().length > 0 ||
++      bulkCalendarDraft.cta !== "unchanged" ||
++      bulkCalendarDraft.ctd !== "unchanged" ||
++      bulkCalendarDraft.stopSell !== "unchanged";
++
++    if (targetRoomIds.length === 0) {
++      setCalendarActionFeedback({ type: "error", text: "Select at least one room for the bulk calendar update." });
++      return;
++    }
++    if (!bulkCalendarDraft.dateFrom || !bulkCalendarDraft.dateTo || bulkCalendarDraft.dateTo < bulkCalendarDraft.dateFrom) {
++      setCalendarActionFeedback({ type: "error", text: "Choose a valid bulk date range." });
++      return;
++    }
++    if (
++      bulkCalendarDraft.availabilityAction === "none" &&
++      bulkCalendarDraft.rateAmount.trim().length === 0 &&
++      !hasRestrictionPayload
++    ) {
++      setCalendarActionFeedback({ type: "error", text: "Choose at least one bulk rate, availability, or restriction change." });
++      return;
++    }
++
++    setCalendarActionFeedback(null);
++    startBulkCalendarTransition(async () => {
++      try {
++        const response = await fetch("/api/host/pro/calendar/bulk-update", {
++          method: "POST",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify({
++            familyId,
++            roomIds: targetRoomIds,
++            dateFrom: bulkCalendarDraft.dateFrom,
++            dateTo: bulkCalendarDraft.dateTo,
++            rateAction: bulkCalendarDraft.rateAmount.trim().length > 0 ? "save" : null,
++            rateAmount: bulkCalendarDraft.rateAmount.trim().length > 0 ? Number(bulkCalendarDraft.rateAmount) : null,
++            availabilityAction: bulkCalendarDraft.availabilityAction === "none" ? null : bulkCalendarDraft.availabilityAction,
++            restrictions: {
++              minStay: bulkCalendarDraft.minStay.trim().length > 0 ? Number(bulkCalendarDraft.minStay) : undefined,
++              minStayArrival:
++                bulkCalendarDraft.minStayArrival.trim().length > 0 ? Number(bulkCalendarDraft.minStayArrival) : undefined,
++              maxStay: bulkCalendarDraft.maxStay.trim().length > 0 ? Number(bulkCalendarDraft.maxStay) : undefined,
++              cta:
++                bulkCalendarDraft.cta === "unchanged" ? undefined : bulkCalendarDraft.cta === "true",
++              ctd:
++                bulkCalendarDraft.ctd === "unchanged" ? undefined : bulkCalendarDraft.ctd === "true",
++              stopSell:
++                bulkCalendarDraft.stopSell === "unchanged" ? undefined : bulkCalendarDraft.stopSell === "true",
++            },
++          }),
++        });
++        const payload = (await response.json()) as { error?: string; affectedRoomCount?: number };
++        if (!response.ok) {
++          throw new Error(payload.error ?? "Failed to apply bulk calendar update.");
++        }
++
++        setCalendarActionFeedback({
++          type: "success",
++          text: `Applied bulk PMS calendar update for ${payload.affectedRoomCount ?? targetRoomIds.length} room(s) and queued Channex sync safely.`,
++        });
++        router.refresh();
++      } catch (error) {
++        setCalendarActionFeedback({
++          type: "error",
++          text: error instanceof Error ? error.message : "Failed to apply bulk calendar update.",
++        });
++      }
++    });
++  };
++
+   const handleHostBookingCancel = async (booking: ProBookingSummary): Promise<void> => {
+     if (booking.isOta || cancellingBookingId === booking.bookingId) return;
+ 
+@@ -5696,6 +5808,157 @@ export default function FamloProDashboardShell({
+                     )}
+                   </article>
+ 
++                  <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
++                    <div className={styles.listTitle}>Bulk calendar and restrictions</div>
++                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
++                      Use one PMS save flow to batch prices, availability, and restriction changes across a date range. Famlo queues the resulting Channex ARI updates instead of pushing directly from the browser.
++                    </div>
++                    <div style={{ display: "grid", gap: 12 }}>
++                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
++                        <span className={styles.fieldLabel}>Room scope</span>
++                        <select
++                          className={styles.fieldInput}
++                          value={bulkCalendarDraft.roomId}
++                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, roomId: event.target.value }))}
++                        >
++                          <option value="__all__">All visible rooms</option>
++                          {calendarRows.map((row) => (
++                            <option key={row.roomId} value={row.roomId}>
++                              {row.roomName}
++                            </option>
++                          ))}
++                        </select>
++                      </label>
++                      <div className={styles.calendarJumpForm}>
++                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
++                          <span className={styles.fieldLabel}>From</span>
++                          <input
++                            className={styles.fieldInput}
++                            type="date"
++                            value={bulkCalendarDraft.dateFrom}
++                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateFrom: event.target.value }))}
++                          />
++                        </label>
++                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
++                          <span className={styles.fieldLabel}>To</span>
++                          <input
++                            className={styles.fieldInput}
++                            type="date"
++                            value={bulkCalendarDraft.dateTo}
++                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateTo: event.target.value }))}
++                          />
++                        </label>
++                      </div>
++                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
++                        <span className={styles.fieldLabel}>Daily rate override (optional)</span>
++                        <input
++                          className={styles.fieldInput}
++                          inputMode="numeric"
++                          placeholder="Leave blank to keep current rates"
++                          value={bulkCalendarDraft.rateAmount}
++                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, rateAmount: event.target.value }))}
++                        />
++                      </label>
++                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
++                        <span className={styles.fieldLabel}>Availability action</span>
++                        <select
++                          className={styles.fieldInput}
++                          value={bulkCalendarDraft.availabilityAction}
++                          onChange={(event) =>
++                            setBulkCalendarDraft((current) => ({
++                              ...current,
++                              availabilityAction: event.target.value as "none" | "block" | "unblock",
++                            }))
++                          }
++                        >
++                          <option value="none">No availability change</option>
++                          <option value="block">Block / stop selling selected dates</option>
++                          <option value="unblock">Unblock selected dates</option>
++                        </select>
++                      </label>
++                      <div className={styles.calendarJumpForm}>
++                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
++                          <span className={styles.fieldLabel}>Min stay through</span>
++                          <input
++                            className={styles.fieldInput}
++                            inputMode="numeric"
++                            placeholder="Optional"
++                            value={bulkCalendarDraft.minStay}
++                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, minStay: event.target.value }))}
++                          />
++                        </label>
++                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
++                          <span className={styles.fieldLabel}>Min stay arrival</span>
++                          <input
++                            className={styles.fieldInput}
++                            inputMode="numeric"
++                            placeholder="Optional"
++                            value={bulkCalendarDraft.minStayArrival}
++                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, minStayArrival: event.target.value }))}
++                          />
++                        </label>
++                      </div>
++                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
++                        <span className={styles.fieldLabel}>Max stay</span>
++                        <input
++                          className={styles.fieldInput}
++                          inputMode="numeric"
++                          placeholder="Optional"
++                          value={bulkCalendarDraft.maxStay}
++                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, maxStay: event.target.value }))}
++                        />
++                      </label>
++                      <div className={styles.calendarJumpForm}>
++                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
++                          <span className={styles.fieldLabel}>CTA</span>
++                          <select
++                            className={styles.fieldInput}
++                            value={bulkCalendarDraft.cta}
++                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, cta: event.target.value as "unchanged" | "true" | "false" }))}
++                          >
++                            <option value="unchanged">Keep current</option>
++                            <option value="true">Closed to arrival</option>
++                            <option value="false">Open to arrival</option>
++                          </select>
++                        </label>
++                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
++                          <span className={styles.fieldLabel}>CTD</span>
++                          <select
++                            className={styles.fieldInput}
++                            value={bulkCalendarDraft.ctd}
++                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, ctd: event.target.value as "unchanged" | "true" | "false" }))}
++                          >
++                            <option value="unchanged">Keep current</option>
++                            <option value="true">Closed to departure</option>
++                            <option value="false">Open to departure</option>
++                          </select>
++                        </label>
++                      </div>
++                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
++                        <span className={styles.fieldLabel}>Stop sell</span>
++                        <select
++                          className={styles.fieldInput}
++                          value={bulkCalendarDraft.stopSell}
++                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, stopSell: event.target.value as "unchanged" | "true" | "false" }))}
++                        >
++                          <option value="unchanged">Keep current</option>
++                          <option value="true">Enable stop sell</option>
++                          <option value="false">Disable stop sell</option>
++                        </select>
++                      </label>
++                    </div>
++                    <div className={styles.roomReadinessRow} style={{ marginTop: "auto", paddingTop: 14 }}>
++                      <button
++                        type="button"
++                        className={styles.secondaryActionButton}
++                        onClick={submitBulkCalendarUpdate}
++                        disabled={isBulkCalendarPending}
++                      >
++                        {isBulkCalendarPending ? "Applying..." : "Apply bulk PMS update"}
++                      </button>
++                    </div>
++                  </article>
++
+                   <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
+                     <div className={styles.listTitle}>Jump to month</div>
+                     <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
+diff --git a/lib/channel-providers/channex/client.ts b/lib/channel-providers/channex/client.ts
+index 2f945620..3d041478 100644
+--- a/lib/channel-providers/channex/client.ts
++++ b/lib/channel-providers/channex/client.ts
+@@ -142,7 +142,11 @@ export type ChannexRestrictionChange = {
+   dateTo: string;
+   rate: string;
+   stopSell: boolean;
++  cta: boolean;
++  ctd: boolean;
+   minStayThrough: number;
++  minStayArrival: number;
++  maxStay: number;
+ };
+ 
+ export type ChannexAriPushResult = {
+@@ -1505,7 +1509,11 @@ export async function pushChannexRestrictions(
+       date_to: value.dateTo,
+       rate: value.rate,
+       stop_sell: value.stopSell,
++      closed_to_arrival: value.cta,
++      closed_to_departure: value.ctd,
+       min_stay_through: value.minStayThrough,
++      min_stay_arrival: value.minStayArrival,
++      max_stay: value.maxStay,
+     })),
+   });
+ }
+diff --git a/lib/channex-ari-jobs.ts b/lib/channex-ari-jobs.ts
+index 129db66f..284d9657 100644
+--- a/lib/channex-ari-jobs.ts
++++ b/lib/channex-ari-jobs.ts
+@@ -147,7 +147,11 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
+   availability: number;
+   rate: string;
+   stopSell: boolean;
++  cta: boolean;
++  ctd: boolean;
+   minStayThrough: number;
++  minStayArrival: number;
++  maxStay: number;
+ }> {
+   const segments: Array<{
+     dateFrom: string;
+@@ -155,7 +159,11 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
+     availability: number;
+     rate: string;
+     stopSell: boolean;
++    cta: boolean;
++    ctd: boolean;
+     minStayThrough: number;
++    minStayArrival: number;
++    maxStay: number;
+   }> = [];
+ 
+   for (const day of days) {
+@@ -163,13 +171,21 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
+     const rate = formatPrice(day.effectiveRate);
+     const stopSell = day.stopSell || day.isBlocked;
+     const minStayThrough = Math.max(1, day.minStay);
++    const minStayArrival = Math.max(1, day.minStayArrival);
++    const maxStay = Math.max(minStayArrival, day.maxStay);
++    const cta = day.cta;
++    const ctd = day.ctd;
+     const last = segments[segments.length - 1];
+     if (
+       last &&
+       last.availability === availability &&
+       last.rate === rate &&
+       last.stopSell === stopSell &&
+-      last.minStayThrough === minStayThrough
++      last.cta === cta &&
++      last.ctd === ctd &&
++      last.minStayThrough === minStayThrough &&
++      last.minStayArrival === minStayArrival &&
++      last.maxStay === maxStay
+     ) {
+       last.dateTo = day.date;
+       continue;
+@@ -181,7 +197,11 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
+       availability,
+       rate,
+       stopSell,
++      cta,
++      ctd,
+       minStayThrough,
++      minStayArrival,
++      maxStay,
+     });
+   }
+ 
+@@ -218,15 +238,6 @@ function extractTaskIds(result: ChannexAriPushResult): string[] {
+   return [...taskIds];
+ }
+ 
+-function unsupportedRestrictionNotes(): string[] {
+-  return [
+-    "max_stay unsupported",
+-    "closed_to_arrival unsupported",
+-    "closed_to_departure unsupported",
+-    "min_stay_arrival unsupported",
+-  ];
+-}
+-
+ async function loadEligibleProviders(
+   supabase: SupabaseClient,
+   input: { familyId: string; providerKeys?: ChannelProviderKey[] | null }
+@@ -253,11 +264,36 @@ async function loadEligibleProviders(
+   if (channexRowResult.error) throw channexRowResult.error;
+ 
+   const propertyId = asString(channexRowResult.data?.external_property_id);
+-  return (providerRowsResult.data ?? [])
++  const providers = (providerRowsResult.data ?? [])
+     .map((row) => asString(row.provider_code) as ChannelProviderKey | null)
+     .filter((providerKey): providerKey is ChannelProviderKey => Boolean(providerKey))
+     .filter((providerKey) => getChannelProviderCapabilities(providerKey).supportsAriSync)
+     .map((providerKey) => ({ providerKey, propertyId }));
++
++  if (providers.length > 0 || !propertyId) {
++    return providers;
++  }
++
++  const [{ count: roomMappingCount, error: roomMappingError }, { count: ratePlanCount, error: ratePlanError }] = await Promise.all([
++    supabase
++      .from("channel_room_mappings")
++      .select("id", { count: "exact", head: true })
++      .eq("family_id", input.familyId)
++      .eq("provider_code", "channex"),
++    supabase
++      .from("channel_rate_plans")
++      .select("id", { count: "exact", head: true })
++      .eq("family_id", input.familyId)
++      .eq("provider_code", "channex"),
++  ]);
++  if (roomMappingError) throw roomMappingError;
++  if (ratePlanError) throw ratePlanError;
++
++  if ((roomMappingCount ?? 0) > 0 && (ratePlanCount ?? 0) > 0) {
++    return [{ providerKey: "booking", propertyId }];
++  }
++
++  return providers;
+ }
+ 
+ export async function enqueueChannexAriSyncJobs(
+@@ -326,7 +362,7 @@ export async function enqueueChannexAriSyncJobs(
+         source_route: input.sourceRoute,
+         actor_user_id: input.actorUserId ?? null,
+         actor_role: input.actorRole ?? null,
+-        unsupported: jobType === "restriction_update" || jobType === "full_sync" ? unsupportedRestrictionNotes() : [],
++        unsupported: [],
+       };
+ 
+       const idempotencyKey = chunkIdempotencyKey({
+@@ -386,6 +422,33 @@ export async function enqueueBookingInventoryAriSyncJobs(
+   });
+ }
+ 
++export async function triggerQueuedChannexSyncWorker(input: {
++  requestUrl: string;
++  workerId: string;
++  limit?: number;
++}): Promise<boolean> {
++  const secret = asString(process.env.CRON_SECRET);
++  if (!secret) return false;
++
++  const base = new URL(input.requestUrl);
++  const cronUrl = new URL("/api/internal/cron/channel-sync-jobs", base.origin);
++  cronUrl.searchParams.set("limit", String(Math.max(1, Math.min(input.limit ?? 5, 10))));
++  cronUrl.searchParams.set("workerId", input.workerId);
++
++  try {
++    const response = await fetch(cronUrl.toString(), {
++      method: "POST",
++      headers: {
++        Authorization: `Bearer ${secret}`,
++      },
++      cache: "no-store",
++    });
++    return response.ok;
++  } catch {
++    return false;
++  }
++}
++
+ async function resolveHostId(supabase: SupabaseClient, familyId: string): Promise<string | null> {
+   const { data, error } = await supabase
+     .from("hosts")
+@@ -495,7 +558,11 @@ async function buildAriPayloadForJob(
+         dateTo: segment.dateTo,
+         rate: segment.rate,
+         stopSell: segment.stopSell,
++        cta: segment.cta,
++        ctd: segment.ctd,
+         minStayThrough: segment.minStayThrough,
++        minStayArrival: segment.minStayArrival,
++        maxStay: segment.maxStay,
+       });
+     }
+   }
+@@ -504,7 +571,7 @@ async function buildAriPayloadForJob(
+     availabilityValues,
+     restrictionValues,
+     roomsConsidered,
+-    unsupported: unsupportedRestrictionNotes(),
++    unsupported: [],
+   };
+ }
+ 
+diff --git a/lib/channex-ari-sync.ts b/lib/channex-ari-sync.ts
+index 71b06e12..b0ca9735 100644
+--- a/lib/channex-ari-sync.ts
++++ b/lib/channex-ari-sync.ts
+@@ -41,7 +41,17 @@ type PushRangeSummary = {
+   roomTypeId: string;
+   ratePlanId: string;
+   availabilityRanges: Array<{ dateFrom: string; dateTo: string; availability: number }>;
+-  rateRanges: Array<{ dateFrom: string; dateTo: string; rate: string; stopSell: boolean; minStayThrough: number }>;
++  rateRanges: Array<{
++    dateFrom: string;
++    dateTo: string;
++    rate: string;
++    stopSell: boolean;
++    cta: boolean;
++    ctd: boolean;
++    minStayThrough: number;
++    minStayArrival: number;
++    maxStay: number;
++  }>;
+ };
+ 
+ type AriChannelHealth = {
+@@ -944,7 +954,17 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+       roomTypeId: item.room.externalRoomTypeId,
+       ratePlanId: item.room.externalRatePlanId,
+       availabilityRanges: segments.map((segment) => ({ dateFrom: segment.dateFrom, dateTo: segment.dateTo, availability: segment.availability })),
+-      rateRanges: segments.map((segment) => ({ dateFrom: segment.dateFrom, dateTo: segment.dateTo, rate: segment.rate, stopSell: segment.stopSell, minStayThrough: 1 })),
++      rateRanges: segments.map((segment) => ({
++        dateFrom: segment.dateFrom,
++        dateTo: segment.dateTo,
++        rate: segment.rate,
++        stopSell: segment.stopSell,
++        cta: false,
++        ctd: false,
++        minStayThrough: 1,
++        minStayArrival: 1,
++        maxStay: 30,
++      })),
+     });
+     for (const segment of segments) {
+       availabilityValues.push({
+@@ -961,7 +981,11 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+         dateTo: segment.dateTo,
+         rate: segment.rate,
+         stopSell: segment.stopSell,
++        cta: false,
++        ctd: false,
+         minStayThrough: 1,
++        minStayArrival: 1,
++        maxStay: 30,
+       });
+     }
+   }
+diff --git a/lib/inventory.ts b/lib/inventory.ts
+index 24185f36..6e51abe4 100644
+--- a/lib/inventory.ts
++++ b/lib/inventory.ts
+@@ -37,6 +37,7 @@ export type InventoryProjectionDay = {
+   cta: boolean;
+   ctd: boolean;
+   minStay: number;
++  minStayArrival: number;
+   maxStay: number;
+   stopSell: boolean;
+   manualBlockPresent: boolean;
+@@ -62,6 +63,7 @@ type InventoryRuleSet = {
+   bookingWindowDays: number;
+   leadTimeHours: number;
+   minStayDays: number;
++  minStayArrivalDays: number;
+   maxStayDays: number;
+   ctaDefault: boolean;
+   ctdDefault: boolean;
+@@ -153,6 +155,7 @@ function mapProjectionRow(row: JsonRecord): InventoryProjectionDay {
+     cta: Boolean(row.cta),
+     ctd: Boolean(row.ctd),
+     minStay: asNumber(row.min_stay, 1),
++    minStayArrival: asNumber(metadata.min_stay_arrival, asNumber(row.min_stay, 1)),
+     maxStay: asNumber(row.max_stay, 30),
+     stopSell: Boolean(row.stop_sell),
+     manualBlockPresent: Boolean(row.manual_block_present),
+@@ -193,6 +196,7 @@ async function loadRules(
+     bookingWindowDays: 365,
+     leadTimeHours: 0,
+     minStayDays: 1,
++    minStayArrivalDays: 1,
+     maxStayDays: 30,
+     ctaDefault: false,
+     ctdDefault: false,
+@@ -242,6 +246,7 @@ async function loadRules(
+     bookingWindowDays: asNumber(source.booking_window_days, defaults.bookingWindowDays),
+     leadTimeHours: asNumber(source.lead_time_hours, defaults.leadTimeHours),
+     minStayDays: asNumber(source.min_stay_days, defaults.minStayDays),
++    minStayArrivalDays: asNumber(source.min_stay_arrival_days, asNumber(source.min_stay_days, defaults.minStayDays)),
+     maxStayDays: Math.max(
+       asNumber(source.min_stay_days, defaults.minStayDays),
+       asNumber(source.max_stay_days, defaults.maxStayDays)
+@@ -353,8 +358,10 @@ function projectDay(input: {
+     "manual_block_removed",
+     "legacy_manual_block_imported",
+   ]);
++  const restrictionEvent = latestEventForDate(input.events, input.date, ["restriction_updated"]);
+ 
+   const ratePayload = (rateEvent?.payload as JsonRecord | null) ?? {};
++  const restrictionPayload = (restrictionEvent?.payload as JsonRecord | null) ?? {};
+   const manualRateAmount =
+     asString(rateEvent?.event_type) === "manual_rate_set" ? Math.max(0, Math.round(asNumber(ratePayload.amount))) : 0;
+   const effectiveRate = manualRateAmount > 0 ? manualRateAmount : baseRate;
+@@ -377,7 +384,12 @@ function projectDay(input: {
+     }
+   }
+ 
+-  const stopSell = input.rules.stopSellDefault;
++  const cta = asBoolean(restrictionPayload.cta, input.rules.ctaDefault);
++  const ctd = asBoolean(restrictionPayload.ctd, input.rules.ctdDefault);
++  const minStay = Math.max(1, asNumber(restrictionPayload.min_stay, input.rules.minStayDays));
++  const minStayArrival = Math.max(1, asNumber(restrictionPayload.min_stay_arrival, input.rules.minStayArrivalDays));
++  const maxStay = Math.max(minStay, asNumber(restrictionPayload.max_stay, input.rules.maxStayDays));
++  const stopSell = asBoolean(restrictionPayload.stop_sell, input.rules.stopSellDefault);
+   const availableUnits = Math.max(0, allotmentLimit - confirmedUnits - holdUnits);
+   const isBlocked = stopSell || manualBlockPresent || availableUnits <= 0;
+   const blockReason = stopSell
+@@ -404,16 +416,18 @@ function projectDay(input: {
+     allotmentLimit,
+     confirmedUnits,
+     holdUnits,
+-    cta: input.rules.ctaDefault,
+-    ctd: input.rules.ctdDefault,
+-    minStay: input.rules.minStayDays,
+-    maxStay: input.rules.maxStayDays,
++    cta,
++    ctd,
++    minStay,
++    minStayArrival,
++    maxStay,
+     stopSell,
+     manualBlockPresent,
+-    lastEventId: asString(rateEvent?.id) ?? asString(blockEvent?.id),
++    lastEventId: asString(restrictionEvent?.id) ?? asString(rateEvent?.id) ?? asString(blockEvent?.id),
+     metadata: {
+       inventory_mode: asString(input.stayUnit.inventory_mode) ?? "physical_unit",
+       hold_expiry_authoritative: true,
++      min_stay_arrival: minStayArrival,
+     },
+   };
+ }
+diff --git a/tests/channel-provider-lifecycle.test.ts b/tests/channel-provider-lifecycle.test.ts
+index 1002a9be..a41e4810 100644
+--- a/tests/channel-provider-lifecycle.test.ts
++++ b/tests/channel-provider-lifecycle.test.ts
+@@ -18,6 +18,10 @@ import {
+ } from "@/lib/channel-provider-framework";
+ import { resolveProviderOperationPolicy } from "@/app/api/host/pro/channel/providers/operation/route";
+ import { verifyChannexWebhookRequest } from "@/app/api/webhooks/channex/bookings/route";
++import { assessImportPreviewEligibility } from "@/app/api/host/pro/channel/channex/bookings/import-preview/route";
++import { assessModificationApplyEligibility } from "@/app/api/host/pro/channel/channex/bookings/apply-modification/route";
++import { assessCancellationApplyEligibility } from "@/app/api/host/pro/channel/channex/bookings/apply-cancellation/route";
++import { assessAcknowledgementEligibility } from "@/app/api/host/pro/channel/channex/bookings/acknowledge/route";
+ 
+ function buildAriSnapshot(label: string): ChannexAriHealthSnapshot {
+   return {
+@@ -319,3 +323,117 @@ test("Framework permission guard rejects host activation and allows admin activa
+     })
+   );
+ });
++
++test("Import preview route allows only clean not-acknowledged revisions and stays idempotent", () => {
++  const eligible = assessImportPreviewEligibility({
++    importStatus: "preview",
++    ackStatus: "not_acknowledged",
++    externalBookingId: "ext-booking-1",
++    arrivalDate: "2026-05-20",
++    departureDate: "2026-05-22",
++    externalRoomTypeId: "room-1",
++    amountNumber: 2500,
++    currency: "INR",
++    linkedBookingId: null,
++  });
++  assert.equal(eligible.ok, true);
++  assert.equal(eligible.state, "eligible");
++
++  const duplicate = assessImportPreviewEligibility({
++    importStatus: "imported",
++    ackStatus: "acknowledged",
++    externalBookingId: "ext-booking-1",
++    arrivalDate: "2026-05-20",
++    departureDate: "2026-05-22",
++    externalRoomTypeId: "room-1",
++    amountNumber: 2500,
++    currency: "INR",
++    linkedBookingId: "booking-1",
++  });
++  assert.equal(duplicate.ok, false);
++  assert.equal(duplicate.status, 409);
++});
++
++test("Modification apply route only allows reviewed revisions and blocks invalid payloads", () => {
++  const eligible = assessModificationApplyEligibility({
++    importStatus: "modified_pending_review",
++    ackStatus: "not_acknowledged",
++    linkedBookingId: "booking-1",
++    externalBookingId: "ext-booking-1",
++    externalRoomTypeId: "room-1",
++    arrivalDate: "2026-05-20",
++    departureDate: "2026-05-22",
++    amountNumber: 3200,
++    currency: "INR",
++  });
++  assert.equal(eligible.ok, true);
++  assert.equal(eligible.state, "eligible");
++
++  const invalid = assessModificationApplyEligibility({
++    importStatus: "preview",
++    ackStatus: "not_acknowledged",
++    linkedBookingId: "booking-1",
++    externalBookingId: "ext-booking-1",
++    externalRoomTypeId: "room-1",
++    arrivalDate: "2026-05-22",
++    departureDate: "2026-05-20",
++    amountNumber: 3200,
++    currency: "INR",
++  });
++  assert.equal(invalid.ok, false);
++  assert.equal(invalid.status, 409);
++});
++
++test("Cancellation apply route requires a cancelled revision linked to a Famlo booking", () => {
++  const eligible = assessCancellationApplyEligibility({
++    revisionStatus: "cancelled",
++    linkedBookingId: "booking-1",
++  });
++  assert.equal(eligible.ok, true);
++
++  const blocked = assessCancellationApplyEligibility({
++    revisionStatus: "modified",
++    linkedBookingId: "booking-1",
++  });
++  assert.equal(blocked.ok, false);
++  assert.equal(blocked.status, 409);
++});
++
++test("Acknowledgement route only allows applied revisions after successful Famlo apply", () => {
++  const imported = assessAcknowledgementEligibility({
++    importStatus: "imported",
++    ackStatus: "not_acknowledged",
++    linkedBookingId: "booking-1",
++    externalRevisionId: "revision-1",
++    source: "booking_revision_feed",
++  });
++  assert.equal(imported.ok, true);
++
++  const modified = assessAcknowledgementEligibility({
++    importStatus: "modified_applied",
++    ackStatus: "not_acknowledged",
++    linkedBookingId: "booking-1",
++    externalRevisionId: "revision-2",
++    source: "booking_revision_feed",
++  });
++  assert.equal(modified.ok, true);
++
++  const cancelled = assessAcknowledgementEligibility({
++    importStatus: "cancelled_applied",
++    ackStatus: "not_acknowledged",
++    linkedBookingId: "booking-1",
++    externalRevisionId: "revision-3",
++    source: "booking_revision_feed",
++  });
++  assert.equal(cancelled.ok, true);
++
++  const blocked = assessAcknowledgementEligibility({
++    importStatus: "modified_pending_review",
++    ackStatus: "not_acknowledged",
++    linkedBookingId: "booking-1",
++    externalRevisionId: "revision-4",
++    source: "booking_revision_feed",
++  });
++  assert.equal(blocked.ok, false);
++  assert.equal(blocked.status, 409);
++});

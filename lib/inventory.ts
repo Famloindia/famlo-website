@@ -37,6 +37,7 @@ export type InventoryProjectionDay = {
   cta: boolean;
   ctd: boolean;
   minStay: number;
+  minStayArrival: number;
   maxStay: number;
   stopSell: boolean;
   manualBlockPresent: boolean;
@@ -62,6 +63,7 @@ type InventoryRuleSet = {
   bookingWindowDays: number;
   leadTimeHours: number;
   minStayDays: number;
+  minStayArrivalDays: number;
   maxStayDays: number;
   ctaDefault: boolean;
   ctdDefault: boolean;
@@ -153,6 +155,7 @@ function mapProjectionRow(row: JsonRecord): InventoryProjectionDay {
     cta: Boolean(row.cta),
     ctd: Boolean(row.ctd),
     minStay: asNumber(row.min_stay, 1),
+    minStayArrival: asNumber(metadata.min_stay_arrival, asNumber(row.min_stay, 1)),
     maxStay: asNumber(row.max_stay, 30),
     stopSell: Boolean(row.stop_sell),
     manualBlockPresent: Boolean(row.manual_block_present),
@@ -193,6 +196,7 @@ async function loadRules(
     bookingWindowDays: 365,
     leadTimeHours: 0,
     minStayDays: 1,
+    minStayArrivalDays: 1,
     maxStayDays: 30,
     ctaDefault: false,
     ctdDefault: false,
@@ -242,6 +246,7 @@ async function loadRules(
     bookingWindowDays: asNumber(source.booking_window_days, defaults.bookingWindowDays),
     leadTimeHours: asNumber(source.lead_time_hours, defaults.leadTimeHours),
     minStayDays: asNumber(source.min_stay_days, defaults.minStayDays),
+    minStayArrivalDays: asNumber(source.min_stay_arrival_days, asNumber(source.min_stay_days, defaults.minStayDays)),
     maxStayDays: Math.max(
       asNumber(source.min_stay_days, defaults.minStayDays),
       asNumber(source.max_stay_days, defaults.maxStayDays)
@@ -353,8 +358,10 @@ function projectDay(input: {
     "manual_block_removed",
     "legacy_manual_block_imported",
   ]);
+  const restrictionEvent = latestEventForDate(input.events, input.date, ["restriction_updated"]);
 
   const ratePayload = (rateEvent?.payload as JsonRecord | null) ?? {};
+  const restrictionPayload = (restrictionEvent?.payload as JsonRecord | null) ?? {};
   const manualRateAmount =
     asString(rateEvent?.event_type) === "manual_rate_set" ? Math.max(0, Math.round(asNumber(ratePayload.amount))) : 0;
   const effectiveRate = manualRateAmount > 0 ? manualRateAmount : baseRate;
@@ -377,7 +384,12 @@ function projectDay(input: {
     }
   }
 
-  const stopSell = input.rules.stopSellDefault;
+  const cta = asBoolean(restrictionPayload.cta, input.rules.ctaDefault);
+  const ctd = asBoolean(restrictionPayload.ctd, input.rules.ctdDefault);
+  const minStay = Math.max(1, asNumber(restrictionPayload.min_stay, input.rules.minStayDays));
+  const minStayArrival = Math.max(1, asNumber(restrictionPayload.min_stay_arrival, input.rules.minStayArrivalDays));
+  const maxStay = Math.max(minStay, asNumber(restrictionPayload.max_stay, input.rules.maxStayDays));
+  const stopSell = asBoolean(restrictionPayload.stop_sell, input.rules.stopSellDefault);
   const availableUnits = Math.max(0, allotmentLimit - confirmedUnits - holdUnits);
   const isBlocked = stopSell || manualBlockPresent || availableUnits <= 0;
   const blockReason = stopSell
@@ -404,16 +416,18 @@ function projectDay(input: {
     allotmentLimit,
     confirmedUnits,
     holdUnits,
-    cta: input.rules.ctaDefault,
-    ctd: input.rules.ctdDefault,
-    minStay: input.rules.minStayDays,
-    maxStay: input.rules.maxStayDays,
+    cta,
+    ctd,
+    minStay,
+    minStayArrival,
+    maxStay,
     stopSell,
     manualBlockPresent,
-    lastEventId: asString(rateEvent?.id) ?? asString(blockEvent?.id),
+    lastEventId: asString(restrictionEvent?.id) ?? asString(rateEvent?.id) ?? asString(blockEvent?.id),
     metadata: {
       inventory_mode: asString(input.stayUnit.inventory_mode) ?? "physical_unit",
       hold_expiry_authoritative: true,
+      min_stay_arrival: minStayArrival,
     },
   };
 }

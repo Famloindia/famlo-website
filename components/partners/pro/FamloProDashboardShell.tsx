@@ -1627,6 +1627,32 @@ export default function FamloProDashboardShell({
   const [calendarRateActionDate, setCalendarRateActionDate] = useState<string | null>(null);
   const [calendarRateOverrides, setCalendarRateOverrides] = useState<Record<string, CalendarRateOverrideState>>({});
   const [isCalendarRatePending, startCalendarRateTransition] = useTransition();
+  const [bulkCalendarDraft, setBulkCalendarDraft] = useState<{
+    roomId: string;
+    dateFrom: string;
+    dateTo: string;
+    availabilityAction: "none" | "block" | "unblock";
+    rateAmount: string;
+    minStay: string;
+    minStayArrival: string;
+    maxStay: string;
+    cta: "unchanged" | "true" | "false";
+    ctd: "unchanged" | "true" | "false";
+    stopSell: "unchanged" | "true" | "false";
+  }>(() => ({
+    roomId: rooms[0]?.id ?? "",
+    dateFrom: calendarWindow.startDate,
+    dateTo: calendarWindow.startDate,
+    availabilityAction: "none",
+    rateAmount: "",
+    minStay: "",
+    minStayArrival: "",
+    maxStay: "",
+    cta: "unchanged",
+    ctd: "unchanged",
+    stopSell: "unchanged",
+  }));
+  const [isBulkCalendarPending, startBulkCalendarTransition] = useTransition();
   const [isCalendarJumpPending, startCalendarJumpTransition] = useTransition();
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
   const [bookingDateFilter, setBookingDateFilter] = useState<BookingDateFilter>("Check-in");
@@ -1656,6 +1682,12 @@ export default function FamloProDashboardShell({
     const nextDate = new Date(`${calendarWindow.startDate}T12:00:00+05:30`);
     setCalendarJumpMonth(String(nextDate.getMonth() + 1).padStart(2, "0"));
     setCalendarJumpYear(String(nextDate.getFullYear()));
+    setBulkCalendarDraft((current) => ({
+      ...current,
+      roomId: current.roomId || rooms[0]?.id || "",
+      dateFrom: calendarWindow.startDate,
+      dateTo: calendarWindow.startDate,
+    }));
   }, [calendarWindow.startDate]);
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
@@ -1860,6 +1892,86 @@ export default function FamloProDashboardShell({
         });
       } finally {
         setCalendarRateActionDate(null);
+      }
+    });
+  };
+
+  const submitBulkCalendarUpdate = (): void => {
+    const targetRoomIds =
+      bulkCalendarDraft.roomId === "__all__"
+        ? calendarRows.map((row) => row.roomId)
+        : bulkCalendarDraft.roomId
+          ? [bulkCalendarDraft.roomId]
+          : [];
+
+    const hasRestrictionPayload =
+      bulkCalendarDraft.minStay.trim().length > 0 ||
+      bulkCalendarDraft.minStayArrival.trim().length > 0 ||
+      bulkCalendarDraft.maxStay.trim().length > 0 ||
+      bulkCalendarDraft.cta !== "unchanged" ||
+      bulkCalendarDraft.ctd !== "unchanged" ||
+      bulkCalendarDraft.stopSell !== "unchanged";
+
+    if (targetRoomIds.length === 0) {
+      setCalendarActionFeedback({ type: "error", text: "Select at least one room for the bulk calendar update." });
+      return;
+    }
+    if (!bulkCalendarDraft.dateFrom || !bulkCalendarDraft.dateTo || bulkCalendarDraft.dateTo < bulkCalendarDraft.dateFrom) {
+      setCalendarActionFeedback({ type: "error", text: "Choose a valid bulk date range." });
+      return;
+    }
+    if (
+      bulkCalendarDraft.availabilityAction === "none" &&
+      bulkCalendarDraft.rateAmount.trim().length === 0 &&
+      !hasRestrictionPayload
+    ) {
+      setCalendarActionFeedback({ type: "error", text: "Choose at least one bulk rate, availability, or restriction change." });
+      return;
+    }
+
+    setCalendarActionFeedback(null);
+    startBulkCalendarTransition(async () => {
+      try {
+        const response = await fetch("/api/host/pro/calendar/bulk-update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            familyId,
+            roomIds: targetRoomIds,
+            dateFrom: bulkCalendarDraft.dateFrom,
+            dateTo: bulkCalendarDraft.dateTo,
+            rateAction: bulkCalendarDraft.rateAmount.trim().length > 0 ? "save" : null,
+            rateAmount: bulkCalendarDraft.rateAmount.trim().length > 0 ? Number(bulkCalendarDraft.rateAmount) : null,
+            availabilityAction: bulkCalendarDraft.availabilityAction === "none" ? null : bulkCalendarDraft.availabilityAction,
+            restrictions: {
+              minStay: bulkCalendarDraft.minStay.trim().length > 0 ? Number(bulkCalendarDraft.minStay) : undefined,
+              minStayArrival:
+                bulkCalendarDraft.minStayArrival.trim().length > 0 ? Number(bulkCalendarDraft.minStayArrival) : undefined,
+              maxStay: bulkCalendarDraft.maxStay.trim().length > 0 ? Number(bulkCalendarDraft.maxStay) : undefined,
+              cta:
+                bulkCalendarDraft.cta === "unchanged" ? undefined : bulkCalendarDraft.cta === "true",
+              ctd:
+                bulkCalendarDraft.ctd === "unchanged" ? undefined : bulkCalendarDraft.ctd === "true",
+              stopSell:
+                bulkCalendarDraft.stopSell === "unchanged" ? undefined : bulkCalendarDraft.stopSell === "true",
+            },
+          }),
+        });
+        const payload = (await response.json()) as { error?: string; affectedRoomCount?: number };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to apply bulk calendar update.");
+        }
+
+        setCalendarActionFeedback({
+          type: "success",
+          text: `Applied bulk PMS calendar update for ${payload.affectedRoomCount ?? targetRoomIds.length} room(s) and queued Channex sync safely.`,
+        });
+        router.refresh();
+      } catch (error) {
+        setCalendarActionFeedback({
+          type: "error",
+          text: error instanceof Error ? error.message : "Failed to apply bulk calendar update.",
+        });
       }
     });
   };
@@ -5694,6 +5806,157 @@ export default function FamloProDashboardShell({
                     ) : (
                       <div className={styles.feedCopy}>No day selected yet. Click a future rate cell above to edit one room on one date.</div>
                     )}
+                  </article>
+
+                  <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
+                    <div className={styles.listTitle}>Bulk calendar and restrictions</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
+                      Use one PMS save flow to batch prices, availability, and restriction changes across a date range. Famlo queues the resulting Channex ARI updates instead of pushing directly from the browser.
+                    </div>
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Room scope</span>
+                        <select
+                          className={styles.fieldInput}
+                          value={bulkCalendarDraft.roomId}
+                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, roomId: event.target.value }))}
+                        >
+                          <option value="__all__">All visible rooms</option>
+                          {calendarRows.map((row) => (
+                            <option key={row.roomId} value={row.roomId}>
+                              {row.roomName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className={styles.calendarJumpForm}>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>From</span>
+                          <input
+                            className={styles.fieldInput}
+                            type="date"
+                            value={bulkCalendarDraft.dateFrom}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateFrom: event.target.value }))}
+                          />
+                        </label>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>To</span>
+                          <input
+                            className={styles.fieldInput}
+                            type="date"
+                            value={bulkCalendarDraft.dateTo}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateTo: event.target.value }))}
+                          />
+                        </label>
+                      </div>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Daily rate override (optional)</span>
+                        <input
+                          className={styles.fieldInput}
+                          inputMode="numeric"
+                          placeholder="Leave blank to keep current rates"
+                          value={bulkCalendarDraft.rateAmount}
+                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, rateAmount: event.target.value }))}
+                        />
+                      </label>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Availability action</span>
+                        <select
+                          className={styles.fieldInput}
+                          value={bulkCalendarDraft.availabilityAction}
+                          onChange={(event) =>
+                            setBulkCalendarDraft((current) => ({
+                              ...current,
+                              availabilityAction: event.target.value as "none" | "block" | "unblock",
+                            }))
+                          }
+                        >
+                          <option value="none">No availability change</option>
+                          <option value="block">Block / stop selling selected dates</option>
+                          <option value="unblock">Unblock selected dates</option>
+                        </select>
+                      </label>
+                      <div className={styles.calendarJumpForm}>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>Min stay through</span>
+                          <input
+                            className={styles.fieldInput}
+                            inputMode="numeric"
+                            placeholder="Optional"
+                            value={bulkCalendarDraft.minStay}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, minStay: event.target.value }))}
+                          />
+                        </label>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>Min stay arrival</span>
+                          <input
+                            className={styles.fieldInput}
+                            inputMode="numeric"
+                            placeholder="Optional"
+                            value={bulkCalendarDraft.minStayArrival}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, minStayArrival: event.target.value }))}
+                          />
+                        </label>
+                      </div>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Max stay</span>
+                        <input
+                          className={styles.fieldInput}
+                          inputMode="numeric"
+                          placeholder="Optional"
+                          value={bulkCalendarDraft.maxStay}
+                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, maxStay: event.target.value }))}
+                        />
+                      </label>
+                      <div className={styles.calendarJumpForm}>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>CTA</span>
+                          <select
+                            className={styles.fieldInput}
+                            value={bulkCalendarDraft.cta}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, cta: event.target.value as "unchanged" | "true" | "false" }))}
+                          >
+                            <option value="unchanged">Keep current</option>
+                            <option value="true">Closed to arrival</option>
+                            <option value="false">Open to arrival</option>
+                          </select>
+                        </label>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>CTD</span>
+                          <select
+                            className={styles.fieldInput}
+                            value={bulkCalendarDraft.ctd}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, ctd: event.target.value as "unchanged" | "true" | "false" }))}
+                          >
+                            <option value="unchanged">Keep current</option>
+                            <option value="true">Closed to departure</option>
+                            <option value="false">Open to departure</option>
+                          </select>
+                        </label>
+                      </div>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Stop sell</span>
+                        <select
+                          className={styles.fieldInput}
+                          value={bulkCalendarDraft.stopSell}
+                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, stopSell: event.target.value as "unchanged" | "true" | "false" }))}
+                        >
+                          <option value="unchanged">Keep current</option>
+                          <option value="true">Enable stop sell</option>
+                          <option value="false">Disable stop sell</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div className={styles.roomReadinessRow} style={{ marginTop: "auto", paddingTop: 14 }}>
+                      <button
+                        type="button"
+                        className={styles.secondaryActionButton}
+                        onClick={submitBulkCalendarUpdate}
+                        disabled={isBulkCalendarPending}
+                      >
+                        {isBulkCalendarPending ? "Applying..." : "Apply bulk PMS update"}
+                      </button>
+                    </div>
                   </article>
 
                   <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>

@@ -968,25 +968,42 @@ export async function enqueueChannelSyncJob(
     maxAttempts?: number;
   }
 ): Promise<string | null> {
-  const { data, error } = await supabase
-    .from("channel_sync_jobs")
-    .upsert(
-      {
-        family_id: input.familyId,
-        provider_code: input.providerKey,
-        job_type: input.jobType,
-        status: "queued",
-        priority: input.priority ?? 100,
-        idempotency_key: input.idempotencyKey ?? null,
-        payload: input.payload ?? {},
-        max_attempts: input.maxAttempts ?? 5,
-        run_after: input.runAfter ?? new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      } as never,
-      { onConflict: "idempotency_key" }
-    )
-    .select("id")
-    .maybeSingle();
+  const queuedAt = new Date().toISOString();
+  const baseJobRow = {
+    family_id: input.familyId,
+    provider_code: input.providerKey,
+    job_type: input.jobType,
+    status: "queued",
+    priority: input.priority ?? 100,
+    idempotency_key: input.idempotencyKey ?? null,
+    payload: input.payload ?? {},
+    max_attempts: input.maxAttempts ?? 5,
+    run_after: input.runAfter ?? queuedAt,
+    updated_at: queuedAt,
+  } as const;
+
+  const existingJobResult =
+    input.idempotencyKey != null
+      ? await supabase
+          .from("channel_sync_jobs")
+          .select("id")
+          .eq("idempotency_key", input.idempotencyKey)
+          .maybeSingle()
+      : { data: null, error: null };
+  if (existingJobResult.error) throw existingJobResult.error;
+
+  const { data, error } = existingJobResult.data?.id
+    ? await supabase
+        .from("channel_sync_jobs")
+        .update(baseJobRow as never)
+        .eq("id", existingJobResult.data.id)
+        .select("id")
+        .maybeSingle()
+    : await supabase
+        .from("channel_sync_jobs")
+        .insert(baseJobRow as never)
+        .select("id")
+        .maybeSingle();
   if (error) throw error;
   return asString((data as JsonRecord | null)?.id);
 }

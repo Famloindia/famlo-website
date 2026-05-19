@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
-import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
+import { enqueueChannexAriSyncJobs, triggerQueuedChannexSyncWorker } from "@/lib/channex-ari-jobs";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -48,17 +48,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const supabase = createAdminSupabaseClient();
-    const hostAccess = await resolveAuthorizedHostResource(supabase, request, {
-      ownerType: "stay_unit",
-      ownerId: roomId,
-    });
+    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { familyId });
+    if (!hostAccess?.familyId || hostAccess.familyId !== familyId) {
+      return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
+    }
 
-    if (
-      !hostAccess?.familyId ||
-      !hostAccess.hostId ||
-      hostAccess.stayUnitId !== roomId ||
-      hostAccess.familyId !== familyId
-    ) {
+    const { data: stayUnitRow, error: stayUnitError } = await supabase
+      .from("stay_units_v2")
+      .select("id,legacy_family_id")
+      .eq("id", roomId)
+      .maybeSingle();
+    if (stayUnitError) throw stayUnitError;
+    if (!stayUnitRow?.id || stayUnitRow.legacy_family_id !== familyId) {
       return NextResponse.json({ error: "You do not have access to this room calendar." }, { status: 403 });
     }
 
@@ -145,6 +146,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       actorUserId: hostAccess.hostUserId ?? null,
       actorRole: hostAccess.isAdmin ? "admin" : "host",
     });
+    const stagingWorkerTriggered =
+      queuedJobIds.length > 0
+        ? await triggerQueuedChannexSyncWorker({
+            requestUrl: request.url,
+            workerId: "pms-calendar-manual-rate",
+            limit: queuedJobIds.length,
+          })
+        : false;
 
     return NextResponse.json({
       ok: true,
@@ -153,6 +162,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       roomId,
       amount: action === "save" ? amount : null,
       queuedJobIds,
+      stagingWorkerTriggered,
     });
   } catch (error) {
     console.error("[host.pro.calendar.manual-rate] error", error);

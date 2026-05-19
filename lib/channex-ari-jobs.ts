@@ -20,6 +20,13 @@ import { enumerateDateRange } from "@/lib/platform-utils";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
 
 type JsonRecord = Record<string, unknown>;
+type MappingRebindCandidate = {
+  roomMappingId: string;
+  previousStayUnitId: string;
+  externalRoomTypeId: string | null;
+  ratePlanIds: string[];
+  ratePlanTitles: string[];
+};
 
 export const CHANNEX_ARI_JOB_TYPES = [
   "availability_update",
@@ -101,6 +108,41 @@ function addIndiaDays(date: string, days: number): string {
   return base.toISOString().slice(0, 10);
 }
 
+function normalizeLabel(value: unknown): string {
+  return typeof value === "string"
+    ? value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim()
+    : "";
+}
+
+function labelMatchesRoomName(label: string, roomName: string): boolean {
+  const normalizedLabel = normalizeLabel(label);
+  const normalizedRoomName = normalizeLabel(roomName);
+  if (!normalizedLabel || !normalizedRoomName) return false;
+  return (
+    normalizedLabel === normalizedRoomName ||
+    normalizedLabel.endsWith(normalizedRoomName) ||
+    normalizedLabel.includes(` ${normalizedRoomName}`) ||
+    normalizedLabel.includes(normalizedRoomName)
+  );
+}
+
+export function findStaleMappingRebindCandidate(
+  roomName: string,
+  availableStayUnitIds: string[],
+  candidates: MappingRebindCandidate[]
+): MappingRebindCandidate | null {
+  const availableIds = new Set(availableStayUnitIds.filter(Boolean));
+  for (const candidate of candidates) {
+    if (!candidate.previousStayUnitId || availableIds.has(candidate.previousStayUnitId)) {
+      continue;
+    }
+    if (candidate.ratePlanTitles.some((title) => labelMatchesRoomName(title, roomName))) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -147,7 +189,11 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
   availability: number;
   rate: string;
   stopSell: boolean;
+  cta: boolean;
+  ctd: boolean;
   minStayThrough: number;
+  minStayArrival: number;
+  maxStay: number;
 }> {
   const segments: Array<{
     dateFrom: string;
@@ -155,7 +201,11 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
     availability: number;
     rate: string;
     stopSell: boolean;
+    cta: boolean;
+    ctd: boolean;
     minStayThrough: number;
+    minStayArrival: number;
+    maxStay: number;
   }> = [];
 
   for (const day of days) {
@@ -163,13 +213,21 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
     const rate = formatPrice(day.effectiveRate);
     const stopSell = day.stopSell || day.isBlocked;
     const minStayThrough = Math.max(1, day.minStay);
+    const minStayArrival = Math.max(1, day.minStayArrival);
+    const maxStay = Math.max(minStayArrival, day.maxStay);
+    const cta = day.cta;
+    const ctd = day.ctd;
     const last = segments[segments.length - 1];
     if (
       last &&
       last.availability === availability &&
       last.rate === rate &&
       last.stopSell === stopSell &&
-      last.minStayThrough === minStayThrough
+      last.cta === cta &&
+      last.ctd === ctd &&
+      last.minStayThrough === minStayThrough &&
+      last.minStayArrival === minStayArrival &&
+      last.maxStay === maxStay
     ) {
       last.dateTo = day.date;
       continue;
@@ -181,7 +239,11 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
       availability,
       rate,
       stopSell,
+      cta,
+      ctd,
       minStayThrough,
+      minStayArrival,
+      maxStay,
     });
   }
 
@@ -218,15 +280,6 @@ function extractTaskIds(result: ChannexAriPushResult): string[] {
   return [...taskIds];
 }
 
-function unsupportedRestrictionNotes(): string[] {
-  return [
-    "max_stay unsupported",
-    "closed_to_arrival unsupported",
-    "closed_to_departure unsupported",
-    "min_stay_arrival unsupported",
-  ];
-}
-
 async function loadEligibleProviders(
   supabase: SupabaseClient,
   input: { familyId: string; providerKeys?: ChannelProviderKey[] | null }
@@ -253,11 +306,172 @@ async function loadEligibleProviders(
   if (channexRowResult.error) throw channexRowResult.error;
 
   const propertyId = asString(channexRowResult.data?.external_property_id);
-  return (providerRowsResult.data ?? [])
+  const providers = (providerRowsResult.data ?? [])
     .map((row) => asString(row.provider_code) as ChannelProviderKey | null)
     .filter((providerKey): providerKey is ChannelProviderKey => Boolean(providerKey))
     .filter((providerKey) => getChannelProviderCapabilities(providerKey).supportsAriSync)
     .map((providerKey) => ({ providerKey, propertyId }));
+
+  if (providers.length > 0 || !propertyId) {
+    return providers;
+  }
+
+  const [{ count: roomMappingCount, error: roomMappingError }, { count: ratePlanCount, error: ratePlanError }] = await Promise.all([
+    supabase
+      .from("channel_room_mappings")
+      .select("id", { count: "exact", head: true })
+      .eq("family_id", input.familyId)
+      .eq("provider_code", "channex"),
+    supabase
+      .from("channel_rate_plans")
+      .select("id", { count: "exact", head: true })
+      .eq("family_id", input.familyId)
+      .eq("provider_code", "channex"),
+  ]);
+  if (roomMappingError) throw roomMappingError;
+  if (ratePlanError) throw ratePlanError;
+
+  if ((roomMappingCount ?? 0) > 0 && (ratePlanCount ?? 0) > 0) {
+    return [{ providerKey: "booking", propertyId }];
+  }
+
+  return providers;
+}
+
+async function repairStaleScopedMappings(
+  supabase: SupabaseClient,
+  input: {
+    familyId: string;
+    storageProviderCode: string;
+    stayUnitIds: string[];
+  }
+): Promise<void> {
+  const targetStayUnitIds = [...new Set(input.stayUnitIds.filter(Boolean))];
+  if (targetStayUnitIds.length === 0) return;
+
+  const [roomsResult, roomMappingsResult, ratePlansResult] = await Promise.all([
+    supabase
+      .from("stay_units_v2")
+      .select("id,name,is_active")
+      .eq("legacy_family_id", input.familyId),
+    supabase
+      .from("channel_room_mappings")
+      .select("id,stay_unit_id,external_room_type_id,metadata")
+      .eq("family_id", input.familyId)
+      .eq("provider_code", input.storageProviderCode),
+    supabase
+      .from("channel_rate_plans")
+      .select("id,stay_unit_id,external_rate_plan_id,title,metadata")
+      .eq("family_id", input.familyId)
+      .eq("provider_code", input.storageProviderCode),
+  ]);
+
+  if (roomsResult.error) throw roomsResult.error;
+  if (roomMappingsResult.error) throw roomMappingsResult.error;
+  if (ratePlansResult.error) throw ratePlansResult.error;
+
+  const rooms = ((roomsResult.data ?? []) as Array<Record<string, unknown>>)
+    .map((row) => ({
+      id: asString(row.id) ?? "",
+      name: asString(row.name) ?? "Room",
+      isActive: row.is_active !== false,
+    }))
+    .filter((room) => room.id);
+  const roomById = new Map(rooms.map((room) => [room.id, room]));
+  const availableStayUnitIds = rooms.filter((room) => room.isActive).map((room) => room.id);
+  const ratePlansByStayUnitId = new Map<string, Array<Record<string, unknown>>>();
+
+  for (const row of (ratePlansResult.data ?? []) as Array<Record<string, unknown>>) {
+    const stayUnitId = asString(row.stay_unit_id);
+    if (!stayUnitId) continue;
+    const collection = ratePlansByStayUnitId.get(stayUnitId) ?? [];
+    collection.push(row);
+    ratePlansByStayUnitId.set(stayUnitId, collection);
+  }
+
+  const mappingCandidates: MappingRebindCandidate[] = ((roomMappingsResult.data ?? []) as Array<Record<string, unknown>>)
+    .map((row) => {
+      const previousStayUnitId = asString(row.stay_unit_id) ?? "";
+      const pairedRatePlans = ratePlansByStayUnitId.get(previousStayUnitId) ?? [];
+      return {
+        roomMappingId: asString(row.id) ?? "",
+        previousStayUnitId,
+        externalRoomTypeId: asString(row.external_room_type_id),
+        ratePlanIds: pairedRatePlans.map((plan) => asString(plan.id)).filter((value): value is string => Boolean(value)),
+        ratePlanTitles: pairedRatePlans
+          .map((plan) => asString(plan.title))
+          .filter((value): value is string => Boolean(value)),
+      };
+    })
+    .filter((candidate) => candidate.roomMappingId && candidate.previousStayUnitId);
+
+  const roomMappingById = new Map(
+    ((roomMappingsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [asString(row.id) ?? "", row])
+  );
+  const ratePlanById = new Map(
+    ((ratePlansResult.data ?? []) as Array<Record<string, unknown>>).map((row) => [asString(row.id) ?? "", row])
+  );
+
+  for (const stayUnitId of targetStayUnitIds) {
+    const room = roomById.get(stayUnitId);
+    if (!room || !room.isActive) continue;
+
+    const hasDirectRoomMapping = ((roomMappingsResult.data ?? []) as Array<Record<string, unknown>>).some((row) => {
+      return asString(row.stay_unit_id) === stayUnitId && Boolean(asString(row.external_room_type_id));
+    });
+    const hasDirectRatePlan = ((ratePlansResult.data ?? []) as Array<Record<string, unknown>>).some((row) => {
+      return asString(row.stay_unit_id) === stayUnitId && Boolean(asString(row.external_rate_plan_id));
+    });
+    if (hasDirectRoomMapping && hasDirectRatePlan) {
+      continue;
+    }
+
+    const candidate = findStaleMappingRebindCandidate(room.name, availableStayUnitIds, mappingCandidates);
+    if (!candidate) continue;
+
+    const now = new Date().toISOString();
+    const currentRoomMapping = roomMappingById.get(candidate.roomMappingId);
+    const { error: roomMappingUpdateError } = await supabase
+      .from("channel_room_mappings")
+      .update({
+        stay_unit_id: stayUnitId,
+        metadata: {
+          ...asObject(currentRoomMapping?.metadata),
+          repaired_via: "queued_channex_stale_mapping_rebind",
+          repaired_at: now,
+          repaired_room_name: room.name,
+          repaired_from_stay_unit_id: candidate.previousStayUnitId,
+        },
+        updated_at: now,
+      } as never)
+      .eq("id", candidate.roomMappingId);
+    if (roomMappingUpdateError) throw roomMappingUpdateError;
+
+    if (candidate.ratePlanIds.length > 0) {
+      const mergedRatePlanMetadata = candidate.ratePlanIds.reduce<JsonRecord>(
+        (accumulator, ratePlanId) => ({
+          ...accumulator,
+          ...asObject(ratePlanById.get(ratePlanId)?.metadata),
+        }),
+        {}
+      );
+      const { error: ratePlanUpdateError } = await supabase
+        .from("channel_rate_plans")
+        .update({
+          stay_unit_id: stayUnitId,
+          metadata: {
+            ...mergedRatePlanMetadata,
+            repaired_via: "queued_channex_stale_mapping_rebind",
+            repaired_at: now,
+            repaired_room_name: room.name,
+            repaired_from_stay_unit_id: candidate.previousStayUnitId,
+          },
+          updated_at: now,
+        } as never)
+        .in("id", candidate.ratePlanIds);
+      if (ratePlanUpdateError) throw ratePlanUpdateError;
+    }
+  }
 }
 
 export async function enqueueChannexAriSyncJobs(
@@ -276,6 +490,13 @@ export async function enqueueChannexAriSyncJobs(
   for (const { providerKey, propertyId } of providers) {
     const storageProviderCode = resolveChannelStorageProviderCode(providerKey);
     const stayUnitIds = input.stayUnitIds?.length ? [...new Set(input.stayUnitIds)] : null;
+    if (stayUnitIds?.length) {
+      await repairStaleScopedMappings(supabase, {
+        familyId: input.familyId,
+        storageProviderCode,
+        stayUnitIds,
+      });
+    }
     let roomMappingsQuery = supabase
       .from("channel_room_mappings")
       .select("stay_unit_id,external_room_type_id")
@@ -326,7 +547,7 @@ export async function enqueueChannexAriSyncJobs(
         source_route: input.sourceRoute,
         actor_user_id: input.actorUserId ?? null,
         actor_role: input.actorRole ?? null,
-        unsupported: jobType === "restriction_update" || jobType === "full_sync" ? unsupportedRestrictionNotes() : [],
+        unsupported: [],
       };
 
       const idempotencyKey = chunkIdempotencyKey({
@@ -339,25 +560,39 @@ export async function enqueueChannexAriSyncJobs(
         certificationScenario: input.certificationScenario,
       });
 
-      const { data, error } = await supabase
+      const queuedAt = new Date().toISOString();
+      const baseJobRow = {
+        family_id: input.familyId,
+        provider_code: providerKey,
+        job_type: jobType,
+        status: "queued",
+        priority: jobType === "full_sync" ? 80 : 40,
+        idempotency_key: idempotencyKey,
+        payload,
+        max_attempts: 6,
+        run_after: queuedAt,
+        updated_at: queuedAt,
+      } as const;
+
+      const existingJobResult = await supabase
         .from("channel_sync_jobs")
-        .upsert(
-          {
-            family_id: input.familyId,
-            provider_code: providerKey,
-            job_type: jobType,
-            status: "queued",
-            priority: jobType === "full_sync" ? 80 : 40,
-            idempotency_key: idempotencyKey,
-            payload,
-            max_attempts: 6,
-            run_after: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          } as never,
-          { onConflict: "idempotency_key" }
-        )
         .select("id")
+        .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
+      if (existingJobResult.error) throw existingJobResult.error;
+
+      const { data, error } = existingJobResult.data?.id
+        ? await supabase
+            .from("channel_sync_jobs")
+            .update(baseJobRow as never)
+            .eq("id", existingJobResult.data.id)
+            .select("id")
+            .maybeSingle()
+        : await supabase
+            .from("channel_sync_jobs")
+            .insert(baseJobRow as never)
+            .select("id")
+            .maybeSingle();
       if (error) throw error;
       const jobId = asString((data as JsonRecord | null)?.id);
       if (jobId) queuedIds.push(jobId);
@@ -384,6 +619,33 @@ export async function enqueueBookingInventoryAriSyncJobs(
     actorUserId: input.actorUserId ?? null,
     actorRole: input.actorRole ?? null,
   });
+}
+
+export async function triggerQueuedChannexSyncWorker(input: {
+  requestUrl: string;
+  workerId: string;
+  limit?: number;
+}): Promise<boolean> {
+  const secret = asString(process.env.CRON_SECRET);
+  if (!secret) return false;
+
+  const base = new URL(input.requestUrl);
+  const cronUrl = new URL("/api/internal/cron/channel-sync-jobs", base.origin);
+  cronUrl.searchParams.set("limit", String(Math.max(1, Math.min(input.limit ?? 5, 10))));
+  cronUrl.searchParams.set("workerId", input.workerId);
+
+  try {
+    const response = await fetch(cronUrl.toString(), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secret}`,
+      },
+      cache: "no-store",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveHostId(supabase: SupabaseClient, familyId: string): Promise<string | null> {
@@ -420,6 +682,13 @@ async function buildAriPayloadForJob(
   }
 
   const storageProviderCode = resolveChannelStorageProviderCode(input.providerKey);
+  if (input.stayUnitIds?.length) {
+    await repairStaleScopedMappings(supabase, {
+      familyId: input.familyId,
+      storageProviderCode,
+      stayUnitIds: input.stayUnitIds,
+    });
+  }
   const [roomMappingsResult, ratePlansResult, rooms] = await Promise.all([
     supabase
       .from("channel_room_mappings")
@@ -495,7 +764,11 @@ async function buildAriPayloadForJob(
         dateTo: segment.dateTo,
         rate: segment.rate,
         stopSell: segment.stopSell,
+        cta: segment.cta,
+        ctd: segment.ctd,
         minStayThrough: segment.minStayThrough,
+        minStayArrival: segment.minStayArrival,
+        maxStay: segment.maxStay,
       });
     }
   }
@@ -504,7 +777,7 @@ async function buildAriPayloadForJob(
     availabilityValues,
     restrictionValues,
     roomsConsidered,
-    unsupported: unsupportedRestrictionNotes(),
+    unsupported: [],
   };
 }
 

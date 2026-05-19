@@ -10,6 +10,38 @@ type AcknowledgeBody = {
   channelBookingRevisionId?: string;
 };
 
+export function assessAcknowledgementEligibility(input: {
+  importStatus: string | null;
+  ackStatus: string | null;
+  linkedBookingId: string | null;
+  externalRevisionId: string | null;
+  source: string | null;
+}): { ok: boolean; status: number; message: string; state: string } {
+  const importStatus = input.importStatus ?? "preview";
+  const ackStatus = input.ackStatus ?? "not_acknowledged";
+  if (!["imported", "modified_applied", "cancelled_applied"].includes(importStatus)) {
+    return { ok: false, status: 409, message: "Only successfully applied Famlo revisions can be acknowledged.", state: importStatus };
+  }
+  if (ackStatus !== "not_acknowledged") {
+    return { ok: false, status: 409, message: `This booking preview is already ${ackStatus}.`, state: ackStatus };
+  }
+  if (!input.linkedBookingId) {
+    return { ok: false, status: 409, message: "A linked Famlo booking is required before acknowledgement.", state: "missing_linked_booking" };
+  }
+  if (!input.externalRevisionId) {
+    return {
+      ok: false,
+      status: 409,
+      message:
+        input.source === "booking_list_api"
+          ? "Cannot acknowledge Booking List preview; requires feed revision id."
+          : "Cannot acknowledge this preview because external_revision_id is missing.",
+      state: "missing_revision_id",
+    };
+  }
+  return { ok: true, status: 200, message: "Revision can be acknowledged after successful apply.", state: "eligible" };
+}
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -99,14 +131,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     const source = asStringOrNull(revisionRow.source) ?? "booking_revision_feed";
     const externalBookingId = asStringOrNull(revisionRow.external_booking_id);
 
-    if (importStatus !== "imported") {
-      return NextResponse.json({ error: "Only imported preview bookings can be acknowledged.", status: importStatus }, { status: 409 });
-    }
-    if (ackStatus !== "not_acknowledged") {
-      return NextResponse.json({ error: `This booking preview is already ${ackStatus}.`, status: ackStatus }, { status: 409 });
-    }
-    if (!linkedBookingId) {
-      return NextResponse.json({ error: "A linked Famlo booking is required before acknowledgement." }, { status: 409 });
+    const eligibility = assessAcknowledgementEligibility({
+      importStatus,
+      ackStatus,
+      linkedBookingId,
+      externalRevisionId,
+      source,
+    });
+    if (!eligibility.ok && eligibility.state !== "missing_revision_id") {
+      return NextResponse.json({ error: eligibility.message, status: eligibility.state }, { status: eligibility.status });
     }
 
     const { data: linkedBooking, error: linkedBookingError } = await supabase
@@ -134,22 +167,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
-    if (!externalRevisionId) {
-      const message = source === "booking_list_api"
-        ? "Cannot acknowledge Booking List preview; requires feed revision id."
-        : "Cannot acknowledge this preview because external_revision_id is missing.";
-
+    if (!eligibility.ok) {
       return NextResponse.json(
         {
           ok: false,
           status: "acknowledgement_requires_revision_id",
-          message,
+          message: eligibility.message,
         },
-        { status: 409 }
+        { status: eligibility.status }
       );
     }
 
-    const result = await acknowledgeChannexBookingRevision(externalRevisionId);
+    const result = await acknowledgeChannexBookingRevision(externalRevisionId as string);
     if (!result.ok) {
       await logAcknowledgeResult({
         supabase,

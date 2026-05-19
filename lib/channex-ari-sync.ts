@@ -41,7 +41,17 @@ type PushRangeSummary = {
   roomTypeId: string;
   ratePlanId: string;
   availabilityRanges: Array<{ dateFrom: string; dateTo: string; availability: number }>;
-  rateRanges: Array<{ dateFrom: string; dateTo: string; rate: string; stopSell: boolean; minStayThrough: number }>;
+  rateRanges: Array<{
+    dateFrom: string;
+    dateTo: string;
+    rate: string;
+    stopSell: boolean;
+    cta: boolean;
+    ctd: boolean;
+    minStayThrough: number;
+    minStayArrival: number;
+    maxStay: number;
+  }>;
 };
 
 type AriChannelHealth = {
@@ -944,7 +954,17 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
       roomTypeId: item.room.externalRoomTypeId,
       ratePlanId: item.room.externalRatePlanId,
       availabilityRanges: segments.map((segment) => ({ dateFrom: segment.dateFrom, dateTo: segment.dateTo, availability: segment.availability })),
-      rateRanges: segments.map((segment) => ({ dateFrom: segment.dateFrom, dateTo: segment.dateTo, rate: segment.rate, stopSell: segment.stopSell, minStayThrough: 1 })),
+      rateRanges: segments.map((segment) => ({
+        dateFrom: segment.dateFrom,
+        dateTo: segment.dateTo,
+        rate: segment.rate,
+        stopSell: segment.stopSell,
+        cta: false,
+        ctd: false,
+        minStayThrough: 1,
+        minStayArrival: 1,
+        maxStay: 30,
+      })),
     });
     for (const segment of segments) {
       availabilityValues.push({
@@ -961,7 +981,11 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
         dateTo: segment.dateTo,
         rate: segment.rate,
         stopSell: segment.stopSell,
+        cta: false,
+        ctd: false,
         minStayThrough: 1,
+        minStayArrival: 1,
+        maxStay: 30,
       });
     }
   }

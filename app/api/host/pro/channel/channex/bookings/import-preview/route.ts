@@ -13,6 +13,37 @@ type ImportPreviewBody = {
   channelBookingRevisionId?: string;
 };
 
+export function assessImportPreviewEligibility(input: {
+  importStatus: string | null;
+  ackStatus: string | null;
+  externalBookingId: string | null;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  externalRoomTypeId: string | null;
+  amountNumber: number | null;
+  currency: string | null;
+  linkedBookingId: string | null;
+}): { ok: boolean; status: number; message: string; state: string } {
+  const importStatus = input.importStatus ?? "preview";
+  const ackStatus = input.ackStatus ?? "not_acknowledged";
+  if (!["preview", "failed"].includes(importStatus)) {
+    return { ok: false, status: 409, message: `This preview is already ${importStatus}.`, state: importStatus };
+  }
+  if (ackStatus !== "not_acknowledged") {
+    return { ok: false, status: 409, message: "Only not_acknowledged preview bookings can be imported in this phase.", state: ackStatus };
+  }
+  if (!input.externalBookingId || !input.arrivalDate || !input.departureDate || !input.externalRoomTypeId) {
+    return { ok: false, status: 409, message: "Preview booking is missing required booking, room, or date fields.", state: "missing_fields" };
+  }
+  if (input.amountNumber == null || !input.currency) {
+    return { ok: false, status: 409, message: "Preview booking amount or currency is missing.", state: "missing_amount" };
+  }
+  if (input.linkedBookingId) {
+    return { ok: true, status: 200, message: "This preview is already linked to a Famlo booking.", state: "already_imported" };
+  }
+  return { ok: true, status: 200, message: "Preview booking can be imported into Famlo.", state: "eligible" };
+}
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -123,16 +154,21 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
 
-    if (!["preview", "failed"].includes(importStatus)) {
-      return NextResponse.json({ error: `This preview is already ${importStatus}.` }, { status: 409 });
-    }
-    if (ackStatus !== "not_acknowledged") {
-      return NextResponse.json({ error: "Only not_acknowledged preview bookings can be imported in this phase." }, { status: 409 });
-    }
-    if (!externalBookingId || !arrivalDate || !departureDate || !externalRoomTypeId) {
+    const eligibility = assessImportPreviewEligibility({
+      importStatus,
+      ackStatus,
+      externalBookingId,
+      arrivalDate,
+      departureDate,
+      externalRoomTypeId,
+      amountNumber,
+      currency,
+      linkedBookingId: asStringOrNull(revisionRow.linked_booking_id),
+    });
+    if (!eligibility.ok && eligibility.state === "missing_fields") {
       return NextResponse.json(
         {
-          error: "Preview booking is missing required booking, room, or date fields.",
+          error: eligibility.message,
           missingFields: [
             !externalBookingId ? "external_booking_id" : null,
             !arrivalDate ? "arrival_date" : null,
@@ -140,33 +176,38 @@ export async function POST(request: Request): Promise<NextResponse> {
             !externalRoomTypeId ? "external_room_type_id" : null,
           ].filter(Boolean),
         },
-        { status: 409 }
+        { status: eligibility.status }
       );
     }
-    if (amountNumber == null || !currency) {
+    if (!eligibility.ok && eligibility.state === "missing_amount") {
       return NextResponse.json(
         {
-          error: "Preview booking amount or currency is missing.",
+          error: eligibility.message,
           missingFields: [
             amountNumber == null ? "amount" : null,
             !currency ? "currency" : null,
           ].filter(Boolean),
         },
-        { status: 409 }
+        { status: eligibility.status }
       );
     }
-
-    if (asStringOrNull(revisionRow.linked_booking_id)) {
+    if (!eligibility.ok) {
+      return NextResponse.json({ error: eligibility.message }, { status: eligibility.status });
+    }
+    if (eligibility.state === "already_imported") {
       return NextResponse.json(
         {
           ok: true,
           status: "already_imported",
-          message: "This preview is already linked to a Famlo booking.",
+          message: eligibility.message,
           bookingId: asStringOrNull(revisionRow.linked_booking_id),
         },
         { status: 200 }
       );
     }
+
+    const assuredAmountNumber = amountNumber as number;
+    const assuredCurrency = currency as string;
 
     const { data: roomMappingRow, error: roomMappingError } = await supabase
       .from("channel_room_mappings")
@@ -245,7 +286,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const now = new Date().toISOString();
     const guestName = asStringOrNull(revisionRow.guest_name) ?? "OTA Guest";
-    const amountRounded = Math.round(amountNumber);
+    const amountRounded = Math.round(assuredAmountNumber);
     const { data: familyRow, error: familyLookupError } = await supabase
       .from("families")
       .select("user_id")
@@ -308,8 +349,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       stay_unit_id: stayUnitId,
       base_price: amountRounded,
       unit_price: amountRounded,
-      total_amount: amountNumber.toFixed(2),
-      currency,
+      total_amount: assuredAmountNumber.toFixed(2),
+      currency: assuredCurrency,
       channel_provider: "channex",
       channel_source_type: "ota",
       channel_source: asStringOrNull(revisionRow.source) ?? "booking_list_api",
@@ -399,8 +440,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         linked_booking_id: bookingId,
         stay_unit_id: stayUnitId,
         host_id: hostId,
-        amount: amountNumber.toFixed(2),
-        currency,
+        amount: assuredAmountNumber.toFixed(2),
+        currency: assuredCurrency,
         technical_owner_user_id: technicalUserId,
       },
     });
