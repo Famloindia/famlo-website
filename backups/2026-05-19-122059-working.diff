@@ -1,0 +1,238 @@
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index 85035e1b..7c0f8a71 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -45,6 +45,7 @@ import {
+   getChannelProviderDefinition,
+   type ChannelProviderKey,
+ } from "@/lib/channel-providers/provider-registry";
++import { resolveProviderFromOtaName } from "@/lib/channel-providers/provider-capabilities";
+ import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
+ import {
+   createDefaultChannelSetupState,
+@@ -10821,12 +10822,15 @@ function ChannexBookingFeedCard({
+   const [isFetching, startFetching] = useTransition();
+   const [isPreviewingRevision, startPreviewingRevision] = useTransition();
+   const [isImportingPreview, startImportingPreview] = useTransition();
++  const [isApplyingModification, startApplyingModification] = useTransition();
+   const [isApplyingCancellation, startApplyingCancellation] = useTransition();
+   const [isAcknowledgingPreview, startAcknowledgingPreview] = useTransition();
+   const [previewingRevisionId, setPreviewingRevisionId] = useState<string | null>(null);
+   const [importingPreviewId, setImportingPreviewId] = useState<string | null>(null);
++  const [applyingModificationId, setApplyingModificationId] = useState<string | null>(null);
+   const [applyingCancellationId, setApplyingCancellationId] = useState<string | null>(null);
+   const [acknowledgingPreviewId, setAcknowledgingPreviewId] = useState<string | null>(null);
++  const [selectedFeedProvider, setSelectedFeedProvider] = useState<ChannelProviderKey>("booking");
+   const [feedback, setFeedback] = useState<{
+     ok: boolean;
+     message: string;
+@@ -10909,15 +10913,16 @@ function ChannexBookingFeedCard({
+       (Object.prototype.hasOwnProperty.call(revision.rawPayload, "booking_list_channel_id") && !asStringOrNull(revision.rawPayload?.booking_list_channel_id)),
+     ackEligible: Boolean(revision.externalRevisionId),
+     currentBooking: revision.linkedBookingId ? proBookingsById.get(revision.linkedBookingId) ?? null : null,
++    providerKey: resolveProviderFromOtaName(revision.otaName) ?? "booking",
+   }));
+ 
+   return (
+     <section className={styles.cardInset}>
+       <div className={styles.cardHeaderCompact}>
+         <div>
+-          <div className={styles.listTitle}>Booking.com import test flow</div>
++          <div className={styles.listTitle}>OTA import test flow</div>
+           <div className={styles.cardCopy}>
+-            Operator-only Booking.com/Channex booking previews for the selected property. Preview before apply, import before acknowledge, and no payment/refund logic runs here.
++            Operator-only Channex booking previews for the selected property. Preview before apply, import before acknowledge, and no payment/refund logic runs here.
+           </div>
+         </div>
+         <span className={`${styles.badge} ${blockedMessage ? styles.badgeMuted : ""}`.trim()}>
+@@ -10947,6 +10952,21 @@ function ChannexBookingFeedCard({
+       <div className={styles.feedCopy}>
+         Feed returned 0 can still mean the booking exists in Booking List API. Verify the booking list below without importing or acknowledging anything.
+       </div>
++      <div className={styles.inlineActionRow} style={{ marginTop: 10 }}>
++        <select
++          className={styles.fieldInput}
++          value={selectedFeedProvider}
++          onChange={(event) => setSelectedFeedProvider(event.target.value as ChannelProviderKey)}
++          disabled={isFetching}
++        >
++          {CHANNEL_PROVIDER_REGISTRY.filter((provider) => provider.key !== "google-hotel").map((provider) => (
++            <option key={provider.key} value={provider.key}>
++              {provider.displayName}
++            </option>
++          ))}
++        </select>
++        <span className={styles.readinessPill}>Feed scope: {getChannelProviderDefinition(selectedFeedProvider).displayName}</span>
++      </div>
+ 
+       {lastSyncLog?.message ? <div className={styles.feedCopy}>{lastSyncLog.message}</div> : null}
+       {blockedMessage ? <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{blockedMessage}</div> : null}
+@@ -11018,8 +11038,16 @@ function ChannexBookingFeedCard({
+               <div className={styles.mappingHeader}>Guest</div>
+               <div className={styles.mappingHeader}>Room / Rate</div>
+               <div className={styles.mappingHeader}>Amount</div>
+-              {(displayedStoredRevisions.length > 0 ? displayedStoredRevisions : feedback.revisions ?? []).map((revision, index) => (
++                  {(displayedStoredRevisions.length > 0 ? displayedStoredRevisions : feedback.revisions ?? []).map((revision, index) => (
+                 <Fragment key={revision.revisionId ?? revision.externalBookingId ?? revision.insertedAt ?? `revision-${index}`}>
++                  {(() => {
++                    const revisionProviderKey =
++                      "providerKey" in revision && revision.providerKey
++                        ? (revision.providerKey as ChannelProviderKey)
++                        : (resolveProviderFromOtaName(revision.otaName) ?? "booking");
++                    const revisionProviderLabel = getChannelProviderDefinition(revisionProviderKey).displayName;
++                    return (
++                      <>
+                   <div className={styles.mappingCell}>
+                     <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
+                     <div className={styles.mappingSubcopy}>Revision {revision.revisionId ?? "Unknown"}</div>
+@@ -11041,7 +11069,7 @@ function ChannexBookingFeedCard({
+                   </div>
+                   <div className={styles.mappingCell}>
+                     <div className={styles.mappingTitle}>{revision.otaName ?? "Unknown"}</div>
+-                    <div className={styles.mappingSubcopy}>{revision.paymentCollect ?? "collection unknown"}</div>
++                    <div className={styles.mappingSubcopy}>{revisionProviderLabel} · {revision.paymentCollect ?? "collection unknown"}</div>
+                   </div>
+                   <div className={styles.mappingCell}>
+                     <div className={styles.mappingTitle}>{revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"}</div>
+@@ -11111,7 +11139,7 @@ function ChannexBookingFeedCard({
+                                   },
+                                   body: JSON.stringify({
+                                     familyId,
+-                                    providerKey: "booking",
++                                    providerKey: revisionProviderKey,
+                                     channelBookingRevisionId: revision.id,
+                                   }),
+                                 });
+@@ -11124,7 +11152,7 @@ function ChannexBookingFeedCard({
+                                 };
+ 
+                                 if (!response.ok || !payload.ok) {
+-                                  throw new Error(payload.error ?? payload.message ?? "Unable to preview this Booking.com revision.");
++                                  throw new Error(payload.error ?? payload.message ?? `Unable to preview this ${revisionProviderLabel} revision.`);
+                                 }
+ 
+                                 const blockers = Array.isArray(payload.blockers) && payload.blockers.length > 0
+@@ -11137,7 +11165,7 @@ function ChannexBookingFeedCard({
+                               } catch (error) {
+                                 setFeedback({
+                                   ok: false,
+-                                  message: error instanceof Error ? error.message : "Unable to preview this Booking.com revision.",
++                                  message: error instanceof Error ? error.message : `Unable to preview this ${revisionProviderLabel} revision.`,
+                                 });
+                               } finally {
+                                 setPreviewingRevisionId(null);
+@@ -11171,7 +11199,7 @@ function ChannexBookingFeedCard({
+                                   },
+                                   body: JSON.stringify({
+                                     familyId,
+-                                    providerKey: "booking",
++                                    providerKey: revisionProviderKey,
+                                     channelBookingRevisionId: revision.id,
+                                   }),
+                                 });
+@@ -11213,8 +11241,56 @@ function ChannexBookingFeedCard({
+                               : "Import to Famlo"}
+                         </button>
+                         {revision.importStatus === "modified_pending_review" ? (
+-                          <button type="button" className={styles.secondaryActionButton} disabled>
+-                            Modification manual only
++                          <button
++                            type="button"
++                            className={styles.secondaryActionButton}
++                            disabled={isApplyingModification || Boolean(blockedMessage)}
++                            onClick={() => {
++                              startApplyingModification(async () => {
++                                setApplyingModificationId(typeof revision.id === "string" ? revision.id : null);
++                                try {
++                                  const response = await fetch("/api/host/pro/channel/channex/operator/bookings/modify", {
++                                    method: "POST",
++                                    headers: {
++                                      "Content-Type": "application/json",
++                                    },
++                                    body: JSON.stringify({
++                                      familyId,
++                                      providerKey: revisionProviderKey,
++                                      channelBookingRevisionId: revision.id,
++                                    }),
++                                  });
++
++                                  const payload = (await response.json()) as {
++                                    ok?: boolean;
++                                    message?: string;
++                                    error?: string;
++                                  };
++
++                                  if (!response.ok || !payload.ok) {
++                                    throw new Error(payload.error ?? payload.message ?? "Unable to apply this booking modification.");
++                                  }
++
++                                  setFeedback({
++                                    ok: true,
++                                    message:
++                                      typeof payload.message === "string" && payload.message.trim().length > 0
++                                        ? payload.message
++                                        : `Applied this ${revisionProviderLabel} modification in Famlo. Acknowledgement still depends on supported lifecycle state.`,
++                                  });
++                                  router.refresh();
++                                } catch (error) {
++                                  setFeedback({
++                                    ok: false,
++                                    message: error instanceof Error ? error.message : "Unable to apply this booking modification.",
++                                  });
++                                } finally {
++                                  setApplyingModificationId(null);
++                                }
++                              });
++                            }}
++                          >
++                            {isApplyingModification && applyingModificationId === revision.id ? "Applying..." : "Apply modification"}
+                           </button>
+                         ) : null}
+                         {revision.importStatus === "modified_pending_review" ? (
+@@ -11249,7 +11325,7 @@ function ChannexBookingFeedCard({
+                                     },
+                                     body: JSON.stringify({
+                                       familyId,
+-                                      providerKey: "booking",
++                                      providerKey: revisionProviderKey,
+                                       channelBookingRevisionId: revision.id,
+                                     }),
+                                   });
+@@ -11312,12 +11388,12 @@ function ChannexBookingFeedCard({
+                                       headers: {
+                                         "Content-Type": "application/json",
+                                       },
+-                                      body: JSON.stringify({
+-                                        familyId,
+-                                        providerKey: "booking",
+-                                        channelBookingRevisionId: revision.id,
+-                                      }),
+-                                    });
++                                        body: JSON.stringify({
++                                          familyId,
++                                          providerKey: revisionProviderKey,
++                                          channelBookingRevisionId: revision.id,
++                                        }),
++                                      });
+ 
+                                     const payload = (await response.json()) as {
+                                       ok?: boolean;
+@@ -11362,6 +11438,9 @@ function ChannexBookingFeedCard({
+                       </div>
+                     ) : null}
+                   </div>
++                      </>
++                    );
++                  })()}
+                 </Fragment>
+               ))}
+             </div>
+@@ -11384,7 +11463,7 @@ function ChannexBookingFeedCard({
+                   headers: {
+                     "Content-Type": "application/json",
+                   },
+-                  body: JSON.stringify({ familyId, providerKey: "booking" }),
++                  body: JSON.stringify({ familyId, providerKey: selectedFeedProvider }),
+                 });
+ 
+                 const payload = (await response.json()) as {
