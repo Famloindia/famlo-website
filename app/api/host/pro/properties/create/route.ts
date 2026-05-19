@@ -8,6 +8,7 @@ import {
   PRO_DEFAULT_MEAL_PLAN,
   PRO_DEFAULT_RATE_PLAN_NAME,
   PRO_DEFAULT_TIMEZONE,
+  saveHostProSettings,
   sanitizeHostProSettingsInput,
 } from "@/lib/host-pro-settings";
 import { parseHostListingMeta, serializeHostListingMeta, type HostListingMeta } from "@/lib/host-listing-meta";
@@ -493,11 +494,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     );
 
-    const { error: settingsError } = await supabase
-      .from("host_pro_settings")
-      .upsert(settingsPayload as never, { onConflict: "family_id" });
-
-    if (settingsError) {
+    try {
+      await saveHostProSettings(supabase, familyId, settingsPayload);
+    } catch (settingsError) {
       console.error(
         "[host.pro.properties.create] host_pro_settings seed failed:",
         JSON.stringify(toErrorLogPayload(settingsError))

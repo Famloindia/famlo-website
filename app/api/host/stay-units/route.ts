@@ -221,6 +221,45 @@ async function resolveHostContext(supabase: ReturnType<typeof createAdminSupabas
   };
 }
 
+async function findExistingStayUnitIdForSave(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  input: {
+    hostId: string | null;
+    legacyFamilyId: string;
+    unitKey: string | null;
+    name: string;
+  }
+): Promise<string | null> {
+  if (input.unitKey) {
+    let query = supabase
+      .from("stay_units_v2")
+      .select("id")
+      .eq("unit_key", input.unitKey)
+      .eq("legacy_family_id", input.legacyFamilyId)
+      .order("updated_at", { ascending: false })
+      .limit(5);
+
+    if (input.hostId) {
+      query = query.eq("host_id", input.hostId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    const existingId = Array.isArray(data) ? asNullableString((data[0] as JsonRecord | undefined)?.id) : null;
+    if (existingId) return existingId;
+  }
+
+  const { data: sameNameRows, error: sameNameError } = await supabase
+    .from("stay_units_v2")
+    .select("id")
+    .eq("legacy_family_id", input.legacyFamilyId)
+    .eq("name", input.name)
+    .order("updated_at", { ascending: false })
+    .limit(5);
+  if (sameNameError) throw sameNameError;
+  return Array.isArray(sameNameRows) ? asNullableString((sameNameRows[0] as JsonRecord | undefined)?.id) : null;
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const familyId = request.nextUrl.searchParams.get("familyId");
   if (!familyId) {
@@ -261,6 +300,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const unitKey = asNullableString(unit.unitKey) || (unitId ? null : makeUnitKey(name));
+    const resolvedExistingUnitId = unitId ?? (await findExistingStayUnitIdForSave(supabase, {
+      hostId,
+      legacyFamilyId,
+      unitKey,
+      name,
+    }));
     const normalizedLat = asNullableNumber(unit.lat);
     const normalizedLng = asNullableNumber(unit.lng);
     const payload: JsonRecord = {
@@ -321,25 +366,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     if (payload.is_primary) {
       await supabase
-        .from("stay_units_v2")
-        .update({ is_primary: false })
-        .eq("legacy_family_id", legacyFamilyId)
-        .neq("id", unitId ?? "00000000-0000-0000-0000-000000000000");
+            .from("stay_units_v2")
+            .update({ is_primary: false })
+            .eq("legacy_family_id", legacyFamilyId)
+            .neq("id", resolvedExistingUnitId ?? "00000000-0000-0000-0000-000000000000");
       if (hostId) {
         await supabase
           .from("stay_units_v2")
           .update({ is_primary: false })
           .eq("host_id", hostId)
-          .neq("id", unitId ?? "00000000-0000-0000-0000-000000000000");
+          .neq("id", resolvedExistingUnitId ?? "00000000-0000-0000-0000-000000000000");
       }
     }
 
-    if (unitId) {
+    if (resolvedExistingUnitId) {
       const { data, error, strippedColumns } = await mutateStayUnitWithSchemaFallback(
         supabase,
         "update",
         payload,
-        unitId
+        resolvedExistingUnitId
       );
       if (strippedColumns.length > 0) {
         console.warn("[stay-units] stripped unsupported columns during update", strippedColumns);
@@ -349,7 +394,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         supabase,
         familyId,
         {
-          roomId: unitId ?? clientId,
+          roomId: resolvedExistingUnitId ?? clientId,
           unitKey: unitKey,
           name,
         },

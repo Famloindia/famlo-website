@@ -5,6 +5,7 @@ import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import {
   buildHostProSettingsUpsert,
   loadHostProSettings,
+  saveHostProSettings,
   sanitizeHostProSettingsInput,
 } from "@/lib/host-pro-settings";
 
@@ -97,15 +98,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       nowIso,
     });
 
-    const { error: upsertError } = await supabase
-      .from("host_pro_settings")
-      .upsert(payload as never, { onConflict: "family_id" });
-
-    if (upsertError) {
-      throw upsertError;
-    }
-
-    const savedSettings = await loadHostProSettings(supabase, familyId);
+    const savedSettings = await saveHostProSettings(supabase, familyId, payload);
 
     return NextResponse.json({
       success: true,

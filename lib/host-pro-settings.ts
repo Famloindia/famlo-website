@@ -198,7 +198,8 @@ export async function loadHostProSettings(
     .from("host_pro_settings")
     .select("id,family_id,property_model,property_type,timezone,currency,check_in_time,check_out_time,default_meal_plan,standard_rate_plan_name,ota_title,contact_email,contact_phone,website,country,state,city,postal_code,address_line,latitude,longitude,property_description,check_in_instructions,house_rules,cancellation_policy_label,metadata,created_at,updated_at")
     .eq("family_id", normalizedFamilyId)
-    .maybeSingle();
+    .order("updated_at", { ascending: false })
+    .limit(5);
 
   if (error) {
     const message = String(error.message ?? "");
@@ -208,11 +209,11 @@ export async function loadHostProSettings(
     throw error;
   }
 
-  if (!data) {
+  if (!Array.isArray(data) || data.length === 0) {
     return createDefaultHostProSettings(normalizedFamilyId);
   }
 
-  return mapHostProSettingsRow(data as Record<string, unknown>, normalizedFamilyId);
+  return mapHostProSettingsRow(data[0] as Record<string, unknown>, normalizedFamilyId);
 }
 
 export function sanitizeHostProSettingsInput(input: HostProSettingsInput): HostProSettingsInput {
@@ -286,6 +287,57 @@ export function buildHostProSettingsUpsert(
     metadata,
     updated_at: options?.nowIso ?? new Date().toISOString(),
   };
+}
+
+export async function saveHostProSettings(
+  supabase: SupabaseClient,
+  familyId: string,
+  payload: Record<string, unknown>
+): Promise<HostProSettings> {
+  const normalizedFamilyId = familyId.trim();
+  if (!normalizedFamilyId) {
+    throw new Error("familyId is required to save Pro settings.");
+  }
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("host_pro_settings")
+    .select("id")
+    .eq("family_id", normalizedFamilyId)
+    .order("updated_at", { ascending: false })
+    .limit(10);
+  if (existingError) throw existingError;
+
+  const primaryRowId =
+    Array.isArray(existingRows) && existingRows.length > 0
+      ? asString((existingRows[0] as Record<string, unknown>).id)
+      : null;
+
+  if (primaryRowId) {
+    const { error: updateError } = await supabase
+      .from("host_pro_settings")
+      .update(payload as never)
+      .eq("id", primaryRowId);
+    if (updateError) throw updateError;
+
+    const staleRowIds = (existingRows ?? [])
+      .slice(1)
+      .map((row) => asString((row as Record<string, unknown>).id))
+      .filter((value): value is string => Boolean(value));
+    if (staleRowIds.length > 0) {
+      const { error: deleteError } = await supabase
+        .from("host_pro_settings")
+        .delete()
+        .in("id", staleRowIds);
+      if (deleteError) throw deleteError;
+    }
+  } else {
+    const { error: insertError } = await supabase
+      .from("host_pro_settings")
+      .insert(payload as never);
+    if (insertError) throw insertError;
+  }
+
+  return loadHostProSettings(supabase, normalizedFamilyId);
 }
 
 export function propertyModelLabel(value: string | null | undefined): string {

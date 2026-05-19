@@ -148,11 +148,36 @@ async function upsertStayUnitRowWithSchemaFallback(
   row: JsonRecord
 ): Promise<JsonRecord | null> {
   const workingRow: JsonRecord = { ...row };
+  const hostId = asNullableString(workingRow.host_id);
+  const legacyFamilyId = asNullableString(workingRow.legacy_family_id);
+  const unitKey = asNullableString(workingRow.unit_key);
+
+  if (unitKey) {
+    let existingQuery = supabase
+      .from("stay_units_v2")
+      .select("id")
+      .eq("unit_key", unitKey)
+      .order("updated_at", { ascending: false })
+      .limit(5);
+
+    if (hostId) {
+      existingQuery = existingQuery.eq("host_id", hostId);
+    } else if (legacyFamilyId) {
+      existingQuery = existingQuery.eq("legacy_family_id", legacyFamilyId);
+    }
+
+    const { data: existingRows, error: existingError } = await existingQuery;
+    if (existingError) throw existingError;
+    const existingId = Array.isArray(existingRows) ? asNullableString((existingRows[0] as JsonRecord | undefined)?.id) : null;
+    if (existingId) {
+      return updateStayUnitRowWithSchemaFallback(supabase, existingId, workingRow);
+    }
+  }
 
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const { data, error } = await supabase
       .from("stay_units_v2")
-      .upsert(workingRow as never, { onConflict: "host_id,unit_key" })
+      .insert(workingRow as never)
       .select("id")
       .single();
 
@@ -711,6 +736,43 @@ async function fetchStayUnitRowsRaw(
   return dedupeStayUnitRows(collectedRows);
 }
 
+async function fetchStayUnitRowsRawById(
+  supabase: SupabaseClient,
+  selector: { hostId?: string | null; legacyFamilyId?: string | null }
+): Promise<StayUnitRecord[]> {
+  const hostId = asNullableString(selector.hostId);
+  const legacyFamilyId = asNullableString(selector.legacyFamilyId);
+  const collectedRows: StayUnitRecord[] = [];
+
+  if (hostId) {
+    const hostRows = await loadRowsForSelector(supabase, { column: "host_id", value: hostId });
+    collectedRows.push(...hostRows);
+  }
+
+  if (legacyFamilyId) {
+    const familyRows = await loadRowsForSelector(supabase, { column: "legacy_family_id", value: legacyFamilyId });
+    collectedRows.push(...familyRows);
+  }
+
+  const byId = new Map<string, StayUnitRecord>();
+  for (const row of collectedRows) {
+    if (!row.id) continue;
+    if (!byId.has(row.id)) {
+      byId.set(row.id, row);
+    }
+  }
+
+  return Array.from(byId.values()).sort((left, right) => {
+    if (left.isPrimary !== right.isPrimary) {
+      return left.isPrimary ? -1 : 1;
+    }
+    if (left.sortOrder !== right.sortOrder) {
+      return left.sortOrder - right.sortOrder;
+    }
+    return left.name.localeCompare(right.name);
+  });
+}
+
 async function loadApprovedRoomSourceForFamily(
   supabase: SupabaseClient,
   familyId: string
@@ -927,12 +989,15 @@ export async function syncPrimaryStayUnitForFamily(
     : [];
 
   if (roomsFromApplication.length > 0) {
-    const currentRows = await fetchStayUnitRowsRaw(supabase, { hostId, legacyFamilyId: familyId });
-    const existingRowByUnitKey = new Map(
-      currentRows
-        .map((row) => (row.unitKey ? [row.unitKey, row] : null))
-        .filter((entry): entry is [string, StayUnitRecord] => Boolean(entry))
-    );
+    const currentRows = await fetchStayUnitRowsRawById(supabase, { hostId, legacyFamilyId: familyId });
+    const existingRowByUnitKey = new Map<string, StayUnitRecord>();
+    for (const row of currentRows) {
+      if (!row.unitKey) continue;
+      const existing = existingRowByUnitKey.get(row.unitKey);
+      if (!existing || scoreStayUnitRow(row) > scoreStayUnitRow(existing)) {
+        existingRowByUnitKey.set(row.unitKey, row);
+      }
+    }
     const syncedRooms: Array<JsonRecord | null> = [];
 
     for (const desiredRow of roomsFromApplication) {
@@ -957,7 +1022,7 @@ export async function syncPrimaryStayUnitForFamily(
         .map((row) => asNullableString((row as JsonRecord | null)?.id))
         .filter((value): value is string => Boolean(value))
     );
-    const refreshedRows = await fetchStayUnitRowsRaw(supabase, { hostId, legacyFamilyId: familyId });
+    const refreshedRows = await fetchStayUnitRowsRawById(supabase, { hostId, legacyFamilyId: familyId });
     const staleRowIds = refreshedRows
       .filter((row) => !desiredUnitKeys.has(row.unitKey) || !keptRowIds.has(row.id))
       .map((row) => row.id)
