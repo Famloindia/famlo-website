@@ -888,6 +888,7 @@
 .roomControlPanel {
   display: grid;
   gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .roomInlineSummaryGrid {

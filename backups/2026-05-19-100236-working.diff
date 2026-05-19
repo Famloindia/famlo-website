@@ -1,0 +1,363 @@
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts b/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
+index c51eeb94..849e9f7f 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
+@@ -109,7 +109,19 @@ export async function POST(request: Request): Promise<NextResponse> {
+     const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
+     const externalRevisionId = asStringOrNull(revisionRow.external_revision_id);
+ 
+-    if (!["imported", "modified_applied", "cancelled_applied"].includes(importStatus)) {
++    if (importStatus === "modified_applied") {
++      return NextResponse.json(
++        { error: "Modification acknowledgement is not supported in this phase yet.", status: importStatus },
++        { status: 409 }
++      );
++    }
++    if (importStatus === "cancelled_applied") {
++      return NextResponse.json(
++        { error: "Cancellation acknowledgement is not supported in this phase yet.", status: importStatus },
++        { status: 409 }
++      );
++    }
++    if (importStatus !== "imported") {
+       return NextResponse.json({ error: "Acknowledge only after successful import/apply.", status: importStatus }, { status: 409 });
+     }
+     if (ackStatus !== "not_acknowledged") {
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/feed/route.ts b/app/api/host/pro/channel/channex/operator/bookings/feed/route.ts
+index a7c94bc1..35e5a196 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/feed/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/feed/route.ts
+@@ -75,6 +75,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       supabase,
+       familyId,
+       action: "fetch_booking_feed",
++      providerKey,
+     });
+ 
+     return NextResponse.json(
+diff --git a/components/partners/pro/pro-dashboard.module.css b/components/partners/pro/pro-dashboard.module.css
+index 60c78feb..c58e3fa1 100644
+--- a/components/partners/pro/pro-dashboard.module.css
++++ b/components/partners/pro/pro-dashboard.module.css
+@@ -888,6 +888,7 @@
+ .roomControlPanel {
+   display: grid;
+   gap: 14px;
++  grid-template-columns: minmax(0, 1fr);
+ }
+ 
+ .roomInlineSummaryGrid {
+diff --git a/lib/channex-booking-auto-apply.ts b/lib/channex-booking-auto-apply.ts
+index 82c94dac..ad0697e6 100644
+--- a/lib/channex-booking-auto-apply.ts
++++ b/lib/channex-booking-auto-apply.ts
+@@ -133,6 +133,9 @@ async function acknowledgeRevision(
+   if (revision.ack_status === "acknowledged") {
+     return { ok: true };
+   }
++  if (revision.import_status !== "imported") {
++    return { ok: false, message: `Automatic acknowledgement is not supported for ${revision.import_status} revisions yet.` };
++  }
+   if (!revision.external_revision_id) {
+     return { ok: false, message: "external_revision_id is missing for acknowledgement." };
+   }
+@@ -537,17 +540,9 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
+         }
+         autoCancelledCount += 1;
+         lastAutoApplyAt = new Date().toISOString();
+-        const ackResult = await acknowledgeRevision(input.supabase, revision);
+-        if (!ackResult.ok) {
+-          failedAutoApplyCount += 1;
+-          lastAutoApplyState = "failed_cancellation_apply";
+-          lastAutoApplyMessage = ackResult.message;
+-          await markRevisionFailure(input.supabase, revision, "cancelled_applied", ackResult.message, "cancellation");
+-          continue;
+-        }
+-        acknowledgedCount += 1;
+-        lastAutoApplyState = "synced";
+-        lastAutoApplyMessage = "Cancellation revisions were applied and acknowledged automatically.";
++        pendingManualReviewCount += 1;
++        lastAutoApplyState = "waiting_for_manual_review";
++        lastAutoApplyMessage = "Cancellation revisions were applied, but acknowledgement still needs operator review.";
+       } catch (processingError) {
+         const message = processingError instanceof Error ? processingError.message : "Auto-cancellation apply failed.";
+         failedAutoApplyCount += 1;
+diff --git a/lib/channex-booking-feed-sync.ts b/lib/channex-booking-feed-sync.ts
+index e73ac51b..9270eb49 100644
+--- a/lib/channex-booking-feed-sync.ts
++++ b/lib/channex-booking-feed-sync.ts
+@@ -6,6 +6,11 @@ import {
+   fetchChannexPropertyById,
+   type ChannexEnvironment,
+ } from "@/lib/channel-providers/channex/client";
++import {
++  resolveProviderFromChannexUniqueId,
++  resolveProviderFromRevision,
++} from "@/lib/channel-providers/provider-capabilities";
++import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+ 
+ type JsonRecord = Record<string, unknown>;
+ 
+@@ -43,6 +48,7 @@ type UnmatchedRevisionPreview = {
+ type PreparedFeedRow = {
+   family_id: string;
+   provider_code: "channex";
++  ota_provider_code: ChannelProviderKey | null;
+   external_property_id: string;
+   external_booking_id: string | null;
+   external_revision_id: string;
+@@ -65,6 +71,7 @@ type PreparedFeedRow = {
+ 
+ type RevisionRow = {
+   id: string;
++  otaProviderCode: ChannelProviderKey | null;
+   importStatus: string;
+   ackStatus: string;
+   status: string | null;
+@@ -124,6 +131,8 @@ export type PollChannexBookingFeedResult = {
+   requiresAcknowledgement: true;
+   acknowledged: false;
+   channelHealth: ChannexFeedHealthSnapshot;
++  requestedProviderKey?: ChannelProviderKey;
++  ignoredOtherProviderCount?: number;
+ };
+ 
+ function asString(value: unknown): string {
+@@ -224,6 +233,22 @@ function extractExternalBookingId(revision: Record<string, unknown>): string | n
+   );
+ }
+ 
++function extractProviderKeyFromFeedRevision(revision: Record<string, unknown>): ChannelProviderKey | null {
++  const attributes = getAttributes(revision);
++  const direct = resolveProviderFromRevision({
++    otaProviderCode: asStringOrNull(revision.ota_provider_code) ?? asStringOrNull(attributes?.ota_provider_code),
++    otaName: extractOtaName(revision),
++  });
++  if (direct) return direct;
++
++  return resolveProviderFromChannexUniqueId(
++    asStringOrNull(revision.unique_id) ??
++      asStringOrNull(attributes?.unique_id) ??
++      asStringOrNull(revision.booking_id) ??
++      asStringOrNull(attributes?.booking_id)
++  );
++}
++
+ function extractRevisionId(revision: Record<string, unknown>): string | null {
+   return asStringOrNull(revision.id);
+ }
+@@ -405,6 +430,7 @@ async function storeMatchedFeedRevisions(input: {
+     dedupedRows.set(revisionId, {
+       family_id: input.familyId,
+       provider_code: "channex",
++      ota_provider_code: extractProviderKeyFromFeedRevision(revision),
+       external_property_id: input.externalPropertyId,
+       external_booking_id: summary.externalBookingId,
+       external_revision_id: revisionId,
+@@ -440,7 +466,7 @@ async function storeMatchedFeedRevisions(input: {
+   const [existingByRevisionResult, existingByBookingResult] = await Promise.all([
+     input.supabase
+       .from("channel_booking_revisions")
+-      .select("id,external_booking_id,external_revision_id,import_status,ack_status,linked_booking_id,raw_payload,source")
++      .select("id,external_booking_id,external_revision_id,ota_provider_code,ota_name,import_status,ack_status,linked_booking_id,raw_payload,source")
+       .eq("family_id", input.familyId)
+       .eq("provider_code", "channex")
+       .eq("source", "booking_revision_feed")
+@@ -448,7 +474,7 @@ async function storeMatchedFeedRevisions(input: {
+     externalBookingIds.length > 0
+       ? input.supabase
+           .from("channel_booking_revisions")
+-          .select("id,external_booking_id,external_revision_id,import_status,ack_status,linked_booking_id,raw_payload,source")
++          .select("id,external_booking_id,external_revision_id,ota_provider_code,ota_name,import_status,ack_status,linked_booking_id,raw_payload,source")
+           .eq("family_id", input.familyId)
+           .eq("provider_code", "channex")
+           .eq("source", "booking_revision_feed")
+@@ -504,6 +530,7 @@ async function storeMatchedFeedRevisions(input: {
+         external_property_id: preparedRow.external_property_id,
+         external_booking_id: preparedRow.external_booking_id,
+         external_revision_id: preparedRow.external_revision_id,
++        ota_provider_code: preparedRow.ota_provider_code,
+         external_room_type_id: preparedRow.external_room_type_id,
+         external_rate_plan_id: preparedRow.external_rate_plan_id,
+         ota_name: preparedRow.ota_name,
+@@ -678,6 +705,7 @@ export async function pollChannexBookingFeedForFamily(input: {
+   supabase: SupabaseClient;
+   familyId: string;
+   action?: string;
++  providerKey?: ChannelProviderKey;
+ }): Promise<PollChannexBookingFeedResult> {
+   const action = input.action ?? "fetch_booking_feed";
+   const observedAt = new Date().toISOString();
+@@ -718,9 +746,26 @@ export async function pollChannexBookingFeedForFamily(input: {
+   const totalFetched = result.revisions.length;
+   const matchedRevisions: Array<Record<string, unknown>> = [];
+   const unmatchedPreviews: UnmatchedRevisionPreview[] = [];
++  const ignoredOtherProviderPreviews: UnmatchedRevisionPreview[] = [];
+   const discoveredPropertyIds = new Set<string>();
+ 
+   for (const revision of result.revisions as Array<Record<string, unknown>>) {
++    const revisionProviderKey = extractProviderKeyFromFeedRevision(revision);
++    if (input.providerKey && revisionProviderKey !== input.providerKey) {
++      const summary = summarizeRevision(revision, mappedRoomTypeIds);
++      ignoredOtherProviderPreviews.push({
++        externalBookingId: summary.externalBookingId,
++        revisionId: summary.revisionId,
++        otaName: summary.otaName,
++        status: summary.status,
++        arrivalDate: summary.arrivalDate,
++        departureDate: summary.departureDate,
++        reason: "unsupported_shape",
++        discoveredPropertyIds: [],
++      });
++      continue;
++    }
++
+     const classification = classifyRevisionForPropertyMatch(revision, externalPropertyId);
+     classification.discoveredPropertyIds.forEach((id) => discoveredPropertyIds.add(id));
+     const summary = summarizeRevision(revision, mappedRoomTypeIds);
+@@ -757,19 +802,29 @@ export async function pollChannexBookingFeedForFamily(input: {
+   const [{ data: storedRevisionRows }, { data: allRevisionRows }] = await Promise.all([
+     input.supabase
+       .from("channel_booking_revisions")
+-      .select("external_booking_id,external_revision_id,status,ota_name,arrival_date,departure_date,guest_name,external_room_type_id,external_rate_plan_id,amount,currency,payment_collect,import_status,ack_status,updated_at")
++      .select("external_booking_id,external_revision_id,ota_provider_code,status,ota_name,arrival_date,departure_date,guest_name,external_room_type_id,external_rate_plan_id,amount,currency,payment_collect,import_status,ack_status,updated_at")
+       .eq("family_id", input.familyId)
+       .eq("provider_code", "channex")
+       .order("updated_at", { ascending: false })
+       .limit(20),
+     input.supabase
+       .from("channel_booking_revisions")
+-      .select("id,source,status,import_status,ack_status,external_booking_id,external_revision_id")
++      .select("id,source,status,ota_provider_code,ota_name,import_status,ack_status,external_booking_id,external_revision_id")
+       .eq("family_id", input.familyId)
+       .eq("provider_code", "channex"),
+   ]);
+ 
+-  const storedRevisions = ((storedRevisionRows ?? []) as Array<Record<string, unknown>>).map((row) => ({
++  const storedRevisions = ((storedRevisionRows ?? []) as Array<Record<string, unknown>>)
++    .filter((row) => {
++      if (!input.providerKey) return true;
++      return (
++        resolveProviderFromRevision({
++          otaProviderCode: asStringOrNull(row.ota_provider_code),
++          otaName: asStringOrNull(row.ota_name),
++        }) === input.providerKey
++      );
++    })
++    .map((row) => ({
+     externalBookingId: asStringOrNull(row.external_booking_id),
+     revisionId: asStringOrNull(row.external_revision_id),
+     status: asStringOrNull(row.status),
+@@ -791,15 +846,21 @@ export async function pollChannexBookingFeedForFamily(input: {
+     ackStatus: asStringOrNull(row.ack_status) ?? "not_acknowledged",
+   }));
+ 
+-  const allRevisions: RevisionRow[] = ((allRevisionRows ?? []) as Array<Record<string, unknown>>).map((row) => ({
++  const allRevisions: RevisionRow[] = ((allRevisionRows ?? []) as Array<Record<string, unknown>>)
++    .map((row) => ({
+     id: asString(row.id),
++    otaProviderCode: resolveProviderFromRevision({
++      otaProviderCode: asStringOrNull(row.ota_provider_code),
++      otaName: asStringOrNull(row.ota_name),
++    }),
+     source: asStringOrNull(row.source) ?? "unknown",
+     status: asStringOrNull(row.status),
+     importStatus: asStringOrNull(row.import_status) ?? "preview",
+     ackStatus: asStringOrNull(row.ack_status) ?? "not_acknowledged",
+     externalBookingId: asStringOrNull(row.external_booking_id),
+     externalRevisionId: asStringOrNull(row.external_revision_id),
+-  }));
++  }))
++    .filter((row) => !input.providerKey || row.otaProviderCode === input.providerKey);
+ 
+   const feedRows = allRevisions.filter((revision) => revision.source === "booking_revision_feed");
+   const unackedRevisionsCount = feedRows.filter((revision) => revision.ackStatus !== "acknowledged").length;
+@@ -819,12 +880,13 @@ export async function pollChannexBookingFeedForFamily(input: {
+   const channelActive = channelResult.data.some((channel) => channel.isActive);
+   const unmatchedRoomCount = normalizedRevisions.filter((revision) => revision.unmatchedRoom).length;
+   const unmatchedCount = unmatchedPreviews.length;
++  const ignoredOtherProviderCount = ignoredOtherProviderPreviews.length;
+   const message = result.ok
+     ? totalFetched === 0
+       ? "0 returned by Channex feed. Preview only; nothing was imported or acknowledged."
+       : normalizedRevisions.length > 0
+-        ? `Fetched ${totalFetched} Channex booking revision${totalFetched === 1 ? "" : "s"}, matched ${normalizedRevisions.length} to this property, and stored matched previews only.`
+-        : `Fetched ${totalFetched} Channex booking revision${totalFetched === 1 ? "" : "s"}, but 0 matched this property.`
++        ? `Fetched ${totalFetched} Channex booking revision${totalFetched === 1 ? "" : "s"}, matched ${normalizedRevisions.length} ${input.providerKey ? `${input.providerKey} ` : ""}revision${normalizedRevisions.length === 1 ? "" : "s"} to this property, and stored matched previews only.`
++        : `Fetched ${totalFetched} Channex booking revision${totalFetched === 1 ? "" : "s"}, but 0 matched this ${input.providerKey ? `${input.providerKey} ` : ""}property scope.`
+     : result.message;
+ 
+   const nextHealth = buildHealthMetadata({
+@@ -855,9 +917,18 @@ export async function pollChannexBookingFeedForFamily(input: {
+   });
+ 
+   if (propertyRow?.id) {
++    const baseMetadata = asObject(propertyRow.metadata) ?? {};
++    const providerFeedHealth =
++      baseMetadata.channexProviderFeedHealth && typeof baseMetadata.channexProviderFeedHealth === "object"
++        ? { ...(baseMetadata.channexProviderFeedHealth as JsonRecord) }
++        : {};
++    if (input.providerKey) {
++      providerFeedHealth[input.providerKey] = nextHealth;
++    }
+     const nextMetadata = {
+-      ...(asObject(propertyRow.metadata) ?? {}),
+-      channexFeedHealth: nextHealth,
++      ...baseMetadata,
++      ...(input.providerKey ? {} : { channexFeedHealth: nextHealth }),
++      ...(input.providerKey ? { channexProviderFeedHealth: providerFeedHealth } : {}),
+     };
+     await input.supabase
+       .from("channel_properties")
+@@ -876,9 +947,11 @@ export async function pollChannexBookingFeedForFamily(input: {
+       endpoint: result.endpoint,
+       http_status: result.httpStatus,
+       external_property_id: externalPropertyId,
++      requested_provider_key: input.providerKey ?? null,
+       total_fetched: totalFetched,
+       matched_revision_count: normalizedRevisions.length,
+       unmatched_revision_count: unmatchedCount,
++      ignored_other_provider_count: ignoredOtherProviderCount,
+       revision_ids: normalizedRevisions.map((revision) => revision.revisionId).filter(Boolean),
+       stored_revision_count: storageResult.storedCount,
+       inserted_revision_count: storageResult.insertedCount,
+@@ -894,11 +967,21 @@ export async function pollChannexBookingFeedForFamily(input: {
+         reason: revision.reason,
+         discovered_property_ids: revision.discoveredPropertyIds,
+       })),
++      ignored_other_provider_revisions: ignoredOtherProviderPreviews.slice(0, 10).map((revision) => ({
++        revision_id: revision.revisionId,
++        external_booking_id: revision.externalBookingId,
++        ota_name: revision.otaName,
++      })),
+       unmatched_room_count: unmatchedRoomCount,
+       channel_health: nextHealth,
+     },
+   });
+ 
++  const latestSafeBookingIds = normalizedRevisions
++    .map((revision) => revision.externalBookingId)
++    .filter((value): value is string => Boolean(value))
++    .slice(0, 10);
++
+   return {
+     ok: result.ok,
+     status: result.ok ? "completed" : "failed",
+@@ -915,14 +998,13 @@ export async function pollChannexBookingFeedForFamily(input: {
+     externalPropertyId,
+     discoveredPropertyIds: [...discoveredPropertyIds],
+     unmatchedRevisions: unmatchedPreviews.slice(0, 20),
+-    latestSafeBookingIds: result.revisions
+-      .slice(0, 10)
+-      .map((revision) => extractExternalBookingId(revision as Record<string, unknown>))
+-      .filter((value): value is string => Boolean(value)),
++    latestSafeBookingIds,
+     lastCheckedAt: observedAt,
+     revisions: storedRevisions,
+     requiresAcknowledgement: true,
+     acknowledged: false,
+     channelHealth: nextHealth,
++    requestedProviderKey: input.providerKey,
++    ignoredOtherProviderCount,
+   };
+ }

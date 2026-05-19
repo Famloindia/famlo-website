@@ -109,7 +109,19 @@ export async function POST(request: Request): Promise<NextResponse> {
     const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
     const externalRevisionId = asStringOrNull(revisionRow.external_revision_id);
 
-    if (!["imported", "modified_applied", "cancelled_applied"].includes(importStatus)) {
+    if (importStatus === "modified_applied") {
+      return NextResponse.json(
+        { error: "Modification acknowledgement is not supported in this phase yet.", status: importStatus },
+        { status: 409 }
+      );
+    }
+    if (importStatus === "cancelled_applied") {
+      return NextResponse.json(
+        { error: "Cancellation acknowledgement is not supported in this phase yet.", status: importStatus },
+        { status: 409 }
+      );
+    }
+    if (importStatus !== "imported") {
       return NextResponse.json({ error: "Acknowledge only after successful import/apply.", status: importStatus }, { status: 409 });
     }
     if (ackStatus !== "not_acknowledged") {

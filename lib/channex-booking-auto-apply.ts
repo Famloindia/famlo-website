@@ -133,6 +133,9 @@ async function acknowledgeRevision(
   if (revision.ack_status === "acknowledged") {
     return { ok: true };
   }
+  if (revision.import_status !== "imported") {
+    return { ok: false, message: `Automatic acknowledgement is not supported for ${revision.import_status} revisions yet.` };
+  }
   if (!revision.external_revision_id) {
     return { ok: false, message: "external_revision_id is missing for acknowledgement." };
   }
@@ -537,17 +540,9 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
         }
         autoCancelledCount += 1;
         lastAutoApplyAt = new Date().toISOString();
-        const ackResult = await acknowledgeRevision(input.supabase, revision);
-        if (!ackResult.ok) {
-          failedAutoApplyCount += 1;
-          lastAutoApplyState = "failed_cancellation_apply";
-          lastAutoApplyMessage = ackResult.message;
-          await markRevisionFailure(input.supabase, revision, "cancelled_applied", ackResult.message, "cancellation");
-          continue;
-        }
-        acknowledgedCount += 1;
-        lastAutoApplyState = "synced";
-        lastAutoApplyMessage = "Cancellation revisions were applied and acknowledged automatically.";
+        pendingManualReviewCount += 1;
+        lastAutoApplyState = "waiting_for_manual_review";
+        lastAutoApplyMessage = "Cancellation revisions were applied, but acknowledgement still needs operator review.";
       } catch (processingError) {
         const message = processingError instanceof Error ? processingError.message : "Auto-cancellation apply failed.";
         failedAutoApplyCount += 1;

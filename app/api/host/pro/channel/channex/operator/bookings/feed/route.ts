@@ -75,6 +75,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       supabase,
       familyId,
       action: "fetch_booking_feed",
+      providerKey,
     });
 
     return NextResponse.json(
