@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import {
   getChannelProviderCapabilities,
+  resolveChannelStorageProviderCode,
   resolveProviderFromRevision,
 } from "@/lib/channel-providers/provider-capabilities";
 import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
@@ -86,6 +87,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
       otaName: asStringOrNull(revisionRow.ota_name),
     });
+    const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? providerKey);
     if (revisionProvider && revisionProvider !== providerKey) {
       return NextResponse.json(
         {
@@ -108,7 +110,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           .from("channel_room_mappings")
           .select("stay_unit_id,external_room_type_id")
           .eq("family_id", familyId)
-          .eq("provider_code", "channex")
+          .eq("provider_code", storageProviderCode)
           .eq("external_room_type_id", externalRoomTypeId)
           .maybeSingle()
       : { data: null, error: null };

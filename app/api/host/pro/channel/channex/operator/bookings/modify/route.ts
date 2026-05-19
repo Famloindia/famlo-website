@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { POST as applyImportPreview } from "@/app/api/host/pro/channel/channex/bookings/import-preview/route";
+import { POST as applyModification } from "@/app/api/host/pro/channel/channex/bookings/apply-modification/route";
 import {
   getChannelProviderCapabilities,
-  resolveChannelStorageProviderCode,
   resolveProviderFromRevision,
 } from "@/lib/channel-providers/provider-capabilities";
 import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
@@ -12,7 +11,7 @@ import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
-type OperatorBookingApplyBody = {
+type OperatorBookingModifyBody = {
   familyId?: string;
   providerKey?: string;
   channelBookingRevisionId?: string;
@@ -26,20 +25,20 @@ function asStringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function buildForwardedRequest(request: Request, familyId: string, channelBookingRevisionId: string): Request {
+function buildForwardedRequest(request: Request, channelBookingRevisionId: string): Request {
   const headers = new Headers(request.headers);
   headers.set("Content-Type", "application/json");
 
   return new Request(request.url, {
     method: "POST",
     headers,
-    body: JSON.stringify({ familyId, channelBookingRevisionId }),
+    body: JSON.stringify({ channelBookingRevisionId }),
   });
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const body = (await request.json()) as OperatorBookingApplyBody;
+    const body = (await request.json()) as OperatorBookingModifyBody;
     const familyId = asString(body.familyId);
     const providerKey = asString(body.providerKey) || "booking";
     const channelBookingRevisionId = asString(body.channelBookingRevisionId);
@@ -53,10 +52,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const capabilities = getChannelProviderCapabilities(providerKey);
-    if (!capabilities.supportsBookingIngest) {
+    if (!capabilities.supportsModificationIngest) {
       return NextResponse.json(
         {
-          error: "This provider does not currently support booking import apply in Famlo.",
+          error: "This provider does not currently support modification apply in Famlo.",
           providerStatus: capabilities.displayStatus,
         },
         { status: 409 }
@@ -80,7 +79,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const { data: revisionRow, error: revisionError } = await supabase
       .from("channel_booking_revisions")
-      .select("id,family_id,provider_code,ota_provider_code,ota_name,external_room_type_id,status,import_status,ack_status")
+      .select("id,family_id,provider_code,ota_provider_code,ota_name,status,import_status,ack_status,linked_booking_id")
       .eq("id", channelBookingRevisionId)
       .eq("family_id", familyId)
       .eq("provider_code", "channex")
@@ -88,14 +87,13 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     if (revisionError) throw revisionError;
     if (!revisionRow) {
-      return NextResponse.json({ error: "Booking preview not found for this selected property." }, { status: 404 });
+      return NextResponse.json({ error: "Booking modification revision not found for this selected property." }, { status: 404 });
     }
 
     const revisionProvider = resolveProviderFromRevision({
       otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
       otaName: asStringOrNull((revisionRow as Record<string, unknown>).ota_name),
     });
-    const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? providerKey);
     if (revisionProvider && revisionProvider !== providerKey) {
       return NextResponse.json(
         {
@@ -106,48 +104,28 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const importStatus = asStringOrNull(revisionRow.import_status) ?? "preview";
-    const ackStatus = asStringOrNull(revisionRow.ack_status) ?? "not_acknowledged";
     const revisionStatus = asStringOrNull(revisionRow.status)?.toLowerCase() ?? "";
-    const externalRoomTypeId = asStringOrNull(revisionRow.external_room_type_id);
+    const importStatus = asStringOrNull(revisionRow.import_status) ?? "preview";
+    const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
 
-    if (!["preview", "failed"].includes(importStatus)) {
-      return NextResponse.json({ error: `This preview is already ${importStatus}.`, status: importStatus }, { status: 409 });
+    if (revisionStatus !== "modified") {
+      return NextResponse.json({ error: "Only modified Channex revisions can use this modification path.", status: revisionStatus }, { status: 409 });
     }
-    if (ackStatus !== "not_acknowledged") {
-      return NextResponse.json({ error: "Acknowledged revisions cannot be imported again.", status: ackStatus }, { status: 409 });
+    if (!linkedBookingId) {
+      return NextResponse.json({ error: "A linked Famlo booking is required before applying modification." }, { status: 409 });
     }
-    if (revisionStatus === "modified") {
-      return NextResponse.json({ error: "Modification revisions remain manual in this phase." }, { status: 409 });
-    }
-    if (revisionStatus === "cancelled") {
-      return NextResponse.json({ error: "Cancelled revisions must use the cancellation apply path, not new booking import." }, { status: 409 });
-    }
-    if (!externalRoomTypeId) {
-      return NextResponse.json({ error: "Cannot import without an external room type id." }, { status: 409 });
+    if (!["modified_pending_review", "modified_applied"].includes(importStatus)) {
+      return NextResponse.json({ error: "This revision is not ready for modification apply.", status: importStatus }, { status: 409 });
     }
 
-    const { data: roomMappingRow, error: roomMappingError } = await supabase
-      .from("channel_room_mappings")
-      .select("stay_unit_id")
-      .eq("family_id", familyId)
-      .eq("provider_code", storageProviderCode)
-      .eq("external_room_type_id", externalRoomTypeId)
-      .maybeSingle();
-
-    if (roomMappingError) throw roomMappingError;
-    if (!roomMappingRow?.stay_unit_id) {
-      return NextResponse.json({ error: "Cannot import until this provider room is mapped to a Famlo room." }, { status: 409 });
-    }
-
-    return applyImportPreview(buildForwardedRequest(request, familyId, channelBookingRevisionId));
+    return applyModification(buildForwardedRequest(request, channelBookingRevisionId));
   } catch (error) {
-    console.error("[host.pro.channel.channex.operator.bookings.apply] failed:", error);
+    console.error("[host.pro.channel.channex.operator.bookings.modify] failed:", error);
     return NextResponse.json(
       {
         ok: false,
         status: "failed",
-        message: error instanceof Error ? error.message : "Unable to apply this Channex preview import.",
+        message: error instanceof Error ? error.message : "Unable to apply this Channex modification.",
       },
       { status: 500 }
     );

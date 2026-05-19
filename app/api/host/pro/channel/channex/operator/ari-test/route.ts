@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 
 import { syncChannexAriForFamily } from "@/lib/channex-ari-sync";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
-import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+import {
+  getChannelProviderCapabilities,
+  resolveChannelStorageProviderCode,
+} from "@/lib/channel-providers/provider-capabilities";
 import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
-import { isChannelProviderKey, readChannelSetupMetadata } from "@/lib/channel-setup-state";
+import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupMetadata } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
@@ -64,6 +68,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const supabase = createAdminSupabaseClient();
+    const storageProviderCode = resolveChannelStorageProviderCode(providerKey);
     const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
 
     if (!authorizedResource?.familyId) {
@@ -79,12 +84,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
     }
 
-    const [{ data: bookingRow }, { data: channexRow }, rooms, { data: roomMappings }, { data: ratePlans }] = await Promise.all([
+    const [{ data: providerRow }, { data: channexRow }, rooms, { data: roomMappings }, { data: ratePlans }] = await Promise.all([
       supabase
         .from("channel_properties")
         .select("id,metadata")
         .eq("family_id", familyId)
-        .eq("provider_code", "booking")
+        .eq("provider_code", providerKey)
         .maybeSingle(),
       supabase
         .from("channel_properties")
@@ -100,26 +105,32 @@ export async function POST(request: Request): Promise<NextResponse> {
         .from("channel_room_mappings")
         .select("stay_unit_id,external_room_type_id")
         .eq("family_id", familyId)
-        .eq("provider_code", "channex"),
+        .eq("provider_code", storageProviderCode),
       supabase
         .from("channel_rate_plans")
         .select("stay_unit_id,external_rate_plan_id")
         .eq("family_id", familyId)
-        .eq("provider_code", "channex"),
+        .eq("provider_code", storageProviderCode),
     ]);
 
-    const setupMetadata = readChannelSetupMetadata(bookingRow?.metadata ?? {});
-    const bookingVerified =
-      setupMetadata.operator_verified_booking_connection === true ||
-      setupMetadata.booking_connection_status === "verified" ||
-      setupMetadata.booking_connection_status === "ready_for_assisted_go_live";
+    const setupMetadata = readChannelSetupMetadata(providerRow?.metadata ?? {});
+    const providerVerified =
+      providerKey === "booking"
+        ? setupMetadata.operator_verified_booking_connection === true ||
+          setupMetadata.booking_connection_status === "verified" ||
+          setupMetadata.booking_connection_status === "ready_for_assisted_go_live"
+        : setupMetadata.provider_structure_verified === true &&
+          setupMetadata.provider_ready_for_test_sync_review === true;
 
-    if (!bookingVerified) {
+    if (!providerVerified) {
       return NextResponse.json(
         {
           ok: false,
           status: "blocked",
-          message: "Booking.com connection must be operator-verified before a limited ARI test sync can run.",
+          message:
+            providerKey === "booking"
+              ? "Booking.com connection must be operator-verified before a limited ARI test sync can run."
+              : `${getChannelProviderDefinition(providerKey).displayName} mapped structure must be verified before a limited ARI test sync can run.`,
         },
         { status: 409 }
       );
@@ -189,12 +200,38 @@ export async function POST(request: Request): Promise<NextResponse> {
     const result = await syncChannexAriForFamily({
       supabase,
       familyId,
+      providerKey,
       hostId: authorizedResource.hostId,
       windowDays,
       action: "push_ari_limited_test",
       route: "/api/host/pro/channel/channex/operator/ari-test",
       requireActiveChannel: true,
     });
+
+    if (providerKey !== "booking" && providerRow?.id) {
+      const nowIso = new Date().toISOString();
+      const metadata = mergeChannelSetupMetadata(providerRow.metadata ?? {}, {
+        status: result.ok ? "needs_review" : "ready_for_test_sync",
+        currentStep: "test_sync",
+        lastError: result.ok ? null : result.message,
+        metadataPatch: {
+          operator_notes: result.ok
+            ? `${getChannelProviderDefinition(providerKey).displayName} limited ARI sync passed for ${result.windowDays} day(s). Booking feed verification should run before assisted go-live review.`
+            : `${getChannelProviderDefinition(providerKey).displayName} limited ARI sync failed or needs review: ${result.message}`,
+        },
+        updatedAt: nowIso,
+      });
+
+      const { error: updateError } = await supabase
+        .from("channel_properties")
+        .update({
+          metadata,
+          updated_at: nowIso,
+        } as never)
+        .eq("id", providerRow.id);
+
+      if (updateError) throw updateError;
+    }
 
     return NextResponse.json(
       {

@@ -11,6 +11,8 @@ import {
   type ChannexAvailabilityChange,
   type ChannexRestrictionChange,
 } from "@/lib/channel-providers/channex/client";
+import { resolveChannelStorageProviderCode } from "@/lib/channel-providers/provider-capabilities";
+import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { loadCanonicalCalendar, type CanonicalCalendarEvent } from "@/lib/calendar";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { loadHostProSettings, PRO_DEFAULT_CURRENCY } from "@/lib/host-pro-settings";
@@ -123,6 +125,7 @@ export type ChannexAriSyncResult = {
 type SyncInput = {
   supabase: SupabaseClient;
   familyId: string;
+  providerKey?: ChannelProviderKey;
   hostId?: string | null;
   windowDays: number;
   action: AriSyncAction;
@@ -323,6 +326,7 @@ function resolveBlockingEndDate(event: CanonicalCalendarEvent): string | null {
 async function logAriPush(input: {
   supabase: SupabaseClient;
   familyId: string;
+  providerCode?: string;
   action: AriSyncAction;
   status: "success" | "warning" | "failed";
   message: string;
@@ -330,7 +334,7 @@ async function logAriPush(input: {
 }): Promise<void> {
   const { error } = await input.supabase.from("channel_sync_logs").insert({
     family_id: input.familyId,
-    provider_code: "channex",
+    provider_code: input.providerCode ?? "channex",
     action: input.action,
     status: input.status,
     message: input.message,
@@ -345,8 +349,15 @@ async function logAriPush(input: {
   }
 }
 
-function readAriHealthMetadata(metadata: JsonRecord | null): ChannexAriHealthSnapshot | null {
-  const health = asObject(metadata?.channexAriHealth);
+export function readAriHealthMetadata(
+  metadata: JsonRecord | null,
+  providerKey: ChannelProviderKey = "booking"
+): ChannexAriHealthSnapshot | null {
+  const providerHealthMap =
+    providerKey !== "booking" && metadata?.providerAriHealth && typeof metadata.providerAriHealth === "object"
+      ? asObject((metadata.providerAriHealth as JsonRecord)[providerKey])
+      : null;
+  const health = providerKey === "booking" ? asObject(metadata?.channexAriHealth) : providerHealthMap;
   if (!health) return null;
   const syncedDateRange = asObject(health.syncedDateRange);
   return {
@@ -386,8 +397,30 @@ function readAriHealthMetadata(metadata: JsonRecord | null): ChannexAriHealthSna
   };
 }
 
+export function buildAriMetadataPatch(
+  baseMetadata: JsonRecord | null,
+  providerKey: ChannelProviderKey,
+  healthSnapshot: ChannexAriHealthSnapshot
+): JsonRecord {
+  const metadata = { ...(baseMetadata ?? {}) };
+  if (providerKey === "booking") {
+    return { ...metadata, channexAriHealth: healthSnapshot };
+  }
+
+  const providerAriHealth =
+    metadata.providerAriHealth && typeof metadata.providerAriHealth === "object"
+      ? { ...(metadata.providerAriHealth as JsonRecord) }
+      : {};
+  providerAriHealth[providerKey] = healthSnapshot;
+  return {
+    ...metadata,
+    providerAriHealth,
+  };
+}
+
 function buildAriHealthMetadata(input: {
   previous: JsonRecord | null;
+  providerKey?: ChannelProviderKey;
   observedAt: string;
   resultStatus: ChannexAriHealthSnapshot["lastAriSyncStatus"];
   message: string;
@@ -397,7 +430,7 @@ function buildAriHealthMetadata(input: {
   channelHealth: AriChannelHealth;
   action: string;
 }): ChannexAriHealthSnapshot {
-  const previousHealth = readAriHealthMetadata(input.previous);
+  const previousHealth = readAriHealthMetadata(input.previous, input.providerKey ?? "booking");
   const successful = input.resultStatus === "synced";
   return {
     lastAriSyncAt: input.observedAt,
@@ -441,6 +474,8 @@ export function shouldSkipChannexAriSync(metadata: JsonRecord | null, now: Date)
 
 export async function syncChannexAriForFamily(input: SyncInput): Promise<ChannexAriSyncResult> {
   const observedAt = new Date().toISOString();
+  const providerKey = input.providerKey ?? "booking";
+  const storageProviderCode = resolveChannelStorageProviderCode(providerKey);
   const config = getChannexConfigSummary();
   const normalizedWindowDays = Math.max(1, Math.floor(input.windowDays));
   const windowDays =
@@ -567,33 +602,44 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
     };
   }
 
-  const [settings, propertyResult, roomMappingsResult, ratePlansResult] = await Promise.all([
+  const [settings, propertyResult, providerResult, roomMappingsResult, ratePlansResult] = await Promise.all([
     loadHostProSettings(input.supabase, input.familyId),
     input.supabase
       .from("channel_properties")
-    .select("id,external_property_id,metadata,sync_status,last_synced_at")
+      .select("id,external_property_id,metadata,sync_status,last_synced_at")
       .eq("family_id", input.familyId)
       .eq("provider_code", "channex")
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    providerKey === "booking"
+      ? Promise.resolve({ data: null, error: null })
+      : input.supabase
+          .from("channel_properties")
+          .select("id,external_property_id,metadata,sync_status,last_synced_at")
+          .eq("family_id", input.familyId)
+          .eq("provider_code", providerKey)
+          .maybeSingle(),
     input.supabase
       .from("channel_room_mappings")
       .select("stay_unit_id,external_room_type_id")
       .eq("family_id", input.familyId)
-      .eq("provider_code", "channex"),
+      .eq("provider_code", storageProviderCode),
     input.supabase
       .from("channel_rate_plans")
       .select("stay_unit_id,external_rate_plan_id")
       .eq("family_id", input.familyId)
-      .eq("provider_code", "channex"),
+      .eq("provider_code", storageProviderCode),
   ]);
 
   if (propertyResult.error) throw propertyResult.error;
+  if (providerResult.error) throw providerResult.error;
   if (roomMappingsResult.error) throw roomMappingsResult.error;
   if (ratePlansResult.error) throw ratePlansResult.error;
 
   const propertyRow = propertyResult.data ?? null;
+  const providerRow = providerResult.data ?? null;
+  const metadataOwnerRow = providerKey === "booking" ? propertyRow : providerRow;
   const externalPropertyId = asString(propertyRow?.external_property_id);
   const dateRange = getDateRange(settings.timezone || "Asia/Kolkata", windowDays);
 
@@ -608,7 +654,8 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
 
   if (!externalPropertyId) {
     const healthSnapshot = buildAriHealthMetadata({
-      previous: propertyRow?.metadata ? asObject(propertyRow.metadata) : null,
+      previous: metadataOwnerRow?.metadata ? asObject(metadataOwnerRow.metadata) : null,
+      providerKey,
       observedAt,
       resultStatus: "sync_failed",
       message: "Create provider property first.",
@@ -670,7 +717,8 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
 
   if (input.requireActiveChannel && (!channelHealth.channelAttached || !channelHealth.channelActive)) {
     const healthSnapshot = buildAriHealthMetadata({
-      previous: asObject(propertyRow?.metadata),
+      previous: asObject(metadataOwnerRow?.metadata),
+      providerKey,
       observedAt,
       resultStatus: "channel_disconnected",
       message: "Channel is detached or inactive, so daily ARI sync was skipped safely.",
@@ -689,15 +737,13 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
     await input.supabase
       .from("channel_properties")
       .update({
-        metadata: {
-          ...asObject(propertyRow?.metadata),
-          channexAriHealth: healthSnapshot,
-        },
+        metadata: buildAriMetadataPatch(asObject(metadataOwnerRow?.metadata), providerKey, healthSnapshot),
       } as never)
-      .eq("id", propertyRow?.id);
+      .eq("id", metadataOwnerRow?.id);
     await logAriPush({
       supabase: input.supabase,
       familyId: input.familyId,
+      providerCode: providerKey === "booking" ? "channex" : providerKey,
       action: input.action,
       status: "warning",
       message: "Skipped ARI sync because channel is detached or inactive.",
@@ -800,7 +846,8 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
       rateMismatches: [],
     };
     const healthSnapshot = buildAriHealthMetadata({
-      previous: asObject(propertyRow?.metadata),
+      previous: asObject(metadataOwnerRow?.metadata),
+      providerKey,
       observedAt,
       resultStatus: "sync_failed",
       message,
@@ -813,12 +860,13 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
     await input.supabase
       .from("channel_properties")
       .update({
-        metadata: { ...asObject(propertyRow?.metadata), channexAriHealth: healthSnapshot },
+        metadata: buildAriMetadataPatch(asObject(metadataOwnerRow?.metadata), providerKey, healthSnapshot),
       } as never)
-      .eq("id", propertyRow?.id);
+      .eq("id", metadataOwnerRow?.id);
     await logAriPush({
       supabase: input.supabase,
       familyId: input.familyId,
+      providerCode: providerKey === "booking" ? "channex" : providerKey,
       action: input.action,
       status: "failed",
       message,
@@ -963,7 +1011,8 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
       ? "channel_disconnected"
       : "sync_failed";
   const healthSnapshot = buildAriHealthMetadata({
-    previous: asObject(propertyRow?.metadata),
+    previous: asObject(metadataOwnerRow?.metadata),
+    providerKey,
     observedAt,
     resultStatus,
     message: summaryMessage,
@@ -977,14 +1026,15 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
   await input.supabase
     .from("channel_properties")
     .update({
-      metadata: { ...asObject(propertyRow?.metadata), channexAriHealth: healthSnapshot },
-      last_synced_at: ok ? observedAt : propertyRow?.last_synced_at ?? null,
+      metadata: buildAriMetadataPatch(asObject(metadataOwnerRow?.metadata), providerKey, healthSnapshot),
+      last_synced_at: ok ? observedAt : metadataOwnerRow?.last_synced_at ?? null,
     } as never)
-    .eq("id", propertyRow?.id);
+    .eq("id", metadataOwnerRow?.id);
 
   await logAriPush({
     supabase: input.supabase,
     familyId: input.familyId,
+    providerCode: providerKey === "booking" ? "channex" : providerKey,
     action: input.action,
     status: ok ? "success" : verificationOk ? "warning" : "failed",
     message: summaryMessage,

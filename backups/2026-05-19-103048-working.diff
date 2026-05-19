@@ -1,0 +1,1684 @@
+diff --git a/app/api/host/pro/channel/channex/bookings/apply-modification/route.ts b/app/api/host/pro/channel/channex/bookings/apply-modification/route.ts
+index 54c6ddab..eef0e237 100644
+--- a/app/api/host/pro/channel/channex/bookings/apply-modification/route.ts
++++ b/app/api/host/pro/channel/channex/bookings/apply-modification/route.ts
+@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
+ 
+ import { acknowledgeChannexBookingRevision } from "@/lib/channel-providers/channex/client";
+ import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
++import {
++  resolveChannelStorageProviderCode,
++  resolveProviderFromRevision,
++} from "@/lib/channel-providers/provider-capabilities";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -143,7 +147,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const { data: revisionRow, error: revisionError } = await supabase
+       .from("channel_booking_revisions")
+-      .select("id,family_id,provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id")
++      .select("id,family_id,provider_code,ota_provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id")
+       .eq("id", channelBookingRevisionId)
+       .eq("provider_code", "channex")
+       .maybeSingle();
+@@ -231,11 +235,17 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "Revision amount must be zero or positive." }, { status: 409 });
+     }
+ 
++    const revisionProvider = resolveProviderFromRevision({
++      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
++      otaName: asStringOrNull(revisionRow.ota_name),
++    });
++    const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
++
+     const { data: roomMappingRow, error: roomMappingError } = await supabase
+       .from("channel_room_mappings")
+       .select("stay_unit_id")
+       .eq("family_id", familyId)
+-      .eq("provider_code", "channex")
++      .eq("provider_code", storageProviderCode)
+       .eq("external_room_type_id", externalRoomTypeId)
+       .maybeSingle();
+ 
+diff --git a/app/api/host/pro/channel/channex/bookings/import-preview/route.ts b/app/api/host/pro/channel/channex/bookings/import-preview/route.ts
+index 50154825..edc01b00 100644
+--- a/app/api/host/pro/channel/channex/bookings/import-preview/route.ts
++++ b/app/api/host/pro/channel/channex/bookings/import-preview/route.ts
+@@ -1,5 +1,9 @@
+ import { NextResponse } from "next/server";
+ 
++import {
++  resolveChannelStorageProviderCode,
++  resolveProviderFromRevision,
++} from "@/lib/channel-providers/provider-capabilities";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -89,7 +93,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const { data: revisionRow, error: revisionError } = await supabase
+       .from("channel_booking_revisions")
+-      .select("id,family_id,provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id")
++      .select("id,family_id,provider_code,ota_provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id")
+       .eq("id", channelBookingRevisionId)
+       .eq("family_id", familyId)
+       .eq("provider_code", "channex")
+@@ -113,6 +117,11 @@ export async function POST(request: Request): Promise<NextResponse> {
+       revisionRow.raw_payload && typeof revisionRow.raw_payload === "object" && !Array.isArray(revisionRow.raw_payload)
+         ? (revisionRow.raw_payload as Record<string, unknown>)
+         : {};
++    const revisionProvider = resolveProviderFromRevision({
++      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
++      otaName: asStringOrNull(revisionRow.ota_name),
++    });
++    const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
+ 
+     if (!["preview", "failed"].includes(importStatus)) {
+       return NextResponse.json({ error: `This preview is already ${importStatus}.` }, { status: 409 });
+@@ -163,7 +172,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       .from("channel_room_mappings")
+       .select("stay_unit_id,external_room_type_id")
+       .eq("family_id", familyId)
+-      .eq("provider_code", "channex")
++      .eq("provider_code", storageProviderCode)
+       .eq("external_room_type_id", externalRoomTypeId)
+       .maybeSingle();
+ 
+diff --git a/app/api/host/pro/channel/channex/operator/ari-test/route.ts b/app/api/host/pro/channel/channex/operator/ari-test/route.ts
+index aefd579e..99c3be7b 100644
+--- a/app/api/host/pro/channel/channex/operator/ari-test/route.ts
++++ b/app/api/host/pro/channel/channex/operator/ari-test/route.ts
+@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
+ 
+ import { syncChannexAriForFamily } from "@/lib/channex-ari-sync";
+ import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+-import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
++import {
++  getChannelProviderCapabilities,
++  resolveChannelStorageProviderCode,
++} from "@/lib/channel-providers/provider-capabilities";
+ import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
+-import { isChannelProviderKey, readChannelSetupMetadata } from "@/lib/channel-setup-state";
++import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
++import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupMetadata } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { loadStayUnitsForSelector } from "@/lib/stay-units";
+@@ -64,6 +68,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+     }
+ 
+     const supabase = createAdminSupabaseClient();
++    const storageProviderCode = resolveChannelStorageProviderCode(providerKey);
+     const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
+ 
+     if (!authorizedResource?.familyId) {
+@@ -79,12 +84,12 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
+     }
+ 
+-    const [{ data: bookingRow }, { data: channexRow }, rooms, { data: roomMappings }, { data: ratePlans }] = await Promise.all([
++    const [{ data: providerRow }, { data: channexRow }, rooms, { data: roomMappings }, { data: ratePlans }] = await Promise.all([
+       supabase
+         .from("channel_properties")
+         .select("id,metadata")
+         .eq("family_id", familyId)
+-        .eq("provider_code", "booking")
++        .eq("provider_code", providerKey)
+         .maybeSingle(),
+       supabase
+         .from("channel_properties")
+@@ -100,26 +105,32 @@ export async function POST(request: Request): Promise<NextResponse> {
+         .from("channel_room_mappings")
+         .select("stay_unit_id,external_room_type_id")
+         .eq("family_id", familyId)
+-        .eq("provider_code", "channex"),
++        .eq("provider_code", storageProviderCode),
+       supabase
+         .from("channel_rate_plans")
+         .select("stay_unit_id,external_rate_plan_id")
+         .eq("family_id", familyId)
+-        .eq("provider_code", "channex"),
++        .eq("provider_code", storageProviderCode),
+     ]);
+ 
+-    const setupMetadata = readChannelSetupMetadata(bookingRow?.metadata ?? {});
+-    const bookingVerified =
+-      setupMetadata.operator_verified_booking_connection === true ||
+-      setupMetadata.booking_connection_status === "verified" ||
+-      setupMetadata.booking_connection_status === "ready_for_assisted_go_live";
++    const setupMetadata = readChannelSetupMetadata(providerRow?.metadata ?? {});
++    const providerVerified =
++      providerKey === "booking"
++        ? setupMetadata.operator_verified_booking_connection === true ||
++          setupMetadata.booking_connection_status === "verified" ||
++          setupMetadata.booking_connection_status === "ready_for_assisted_go_live"
++        : setupMetadata.provider_structure_verified === true &&
++          setupMetadata.provider_ready_for_test_sync_review === true;
+ 
+-    if (!bookingVerified) {
++    if (!providerVerified) {
+       return NextResponse.json(
+         {
+           ok: false,
+           status: "blocked",
+-          message: "Booking.com connection must be operator-verified before a limited ARI test sync can run.",
++          message:
++            providerKey === "booking"
++              ? "Booking.com connection must be operator-verified before a limited ARI test sync can run."
++              : `${getChannelProviderDefinition(providerKey).displayName} mapped structure must be verified before a limited ARI test sync can run.`,
+         },
+         { status: 409 }
+       );
+@@ -189,6 +200,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+     const result = await syncChannexAriForFamily({
+       supabase,
+       familyId,
++      providerKey,
+       hostId: authorizedResource.hostId,
+       windowDays,
+       action: "push_ari_limited_test",
+@@ -196,6 +208,31 @@ export async function POST(request: Request): Promise<NextResponse> {
+       requireActiveChannel: true,
+     });
+ 
++    if (providerKey !== "booking" && providerRow?.id) {
++      const nowIso = new Date().toISOString();
++      const metadata = mergeChannelSetupMetadata(providerRow.metadata ?? {}, {
++        status: result.ok ? "needs_review" : "ready_for_test_sync",
++        currentStep: "test_sync",
++        lastError: result.ok ? null : result.message,
++        metadataPatch: {
++          operator_notes: result.ok
++            ? `${getChannelProviderDefinition(providerKey).displayName} limited ARI sync passed for ${result.windowDays} day(s). Booking feed verification should run before assisted go-live review.`
++            : `${getChannelProviderDefinition(providerKey).displayName} limited ARI sync failed or needs review: ${result.message}`,
++        },
++        updatedAt: nowIso,
++      });
++
++      const { error: updateError } = await supabase
++        .from("channel_properties")
++        .update({
++          metadata,
++          updated_at: nowIso,
++        } as never)
++        .eq("id", providerRow.id);
++
++      if (updateError) throw updateError;
++    }
++
+     return NextResponse.json(
+       {
+         ...result,
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/apply/route.ts b/app/api/host/pro/channel/channex/operator/bookings/apply/route.ts
+index 6251dba1..76388cc5 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/apply/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/apply/route.ts
+@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
+ import { POST as applyImportPreview } from "@/app/api/host/pro/channel/channex/bookings/import-preview/route";
+ import {
+   getChannelProviderCapabilities,
++  resolveChannelStorageProviderCode,
+   resolveProviderFromRevision,
+ } from "@/lib/channel-providers/provider-capabilities";
+ import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+@@ -94,6 +95,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+       otaName: asStringOrNull((revisionRow as Record<string, unknown>).ota_name),
+     });
++    const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? providerKey);
+     if (revisionProvider && revisionProvider !== providerKey) {
+       return NextResponse.json(
+         {
+@@ -129,7 +131,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       .from("channel_room_mappings")
+       .select("stay_unit_id")
+       .eq("family_id", familyId)
+-      .eq("provider_code", "channex")
++      .eq("provider_code", storageProviderCode)
+       .eq("external_room_type_id", externalRoomTypeId)
+       .maybeSingle();
+ 
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/preview/route.ts b/app/api/host/pro/channel/channex/operator/bookings/preview/route.ts
+index daa3005c..008de697 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/preview/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/preview/route.ts
+@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
+ 
+ import {
+   getChannelProviderCapabilities,
++  resolveChannelStorageProviderCode,
+   resolveProviderFromRevision,
+ } from "@/lib/channel-providers/provider-capabilities";
+ import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+@@ -86,6 +87,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+       otaName: asStringOrNull(revisionRow.ota_name),
+     });
++    const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? providerKey);
+     if (revisionProvider && revisionProvider !== providerKey) {
+       return NextResponse.json(
+         {
+@@ -108,7 +110,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+           .from("channel_room_mappings")
+           .select("stay_unit_id,external_room_type_id")
+           .eq("family_id", familyId)
+-          .eq("provider_code", "channex")
++          .eq("provider_code", storageProviderCode)
+           .eq("external_room_type_id", externalRoomTypeId)
+           .maybeSingle()
+       : { data: null, error: null };
+diff --git a/app/api/host/pro/channel/channex/operator/go-live-readiness/route.ts b/app/api/host/pro/channel/channex/operator/go-live-readiness/route.ts
+index bde191e6..00ba327b 100644
+--- a/app/api/host/pro/channel/channex/operator/go-live-readiness/route.ts
++++ b/app/api/host/pro/channel/channex/operator/go-live-readiness/route.ts
+@@ -1,6 +1,11 @@
+ import { NextResponse } from "next/server";
+ 
+-import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
++import { readAriHealthMetadata } from "@/lib/channex-ari-sync";
++import {
++  getChannelProviderCapabilities,
++  resolveChannelStorageProviderCode,
++} from "@/lib/channel-providers/provider-capabilities";
++import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+ import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupMetadata } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+@@ -23,13 +28,14 @@ function asObject(value: unknown): Record<string, unknown> {
+ async function logGoLiveReadiness(input: {
+   supabase: ReturnType<typeof createAdminSupabaseClient>;
+   familyId: string;
++  providerCode: string;
+   status: "success" | "failed";
+   message: string;
+   payload: Record<string, unknown>;
+ }): Promise<void> {
+   const { error } = await input.supabase.from("channel_sync_logs").insert({
+     family_id: input.familyId,
+-    provider_code: "booking",
++    provider_code: input.providerCode,
+     action: "mark_assisted_go_live_ready",
+     status: input.status,
+     message: input.message,
+@@ -69,19 +75,9 @@ export async function POST(request: Request): Promise<NextResponse> {
+       );
+     }
+ 
+-    if (!capabilities.supportsAutoActivation) {
+-      return NextResponse.json(
+-        {
+-          ok: false,
+-          status: "assisted_only",
+-          message: "This provider stays in assisted review until operator sync and mapping checks are completed. No activation was performed.",
+-          providerStatus: capabilities.displayStatus,
+-        },
+-        { status: 409 }
+-      );
+-    }
+-
+     const supabase = createAdminSupabaseClient();
++    const storageProviderCode = resolveChannelStorageProviderCode(providerKey);
++    const providerDefinition = getChannelProviderDefinition(providerKey);
+     const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
+ 
+     if (!authorizedResource?.familyId) {
+@@ -98,7 +94,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+     }
+ 
+     const [
+-      { data: bookingRow },
++      { data: providerRow },
+       { data: channexRow },
+       rooms,
+       { data: roomMappings },
+@@ -109,7 +105,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+         .from("channel_properties")
+         .select("id,family_id,provider_code,external_property_id,sync_status,metadata,created_at,updated_at")
+         .eq("family_id", familyId)
+-        .eq("provider_code", "booking")
++        .eq("provider_code", providerKey)
+         .maybeSingle(),
+       supabase
+         .from("channel_properties")
+@@ -125,25 +121,36 @@ export async function POST(request: Request): Promise<NextResponse> {
+         .from("channel_room_mappings")
+         .select("stay_unit_id,external_room_type_id")
+         .eq("family_id", familyId)
+-        .eq("provider_code", "channex"),
++        .eq("provider_code", storageProviderCode),
+       supabase
+         .from("channel_rate_plans")
+         .select("stay_unit_id,external_rate_plan_id")
+         .eq("family_id", familyId)
+-        .eq("provider_code", "channex"),
++        .eq("provider_code", storageProviderCode),
+       supabase
+         .from("channel_sync_logs")
+         .select("id,action,status,message,created_at")
+         .eq("family_id", familyId)
+-        .eq("provider_code", "channex")
++        .eq("provider_code", providerKey === "booking" ? "channex" : providerKey)
+         .order("created_at", { ascending: false })
+         .limit(50),
+     ]);
+ 
+-    const setupMetadata = readChannelSetupMetadata(bookingRow?.metadata ?? {});
++    const setupMetadata = readChannelSetupMetadata(providerRow?.metadata ?? {});
+     const channexMetadata = asObject(channexRow?.metadata);
+-    const ariHealth = asObject(channexMetadata.channexAriHealth);
+-    const feedHealth = asObject(channexMetadata.channexFeedHealth);
++    const providerMetadata = asObject(providerRow?.metadata);
++    const ariHealth =
++      providerKey === "booking"
++        ? asObject(channexMetadata.channexAriHealth)
++        : readAriHealthMetadata(providerMetadata, providerKey);
++    const providerFeedHealthMap =
++      channexMetadata.channexProviderFeedHealth && typeof channexMetadata.channexProviderFeedHealth === "object"
++        ? (channexMetadata.channexProviderFeedHealth as Record<string, unknown>)
++        : {};
++    const feedHealth =
++      providerKey === "booking"
++        ? asObject(channexMetadata.channexFeedHealth)
++        : asObject(providerFeedHealthMap[providerKey]);
+     const activeRooms = rooms.filter((room) => room.isActive);
+     const mappedRoomIds = new Set(
+       (roomMappings ?? [])
+@@ -160,24 +167,29 @@ export async function POST(request: Request): Promise<NextResponse> {
+     const latestLimitedAri = (syncLogs ?? []).find((log) => log.action === "push_ari_limited_test");
+     const latestBookingFeed = (syncLogs ?? []).find((log) => log.action === "fetch_booking_feed");
+     const blockers = [
+-      setupMetadata.operator_verified_booking_connection === true ||
+-      setupMetadata.booking_connection_status === "verified" ||
+-      setupMetadata.booking_connection_status === "ready_for_assisted_go_live"
+-        ? null
+-        : "Booking.com connection has not been operator-verified.",
++      providerKey === "booking"
++        ? setupMetadata.operator_verified_booking_connection === true ||
++          setupMetadata.booking_connection_status === "verified" ||
++          setupMetadata.booking_connection_status === "ready_for_assisted_go_live"
++          ? null
++          : "Booking.com connection has not been operator-verified."
++        : setupMetadata.provider_structure_verified === true &&
++            setupMetadata.provider_ready_for_test_sync_review === true
++          ? null
++          : `${providerDefinition.displayName} mapped structure has not been verified yet.`,
+       asString(channexRow?.external_property_id) ? null : "Channex property is missing.",
+       activeRooms.length > 0 ? null : "No active Famlo room is available.",
+       missingRoomMappings.length === 0 ? null : `Room mappings missing for ${missingRoomMappings.join(", ")}.`,
+       missingRatePlans.length === 0 ? null : `Rate plans missing for ${missingRatePlans.join(", ")}.`,
+       latestLimitedAri?.status === "success" ? null : "Limited ARI test sync has not succeeded.",
+-      latestBookingFeed?.status === "success" ? null : "Booking feed poll has not succeeded.",
+-      ariHealth.channelAttached === true || feedHealth.channelAttached === true ? null : "Channex channel is not attached.",
+-      ariHealth.channelActive === true || feedHealth.channelActive === true ? null : "Channex channel is not active.",
++      latestBookingFeed?.status === "success" ? null : `${providerDefinition.displayName} booking feed poll has not succeeded.`,
++      ariHealth?.channelAttached === true || feedHealth.channelAttached === true ? null : "Channex channel is not attached.",
++      ariHealth?.channelActive === true || feedHealth.channelActive === true ? null : "Channex channel is not active.",
+     ].filter((item): item is string => Boolean(item));
+ 
+     const nowIso = new Date().toISOString();
+     const ready = blockers.length === 0;
+-    const nextMetadata = mergeChannelSetupMetadata(bookingRow?.metadata ?? {}, {
++    const nextMetadata = mergeChannelSetupMetadata(providerRow?.metadata ?? {}, {
+       status: ready ? "review_requested" : "needs_review",
+       currentStep: "activate",
+       lastError: ready ? null : blockers.join(" "),
+@@ -186,20 +198,22 @@ export async function POST(request: Request): Promise<NextResponse> {
+         ready_for_assisted_go_live_at: ready ? nowIso : null,
+         ready_for_assisted_go_live_by: authorizedResource.hostUserId ?? "operator",
+         assisted_go_live_blockers: blockers,
+-        booking_connection_status: ready ? "ready_for_assisted_go_live" : setupMetadata.booking_connection_status,
++        ...(providerKey === "booking"
++          ? { booking_connection_status: ready ? "ready_for_assisted_go_live" : setupMetadata.booking_connection_status }
++          : {}),
+         operator_notes: ready
+-          ? "Operator marked Booking.com ready for assisted go-live review. No activation was performed."
+-          : "Operator go-live readiness check found blockers. No activation was performed.",
++          ? `Operator marked ${providerDefinition.displayName} ready for assisted go-live review. No activation was performed.`
++          : `Operator go-live readiness check found blockers for ${providerDefinition.displayName}. No activation was performed.`,
+       },
+       updatedAt: nowIso,
+     });
+ 
+     const payload = {
+-      id: asString(bookingRow?.id) || undefined,
++      id: asString(providerRow?.id) || undefined,
+       family_id: familyId,
+-      provider_code: "booking",
+-      external_property_id: typeof bookingRow?.external_property_id === "string" ? bookingRow.external_property_id : null,
+-      sync_status: typeof bookingRow?.sync_status === "string" ? bookingRow.sync_status : "not_connected",
++      provider_code: providerKey,
++      external_property_id: typeof providerRow?.external_property_id === "string" ? providerRow.external_property_id : null,
++      sync_status: typeof providerRow?.sync_status === "string" ? providerRow.sync_status : "not_connected",
+       metadata: nextMetadata,
+       updated_at: nowIso,
+     };
+@@ -211,12 +225,13 @@ export async function POST(request: Request): Promise<NextResponse> {
+     if (upsertError) throw upsertError;
+ 
+     const message = ready
+-      ? "Booking.com is marked ready for assisted go-live review. No channel was activated."
+-      : "Booking.com is not ready for assisted go-live review. No channel was activated.";
++      ? `${providerDefinition.displayName} is marked ready for assisted go-live review. No channel was activated.`
++      : `${providerDefinition.displayName} is not ready for assisted go-live review. No channel was activated.`;
+ 
+     await logGoLiveReadiness({
+       supabase,
+       familyId,
++      providerCode: providerKey === "booking" ? "channex" : providerKey,
+       status: ready ? "success" : "failed",
+       message,
+       payload: {
+diff --git a/components/partners/pro/ChannelSetupWizard.tsx b/components/partners/pro/ChannelSetupWizard.tsx
+index 455ef618..245308ae 100644
+--- a/components/partners/pro/ChannelSetupWizard.tsx
++++ b/components/partners/pro/ChannelSetupWizard.tsx
+@@ -3,6 +3,7 @@
+ import { Fragment, useEffect, useMemo, useState } from "react";
+ 
+ import { buildProviderConnectionModel } from "@/lib/channel-providers/connection-model";
++import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+ import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
+ import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+ import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+@@ -640,6 +641,8 @@ export default function ChannelSetupWizard({
+   const currentStepLabel = getChannelSetupStepLabel(state.currentStep);
+   const currentStatusLabel = getChannelSetupStatusLabel(state.status);
+   const readinessItems = readinessModel.items;
++  const providerDefinition = getChannelProviderDefinition(providerKey);
++  const providerCapabilities = getChannelProviderCapabilities(providerKey);
+   const assistedConnectionLabels = providerKey === "booking" ? null : getAssistedConnectionLabels(providerKey);
+   const showAdvancedReadiness = false;
+   const connectionModel = buildProviderConnectionModel({
+@@ -691,7 +694,7 @@ export default function ChannelSetupWizard({
+   const hasPreviewSuggestions = Boolean(previewWorkspace && previewWorkspace.suggestions.length > 0);
+   const derivedHostFlowStatus: HostConnectFlowStatus =
+     mappingConfirmed
+-      ? providerKey === "booking"
++      ? providerCapabilities.supportsSelectedPropertySyncTest
+         ? "sync_ready"
+         : "mapping_confirmed"
+       : hasPreviewSuggestions
+@@ -1013,7 +1016,7 @@ export default function ChannelSetupWizard({
+     })();
+   };
+ 
+-  const runBookingSyncTest = (): void => {
++  const runSelectedPropertySyncTest = (): void => {
+     void (async () => {
+       setIsRunningSync(true);
+       setHostFlowOverride("sync_running");
+@@ -1043,7 +1046,7 @@ export default function ChannelSetupWizard({
+         }
+ 
+         setHostFlowOverride("sync_success");
+-        setFeedback(payload.message ?? "Limited Booking.com sync test completed.");
++        setFeedback(payload.message ?? `Limited ${providerDefinition.displayName} sync test completed.`);
+       } catch (error) {
+         setHostFlowOverride("sync_failed");
+         setFeedback(error instanceof Error ? error.message : "Unable to run the selected-property sync test.");
+@@ -1874,22 +1877,24 @@ export default function ChannelSetupWizard({
+       <section className={styles.listCard} style={{ marginBottom: 16 }}>
+         <div className={styles.listTitle}>Sync control</div>
+         <div className={styles.cardCopy}>
+-          Booking.com can run a limited selected-property sync test after mapping is confirmed. Non-Booking providers stay assisted until their direct provider mutation path exists.
++          {providerCapabilities.supportsSelectedPropertySyncTest
++            ? `${providerDefinition.displayName} can run a limited selected-property sync test after mapping is confirmed.`
++            : "This provider stays assisted until its limited selected-property sync path is enabled in Famlo."}
+         </div>
+         <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
+           <span className={styles.readinessPill}>Current host flow: {getHostFlowLabel(hostFlowStatus)}</span>
+           <span className={styles.readinessPill}>Mapped rooms: {mappedRoomCount}/{activeMappingRooms.length || 0}</span>
+           <span className={styles.readinessPill}>Mapped rates: {mappedRateCount}/{activeMappingRooms.length || 0}</span>
+         </div>
+-        {providerKey === "booking" ? (
++        {providerCapabilities.supportsSelectedPropertySyncTest ? (
+           <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
+             <button
+               type="button"
+               className={styles.primaryActionButton}
+               disabled={isRunningSync || !mappingConfirmed}
+-              onClick={runBookingSyncTest}
++              onClick={runSelectedPropertySyncTest}
+             >
+-              {isRunningSync ? "Running sync..." : "Run Booking.com sync test"}
++              {isRunningSync ? "Running sync..." : `Run ${providerDefinition.displayName} sync test`}
+             </button>
+             <span className={`${styles.readinessPill} ${hostFlowStatus === "sync_success" ? styles.readinessPillOk : hostFlowStatus === "sync_failed" ? styles.readinessPillReview : styles.readinessPillMissing}`}>
+               {getHostFlowLabel(hostFlowStatus)}
+diff --git a/lib/channel-providers/provider-capabilities.ts b/lib/channel-providers/provider-capabilities.ts
+index fa9ca914..df5b5429 100644
+--- a/lib/channel-providers/provider-capabilities.ts
++++ b/lib/channel-providers/provider-capabilities.ts
+@@ -18,6 +18,10 @@ export type ChannelProviderCapabilities = {
+   supportsAutoActivation: boolean;
+ };
+ 
++export function resolveChannelStorageProviderCode(providerKey: ChannelProviderKey): string {
++  return providerKey === "booking" ? "channex" : providerKey;
++}
++
+ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilities> = {
+   booking: {
+     providerKey: "booking",
+@@ -42,11 +46,11 @@ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilit
+     supportsChannexIframe: true,
+     supportsStructureVerification: true,
+     supportsAriSync: true,
+-    supportsSelectedPropertySyncTest: false,
+-    supportsBookingIngest: false,
+-    supportsModificationIngest: false,
+-    supportsCancellationIngest: false,
+-    supportsGoLiveReadiness: false,
++    supportsSelectedPropertySyncTest: true,
++    supportsBookingIngest: true,
++    supportsModificationIngest: true,
++    supportsCancellationIngest: true,
++    supportsGoLiveReadiness: true,
+     supportsAutoActivation: false,
+   },
+   airbnb: {
+@@ -57,7 +61,7 @@ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilit
+     supportsChannexIframe: true,
+     supportsStructureVerification: true,
+     supportsAriSync: true,
+-    supportsSelectedPropertySyncTest: false,
++    supportsSelectedPropertySyncTest: true,
+     supportsBookingIngest: true,
+     supportsModificationIngest: true,
+     supportsCancellationIngest: true,
+@@ -72,7 +76,7 @@ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilit
+     supportsChannexIframe: true,
+     supportsStructureVerification: true,
+     supportsAriSync: true,
+-    supportsSelectedPropertySyncTest: false,
++    supportsSelectedPropertySyncTest: true,
+     supportsBookingIngest: true,
+     supportsModificationIngest: true,
+     supportsCancellationIngest: true,
+@@ -87,7 +91,7 @@ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilit
+     supportsChannexIframe: true,
+     supportsStructureVerification: true,
+     supportsAriSync: true,
+-    supportsSelectedPropertySyncTest: false,
++    supportsSelectedPropertySyncTest: true,
+     supportsBookingIngest: true,
+     supportsModificationIngest: true,
+     supportsCancellationIngest: true,
+diff --git a/lib/channel-setup-state.ts b/lib/channel-setup-state.ts
+index 7e80f818..42616639 100644
+--- a/lib/channel-setup-state.ts
++++ b/lib/channel-setup-state.ts
+@@ -1,5 +1,6 @@
+ import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+ import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
++import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+ import type { ChannelPropertyRecord } from "@/lib/host-pro-channel-foundation";
+ 
+ type JsonRecord = Record<string, unknown>;
+@@ -881,6 +882,7 @@ export function buildChannelTestSyncReadinessModel(
+   const providerStructureBlockers = state.metadata.provider_structure_blockers.filter(Boolean);
+ 
+   if (providerKey !== "booking") {
++    const capabilities = getChannelProviderCapabilities(providerKey);
+     const checklist = [
+       buildTestSyncChecklistItem(
+         "property_exists",
+@@ -933,14 +935,18 @@ export function buildChannelTestSyncReadinessModel(
+       buildTestSyncChecklistItem(
+         "calendar",
+         "Calendar / availability data",
+-        providerStructureVerified ? "not_ready" : hasRealConnection ? "blocked" : "assisted_only",
++        providerStructureVerified ? (capabilities.supportsSelectedPropertySyncTest ? "ready" : "not_ready") : hasRealConnection ? "blocked" : "assisted_only",
+         providerStructureVerified
+-          ? "Mapped provider structure is verified and can move to operator test sync review."
++          ? capabilities.supportsSelectedPropertySyncTest
++            ? "Mapped provider structure is verified and a limited selected-property sync can now run."
++            : "Mapped provider structure is verified and can move to operator test sync review."
+           : hasRealConnection
+             ? "Run operator structure verification after room and rate mapping."
+             : "Calendar and availability readiness stays assisted until the provider connection exists.",
+         providerStructureVerified
+-          ? "A real sync route is not exposed yet for this provider."
++          ? capabilities.supportsSelectedPropertySyncTest
++            ? "Run the limited selected-property sync before requesting operator go-live review."
++            : "A real sync route is not exposed yet for this provider."
+           : hasRealConnection
+             ? (providerStructureBlockers[0] ?? "Structure verification has not been completed yet.")
+             : "No safe provider feed is available for this channel yet."
+@@ -948,12 +954,16 @@ export function buildChannelTestSyncReadinessModel(
+       buildTestSyncChecklistItem(
+         "sync_issue",
+         "No critical sync issue",
+-        providerReadyForTestSyncReview ? "ready" : hasRealConnection ? "blocked" : "assisted_only",
++        providerReadyForTestSyncReview ? (capabilities.supportsSelectedPropertySyncTest ? "not_ready" : "ready") : hasRealConnection ? "blocked" : "assisted_only",
+         providerReadyForTestSyncReview
+-          ? "Operator structure verification says this provider is ready for limited sync review."
++          ? capabilities.supportsSelectedPropertySyncTest
++            ? "Operator structure verification passed. Run the limited sync and verify the provider feed next."
++            : "Operator structure verification says this provider is ready for limited sync review."
+           : "Operator review is required before any test sync can be considered.",
+         providerReadyForTestSyncReview
+-          ? "Ready for operator test sync review."
++          ? capabilities.supportsSelectedPropertySyncTest
++            ? "Limited sync can run now."
++            : "Ready for operator test sync review."
+           : hasRealConnection
+             ? (providerStructureBlockers[0] ?? "Verify the mapped provider structure first.")
+             : "Test sync remains operator-controlled for this provider."
+@@ -961,16 +971,27 @@ export function buildChannelTestSyncReadinessModel(
+     ];
+ 
+     return {
+-      status: providerReadyForTestSyncReview ? "ready" : hasRealConnection ? "blocked" : hasSetupRow ? "assisted_only" : "unavailable",
++      status:
++        providerReadyForTestSyncReview
++          ? "ready"
++          : hasRealConnection
++            ? "blocked"
++            : hasSetupRow
++              ? "assisted_only"
++              : "unavailable",
+       statusLabel: providerReadyForTestSyncReview
+-        ? "Ready for operator test sync review"
++        ? capabilities.supportsSelectedPropertySyncTest
++          ? "Ready for limited selected-property sync"
++          : "Ready for operator test sync review"
+         : hasRealConnection
+           ? "Blocked until mapped structure is verified"
+           : hasSetupRow
+             ? "Test sync unavailable until channel connection is completed."
+             : "Test sync unavailable.",
+       nextRequiredAction: providerReadyForTestSyncReview
+-        ? "Ready for operator test sync review."
++        ? capabilities.supportsSelectedPropertySyncTest
++          ? "Run the limited selected-property sync."
++          : "Ready for operator test sync review."
+         : hasRealConnection
+           ? providerStructureBlockers[0] ?? "Verify mapped structure before operator test sync review."
+           : hasSetupRow
+@@ -978,7 +999,9 @@ export function buildChannelTestSyncReadinessModel(
+             : "Request Famlo setup help to begin the assisted setup flow.",
+       checklist,
+       operatorNote: providerReadyForTestSyncReview
+-        ? "A real connection and mapped structure now exist. Actual provider test sync still remains operator-controlled."
++        ? capabilities.supportsSelectedPropertySyncTest
++          ? "A real connection and mapped structure now exist. Famlo can run a limited selected-property sync for this provider."
++          : "A real connection and mapped structure now exist. Actual provider test sync still remains operator-controlled."
+         : hasRealConnection
+           ? "Use Verify mapped structure in operator diagnostics after the real provider channel is attached."
+           : "This provider remains assisted-only until real channel data exists.",
+diff --git a/lib/channex-ari-sync.ts b/lib/channex-ari-sync.ts
+index 7feb306f..71b06e12 100644
+--- a/lib/channex-ari-sync.ts
++++ b/lib/channex-ari-sync.ts
+@@ -11,6 +11,8 @@ import {
+   type ChannexAvailabilityChange,
+   type ChannexRestrictionChange,
+ } from "@/lib/channel-providers/channex/client";
++import { resolveChannelStorageProviderCode } from "@/lib/channel-providers/provider-capabilities";
++import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+ import { loadCanonicalCalendar, type CanonicalCalendarEvent } from "@/lib/calendar";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { loadHostProSettings, PRO_DEFAULT_CURRENCY } from "@/lib/host-pro-settings";
+@@ -123,6 +125,7 @@ export type ChannexAriSyncResult = {
+ type SyncInput = {
+   supabase: SupabaseClient;
+   familyId: string;
++  providerKey?: ChannelProviderKey;
+   hostId?: string | null;
+   windowDays: number;
+   action: AriSyncAction;
+@@ -323,6 +326,7 @@ function resolveBlockingEndDate(event: CanonicalCalendarEvent): string | null {
+ async function logAriPush(input: {
+   supabase: SupabaseClient;
+   familyId: string;
++  providerCode?: string;
+   action: AriSyncAction;
+   status: "success" | "warning" | "failed";
+   message: string;
+@@ -330,7 +334,7 @@ async function logAriPush(input: {
+ }): Promise<void> {
+   const { error } = await input.supabase.from("channel_sync_logs").insert({
+     family_id: input.familyId,
+-    provider_code: "channex",
++    provider_code: input.providerCode ?? "channex",
+     action: input.action,
+     status: input.status,
+     message: input.message,
+@@ -345,8 +349,15 @@ async function logAriPush(input: {
+   }
+ }
+ 
+-function readAriHealthMetadata(metadata: JsonRecord | null): ChannexAriHealthSnapshot | null {
+-  const health = asObject(metadata?.channexAriHealth);
++export function readAriHealthMetadata(
++  metadata: JsonRecord | null,
++  providerKey: ChannelProviderKey = "booking"
++): ChannexAriHealthSnapshot | null {
++  const providerHealthMap =
++    providerKey !== "booking" && metadata?.providerAriHealth && typeof metadata.providerAriHealth === "object"
++      ? asObject((metadata.providerAriHealth as JsonRecord)[providerKey])
++      : null;
++  const health = providerKey === "booking" ? asObject(metadata?.channexAriHealth) : providerHealthMap;
+   if (!health) return null;
+   const syncedDateRange = asObject(health.syncedDateRange);
+   return {
+@@ -386,8 +397,30 @@ function readAriHealthMetadata(metadata: JsonRecord | null): ChannexAriHealthSna
+   };
+ }
+ 
++export function buildAriMetadataPatch(
++  baseMetadata: JsonRecord | null,
++  providerKey: ChannelProviderKey,
++  healthSnapshot: ChannexAriHealthSnapshot
++): JsonRecord {
++  const metadata = { ...(baseMetadata ?? {}) };
++  if (providerKey === "booking") {
++    return { ...metadata, channexAriHealth: healthSnapshot };
++  }
++
++  const providerAriHealth =
++    metadata.providerAriHealth && typeof metadata.providerAriHealth === "object"
++      ? { ...(metadata.providerAriHealth as JsonRecord) }
++      : {};
++  providerAriHealth[providerKey] = healthSnapshot;
++  return {
++    ...metadata,
++    providerAriHealth,
++  };
++}
++
+ function buildAriHealthMetadata(input: {
+   previous: JsonRecord | null;
++  providerKey?: ChannelProviderKey;
+   observedAt: string;
+   resultStatus: ChannexAriHealthSnapshot["lastAriSyncStatus"];
+   message: string;
+@@ -397,7 +430,7 @@ function buildAriHealthMetadata(input: {
+   channelHealth: AriChannelHealth;
+   action: string;
+ }): ChannexAriHealthSnapshot {
+-  const previousHealth = readAriHealthMetadata(input.previous);
++  const previousHealth = readAriHealthMetadata(input.previous, input.providerKey ?? "booking");
+   const successful = input.resultStatus === "synced";
+   return {
+     lastAriSyncAt: input.observedAt,
+@@ -441,6 +474,8 @@ export function shouldSkipChannexAriSync(metadata: JsonRecord | null, now: Date)
+ 
+ export async function syncChannexAriForFamily(input: SyncInput): Promise<ChannexAriSyncResult> {
+   const observedAt = new Date().toISOString();
++  const providerKey = input.providerKey ?? "booking";
++  const storageProviderCode = resolveChannelStorageProviderCode(providerKey);
+   const config = getChannexConfigSummary();
+   const normalizedWindowDays = Math.max(1, Math.floor(input.windowDays));
+   const windowDays =
+@@ -567,33 +602,44 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+     };
+   }
+ 
+-  const [settings, propertyResult, roomMappingsResult, ratePlansResult] = await Promise.all([
++  const [settings, propertyResult, providerResult, roomMappingsResult, ratePlansResult] = await Promise.all([
+     loadHostProSettings(input.supabase, input.familyId),
+     input.supabase
+       .from("channel_properties")
+-    .select("id,external_property_id,metadata,sync_status,last_synced_at")
++      .select("id,external_property_id,metadata,sync_status,last_synced_at")
+       .eq("family_id", input.familyId)
+       .eq("provider_code", "channex")
+       .order("updated_at", { ascending: false })
+       .limit(1)
+       .maybeSingle(),
++    providerKey === "booking"
++      ? Promise.resolve({ data: null, error: null })
++      : input.supabase
++          .from("channel_properties")
++          .select("id,external_property_id,metadata,sync_status,last_synced_at")
++          .eq("family_id", input.familyId)
++          .eq("provider_code", providerKey)
++          .maybeSingle(),
+     input.supabase
+       .from("channel_room_mappings")
+       .select("stay_unit_id,external_room_type_id")
+       .eq("family_id", input.familyId)
+-      .eq("provider_code", "channex"),
++      .eq("provider_code", storageProviderCode),
+     input.supabase
+       .from("channel_rate_plans")
+       .select("stay_unit_id,external_rate_plan_id")
+       .eq("family_id", input.familyId)
+-      .eq("provider_code", "channex"),
++      .eq("provider_code", storageProviderCode),
+   ]);
+ 
+   if (propertyResult.error) throw propertyResult.error;
++  if (providerResult.error) throw providerResult.error;
+   if (roomMappingsResult.error) throw roomMappingsResult.error;
+   if (ratePlansResult.error) throw ratePlansResult.error;
+ 
+   const propertyRow = propertyResult.data ?? null;
++  const providerRow = providerResult.data ?? null;
++  const metadataOwnerRow = providerKey === "booking" ? propertyRow : providerRow;
+   const externalPropertyId = asString(propertyRow?.external_property_id);
+   const dateRange = getDateRange(settings.timezone || "Asia/Kolkata", windowDays);
+ 
+@@ -608,7 +654,8 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+ 
+   if (!externalPropertyId) {
+     const healthSnapshot = buildAriHealthMetadata({
+-      previous: propertyRow?.metadata ? asObject(propertyRow.metadata) : null,
++      previous: metadataOwnerRow?.metadata ? asObject(metadataOwnerRow.metadata) : null,
++      providerKey,
+       observedAt,
+       resultStatus: "sync_failed",
+       message: "Create provider property first.",
+@@ -670,7 +717,8 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+ 
+   if (input.requireActiveChannel && (!channelHealth.channelAttached || !channelHealth.channelActive)) {
+     const healthSnapshot = buildAriHealthMetadata({
+-      previous: asObject(propertyRow?.metadata),
++      previous: asObject(metadataOwnerRow?.metadata),
++      providerKey,
+       observedAt,
+       resultStatus: "channel_disconnected",
+       message: "Channel is detached or inactive, so daily ARI sync was skipped safely.",
+@@ -689,15 +737,13 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+     await input.supabase
+       .from("channel_properties")
+       .update({
+-        metadata: {
+-          ...asObject(propertyRow?.metadata),
+-          channexAriHealth: healthSnapshot,
+-        },
++        metadata: buildAriMetadataPatch(asObject(metadataOwnerRow?.metadata), providerKey, healthSnapshot),
+       } as never)
+-      .eq("id", propertyRow?.id);
++      .eq("id", metadataOwnerRow?.id);
+     await logAriPush({
+       supabase: input.supabase,
+       familyId: input.familyId,
++      providerCode: providerKey === "booking" ? "channex" : providerKey,
+       action: input.action,
+       status: "warning",
+       message: "Skipped ARI sync because channel is detached or inactive.",
+@@ -800,7 +846,8 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+       rateMismatches: [],
+     };
+     const healthSnapshot = buildAriHealthMetadata({
+-      previous: asObject(propertyRow?.metadata),
++      previous: asObject(metadataOwnerRow?.metadata),
++      providerKey,
+       observedAt,
+       resultStatus: "sync_failed",
+       message,
+@@ -813,12 +860,13 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+     await input.supabase
+       .from("channel_properties")
+       .update({
+-        metadata: { ...asObject(propertyRow?.metadata), channexAriHealth: healthSnapshot },
++        metadata: buildAriMetadataPatch(asObject(metadataOwnerRow?.metadata), providerKey, healthSnapshot),
+       } as never)
+-      .eq("id", propertyRow?.id);
++      .eq("id", metadataOwnerRow?.id);
+     await logAriPush({
+       supabase: input.supabase,
+       familyId: input.familyId,
++      providerCode: providerKey === "booking" ? "channex" : providerKey,
+       action: input.action,
+       status: "failed",
+       message,
+@@ -963,7 +1011,8 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+       ? "channel_disconnected"
+       : "sync_failed";
+   const healthSnapshot = buildAriHealthMetadata({
+-    previous: asObject(propertyRow?.metadata),
++    previous: asObject(metadataOwnerRow?.metadata),
++    providerKey,
+     observedAt,
+     resultStatus,
+     message: summaryMessage,
+@@ -977,14 +1026,15 @@ export async function syncChannexAriForFamily(input: SyncInput): Promise<Channex
+   await input.supabase
+     .from("channel_properties")
+     .update({
+-      metadata: { ...asObject(propertyRow?.metadata), channexAriHealth: healthSnapshot },
+-      last_synced_at: ok ? observedAt : propertyRow?.last_synced_at ?? null,
++      metadata: buildAriMetadataPatch(asObject(metadataOwnerRow?.metadata), providerKey, healthSnapshot),
++      last_synced_at: ok ? observedAt : metadataOwnerRow?.last_synced_at ?? null,
+     } as never)
+-    .eq("id", propertyRow?.id);
++    .eq("id", metadataOwnerRow?.id);
+ 
+   await logAriPush({
+     supabase: input.supabase,
+     familyId: input.familyId,
++    providerCode: providerKey === "booking" ? "channex" : providerKey,
+     action: input.action,
+     status: ok ? "success" : verificationOk ? "warning" : "failed",
+     message: summaryMessage,
+diff --git a/lib/channex-booking-auto-apply.ts b/lib/channex-booking-auto-apply.ts
+index ad0697e6..59c77343 100644
+--- a/lib/channex-booking-auto-apply.ts
++++ b/lib/channex-booking-auto-apply.ts
+@@ -1,12 +1,17 @@
+ import type { SupabaseClient } from "@supabase/supabase-js";
+ 
+ import { acknowledgeChannexBookingRevision, getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
++import {
++  resolveChannelStorageProviderCode,
++  resolveProviderFromRevision,
++} from "@/lib/channel-providers/provider-capabilities";
+ 
+ type JsonRecord = Record<string, unknown>;
+ 
+ type RevisionRecord = {
+   id: string;
+   family_id: string;
++  ota_provider_code: string | null;
+   external_booking_id: string | null;
+   external_revision_id: string | null;
+   external_room_type_id: string | null;
+@@ -182,11 +187,17 @@ async function autoImportNewRevision(
+     return { ok: true, bookingId: revision.linked_booking_id };
+   }
+ 
++  const revisionProvider = resolveProviderFromRevision({
++    otaProviderCode: revision.ota_provider_code,
++    otaName: revision.ota_name,
++  });
++  const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
++
+   const { data: roomMappingRow, error: roomMappingError } = await supabase
+     .from("channel_room_mappings")
+     .select("stay_unit_id")
+     .eq("family_id", revision.family_id)
+-    .eq("provider_code", "channex")
++    .eq("provider_code", storageProviderCode)
+     .eq("external_room_type_id", revision.external_room_type_id)
+     .maybeSingle();
+   if (roomMappingError) throw roomMappingError;
+@@ -439,7 +450,7 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
+ 
+   const { data: rows, error } = await input.supabase
+     .from("channel_booking_revisions")
+-    .select("id,family_id,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,updated_at")
++    .select("id,family_id,ota_provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,updated_at")
+     .eq("family_id", input.familyId)
+     .eq("provider_code", "channex")
+     .eq("source", "booking_revision_feed")
+@@ -460,6 +471,7 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
+     const revision: RevisionRecord = {
+       id: asString(rawRow.id),
+       family_id: asString(rawRow.family_id),
++      ota_provider_code: asStringOrNull(rawRow.ota_provider_code),
+       external_booking_id: asStringOrNull(rawRow.external_booking_id),
+       external_revision_id: asStringOrNull(rawRow.external_revision_id),
+       external_room_type_id: asStringOrNull(rawRow.external_room_type_id),
+diff --git a/lib/channex-booking-feed-sync.ts b/lib/channex-booking-feed-sync.ts
+index 9270eb49..f7859d56 100644
+--- a/lib/channex-booking-feed-sync.ts
++++ b/lib/channex-booking-feed-sync.ts
+@@ -233,7 +233,7 @@ function extractExternalBookingId(revision: Record<string, unknown>): string | n
+   );
+ }
+ 
+-function extractProviderKeyFromFeedRevision(revision: Record<string, unknown>): ChannelProviderKey | null {
++export function extractProviderKeyFromFeedRevision(revision: Record<string, unknown>): ChannelProviderKey | null {
+   const attributes = getAttributes(revision);
+   const direct = resolveProviderFromRevision({
+     otaProviderCode: asStringOrNull(revision.ota_provider_code) ?? asStringOrNull(attributes?.ota_provider_code),
+@@ -249,6 +249,14 @@ function extractProviderKeyFromFeedRevision(revision: Record<string, unknown>):
+   );
+ }
+ 
++export function shouldIgnoreFeedRevisionForProvider(
++  requestedProviderKey: ChannelProviderKey | undefined,
++  revision: Record<string, unknown>
++): boolean {
++  if (!requestedProviderKey) return false;
++  return extractProviderKeyFromFeedRevision(revision) !== requestedProviderKey;
++}
++
+ function extractRevisionId(revision: Record<string, unknown>): string | null {
+   return asStringOrNull(revision.id);
+ }
+@@ -655,6 +663,30 @@ function buildHealthMetadata(input: {
+   };
+ }
+ 
++export function buildFeedMetadataPatch(
++  baseMetadata: JsonRecord | null,
++  providerKey: ChannelProviderKey | undefined,
++  nextHealth: ChannexFeedHealthSnapshot
++): JsonRecord {
++  const metadata = { ...(baseMetadata ?? {}) };
++  if (!providerKey) {
++    return {
++      ...metadata,
++      channexFeedHealth: nextHealth,
++    };
++  }
++
++  const providerFeedHealth =
++    metadata.channexProviderFeedHealth && typeof metadata.channexProviderFeedHealth === "object"
++      ? { ...(metadata.channexProviderFeedHealth as JsonRecord) }
++      : {};
++  providerFeedHealth[providerKey] = nextHealth;
++  return {
++    ...metadata,
++    channexProviderFeedHealth: providerFeedHealth,
++  };
++}
++
+ export function shouldSkipChannexFeedPoll(metadata: JsonRecord | null, now: Date): {
+   skip: boolean;
+   reason: "recent_success" | "backoff";
+@@ -750,8 +782,7 @@ export async function pollChannexBookingFeedForFamily(input: {
+   const discoveredPropertyIds = new Set<string>();
+ 
+   for (const revision of result.revisions as Array<Record<string, unknown>>) {
+-    const revisionProviderKey = extractProviderKeyFromFeedRevision(revision);
+-    if (input.providerKey && revisionProviderKey !== input.providerKey) {
++    if (shouldIgnoreFeedRevisionForProvider(input.providerKey, revision)) {
+       const summary = summarizeRevision(revision, mappedRoomTypeIds);
+       ignoredOtherProviderPreviews.push({
+         externalBookingId: summary.externalBookingId,
+@@ -917,19 +948,7 @@ export async function pollChannexBookingFeedForFamily(input: {
+   });
+ 
+   if (propertyRow?.id) {
+-    const baseMetadata = asObject(propertyRow.metadata) ?? {};
+-    const providerFeedHealth =
+-      baseMetadata.channexProviderFeedHealth && typeof baseMetadata.channexProviderFeedHealth === "object"
+-        ? { ...(baseMetadata.channexProviderFeedHealth as JsonRecord) }
+-        : {};
+-    if (input.providerKey) {
+-      providerFeedHealth[input.providerKey] = nextHealth;
+-    }
+-    const nextMetadata = {
+-      ...baseMetadata,
+-      ...(input.providerKey ? {} : { channexFeedHealth: nextHealth }),
+-      ...(input.providerKey ? { channexProviderFeedHealth: providerFeedHealth } : {}),
+-    };
++    const nextMetadata = buildFeedMetadataPatch(asObject(propertyRow.metadata), input.providerKey, nextHealth);
+     await input.supabase
+       .from("channel_properties")
+       .update({ metadata: nextMetadata, updated_at: observedAt } as never)
+diff --git a/package-lock.json b/package-lock.json
+index 67403b7e..1a4ca2a5 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -26,6 +26,7 @@
+         "@types/react-dom": "^19",
+         "eslint": "^9",
+         "eslint-config-next": "16.2.2",
++        "tsx": "^4.22.2",
+         "typescript": "^5"
+       },
+       "engines": {
+@@ -1156,6 +1157,448 @@
+         "tslib": "^2.4.0"
+       }
+     },
++    "node_modules/@esbuild/aix-ppc64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.28.0.tgz",
++      "integrity": "sha512-lhRUCeuOyJQURhTxl4WkpFTjIsbDayJHih5kZC1giwE+MhIzAb7mEsQMqMf18rHLsrb5qI1tafG20mLxEWcWlA==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "aix"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-arm": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.28.0.tgz",
++      "integrity": "sha512-wqh0ByljabXLKHeWXYLqoJ5jKC4XBaw6Hk08OfMrCRd2nP2ZQ5eleDZC41XHyCNgktBGYMbqnrJKq/K/lzPMSQ==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-arm64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm64/-/android-arm64-0.28.0.tgz",
++      "integrity": "sha512-+WzIXQOSaGs33tLEgYPYe/yQHf0WTU0X42Jca3y8NWMbUVhp7rUnw+vAsRC/QiDrdD31IszMrZy+qwPOPjd+rw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-x64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-x64/-/android-x64-0.28.0.tgz",
++      "integrity": "sha512-+VJggoaKhk2VNNqVL7f6S189UzShHC/mR9EE8rDdSkdpN0KflSwWY/gWjDrNxxisg8Fp1ZCD9jLMo4m0OUfeUA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/darwin-arm64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.28.0.tgz",
++      "integrity": "sha512-0T+A9WZm+bZ84nZBtk1ckYsOvyA3x7e2Acj1KdVfV4/2tdG4fzUp91YHx+GArWLtwqp77pBXVCPn2We7Letr0Q==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/darwin-x64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-0.28.0.tgz",
++      "integrity": "sha512-fyzLm/DLDl/84OCfp2f/XQ4flmORsjU7VKt8HLjvIXChJoFFOIL6pLJPH4Yhd1n1gGFF9mPwtlN5Wf82DZs+LQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/freebsd-arm64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-arm64/-/freebsd-arm64-0.28.0.tgz",
++      "integrity": "sha512-l9GeW5UZBT9k9brBYI+0WDffcRxgHQD8ShN2Ur4xWq/NFzUKm3k5lsH4PdaRgb2w7mI9u61nr2gI2mLI27Nh3Q==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/freebsd-x64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-x64/-/freebsd-x64-0.28.0.tgz",
++      "integrity": "sha512-BXoQai/A0wPO6Es3yFJ7APCiKGc1tdAEOgeTNy3SsB491S3aHn4S4r3e976eUnPdU+NbdtmBuLncYir2tMU9Nw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-arm": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.28.0.tgz",
++      "integrity": "sha512-CjaaREJagqJp7iTaNQjjidaNbCKYcd4IDkzbwwxtSvjI7NZm79qiHc8HqciMddQ6CKvJT6aBd8lO9kN/ZudLlw==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-arm64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.28.0.tgz",
++      "integrity": "sha512-RVyzfb3FWsGA55n6WY0MEIEPURL1FcbhFE6BffZEMEekfCzCIMtB5yyDcFnVbTnwk+CLAgTujmV/Lgvih56W+A==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-ia32": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ia32/-/linux-ia32-0.28.0.tgz",
++      "integrity": "sha512-KBnSTt1kxl9x70q+ydterVdl+Cn0H18ngRMRCEQfrbqdUuntQQ0LoMZv47uB97NljZFzY6HcfqEZ2SAyIUTQBQ==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-loong64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-loong64/-/linux-loong64-0.28.0.tgz",
++      "integrity": "sha512-zpSlUce1mnxzgBADvxKXX5sl8aYQHo2ezvMNI8I0lbblJtp8V4odlm3Yzlj7gPyt3T8ReksE6bK+pT3WD+aJRg==",
++      "cpu": [
++        "loong64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-mips64el": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-mips64el/-/linux-mips64el-0.28.0.tgz",
++      "integrity": "sha512-2jIfP6mmjkdmeTlsX/9vmdmhBmKADrWqN7zcdtHIeNSCH1SqIoNI63cYsjQR8J+wGa4Y5izRcSHSm8K3QWmk3w==",
++      "cpu": [
++        "mips64el"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-ppc64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ppc64/-/linux-ppc64-0.28.0.tgz",
++      "integrity": "sha512-bc0FE9wWeC0WBm49IQMPSPILRocGTQt3j5KPCA8os6VprfuJ7KD+5PzESSrJ6GmPIPJK965ZJHTUlSA6GNYEhg==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-riscv64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-riscv64/-/linux-riscv64-0.28.0.tgz",
++      "integrity": "sha512-SQPZOwoTTT/HXFXQJG/vBX8sOFagGqvZyXcgLA3NhIqcBv1BJU1d46c0rGcrij2B56Z2rNiSLaZOYW5cUk7yLQ==",
++      "cpu": [
++        "riscv64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-s390x": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-s390x/-/linux-s390x-0.28.0.tgz",
++      "integrity": "sha512-SCfR0HN8CEEjnYnySJTd2cw0k9OHB/YFzt5zgJEwa+wL/T/raGWYMBqwDNAC6dqFKmJYZoQBRfHjgwLHGSrn3Q==",
++      "cpu": [
++        "s390x"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-x64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.28.0.tgz",
++      "integrity": "sha512-us0dSb9iFxIi8srnpl931Nvs65it/Jd2a2K3qs7fz2WfGPHqzfzZTfec7oxZJRNPXPnNYZtanmRc4AL/JwVzHQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/netbsd-arm64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-arm64/-/netbsd-arm64-0.28.0.tgz",
++      "integrity": "sha512-CR/RYotgtCKwtftMwJlUU7xCVNg3lMYZ0RzTmAHSfLCXw3NtZtNpswLEj/Kkf6kEL3Gw+BpOekRX0BYCtklhUw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "netbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/netbsd-x64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-x64/-/netbsd-x64-0.28.0.tgz",
++      "integrity": "sha512-nU1yhmYutL+fQ71Kxnhg8uEOdC0pwEW9entHykTgEbna2pw2dkbFSMeqjjyHZoCmt8SBkOSvV+yNmm94aUrrqw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "netbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openbsd-arm64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-arm64/-/openbsd-arm64-0.28.0.tgz",
++      "integrity": "sha512-cXb5vApOsRsxsEl4mcZ1XY3D4DzcoMxR/nnc4IyqYs0rTI8ZKmW6kyyg+11Z8yvgMfAEldKzP7AdP64HnSC/6g==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openbsd-x64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-x64/-/openbsd-x64-0.28.0.tgz",
++      "integrity": "sha512-8wZM2qqtv9UP3mzy7HiGYNH/zjTA355mpeuA+859TyR+e+Tc08IHYpLJuMsfpDJwoLo1ikIJI8jC3GFjnRClzA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openbsd"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openharmony-arm64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/openharmony-arm64/-/openharmony-arm64-0.28.0.tgz",
++      "integrity": "sha512-FLGfyizszcef5C3YtoyQDACyg95+dndv79i2EekILBofh5wpCa1KuBqOWKrEHZg3zrL3t5ouE5jgr94vA+Wb2w==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openharmony"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/sunos-x64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/sunos-x64/-/sunos-x64-0.28.0.tgz",
++      "integrity": "sha512-1ZgjUoEdHZZl/YlV76TSCz9Hqj9h9YmMGAgAPYd+q4SicWNX3G5GCyx9uhQWSLcbvPW8Ni7lj4gDa1T40akdlw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "sunos"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-arm64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-arm64/-/win32-arm64-0.28.0.tgz",
++      "integrity": "sha512-Q9StnDmQ/enxnpxCCLSg0oo4+34B9TdXpuyPeTedN/6+iXBJ4J+zwfQI28u/Jl40nOYAxGoNi7mFP40RUtkmUA==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-ia32": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-ia32/-/win32-ia32-0.28.0.tgz",
++      "integrity": "sha512-zF3ag/gfiCe6U2iczcRzSYJKH1DCI+ByzSENHlM2FcDbEeo5Zd2C86Aq0tKUYAJJ1obRP84ymxIAksZUcdztHA==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-x64": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-x64/-/win32-x64-0.28.0.tgz",
++      "integrity": "sha512-pEl1bO9mfAmIC+tW5btTmrKaujg3zGtUmWNdCw/xs70FBjwAL3o9OEKNHvNmnyylD6ubxUERiEhdsL0xBQ9efw==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/@eslint-community/eslint-utils": {
+       "version": "4.9.1",
+       "resolved": "https://registry.npmjs.org/@eslint-community/eslint-utils/-/eslint-utils-4.9.1.tgz",
+@@ -4461,6 +4904,48 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/esbuild": {
++      "version": "0.28.0",
++      "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.28.0.tgz",
++      "integrity": "sha512-sNR9MHpXSUV/XB4zmsFKN+QgVG82Cc7+/aaxJ8Adi8hyOac+EXptIp45QBPaVyX3N70664wRbTcLTOemCAnyqw==",
++      "dev": true,
++      "hasInstallScript": true,
++      "license": "MIT",
++      "bin": {
++        "esbuild": "bin/esbuild"
++      },
++      "engines": {
++        "node": ">=18"
++      },
++      "optionalDependencies": {
++        "@esbuild/aix-ppc64": "0.28.0",
++        "@esbuild/android-arm": "0.28.0",
++        "@esbuild/android-arm64": "0.28.0",
++        "@esbuild/android-x64": "0.28.0",
++        "@esbuild/darwin-arm64": "0.28.0",
++        "@esbuild/darwin-x64": "0.28.0",
++        "@esbuild/freebsd-arm64": "0.28.0",
++        "@esbuild/freebsd-x64": "0.28.0",
++        "@esbuild/linux-arm": "0.28.0",
++        "@esbuild/linux-arm64": "0.28.0",
++        "@esbuild/linux-ia32": "0.28.0",
++        "@esbuild/linux-loong64": "0.28.0",
++        "@esbuild/linux-mips64el": "0.28.0",
++        "@esbuild/linux-ppc64": "0.28.0",
++        "@esbuild/linux-riscv64": "0.28.0",
++        "@esbuild/linux-s390x": "0.28.0",
++        "@esbuild/linux-x64": "0.28.0",
++        "@esbuild/netbsd-arm64": "0.28.0",
++        "@esbuild/netbsd-x64": "0.28.0",
++        "@esbuild/openbsd-arm64": "0.28.0",
++        "@esbuild/openbsd-x64": "0.28.0",
++        "@esbuild/openharmony-arm64": "0.28.0",
++        "@esbuild/sunos-x64": "0.28.0",
++        "@esbuild/win32-arm64": "0.28.0",
++        "@esbuild/win32-ia32": "0.28.0",
++        "@esbuild/win32-x64": "0.28.0"
++      }
++    },
+     "node_modules/escalade": {
+       "version": "3.2.0",
+       "resolved": "https://registry.npmjs.org/escalade/-/escalade-3.2.0.tgz",
+@@ -5066,6 +5551,21 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/fsevents": {
++      "version": "2.3.3",
++      "resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz",
++      "integrity": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==",
++      "dev": true,
++      "hasInstallScript": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "engines": {
++        "node": "^8.16.0 || ^10.6.0 || >=11.0.0"
++      }
++    },
+     "node_modules/function-bind": {
+       "version": "1.1.2",
+       "resolved": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
+@@ -7512,6 +8012,25 @@
+       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
+       "license": "0BSD"
+     },
++    "node_modules/tsx": {
++      "version": "4.22.2",
++      "resolved": "https://registry.npmjs.org/tsx/-/tsx-4.22.2.tgz",
++      "integrity": "sha512-6w9FwtT8WQqRAyTNR+Z+86kghRqpmOLjXUrBlBT6T+CQGDuIMm0VmAqaFUFBIeKDTGobE6/YSigZYLeomzBaRg==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "esbuild": "~0.28.0"
++      },
++      "bin": {
++        "tsx": "dist/cli.mjs"
++      },
++      "engines": {
++        "node": ">=18.0.0"
++      },
++      "optionalDependencies": {
++        "fsevents": "~2.3.3"
++      }
++    },
+     "node_modules/type-check": {
+       "version": "0.4.0",
+       "resolved": "https://registry.npmjs.org/type-check/-/type-check-0.4.0.tgz",
+diff --git a/package.json b/package.json
+index e11612b7..6fd1a6ad 100644
+--- a/package.json
++++ b/package.json
+@@ -8,6 +8,7 @@
+     "start": "next start",
+     "lint": "eslint",
+     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
++    "test:channels": "tsx --test tests/channel-provider-lifecycle.test.ts",
+     "db:v2:verify": "node scripts/verify-v2.mjs",
+     "db:v2:backfill": "node scripts/backfill-v2.mjs",
+     "inventory:backfill": "node scripts/backfill-canonical-inventory.mjs",
+@@ -35,6 +36,7 @@
+     "@types/react-dom": "^19",
+     "eslint": "^9",
+     "eslint-config-next": "16.2.2",
++    "tsx": "^4.22.2",
+     "typescript": "^5"
+   },
+   "engines": {

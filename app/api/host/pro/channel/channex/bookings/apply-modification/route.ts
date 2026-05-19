@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { acknowledgeChannexBookingRevision } from "@/lib/channel-providers/channex/client";
 import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
+import {
+  resolveChannelStorageProviderCode,
+  resolveProviderFromRevision,
+} from "@/lib/channel-providers/provider-capabilities";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -143,7 +147,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const { data: revisionRow, error: revisionError } = await supabase
       .from("channel_booking_revisions")
-      .select("id,family_id,provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id")
+      .select("id,family_id,provider_code,ota_provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id")
       .eq("id", channelBookingRevisionId)
       .eq("provider_code", "channex")
       .maybeSingle();
@@ -231,11 +235,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "Revision amount must be zero or positive." }, { status: 409 });
     }
 
+    const revisionProvider = resolveProviderFromRevision({
+      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+      otaName: asStringOrNull(revisionRow.ota_name),
+    });
+    const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
+
     const { data: roomMappingRow, error: roomMappingError } = await supabase
       .from("channel_room_mappings")
       .select("stay_unit_id")
       .eq("family_id", familyId)
-      .eq("provider_code", "channex")
+      .eq("provider_code", storageProviderCode)
       .eq("external_room_type_id", externalRoomTypeId)
       .maybeSingle();
 

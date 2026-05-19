@@ -1,12 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { acknowledgeChannexBookingRevision, getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+import {
+  resolveChannelStorageProviderCode,
+  resolveProviderFromRevision,
+} from "@/lib/channel-providers/provider-capabilities";
 
 type JsonRecord = Record<string, unknown>;
 
 type RevisionRecord = {
   id: string;
   family_id: string;
+  ota_provider_code: string | null;
   external_booking_id: string | null;
   external_revision_id: string | null;
   external_room_type_id: string | null;
@@ -182,11 +187,17 @@ async function autoImportNewRevision(
     return { ok: true, bookingId: revision.linked_booking_id };
   }
 
+  const revisionProvider = resolveProviderFromRevision({
+    otaProviderCode: revision.ota_provider_code,
+    otaName: revision.ota_name,
+  });
+  const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
+
   const { data: roomMappingRow, error: roomMappingError } = await supabase
     .from("channel_room_mappings")
     .select("stay_unit_id")
     .eq("family_id", revision.family_id)
-    .eq("provider_code", "channex")
+    .eq("provider_code", storageProviderCode)
     .eq("external_room_type_id", revision.external_room_type_id)
     .maybeSingle();
   if (roomMappingError) throw roomMappingError;
@@ -439,7 +450,7 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
 
   const { data: rows, error } = await input.supabase
     .from("channel_booking_revisions")
-    .select("id,family_id,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,updated_at")
+    .select("id,family_id,ota_provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,updated_at")
     .eq("family_id", input.familyId)
     .eq("provider_code", "channex")
     .eq("source", "booking_revision_feed")
@@ -460,6 +471,7 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
     const revision: RevisionRecord = {
       id: asString(rawRow.id),
       family_id: asString(rawRow.family_id),
+      ota_provider_code: asStringOrNull(rawRow.ota_provider_code),
       external_booking_id: asStringOrNull(rawRow.external_booking_id),
       external_revision_id: asStringOrNull(rawRow.external_revision_id),
       external_room_type_id: asStringOrNull(rawRow.external_room_type_id),

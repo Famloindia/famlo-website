@@ -1,5 +1,6 @@
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
 import type { ChannelPropertyRecord } from "@/lib/host-pro-channel-foundation";
 
 type JsonRecord = Record<string, unknown>;
@@ -881,6 +882,7 @@ export function buildChannelTestSyncReadinessModel(
   const providerStructureBlockers = state.metadata.provider_structure_blockers.filter(Boolean);
 
   if (providerKey !== "booking") {
+    const capabilities = getChannelProviderCapabilities(providerKey);
     const checklist = [
       buildTestSyncChecklistItem(
         "property_exists",
@@ -933,14 +935,18 @@ export function buildChannelTestSyncReadinessModel(
       buildTestSyncChecklistItem(
         "calendar",
         "Calendar / availability data",
-        providerStructureVerified ? "not_ready" : hasRealConnection ? "blocked" : "assisted_only",
+        providerStructureVerified ? (capabilities.supportsSelectedPropertySyncTest ? "ready" : "not_ready") : hasRealConnection ? "blocked" : "assisted_only",
         providerStructureVerified
-          ? "Mapped provider structure is verified and can move to operator test sync review."
+          ? capabilities.supportsSelectedPropertySyncTest
+            ? "Mapped provider structure is verified and a limited selected-property sync can now run."
+            : "Mapped provider structure is verified and can move to operator test sync review."
           : hasRealConnection
             ? "Run operator structure verification after room and rate mapping."
             : "Calendar and availability readiness stays assisted until the provider connection exists.",
         providerStructureVerified
-          ? "A real sync route is not exposed yet for this provider."
+          ? capabilities.supportsSelectedPropertySyncTest
+            ? "Run the limited selected-property sync before requesting operator go-live review."
+            : "A real sync route is not exposed yet for this provider."
           : hasRealConnection
             ? (providerStructureBlockers[0] ?? "Structure verification has not been completed yet.")
             : "No safe provider feed is available for this channel yet."
@@ -948,12 +954,16 @@ export function buildChannelTestSyncReadinessModel(
       buildTestSyncChecklistItem(
         "sync_issue",
         "No critical sync issue",
-        providerReadyForTestSyncReview ? "ready" : hasRealConnection ? "blocked" : "assisted_only",
+        providerReadyForTestSyncReview ? (capabilities.supportsSelectedPropertySyncTest ? "not_ready" : "ready") : hasRealConnection ? "blocked" : "assisted_only",
         providerReadyForTestSyncReview
-          ? "Operator structure verification says this provider is ready for limited sync review."
+          ? capabilities.supportsSelectedPropertySyncTest
+            ? "Operator structure verification passed. Run the limited sync and verify the provider feed next."
+            : "Operator structure verification says this provider is ready for limited sync review."
           : "Operator review is required before any test sync can be considered.",
         providerReadyForTestSyncReview
-          ? "Ready for operator test sync review."
+          ? capabilities.supportsSelectedPropertySyncTest
+            ? "Limited sync can run now."
+            : "Ready for operator test sync review."
           : hasRealConnection
             ? (providerStructureBlockers[0] ?? "Verify the mapped provider structure first.")
             : "Test sync remains operator-controlled for this provider."
@@ -961,16 +971,27 @@ export function buildChannelTestSyncReadinessModel(
     ];
 
     return {
-      status: providerReadyForTestSyncReview ? "ready" : hasRealConnection ? "blocked" : hasSetupRow ? "assisted_only" : "unavailable",
+      status:
+        providerReadyForTestSyncReview
+          ? "ready"
+          : hasRealConnection
+            ? "blocked"
+            : hasSetupRow
+              ? "assisted_only"
+              : "unavailable",
       statusLabel: providerReadyForTestSyncReview
-        ? "Ready for operator test sync review"
+        ? capabilities.supportsSelectedPropertySyncTest
+          ? "Ready for limited selected-property sync"
+          : "Ready for operator test sync review"
         : hasRealConnection
           ? "Blocked until mapped structure is verified"
           : hasSetupRow
             ? "Test sync unavailable until channel connection is completed."
             : "Test sync unavailable.",
       nextRequiredAction: providerReadyForTestSyncReview
-        ? "Ready for operator test sync review."
+        ? capabilities.supportsSelectedPropertySyncTest
+          ? "Run the limited selected-property sync."
+          : "Ready for operator test sync review."
         : hasRealConnection
           ? providerStructureBlockers[0] ?? "Verify mapped structure before operator test sync review."
           : hasSetupRow
@@ -978,7 +999,9 @@ export function buildChannelTestSyncReadinessModel(
             : "Request Famlo setup help to begin the assisted setup flow.",
       checklist,
       operatorNote: providerReadyForTestSyncReview
-        ? "A real connection and mapped structure now exist. Actual provider test sync still remains operator-controlled."
+        ? capabilities.supportsSelectedPropertySyncTest
+          ? "A real connection and mapped structure now exist. Famlo can run a limited selected-property sync for this provider."
+          : "A real connection and mapped structure now exist. Actual provider test sync still remains operator-controlled."
         : hasRealConnection
           ? "Use Verify mapped structure in operator diagnostics after the real provider channel is attached."
           : "This provider remains assisted-only until real channel data exists.",

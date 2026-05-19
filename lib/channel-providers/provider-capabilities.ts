@@ -18,6 +18,10 @@ export type ChannelProviderCapabilities = {
   supportsAutoActivation: boolean;
 };
 
+export function resolveChannelStorageProviderCode(providerKey: ChannelProviderKey): string {
+  return providerKey === "booking" ? "channex" : providerKey;
+}
+
 const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilities> = {
   booking: {
     providerKey: "booking",
@@ -42,11 +46,11 @@ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilit
     supportsChannexIframe: true,
     supportsStructureVerification: true,
     supportsAriSync: true,
-    supportsSelectedPropertySyncTest: false,
-    supportsBookingIngest: false,
-    supportsModificationIngest: false,
-    supportsCancellationIngest: false,
-    supportsGoLiveReadiness: false,
+    supportsSelectedPropertySyncTest: true,
+    supportsBookingIngest: true,
+    supportsModificationIngest: true,
+    supportsCancellationIngest: true,
+    supportsGoLiveReadiness: true,
     supportsAutoActivation: false,
   },
   airbnb: {
@@ -57,7 +61,7 @@ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilit
     supportsChannexIframe: true,
     supportsStructureVerification: true,
     supportsAriSync: true,
-    supportsSelectedPropertySyncTest: false,
+    supportsSelectedPropertySyncTest: true,
     supportsBookingIngest: true,
     supportsModificationIngest: true,
     supportsCancellationIngest: true,
@@ -72,7 +76,7 @@ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilit
     supportsChannexIframe: true,
     supportsStructureVerification: true,
     supportsAriSync: true,
-    supportsSelectedPropertySyncTest: false,
+    supportsSelectedPropertySyncTest: true,
     supportsBookingIngest: true,
     supportsModificationIngest: true,
     supportsCancellationIngest: true,
@@ -87,7 +91,7 @@ const PROVIDER_CAPABILITIES: Record<ChannelProviderKey, ChannelProviderCapabilit
     supportsChannexIframe: true,
     supportsStructureVerification: true,
     supportsAriSync: true,
-    supportsSelectedPropertySyncTest: false,
+    supportsSelectedPropertySyncTest: true,
     supportsBookingIngest: true,
     supportsModificationIngest: true,
     supportsCancellationIngest: true,

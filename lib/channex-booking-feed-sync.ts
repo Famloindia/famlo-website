@@ -233,7 +233,7 @@ function extractExternalBookingId(revision: Record<string, unknown>): string | n
   );
 }
 
-function extractProviderKeyFromFeedRevision(revision: Record<string, unknown>): ChannelProviderKey | null {
+export function extractProviderKeyFromFeedRevision(revision: Record<string, unknown>): ChannelProviderKey | null {
   const attributes = getAttributes(revision);
   const direct = resolveProviderFromRevision({
     otaProviderCode: asStringOrNull(revision.ota_provider_code) ?? asStringOrNull(attributes?.ota_provider_code),
@@ -247,6 +247,14 @@ function extractProviderKeyFromFeedRevision(revision: Record<string, unknown>): 
       asStringOrNull(revision.booking_id) ??
       asStringOrNull(attributes?.booking_id)
   );
+}
+
+export function shouldIgnoreFeedRevisionForProvider(
+  requestedProviderKey: ChannelProviderKey | undefined,
+  revision: Record<string, unknown>
+): boolean {
+  if (!requestedProviderKey) return false;
+  return extractProviderKeyFromFeedRevision(revision) !== requestedProviderKey;
 }
 
 function extractRevisionId(revision: Record<string, unknown>): string | null {
@@ -655,6 +663,30 @@ function buildHealthMetadata(input: {
   };
 }
 
+export function buildFeedMetadataPatch(
+  baseMetadata: JsonRecord | null,
+  providerKey: ChannelProviderKey | undefined,
+  nextHealth: ChannexFeedHealthSnapshot
+): JsonRecord {
+  const metadata = { ...(baseMetadata ?? {}) };
+  if (!providerKey) {
+    return {
+      ...metadata,
+      channexFeedHealth: nextHealth,
+    };
+  }
+
+  const providerFeedHealth =
+    metadata.channexProviderFeedHealth && typeof metadata.channexProviderFeedHealth === "object"
+      ? { ...(metadata.channexProviderFeedHealth as JsonRecord) }
+      : {};
+  providerFeedHealth[providerKey] = nextHealth;
+  return {
+    ...metadata,
+    channexProviderFeedHealth: providerFeedHealth,
+  };
+}
+
 export function shouldSkipChannexFeedPoll(metadata: JsonRecord | null, now: Date): {
   skip: boolean;
   reason: "recent_success" | "backoff";
@@ -750,8 +782,7 @@ export async function pollChannexBookingFeedForFamily(input: {
   const discoveredPropertyIds = new Set<string>();
 
   for (const revision of result.revisions as Array<Record<string, unknown>>) {
-    const revisionProviderKey = extractProviderKeyFromFeedRevision(revision);
-    if (input.providerKey && revisionProviderKey !== input.providerKey) {
+    if (shouldIgnoreFeedRevisionForProvider(input.providerKey, revision)) {
       const summary = summarizeRevision(revision, mappedRoomTypeIds);
       ignoredOtherProviderPreviews.push({
         externalBookingId: summary.externalBookingId,
@@ -917,19 +948,7 @@ export async function pollChannexBookingFeedForFamily(input: {
   });
 
   if (propertyRow?.id) {
-    const baseMetadata = asObject(propertyRow.metadata) ?? {};
-    const providerFeedHealth =
-      baseMetadata.channexProviderFeedHealth && typeof baseMetadata.channexProviderFeedHealth === "object"
-        ? { ...(baseMetadata.channexProviderFeedHealth as JsonRecord) }
-        : {};
-    if (input.providerKey) {
-      providerFeedHealth[input.providerKey] = nextHealth;
-    }
-    const nextMetadata = {
-      ...baseMetadata,
-      ...(input.providerKey ? {} : { channexFeedHealth: nextHealth }),
-      ...(input.providerKey ? { channexProviderFeedHealth: providerFeedHealth } : {}),
-    };
+    const nextMetadata = buildFeedMetadataPatch(asObject(propertyRow.metadata), input.providerKey, nextHealth);
     await input.supabase
       .from("channel_properties")
       .update({ metadata: nextMetadata, updated_at: observedAt } as never)

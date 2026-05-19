@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { buildProviderConnectionModel } from "@/lib/channel-providers/connection-model";
+import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
 import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
@@ -640,6 +641,8 @@ export default function ChannelSetupWizard({
   const currentStepLabel = getChannelSetupStepLabel(state.currentStep);
   const currentStatusLabel = getChannelSetupStatusLabel(state.status);
   const readinessItems = readinessModel.items;
+  const providerDefinition = getChannelProviderDefinition(providerKey);
+  const providerCapabilities = getChannelProviderCapabilities(providerKey);
   const assistedConnectionLabels = providerKey === "booking" ? null : getAssistedConnectionLabels(providerKey);
   const showAdvancedReadiness = false;
   const connectionModel = buildProviderConnectionModel({
@@ -691,7 +694,7 @@ export default function ChannelSetupWizard({
   const hasPreviewSuggestions = Boolean(previewWorkspace && previewWorkspace.suggestions.length > 0);
   const derivedHostFlowStatus: HostConnectFlowStatus =
     mappingConfirmed
-      ? providerKey === "booking"
+      ? providerCapabilities.supportsSelectedPropertySyncTest
         ? "sync_ready"
         : "mapping_confirmed"
       : hasPreviewSuggestions
@@ -1013,7 +1016,7 @@ export default function ChannelSetupWizard({
     })();
   };
 
-  const runBookingSyncTest = (): void => {
+  const runSelectedPropertySyncTest = (): void => {
     void (async () => {
       setIsRunningSync(true);
       setHostFlowOverride("sync_running");
@@ -1043,7 +1046,7 @@ export default function ChannelSetupWizard({
         }
 
         setHostFlowOverride("sync_success");
-        setFeedback(payload.message ?? "Limited Booking.com sync test completed.");
+        setFeedback(payload.message ?? `Limited ${providerDefinition.displayName} sync test completed.`);
       } catch (error) {
         setHostFlowOverride("sync_failed");
         setFeedback(error instanceof Error ? error.message : "Unable to run the selected-property sync test.");
@@ -1874,22 +1877,24 @@ export default function ChannelSetupWizard({
       <section className={styles.listCard} style={{ marginBottom: 16 }}>
         <div className={styles.listTitle}>Sync control</div>
         <div className={styles.cardCopy}>
-          Booking.com can run a limited selected-property sync test after mapping is confirmed. Non-Booking providers stay assisted until their direct provider mutation path exists.
+          {providerCapabilities.supportsSelectedPropertySyncTest
+            ? `${providerDefinition.displayName} can run a limited selected-property sync test after mapping is confirmed.`
+            : "This provider stays assisted until its limited selected-property sync path is enabled in Famlo."}
         </div>
         <div className={styles.inlineBadgeRow} style={{ marginTop: 12 }}>
           <span className={styles.readinessPill}>Current host flow: {getHostFlowLabel(hostFlowStatus)}</span>
           <span className={styles.readinessPill}>Mapped rooms: {mappedRoomCount}/{activeMappingRooms.length || 0}</span>
           <span className={styles.readinessPill}>Mapped rates: {mappedRateCount}/{activeMappingRooms.length || 0}</span>
         </div>
-        {providerKey === "booking" ? (
+        {providerCapabilities.supportsSelectedPropertySyncTest ? (
           <div className={styles.inlineActionRow} style={{ marginTop: 12 }}>
             <button
               type="button"
               className={styles.primaryActionButton}
               disabled={isRunningSync || !mappingConfirmed}
-              onClick={runBookingSyncTest}
+              onClick={runSelectedPropertySyncTest}
             >
-              {isRunningSync ? "Running sync..." : "Run Booking.com sync test"}
+              {isRunningSync ? "Running sync..." : `Run ${providerDefinition.displayName} sync test`}
             </button>
             <span className={`${styles.readinessPill} ${hostFlowStatus === "sync_success" ? styles.readinessPillOk : hostFlowStatus === "sync_failed" ? styles.readinessPillReview : styles.readinessPillMissing}`}>
               {getHostFlowLabel(hostFlowStatus)}

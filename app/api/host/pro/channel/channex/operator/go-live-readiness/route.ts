@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+import { readAriHealthMetadata } from "@/lib/channex-ari-sync";
+import {
+  getChannelProviderCapabilities,
+  resolveChannelStorageProviderCode,
+} from "@/lib/channel-providers/provider-capabilities";
+import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
 import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupMetadata } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
@@ -23,13 +28,14 @@ function asObject(value: unknown): Record<string, unknown> {
 async function logGoLiveReadiness(input: {
   supabase: ReturnType<typeof createAdminSupabaseClient>;
   familyId: string;
+  providerCode: string;
   status: "success" | "failed";
   message: string;
   payload: Record<string, unknown>;
 }): Promise<void> {
   const { error } = await input.supabase.from("channel_sync_logs").insert({
     family_id: input.familyId,
-    provider_code: "booking",
+    provider_code: input.providerCode,
     action: "mark_assisted_go_live_ready",
     status: input.status,
     message: input.message,
@@ -69,19 +75,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    if (!capabilities.supportsAutoActivation) {
-      return NextResponse.json(
-        {
-          ok: false,
-          status: "assisted_only",
-          message: "This provider stays in assisted review until operator sync and mapping checks are completed. No activation was performed.",
-          providerStatus: capabilities.displayStatus,
-        },
-        { status: 409 }
-      );
-    }
-
     const supabase = createAdminSupabaseClient();
+    const storageProviderCode = resolveChannelStorageProviderCode(providerKey);
+    const providerDefinition = getChannelProviderDefinition(providerKey);
     const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
 
     if (!authorizedResource?.familyId) {
@@ -98,7 +94,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const [
-      { data: bookingRow },
+      { data: providerRow },
       { data: channexRow },
       rooms,
       { data: roomMappings },
@@ -109,7 +105,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         .from("channel_properties")
         .select("id,family_id,provider_code,external_property_id,sync_status,metadata,created_at,updated_at")
         .eq("family_id", familyId)
-        .eq("provider_code", "booking")
+        .eq("provider_code", providerKey)
         .maybeSingle(),
       supabase
         .from("channel_properties")
@@ -125,25 +121,36 @@ export async function POST(request: Request): Promise<NextResponse> {
         .from("channel_room_mappings")
         .select("stay_unit_id,external_room_type_id")
         .eq("family_id", familyId)
-        .eq("provider_code", "channex"),
+        .eq("provider_code", storageProviderCode),
       supabase
         .from("channel_rate_plans")
         .select("stay_unit_id,external_rate_plan_id")
         .eq("family_id", familyId)
-        .eq("provider_code", "channex"),
+        .eq("provider_code", storageProviderCode),
       supabase
         .from("channel_sync_logs")
         .select("id,action,status,message,created_at")
         .eq("family_id", familyId)
-        .eq("provider_code", "channex")
+        .eq("provider_code", providerKey === "booking" ? "channex" : providerKey)
         .order("created_at", { ascending: false })
         .limit(50),
     ]);
 
-    const setupMetadata = readChannelSetupMetadata(bookingRow?.metadata ?? {});
+    const setupMetadata = readChannelSetupMetadata(providerRow?.metadata ?? {});
     const channexMetadata = asObject(channexRow?.metadata);
-    const ariHealth = asObject(channexMetadata.channexAriHealth);
-    const feedHealth = asObject(channexMetadata.channexFeedHealth);
+    const providerMetadata = asObject(providerRow?.metadata);
+    const ariHealth =
+      providerKey === "booking"
+        ? asObject(channexMetadata.channexAriHealth)
+        : readAriHealthMetadata(providerMetadata, providerKey);
+    const providerFeedHealthMap =
+      channexMetadata.channexProviderFeedHealth && typeof channexMetadata.channexProviderFeedHealth === "object"
+        ? (channexMetadata.channexProviderFeedHealth as Record<string, unknown>)
+        : {};
+    const feedHealth =
+      providerKey === "booking"
+        ? asObject(channexMetadata.channexFeedHealth)
+        : asObject(providerFeedHealthMap[providerKey]);
     const activeRooms = rooms.filter((room) => room.isActive);
     const mappedRoomIds = new Set(
       (roomMappings ?? [])
@@ -160,24 +167,29 @@ export async function POST(request: Request): Promise<NextResponse> {
     const latestLimitedAri = (syncLogs ?? []).find((log) => log.action === "push_ari_limited_test");
     const latestBookingFeed = (syncLogs ?? []).find((log) => log.action === "fetch_booking_feed");
     const blockers = [
-      setupMetadata.operator_verified_booking_connection === true ||
-      setupMetadata.booking_connection_status === "verified" ||
-      setupMetadata.booking_connection_status === "ready_for_assisted_go_live"
-        ? null
-        : "Booking.com connection has not been operator-verified.",
+      providerKey === "booking"
+        ? setupMetadata.operator_verified_booking_connection === true ||
+          setupMetadata.booking_connection_status === "verified" ||
+          setupMetadata.booking_connection_status === "ready_for_assisted_go_live"
+          ? null
+          : "Booking.com connection has not been operator-verified."
+        : setupMetadata.provider_structure_verified === true &&
+            setupMetadata.provider_ready_for_test_sync_review === true
+          ? null
+          : `${providerDefinition.displayName} mapped structure has not been verified yet.`,
       asString(channexRow?.external_property_id) ? null : "Channex property is missing.",
       activeRooms.length > 0 ? null : "No active Famlo room is available.",
       missingRoomMappings.length === 0 ? null : `Room mappings missing for ${missingRoomMappings.join(", ")}.`,
       missingRatePlans.length === 0 ? null : `Rate plans missing for ${missingRatePlans.join(", ")}.`,
       latestLimitedAri?.status === "success" ? null : "Limited ARI test sync has not succeeded.",
-      latestBookingFeed?.status === "success" ? null : "Booking feed poll has not succeeded.",
-      ariHealth.channelAttached === true || feedHealth.channelAttached === true ? null : "Channex channel is not attached.",
-      ariHealth.channelActive === true || feedHealth.channelActive === true ? null : "Channex channel is not active.",
+      latestBookingFeed?.status === "success" ? null : `${providerDefinition.displayName} booking feed poll has not succeeded.`,
+      ariHealth?.channelAttached === true || feedHealth.channelAttached === true ? null : "Channex channel is not attached.",
+      ariHealth?.channelActive === true || feedHealth.channelActive === true ? null : "Channex channel is not active.",
     ].filter((item): item is string => Boolean(item));
 
     const nowIso = new Date().toISOString();
     const ready = blockers.length === 0;
-    const nextMetadata = mergeChannelSetupMetadata(bookingRow?.metadata ?? {}, {
+    const nextMetadata = mergeChannelSetupMetadata(providerRow?.metadata ?? {}, {
       status: ready ? "review_requested" : "needs_review",
       currentStep: "activate",
       lastError: ready ? null : blockers.join(" "),
@@ -186,20 +198,22 @@ export async function POST(request: Request): Promise<NextResponse> {
         ready_for_assisted_go_live_at: ready ? nowIso : null,
         ready_for_assisted_go_live_by: authorizedResource.hostUserId ?? "operator",
         assisted_go_live_blockers: blockers,
-        booking_connection_status: ready ? "ready_for_assisted_go_live" : setupMetadata.booking_connection_status,
+        ...(providerKey === "booking"
+          ? { booking_connection_status: ready ? "ready_for_assisted_go_live" : setupMetadata.booking_connection_status }
+          : {}),
         operator_notes: ready
-          ? "Operator marked Booking.com ready for assisted go-live review. No activation was performed."
-          : "Operator go-live readiness check found blockers. No activation was performed.",
+          ? `Operator marked ${providerDefinition.displayName} ready for assisted go-live review. No activation was performed.`
+          : `Operator go-live readiness check found blockers for ${providerDefinition.displayName}. No activation was performed.`,
       },
       updatedAt: nowIso,
     });
 
     const payload = {
-      id: asString(bookingRow?.id) || undefined,
+      id: asString(providerRow?.id) || undefined,
       family_id: familyId,
-      provider_code: "booking",
-      external_property_id: typeof bookingRow?.external_property_id === "string" ? bookingRow.external_property_id : null,
-      sync_status: typeof bookingRow?.sync_status === "string" ? bookingRow.sync_status : "not_connected",
+      provider_code: providerKey,
+      external_property_id: typeof providerRow?.external_property_id === "string" ? providerRow.external_property_id : null,
+      sync_status: typeof providerRow?.sync_status === "string" ? providerRow.sync_status : "not_connected",
       metadata: nextMetadata,
       updated_at: nowIso,
     };
@@ -211,12 +225,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (upsertError) throw upsertError;
 
     const message = ready
-      ? "Booking.com is marked ready for assisted go-live review. No channel was activated."
-      : "Booking.com is not ready for assisted go-live review. No channel was activated.";
+      ? `${providerDefinition.displayName} is marked ready for assisted go-live review. No channel was activated.`
+      : `${providerDefinition.displayName} is not ready for assisted go-live review. No channel was activated.`;
 
     await logGoLiveReadiness({
       supabase,
       familyId,
+      providerCode: providerKey === "booking" ? "channex" : providerKey,
       status: ready ? "success" : "failed",
       message,
       payload: {
