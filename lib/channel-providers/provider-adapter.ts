@@ -5,6 +5,10 @@ import {
   fetchChannexRoomTypesForProperty,
   type ChannexChannelStructureRecord,
 } from "@/lib/channel-providers/channex/client";
+import {
+  resolveProviderFromChannexUniqueId,
+  resolveProviderFromOtaName,
+} from "@/lib/channel-providers/provider-capabilities";
 import { mergeChannelSetupMetadata } from "@/lib/channel-setup-state";
 
 import type { ChannelProviderKey } from "./provider-registry";
@@ -59,14 +63,13 @@ function asRecord(value: unknown): JsonRecord {
 }
 
 export function providerChannelMatches(providerKey: ChannelProviderKey, channel: ChannexChannelStructureRecord): boolean {
-  const haystack = `${channel.title ?? ""} ${channel.hotelId ?? ""}`.toLowerCase();
+  const resolvedFromUniqueId = resolveProviderFromChannexUniqueId(channel.uniqueId);
+  if (resolvedFromUniqueId) return resolvedFromUniqueId === providerKey;
 
-  if (providerKey === "booking") return /booking/.test(haystack);
-  if (providerKey === "mmt") return /make.?my.?trip|goibibo|\bmmt\b/.test(haystack);
-  if (providerKey === "airbnb") return /airbnb/.test(haystack);
-  if (providerKey === "agoda") return /agoda|ycs/.test(haystack);
-  if (providerKey === "expedia") return /expedia/.test(haystack);
-  return /google/.test(haystack);
+  const resolvedFromName = resolveProviderFromOtaName(`${channel.title ?? ""} ${channel.hotelId ?? ""}`);
+  if (resolvedFromName) return resolvedFromName === providerKey;
+
+  return false;
 }
 
 export async function inspectProviderConnectionInChannex(

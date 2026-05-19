@@ -5,6 +5,7 @@ import {
   createChannexOneTimeToken,
   getChannexConfigSummary,
 } from "@/lib/channel-providers/channex/client";
+import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
 import { inspectProviderConnectionInChannex } from "@/lib/channel-providers/provider-adapter";
 import {
   channelCredentialStorageConfigured,
@@ -52,12 +53,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function iframeCodesForProvider(providerKey: ChannelProviderKey): string[] {
-  if (providerKey === "booking") return ["BDC"];
-  if (providerKey === "airbnb") return ["ABB"];
-  if (providerKey === "agoda") return ["AGO"];
-  if (providerKey === "expedia") return ["EXP"];
-  if (providerKey === "google-hotel") return ["GHA"];
-  return [];
+  const code = getChannelProviderCapabilities(providerKey).channexChannelCode;
+  return code ? [code] : [];
 }
 
 function iframeHint(providerKey: ChannelProviderKey, filteredChannels: string[]): string {
@@ -112,9 +109,30 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
     }
     providerKey = providerInput;
+    const capabilities = getChannelProviderCapabilities(providerKey);
 
-    if (providerKey !== "booking" && providerKey !== "mmt") {
-      return NextResponse.json({ error: "This connect flow is currently supported for Booking.com and MakeMyTrip / Goibibo only." }, { status: 400 });
+    if (capabilities.mode === "disabled") {
+      return NextResponse.json({ error: "This provider is currently disabled in Famlo." }, { status: 409 });
+    }
+
+    if (capabilities.mode === "feed_only") {
+      return NextResponse.json(
+        {
+          error: "This provider is handled as a feed/metasearch workflow, not a direct OTA connect flow.",
+          providerStatus: capabilities.displayStatus,
+        },
+        { status: 409 }
+      );
+    }
+
+    if (!capabilities.supportsChannexIframe) {
+      return NextResponse.json(
+        {
+          error: "This provider does not currently support the Channex-assisted connection flow in Famlo.",
+          providerStatus: capabilities.displayStatus,
+        },
+        { status: 409 }
+      );
     }
 
     const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
@@ -190,7 +208,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       const providerAccessToken = asString(body.providerAccessToken);
 
       if (!providerListingId && !providerPropertyCode && !providerListingUrl) {
-        return NextResponse.json({ error: "Add an MMT Hotel ID, Hotel Code, or reference URL first." }, { status: 400 });
+        return NextResponse.json(
+          {
+            error:
+              providerKey === "airbnb"
+                ? "Add an Airbnb listing URL, listing id, or owner account reference first."
+                : providerKey === "mmt"
+                  ? "Add an MMT Hotel ID, Hotel Code, or reference URL first."
+                  : "Add the provider listing id, property code, or listing URL first.",
+          },
+          { status: 400 }
+        );
       }
 
       if (providerAccessToken) {
@@ -359,6 +387,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({
       ok: true,
       mode: nextMode,
+      providerStatus: capabilities.displayStatus,
+      providerMode: capabilities.mode,
       message:
         nextMode === "ready_for_preview"
           ? "Provider channel is already visible. Load preview and confirm the mappings."

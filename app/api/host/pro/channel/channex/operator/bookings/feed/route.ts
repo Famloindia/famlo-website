@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { pollChannexBookingFeedForFamily } from "@/lib/channex-booking-feed-sync";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+import { isChannelProviderKey } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -24,11 +26,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!familyId) {
       return NextResponse.json({ error: "familyId is required." }, { status: 400 });
     }
+    if (!isChannelProviderKey(providerKey)) {
+      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
+    }
 
-    if (providerKey !== "booking") {
+    const capabilities = getChannelProviderCapabilities(providerKey);
+    if (!capabilities.supportsBookingIngest) {
       return NextResponse.json(
-        { error: "Booking feed test is currently available only for Booking.com through Channex." },
-        { status: 400 }
+        {
+          error: "This provider does not currently support booking ingestion in Famlo.",
+          providerStatus: capabilities.displayStatus,
+        },
+        { status: 409 }
       );
     }
 
@@ -73,6 +82,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         ...result,
         operatorOnly: true,
         providerKey,
+        providerStatus: capabilities.displayStatus,
       },
       { status: result.ok ? 200 : 502 }
     );

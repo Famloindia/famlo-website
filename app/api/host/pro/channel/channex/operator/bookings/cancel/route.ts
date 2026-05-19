@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { POST as applyCancellation } from "@/app/api/host/pro/channel/channex/bookings/apply-cancellation/route";
+import {
+  getChannelProviderCapabilities,
+  resolveProviderFromRevision,
+} from "@/lib/channel-providers/provider-capabilities";
+import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+import { isChannelProviderKey } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -41,10 +47,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "familyId and channelBookingRevisionId are required." }, { status: 400 });
     }
 
-    if (providerKey !== "booking") {
+    if (!isChannelProviderKey(providerKey)) {
+      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
+    }
+
+    const capabilities = getChannelProviderCapabilities(providerKey);
+    if (!capabilities.supportsCancellationIngest) {
       return NextResponse.json(
-        { error: "Booking cancellation apply is currently available only for Booking.com through Channex." },
-        { status: 400 }
+        {
+          error: "This provider does not currently support cancellation apply in Famlo.",
+          providerStatus: capabilities.displayStatus,
+        },
+        { status: 409 }
       );
     }
 
@@ -65,7 +79,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const { data: revisionRow, error: revisionError } = await supabase
       .from("channel_booking_revisions")
-      .select("id,family_id,provider_code,status,import_status,ack_status,linked_booking_id")
+      .select("id,family_id,provider_code,ota_provider_code,ota_name,status,import_status,ack_status,linked_booking_id")
       .eq("id", channelBookingRevisionId)
       .eq("family_id", familyId)
       .eq("provider_code", "channex")
@@ -74,6 +88,20 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (revisionError) throw revisionError;
     if (!revisionRow) {
       return NextResponse.json({ error: "Booking cancellation revision not found for this selected property." }, { status: 404 });
+    }
+
+    const revisionProvider = resolveProviderFromRevision({
+      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+      otaName: asStringOrNull((revisionRow as Record<string, unknown>).ota_name),
+    });
+    if (revisionProvider && revisionProvider !== providerKey) {
+      return NextResponse.json(
+        {
+          error: `This revision belongs to ${getChannelProviderDefinition(revisionProvider).displayName}, not ${getChannelProviderDefinition(providerKey).displayName}.`,
+          status: "provider_mismatch",
+        },
+        { status: 409 }
+      );
     }
 
     const revisionStatus = asStringOrNull(revisionRow.status)?.toLowerCase() ?? "";
@@ -97,7 +125,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       {
         ok: false,
         status: "failed",
-        message: error instanceof Error ? error.message : "Unable to apply this Booking.com cancellation.",
+        message: error instanceof Error ? error.message : "Unable to apply this Channex cancellation.",
       },
       { status: 500 }
     );

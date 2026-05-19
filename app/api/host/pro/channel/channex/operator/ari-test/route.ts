@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 
 import { syncChannexAriForFamily } from "@/lib/channex-ari-sync";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
 import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
-import { readChannelSetupMetadata } from "@/lib/channel-setup-state";
+import { isChannelProviderKey, readChannelSetupMetadata } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
@@ -35,10 +36,30 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "familyId is required." }, { status: 400 });
     }
 
-    if (providerKey !== "booking") {
+    if (!isChannelProviderKey(providerKey)) {
+      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
+    }
+
+    const capabilities = getChannelProviderCapabilities(providerKey);
+    if (!capabilities.supportsAriSync || capabilities.mode === "feed_only") {
       return NextResponse.json(
-        { error: "Limited ARI test sync is currently available only for Booking.com through Channex." },
-        { status: 400 }
+        {
+          error: "This provider does not currently support ARI sync in this Famlo flow.",
+          providerStatus: capabilities.displayStatus,
+        },
+        { status: 409 }
+      );
+    }
+
+    if (!capabilities.supportsSelectedPropertySyncTest) {
+      return NextResponse.json(
+        {
+          ok: false,
+          status: "assisted_only",
+          message: "This provider can use Channex sync, but the limited test route still requires operator-assisted review in Famlo.",
+          providerStatus: capabilities.displayStatus,
+        },
+        { status: 409 }
       );
     }
 

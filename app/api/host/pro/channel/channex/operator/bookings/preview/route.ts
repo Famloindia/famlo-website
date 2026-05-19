@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 
+import {
+  getChannelProviderCapabilities,
+  resolveProviderFromRevision,
+} from "@/lib/channel-providers/provider-capabilities";
+import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
+import { isChannelProviderKey } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -33,10 +39,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "familyId and channelBookingRevisionId are required." }, { status: 400 });
     }
 
-    if (providerKey !== "booking") {
+    if (!isChannelProviderKey(providerKey)) {
+      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
+    }
+
+    const capabilities = getChannelProviderCapabilities(providerKey);
+    if (!capabilities.supportsBookingIngest) {
       return NextResponse.json(
-        { error: "Booking import test is currently available only for Booking.com through Channex." },
-        { status: 400 }
+        {
+          error: "This provider does not currently support booking import preview in Famlo.",
+          providerStatus: capabilities.displayStatus,
+        },
+        { status: 409 }
       );
     }
 
@@ -57,7 +71,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const { data: revisionRow, error: revisionError } = await supabase
       .from("channel_booking_revisions")
-      .select("id,family_id,provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,updated_at")
+      .select("id,family_id,provider_code,ota_provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,updated_at")
       .eq("id", channelBookingRevisionId)
       .eq("family_id", familyId)
       .eq("provider_code", "channex")
@@ -66,6 +80,20 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (revisionError) throw revisionError;
     if (!revisionRow) {
       return NextResponse.json({ error: "Booking preview not found for this selected property." }, { status: 404 });
+    }
+
+    const revisionProvider = resolveProviderFromRevision({
+      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+      otaName: asStringOrNull(revisionRow.ota_name),
+    });
+    if (revisionProvider && revisionProvider !== providerKey) {
+      return NextResponse.json(
+        {
+          error: `This revision belongs to ${getChannelProviderDefinition(revisionProvider).displayName}, not ${getChannelProviderDefinition(providerKey).displayName}.`,
+          status: "provider_mismatch",
+        },
+        { status: 409 }
+      );
     }
 
     const externalRoomTypeId = asStringOrNull(revisionRow.external_room_type_id);
@@ -127,6 +155,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         roomMappingStatus: roomMappingRow?.stay_unit_id ? "matched" : "missing",
         stayUnitId: asStringOrNull(roomMappingRow?.stay_unit_id),
         rawPayload: asObject(revisionRow.raw_payload),
+        normalizedProvider: revisionProvider ?? providerKey,
       },
       blockers,
     });
@@ -136,7 +165,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       {
         ok: false,
         status: "failed",
-        message: error instanceof Error ? error.message : "Unable to preview this Booking.com revision.",
+        message: error instanceof Error ? error.message : "Unable to preview this Channex revision.",
       },
       { status: 500 }
     );

@@ -1,0 +1,681 @@
+diff --git a/app/api/host/pro/channel/channex/operator/ari-test/route.ts b/app/api/host/pro/channel/channex/operator/ari-test/route.ts
+index 49f78def..aefd579e 100644
+--- a/app/api/host/pro/channel/channex/operator/ari-test/route.ts
++++ b/app/api/host/pro/channel/channex/operator/ari-test/route.ts
+@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
+ 
+ import { syncChannexAriForFamily } from "@/lib/channex-ari-sync";
+ import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
++import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+ import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
+-import { readChannelSetupMetadata } from "@/lib/channel-setup-state";
++import { isChannelProviderKey, readChannelSetupMetadata } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { loadStayUnitsForSelector } from "@/lib/stay-units";
+@@ -35,10 +36,30 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "familyId is required." }, { status: 400 });
+     }
+ 
+-    if (providerKey !== "booking") {
++    if (!isChannelProviderKey(providerKey)) {
++      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
++    }
++
++    const capabilities = getChannelProviderCapabilities(providerKey);
++    if (!capabilities.supportsAriSync || capabilities.mode === "feed_only") {
+       return NextResponse.json(
+-        { error: "Limited ARI test sync is currently available only for Booking.com through Channex." },
+-        { status: 400 }
++        {
++          error: "This provider does not currently support ARI sync in this Famlo flow.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
++      );
++    }
++
++    if (!capabilities.supportsSelectedPropertySyncTest) {
++      return NextResponse.json(
++        {
++          ok: false,
++          status: "assisted_only",
++          message: "This provider can use Channex sync, but the limited test route still requires operator-assisted review in Famlo.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
+       );
+     }
+ 
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts b/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
+index edca608f..c51eeb94 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/acknowledge/route.ts
+@@ -1,6 +1,12 @@
+ import { NextResponse } from "next/server";
+ 
+ import { POST as acknowledgeRevision } from "@/app/api/host/pro/channel/channex/bookings/acknowledge/route";
++import {
++  getChannelProviderCapabilities,
++  resolveProviderFromRevision,
++} from "@/lib/channel-providers/provider-capabilities";
++import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
++import { isChannelProviderKey } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -41,10 +47,18 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "familyId and channelBookingRevisionId are required." }, { status: 400 });
+     }
+ 
+-    if (providerKey !== "booking") {
++    if (!isChannelProviderKey(providerKey)) {
++      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
++    }
++
++    const capabilities = getChannelProviderCapabilities(providerKey);
++    if (!capabilities.supportsBookingIngest) {
+       return NextResponse.json(
+-        { error: "Booking acknowledgement is currently available only for Booking.com through Channex." },
+-        { status: 400 }
++        {
++          error: "This provider does not currently support revision acknowledgement in Famlo.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
+       );
+     }
+ 
+@@ -65,7 +79,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const { data: revisionRow, error: revisionError } = await supabase
+       .from("channel_booking_revisions")
+-      .select("id,family_id,provider_code,external_revision_id,import_status,ack_status,linked_booking_id")
++      .select("id,family_id,provider_code,ota_provider_code,ota_name,external_revision_id,import_status,ack_status,linked_booking_id")
+       .eq("id", channelBookingRevisionId)
+       .eq("family_id", familyId)
+       .eq("provider_code", "channex")
+@@ -76,6 +90,20 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "Booking revision not found for this selected property." }, { status: 404 });
+     }
+ 
++    const revisionProvider = resolveProviderFromRevision({
++      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
++      otaName: asStringOrNull((revisionRow as Record<string, unknown>).ota_name),
++    });
++    if (revisionProvider && revisionProvider !== providerKey) {
++      return NextResponse.json(
++        {
++          error: `This revision belongs to ${getChannelProviderDefinition(revisionProvider).displayName}, not ${getChannelProviderDefinition(providerKey).displayName}.`,
++          status: "provider_mismatch",
++        },
++        { status: 409 }
++      );
++    }
++
+     const importStatus = asStringOrNull(revisionRow.import_status) ?? "preview";
+     const ackStatus = asStringOrNull(revisionRow.ack_status) ?? "not_acknowledged";
+     const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
+@@ -101,7 +129,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       {
+         ok: false,
+         status: "failed",
+-        message: error instanceof Error ? error.message : "Unable to acknowledge this Booking.com revision.",
++        message: error instanceof Error ? error.message : "Unable to acknowledge this Channex revision.",
+       },
+       { status: 500 }
+     );
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/apply/route.ts b/app/api/host/pro/channel/channex/operator/bookings/apply/route.ts
+index 786c5067..6251dba1 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/apply/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/apply/route.ts
+@@ -1,6 +1,12 @@
+ import { NextResponse } from "next/server";
+ 
+ import { POST as applyImportPreview } from "@/app/api/host/pro/channel/channex/bookings/import-preview/route";
++import {
++  getChannelProviderCapabilities,
++  resolveProviderFromRevision,
++} from "@/lib/channel-providers/provider-capabilities";
++import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
++import { isChannelProviderKey } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -41,10 +47,18 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "familyId and channelBookingRevisionId are required." }, { status: 400 });
+     }
+ 
+-    if (providerKey !== "booking") {
++    if (!isChannelProviderKey(providerKey)) {
++      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
++    }
++
++    const capabilities = getChannelProviderCapabilities(providerKey);
++    if (!capabilities.supportsBookingIngest) {
+       return NextResponse.json(
+-        { error: "Booking import apply is currently available only for Booking.com through Channex." },
+-        { status: 400 }
++        {
++          error: "This provider does not currently support booking import apply in Famlo.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
+       );
+     }
+ 
+@@ -65,7 +79,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const { data: revisionRow, error: revisionError } = await supabase
+       .from("channel_booking_revisions")
+-      .select("id,family_id,provider_code,external_room_type_id,status,import_status,ack_status")
++      .select("id,family_id,provider_code,ota_provider_code,ota_name,external_room_type_id,status,import_status,ack_status")
+       .eq("id", channelBookingRevisionId)
+       .eq("family_id", familyId)
+       .eq("provider_code", "channex")
+@@ -76,6 +90,20 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "Booking preview not found for this selected property." }, { status: 404 });
+     }
+ 
++    const revisionProvider = resolveProviderFromRevision({
++      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
++      otaName: asStringOrNull((revisionRow as Record<string, unknown>).ota_name),
++    });
++    if (revisionProvider && revisionProvider !== providerKey) {
++      return NextResponse.json(
++        {
++          error: `This revision belongs to ${getChannelProviderDefinition(revisionProvider).displayName}, not ${getChannelProviderDefinition(providerKey).displayName}.`,
++          status: "provider_mismatch",
++        },
++        { status: 409 }
++      );
++    }
++
+     const importStatus = asStringOrNull(revisionRow.import_status) ?? "preview";
+     const ackStatus = asStringOrNull(revisionRow.ack_status) ?? "not_acknowledged";
+     const revisionStatus = asStringOrNull(revisionRow.status)?.toLowerCase() ?? "";
+@@ -117,7 +145,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       {
+         ok: false,
+         status: "failed",
+-        message: error instanceof Error ? error.message : "Unable to apply this Booking.com preview import.",
++        message: error instanceof Error ? error.message : "Unable to apply this Channex preview import.",
+       },
+       { status: 500 }
+     );
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/cancel/route.ts b/app/api/host/pro/channel/channex/operator/bookings/cancel/route.ts
+index d54ad265..2e1c43ad 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/cancel/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/cancel/route.ts
+@@ -1,6 +1,12 @@
+ import { NextResponse } from "next/server";
+ 
+ import { POST as applyCancellation } from "@/app/api/host/pro/channel/channex/bookings/apply-cancellation/route";
++import {
++  getChannelProviderCapabilities,
++  resolveProviderFromRevision,
++} from "@/lib/channel-providers/provider-capabilities";
++import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
++import { isChannelProviderKey } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -41,10 +47,18 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "familyId and channelBookingRevisionId are required." }, { status: 400 });
+     }
+ 
+-    if (providerKey !== "booking") {
++    if (!isChannelProviderKey(providerKey)) {
++      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
++    }
++
++    const capabilities = getChannelProviderCapabilities(providerKey);
++    if (!capabilities.supportsCancellationIngest) {
+       return NextResponse.json(
+-        { error: "Booking cancellation apply is currently available only for Booking.com through Channex." },
+-        { status: 400 }
++        {
++          error: "This provider does not currently support cancellation apply in Famlo.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
+       );
+     }
+ 
+@@ -65,7 +79,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const { data: revisionRow, error: revisionError } = await supabase
+       .from("channel_booking_revisions")
+-      .select("id,family_id,provider_code,status,import_status,ack_status,linked_booking_id")
++      .select("id,family_id,provider_code,ota_provider_code,ota_name,status,import_status,ack_status,linked_booking_id")
+       .eq("id", channelBookingRevisionId)
+       .eq("family_id", familyId)
+       .eq("provider_code", "channex")
+@@ -76,6 +90,20 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "Booking cancellation revision not found for this selected property." }, { status: 404 });
+     }
+ 
++    const revisionProvider = resolveProviderFromRevision({
++      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
++      otaName: asStringOrNull((revisionRow as Record<string, unknown>).ota_name),
++    });
++    if (revisionProvider && revisionProvider !== providerKey) {
++      return NextResponse.json(
++        {
++          error: `This revision belongs to ${getChannelProviderDefinition(revisionProvider).displayName}, not ${getChannelProviderDefinition(providerKey).displayName}.`,
++          status: "provider_mismatch",
++        },
++        { status: 409 }
++      );
++    }
++
+     const revisionStatus = asStringOrNull(revisionRow.status)?.toLowerCase() ?? "";
+     const linkedBookingId = asStringOrNull(revisionRow.linked_booking_id);
+     const ackStatus = asStringOrNull(revisionRow.ack_status) ?? "not_acknowledged";
+@@ -97,7 +125,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       {
+         ok: false,
+         status: "failed",
+-        message: error instanceof Error ? error.message : "Unable to apply this Booking.com cancellation.",
++        message: error instanceof Error ? error.message : "Unable to apply this Channex cancellation.",
+       },
+       { status: 500 }
+     );
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/feed/route.ts b/app/api/host/pro/channel/channex/operator/bookings/feed/route.ts
+index 2b21660f..a7c94bc1 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/feed/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/feed/route.ts
+@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
+ 
+ import { pollChannexBookingFeedForFamily } from "@/lib/channex-booking-feed-sync";
+ import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
++import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
++import { isChannelProviderKey } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -24,11 +26,18 @@ export async function POST(request: Request): Promise<NextResponse> {
+     if (!familyId) {
+       return NextResponse.json({ error: "familyId is required." }, { status: 400 });
+     }
++    if (!isChannelProviderKey(providerKey)) {
++      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
++    }
+ 
+-    if (providerKey !== "booking") {
++    const capabilities = getChannelProviderCapabilities(providerKey);
++    if (!capabilities.supportsBookingIngest) {
+       return NextResponse.json(
+-        { error: "Booking feed test is currently available only for Booking.com through Channex." },
+-        { status: 400 }
++        {
++          error: "This provider does not currently support booking ingestion in Famlo.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
+       );
+     }
+ 
+@@ -73,6 +82,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+         ...result,
+         operatorOnly: true,
+         providerKey,
++        providerStatus: capabilities.displayStatus,
+       },
+       { status: result.ok ? 200 : 502 }
+     );
+diff --git a/app/api/host/pro/channel/channex/operator/bookings/preview/route.ts b/app/api/host/pro/channel/channex/operator/bookings/preview/route.ts
+index 912200f7..daa3005c 100644
+--- a/app/api/host/pro/channel/channex/operator/bookings/preview/route.ts
++++ b/app/api/host/pro/channel/channex/operator/bookings/preview/route.ts
+@@ -1,5 +1,11 @@
+ import { NextResponse } from "next/server";
+ 
++import {
++  getChannelProviderCapabilities,
++  resolveProviderFromRevision,
++} from "@/lib/channel-providers/provider-capabilities";
++import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
++import { isChannelProviderKey } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { createAdminSupabaseClient } from "@/lib/supabase";
+@@ -33,10 +39,18 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "familyId and channelBookingRevisionId are required." }, { status: 400 });
+     }
+ 
+-    if (providerKey !== "booking") {
++    if (!isChannelProviderKey(providerKey)) {
++      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
++    }
++
++    const capabilities = getChannelProviderCapabilities(providerKey);
++    if (!capabilities.supportsBookingIngest) {
+       return NextResponse.json(
+-        { error: "Booking import test is currently available only for Booking.com through Channex." },
+-        { status: 400 }
++        {
++          error: "This provider does not currently support booking import preview in Famlo.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
+       );
+     }
+ 
+@@ -57,7 +71,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+ 
+     const { data: revisionRow, error: revisionError } = await supabase
+       .from("channel_booking_revisions")
+-      .select("id,family_id,provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,updated_at")
++      .select("id,family_id,provider_code,ota_provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,updated_at")
+       .eq("id", channelBookingRevisionId)
+       .eq("family_id", familyId)
+       .eq("provider_code", "channex")
+@@ -68,6 +82,20 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "Booking preview not found for this selected property." }, { status: 404 });
+     }
+ 
++    const revisionProvider = resolveProviderFromRevision({
++      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
++      otaName: asStringOrNull(revisionRow.ota_name),
++    });
++    if (revisionProvider && revisionProvider !== providerKey) {
++      return NextResponse.json(
++        {
++          error: `This revision belongs to ${getChannelProviderDefinition(revisionProvider).displayName}, not ${getChannelProviderDefinition(providerKey).displayName}.`,
++          status: "provider_mismatch",
++        },
++        { status: 409 }
++      );
++    }
++
+     const externalRoomTypeId = asStringOrNull(revisionRow.external_room_type_id);
+     const externalRatePlanId = asStringOrNull(revisionRow.external_rate_plan_id);
+     const importStatus = asStringOrNull(revisionRow.import_status) ?? "preview";
+@@ -127,6 +155,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+         roomMappingStatus: roomMappingRow?.stay_unit_id ? "matched" : "missing",
+         stayUnitId: asStringOrNull(roomMappingRow?.stay_unit_id),
+         rawPayload: asObject(revisionRow.raw_payload),
++        normalizedProvider: revisionProvider ?? providerKey,
+       },
+       blockers,
+     });
+@@ -136,7 +165,7 @@ export async function POST(request: Request): Promise<NextResponse> {
+       {
+         ok: false,
+         status: "failed",
+-        message: error instanceof Error ? error.message : "Unable to preview this Booking.com revision.",
++        message: error instanceof Error ? error.message : "Unable to preview this Channex revision.",
+       },
+       { status: 500 }
+     );
+diff --git a/app/api/host/pro/channel/channex/operator/go-live-readiness/route.ts b/app/api/host/pro/channel/channex/operator/go-live-readiness/route.ts
+index ba095224..bde191e6 100644
+--- a/app/api/host/pro/channel/channex/operator/go-live-readiness/route.ts
++++ b/app/api/host/pro/channel/channex/operator/go-live-readiness/route.ts
+@@ -1,6 +1,7 @@
+ import { NextResponse } from "next/server";
+ 
+-import { mergeChannelSetupMetadata, readChannelSetupMetadata } from "@/lib/channel-setup-state";
++import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
++import { isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupMetadata } from "@/lib/channel-setup-state";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { loadHostProAccess } from "@/lib/host-pro-access";
+ import { loadStayUnitsForSelector } from "@/lib/stay-units";
+@@ -53,10 +54,30 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "familyId is required." }, { status: 400 });
+     }
+ 
+-    if (providerKey !== "booking") {
++    if (!isChannelProviderKey(providerKey)) {
++      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
++    }
++
++    const capabilities = getChannelProviderCapabilities(providerKey);
++    if (!capabilities.supportsGoLiveReadiness || capabilities.mode === "feed_only") {
++      return NextResponse.json(
++        {
++          error: "This provider does not currently support OTA-style go-live readiness in Famlo.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
++      );
++    }
++
++    if (!capabilities.supportsAutoActivation) {
+       return NextResponse.json(
+-        { error: "Assisted go-live readiness can only be marked for Booking.com in this phase." },
+-        { status: 400 }
++        {
++          ok: false,
++          status: "assisted_only",
++          message: "This provider stays in assisted review until operator sync and mapping checks are completed. No activation was performed.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
+       );
+     }
+ 
+diff --git a/app/api/host/pro/channel/connect/route.ts b/app/api/host/pro/channel/connect/route.ts
+index 72eb7e1f..a89b7126 100644
+--- a/app/api/host/pro/channel/connect/route.ts
++++ b/app/api/host/pro/channel/connect/route.ts
+@@ -5,6 +5,7 @@ import {
+   createChannexOneTimeToken,
+   getChannexConfigSummary,
+ } from "@/lib/channel-providers/channex/client";
++import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+ import { inspectProviderConnectionInChannex } from "@/lib/channel-providers/provider-adapter";
+ import {
+   channelCredentialStorageConfigured,
+@@ -52,12 +53,8 @@ function asRecord(value: unknown): Record<string, unknown> {
+ }
+ 
+ function iframeCodesForProvider(providerKey: ChannelProviderKey): string[] {
+-  if (providerKey === "booking") return ["BDC"];
+-  if (providerKey === "airbnb") return ["ABB"];
+-  if (providerKey === "agoda") return ["AGO"];
+-  if (providerKey === "expedia") return ["EXP"];
+-  if (providerKey === "google-hotel") return ["GHA"];
+-  return [];
++  const code = getChannelProviderCapabilities(providerKey).channexChannelCode;
++  return code ? [code] : [];
+ }
+ 
+ function iframeHint(providerKey: ChannelProviderKey, filteredChannels: string[]): string {
+@@ -112,9 +109,30 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
+     }
+     providerKey = providerInput;
++    const capabilities = getChannelProviderCapabilities(providerKey);
+ 
+-    if (providerKey !== "booking" && providerKey !== "mmt") {
+-      return NextResponse.json({ error: "This connect flow is currently supported for Booking.com and MakeMyTrip / Goibibo only." }, { status: 400 });
++    if (capabilities.mode === "disabled") {
++      return NextResponse.json({ error: "This provider is currently disabled in Famlo." }, { status: 409 });
++    }
++
++    if (capabilities.mode === "feed_only") {
++      return NextResponse.json(
++        {
++          error: "This provider is handled as a feed/metasearch workflow, not a direct OTA connect flow.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
++      );
++    }
++
++    if (!capabilities.supportsChannexIframe) {
++      return NextResponse.json(
++        {
++          error: "This provider does not currently support the Channex-assisted connection flow in Famlo.",
++          providerStatus: capabilities.displayStatus,
++        },
++        { status: 409 }
++      );
+     }
+ 
+     const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
+@@ -190,7 +208,17 @@ export async function POST(request: Request): Promise<NextResponse> {
+       const providerAccessToken = asString(body.providerAccessToken);
+ 
+       if (!providerListingId && !providerPropertyCode && !providerListingUrl) {
+-        return NextResponse.json({ error: "Add an MMT Hotel ID, Hotel Code, or reference URL first." }, { status: 400 });
++        return NextResponse.json(
++          {
++            error:
++              providerKey === "airbnb"
++                ? "Add an Airbnb listing URL, listing id, or owner account reference first."
++                : providerKey === "mmt"
++                  ? "Add an MMT Hotel ID, Hotel Code, or reference URL first."
++                  : "Add the provider listing id, property code, or listing URL first.",
++          },
++          { status: 400 }
++        );
+       }
+ 
+       if (providerAccessToken) {
+@@ -359,6 +387,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+     return NextResponse.json({
+       ok: true,
+       mode: nextMode,
++      providerStatus: capabilities.displayStatus,
++      providerMode: capabilities.mode,
+       message:
+         nextMode === "ready_for_preview"
+           ? "Provider channel is already visible. Load preview and confirm the mappings."
+diff --git a/app/api/host/pro/channel/setup/route.ts b/app/api/host/pro/channel/setup/route.ts
+index 85cbc699..c5e1665c 100644
+--- a/app/api/host/pro/channel/setup/route.ts
++++ b/app/api/host/pro/channel/setup/route.ts
+@@ -1,5 +1,6 @@
+ import { NextResponse } from "next/server";
+ 
++import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+ import { CHANNEL_PROVIDER_REGISTRY } from "@/lib/channel-providers/provider-registry";
+ import { resolveAuthorizedHostResource } from "@/lib/host-access";
+ import { createDefaultChannelSetupState, isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupState, sanitizeChannelSetupMode, sanitizeChannelSetupStatus, sanitizeChannelSetupStep } from "@/lib/channel-setup-state";
+@@ -96,6 +97,7 @@ export async function GET(request: Request): Promise<NextResponse> {
+     return NextResponse.json({
+       familyId,
+       states,
++      capabilities: CHANNEL_PROVIDER_REGISTRY.map((provider) => getChannelProviderCapabilities(provider.key)),
+     });
+   } catch (error) {
+     console.error("[host.pro.channel.setup] load failed:", error);
+diff --git a/app/api/host/pro/channel/sync/route.ts b/app/api/host/pro/channel/sync/route.ts
+index 7caaf209..6e1505e5 100644
+--- a/app/api/host/pro/channel/sync/route.ts
++++ b/app/api/host/pro/channel/sync/route.ts
+@@ -1,6 +1,8 @@
+ import { NextResponse } from "next/server";
+ 
+ import { POST as runLimitedAriTest } from "@/app/api/host/pro/channel/channex/operator/ari-test/route";
++import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
++import { isChannelProviderKey } from "@/lib/channel-setup-state";
+ import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
+ import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
+ import { buildInternalJsonRequest, readJsonResponse } from "@/lib/channel-api-bridge";
+@@ -29,7 +31,29 @@ export async function POST(request: Request): Promise<NextResponse> {
+       return NextResponse.json({ ok: false, error: "familyId and providerKey are required." }, { status: 400 });
+     }
+ 
+-    if (providerKey !== "booking") {
++    if (!isChannelProviderKey(providerKey)) {
++      return NextResponse.json({ ok: false, error: "providerKey is invalid." }, { status: 400 });
++    }
++
++    const capabilities = getChannelProviderCapabilities(providerKey as ChannelProviderKey);
++
++    if (!capabilities.supportsAriSync || capabilities.mode === "feed_only") {
++      const primitiveAudit = getProviderMutationPrimitiveAudit(providerKey as ChannelProviderKey);
++      return NextResponse.json(
++        {
++          ok: false,
++          phase: "sync",
++          providerKey,
++          status: "not_supported",
++          error: "Selected-property sync is not available for this provider mode in Famlo.",
++          providerStatus: capabilities.displayStatus,
++          primitiveAudit,
++        },
++        { status: 409 }
++      );
++    }
++
++    if (!capabilities.supportsSelectedPropertySyncTest) {
+       const primitiveAudit = getProviderMutationPrimitiveAudit(providerKey as ChannelProviderKey);
+       return NextResponse.json(
+         {
+@@ -37,7 +61,8 @@ export async function POST(request: Request): Promise<NextResponse> {
+           phase: "sync",
+           providerKey,
+           status: "assisted_only",
+-          error: "Selected-property sync is currently available only for Booking.com through the Channex path in this repo.",
++          error: "This provider can sync through Channex, but the selected-property test route is still operator-assisted in Famlo.",
++          providerStatus: capabilities.displayStatus,
+           primitiveAudit,
+         },
+         { status: 409 }
+diff --git a/lib/channel-providers/channex/client.ts b/lib/channel-providers/channex/client.ts
+index 74aa008c..669fa43b 100644
+--- a/lib/channel-providers/channex/client.ts
++++ b/lib/channel-providers/channex/client.ts
+@@ -215,6 +215,7 @@ export type ChannexChannelStructureRecord = {
+   id: string;
+   title: string | null;
+   hotelId: string | null;
++  uniqueId: string | null;
+   isActive: boolean;
+   propertyIds: string[];
+ };
+@@ -1665,6 +1666,12 @@ export async function fetchChannexChannelsForProperty(
+               : typeof attributes?.hotel_id === "number" && Number.isFinite(attributes.hotel_id)
+                 ? String(attributes.hotel_id)
+                 : null,
++          uniqueId:
++            typeof attributes?.unique_id === "string"
++              ? trimOrNull(attributes.unique_id)
++              : typeof attributes?.unique_id === "number" && Number.isFinite(attributes.unique_id)
++                ? String(attributes.unique_id)
++                : null,
+           isActive:
+             typeof attributes?.is_active === "boolean"
+               ? attributes.is_active
+diff --git a/lib/channel-providers/provider-adapter.ts b/lib/channel-providers/provider-adapter.ts
+index ce0eeeb0..06a4f1e5 100644
+--- a/lib/channel-providers/provider-adapter.ts
++++ b/lib/channel-providers/provider-adapter.ts
+@@ -5,6 +5,10 @@ import {
+   fetchChannexRoomTypesForProperty,
+   type ChannexChannelStructureRecord,
+ } from "@/lib/channel-providers/channex/client";
++import {
++  resolveProviderFromChannexUniqueId,
++  resolveProviderFromOtaName,
++} from "@/lib/channel-providers/provider-capabilities";
+ import { mergeChannelSetupMetadata } from "@/lib/channel-setup-state";
+ 
+ import type { ChannelProviderKey } from "./provider-registry";
+@@ -59,14 +63,13 @@ function asRecord(value: unknown): JsonRecord {
+ }
+ 
+ export function providerChannelMatches(providerKey: ChannelProviderKey, channel: ChannexChannelStructureRecord): boolean {
+-  const haystack = `${channel.title ?? ""} ${channel.hotelId ?? ""}`.toLowerCase();
+-
+-  if (providerKey === "booking") return /booking/.test(haystack);
+-  if (providerKey === "mmt") return /make.?my.?trip|goibibo|\bmmt\b/.test(haystack);
+-  if (providerKey === "airbnb") return /airbnb/.test(haystack);
+-  if (providerKey === "agoda") return /agoda|ycs/.test(haystack);
+-  if (providerKey === "expedia") return /expedia/.test(haystack);
+-  return /google/.test(haystack);
++  const resolvedFromUniqueId = resolveProviderFromChannexUniqueId(channel.uniqueId);
++  if (resolvedFromUniqueId) return resolvedFromUniqueId === providerKey;
++
++  const resolvedFromName = resolveProviderFromOtaName(`${channel.title ?? ""} ${channel.hotelId ?? ""}`);
++  if (resolvedFromName) return resolvedFromName === providerKey;
++
++  return false;
+ }
+ 
+ export async function inspectProviderConnectionInChannex(

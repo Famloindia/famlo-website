@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
 import { CHANNEL_PROVIDER_REGISTRY } from "@/lib/channel-providers/provider-registry";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createDefaultChannelSetupState, isChannelProviderKey, mergeChannelSetupMetadata, readChannelSetupState, sanitizeChannelSetupMode, sanitizeChannelSetupStatus, sanitizeChannelSetupStep } from "@/lib/channel-setup-state";
@@ -96,6 +97,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({
       familyId,
       states,
+      capabilities: CHANNEL_PROVIDER_REGISTRY.map((provider) => getChannelProviderCapabilities(provider.key)),
     });
   } catch (error) {
     console.error("[host.pro.channel.setup] load failed:", error);

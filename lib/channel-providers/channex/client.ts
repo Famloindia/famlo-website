@@ -215,6 +215,7 @@ export type ChannexChannelStructureRecord = {
   id: string;
   title: string | null;
   hotelId: string | null;
+  uniqueId: string | null;
   isActive: boolean;
   propertyIds: string[];
 };
@@ -1664,6 +1665,12 @@ export async function fetchChannexChannelsForProperty(
               ? trimOrNull(attributes.hotel_id)
               : typeof attributes?.hotel_id === "number" && Number.isFinite(attributes.hotel_id)
                 ? String(attributes.hotel_id)
+                : null,
+          uniqueId:
+            typeof attributes?.unique_id === "string"
+              ? trimOrNull(attributes.unique_id)
+              : typeof attributes?.unique_id === "number" && Number.isFinite(attributes.unique_id)
+                ? String(attributes.unique_id)
                 : null,
           isActive:
             typeof attributes?.is_active === "boolean"

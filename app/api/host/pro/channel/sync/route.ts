@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { POST as runLimitedAriTest } from "@/app/api/host/pro/channel/channex/operator/ari-test/route";
+import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
+import { isChannelProviderKey } from "@/lib/channel-setup-state";
 import { getProviderMutationPrimitiveAudit } from "@/lib/channel-providers/provider-mutation-primitives";
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { buildInternalJsonRequest, readJsonResponse } from "@/lib/channel-api-bridge";
@@ -29,7 +31,29 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ ok: false, error: "familyId and providerKey are required." }, { status: 400 });
     }
 
-    if (providerKey !== "booking") {
+    if (!isChannelProviderKey(providerKey)) {
+      return NextResponse.json({ ok: false, error: "providerKey is invalid." }, { status: 400 });
+    }
+
+    const capabilities = getChannelProviderCapabilities(providerKey as ChannelProviderKey);
+
+    if (!capabilities.supportsAriSync || capabilities.mode === "feed_only") {
+      const primitiveAudit = getProviderMutationPrimitiveAudit(providerKey as ChannelProviderKey);
+      return NextResponse.json(
+        {
+          ok: false,
+          phase: "sync",
+          providerKey,
+          status: "not_supported",
+          error: "Selected-property sync is not available for this provider mode in Famlo.",
+          providerStatus: capabilities.displayStatus,
+          primitiveAudit,
+        },
+        { status: 409 }
+      );
+    }
+
+    if (!capabilities.supportsSelectedPropertySyncTest) {
       const primitiveAudit = getProviderMutationPrimitiveAudit(providerKey as ChannelProviderKey);
       return NextResponse.json(
         {
@@ -37,7 +61,8 @@ export async function POST(request: Request): Promise<NextResponse> {
           phase: "sync",
           providerKey,
           status: "assisted_only",
-          error: "Selected-property sync is currently available only for Booking.com through the Channex path in this repo.",
+          error: "This provider can sync through Channex, but the selected-property test route is still operator-assisted in Famlo.",
+          providerStatus: capabilities.displayStatus,
           primitiveAudit,
         },
         { status: 409 }
