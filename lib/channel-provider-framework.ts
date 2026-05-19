@@ -10,6 +10,12 @@ import {
   inspectProviderConnectionInChannex,
   type ProviderAdapterInspection,
 } from "@/lib/channel-providers/provider-adapter";
+import {
+  isChannexAriJobType,
+  nextChannexRetryAt,
+  processChannexAriSyncJob,
+} from "@/lib/channex-ari-jobs";
+import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { getChannelProviderDefinition } from "@/lib/channel-providers/provider-registry";
 import { mergeChannelSetupMetadata } from "@/lib/channel-setup-state";
@@ -23,6 +29,7 @@ export type ChannelProviderOperationType =
   | "activate_provider"
   | "deactivate_provider"
   | "verify_mappings"
+  | "request_review"
   | "reconcile";
 
 export type ChannelProviderOperationResult = {
@@ -55,6 +62,49 @@ function asObject(value: unknown): JsonRecord {
 
 function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+const HOST_ALLOWED_OPERATION_TYPES = new Set<ChannelProviderOperationType>([
+  "create_provider",
+  "connect_provider",
+  "verify_mappings",
+  "request_review",
+]);
+
+export class ChannelProviderPermissionError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode = 403) {
+    super(message);
+    this.name = "ChannelProviderPermissionError";
+    this.statusCode = statusCode;
+  }
+}
+
+export function assertChannelProviderOperationPermission(input: {
+  actorRole?: string | null;
+  operationType: ChannelProviderOperationType;
+  dryRun: boolean;
+}): void {
+  const actorRole =
+    input.actorRole === "admin" || input.actorRole === "system"
+      ? input.actorRole
+      : "host";
+  if (actorRole === "admin") return;
+  if (actorRole === "system") return;
+
+  if (input.operationType === "activate_provider") {
+    throw new ChannelProviderPermissionError("Operator access is required to activate a provider.");
+  }
+  if (input.operationType === "deactivate_provider") {
+    throw new ChannelProviderPermissionError("Operator access is required to deactivate a provider.");
+  }
+  if (!input.dryRun) {
+    throw new ChannelProviderPermissionError("Host-scoped provider operations must stay in dry-run mode.");
+  }
+  if (!HOST_ALLOWED_OPERATION_TYPES.has(input.operationType)) {
+    throw new ChannelProviderPermissionError("This provider operation requires operator access.");
+  }
 }
 
 function iframeCodesForProvider(providerKey: ChannelProviderKey): string[] {
@@ -532,6 +582,11 @@ export async function executeChannelProviderOperation(
   }
 ): Promise<ChannelProviderOperationResult> {
   const dryRun = input.dryRun ?? true;
+  assertChannelProviderOperationPermission({
+    actorRole: input.actorRole ?? null,
+    operationType: input.operationType,
+    dryRun,
+  });
   const beforeConnection = await loadConnection(supabase, input);
   const beforeState = asObject(beforeConnection);
   const operation = await insertOperation({
@@ -565,6 +620,8 @@ export async function executeChannelProviderOperation(
     let data: JsonRecord = {};
     let message = "Provider operation completed.";
     let status: "succeeded" | "blocked" = "succeeded";
+    const nowIso = new Date().toISOString();
+    const capabilities = getChannelProviderCapabilities(input.providerKey);
 
     if (input.operationType === "connect_provider") {
       const accountId = await upsertProviderAccount(supabase, {
@@ -577,9 +634,9 @@ export async function executeChannelProviderOperation(
         status: "connection_requested",
         currentStep: "connection",
         lastError: null,
-        requestedAt: new Date().toISOString(),
-        setupRequestedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        requestedAt: nowIso,
+        setupRequestedAt: nowIso,
+        updatedAt: nowIso,
         metadataPatch: {
           provider_connection_status: "details_submitted",
           provider_connection_error: null,
@@ -622,9 +679,9 @@ export async function executeChannelProviderOperation(
         status: "connection_requested",
         currentStep: "connection",
         lastError: null,
-        requestedAt: new Date().toISOString(),
-        setupRequestedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        requestedAt: nowIso,
+        setupRequestedAt: nowIso,
+        updatedAt: nowIso,
         metadataPatch: {
           provider_connection_status: setupSession.setup_session_available
             ? "setup_session_created"
@@ -670,7 +727,7 @@ export async function executeChannelProviderOperation(
       const metadata = {
         ...asObject(beforeConnection?.metadata),
         provider_mapping_verification: mapping,
-        provider_mapping_verified_at: new Date().toISOString(),
+        provider_mapping_verified_at: nowIso,
       };
       connection = await saveConnectionState(supabase, {
         familyId: input.familyId,
@@ -684,6 +741,36 @@ export async function executeChannelProviderOperation(
       });
       data = mapping;
       message = mapping.ready ? "Provider mappings are complete." : "Provider mappings still need work.";
+    }
+
+    if (input.operationType === "request_review") {
+      const metadata = mergeChannelSetupMetadata(asObject(beforeConnection?.metadata), {
+        status: "review_requested",
+        currentStep: "activate",
+        lastError: null,
+        updatedAt: nowIso,
+        metadataPatch: {
+          go_live_review_requested: true,
+          go_live_review_requested_at: nowIso,
+          operator_review_requested_by: input.actorUserId ?? null,
+          operator_review_provider: input.providerKey,
+        },
+      });
+      connection = await saveConnectionState(supabase, {
+        familyId: input.familyId,
+        providerKey: input.providerKey,
+        operationId: operation.id,
+        patch: {
+          sync_status: asString(beforeConnection?.sync_status) ?? "not_connected",
+          connection_status: "review_requested",
+          verification_status: asString(beforeConnection?.verification_status) ?? "not_verified",
+          activation_status: "ready_for_operator_review",
+          dry_run: true,
+        },
+        metadata,
+      });
+      data = { review_requested: true };
+      message = "Provider was marked ready for operator review without activating it.";
     }
 
     if (input.operationType === "activate_provider") {
@@ -701,25 +788,30 @@ export async function executeChannelProviderOperation(
         data = refresh.data;
         message = "Dry-run activation passed. Disable dry-run only after operator review.";
       } else {
+        const nextConnectionStatus = capabilities.supportsAutoActivation ? "active" : "assisted_live";
+        const nextActivationStatus = capabilities.supportsAutoActivation ? "active" : "assisted_live";
         connection = await saveConnectionState(supabase, {
           familyId: input.familyId,
           providerKey: input.providerKey,
           operationId: operation.id,
           patch: {
             sync_status: "connected",
-            connection_status: "active",
+            connection_status: nextConnectionStatus,
             verification_status: "verified",
-            activation_status: "active",
+            activation_status: nextActivationStatus,
             dry_run: false,
           },
           metadata: {
             ...asObject(refresh.connection?.metadata),
-            activated_at: new Date().toISOString(),
+            activated_at: nowIso,
             activated_by: input.actorUserId ?? null,
+            activation_mode: capabilities.supportsAutoActivation ? "auto_activation" : "assisted_live",
           },
         });
         data = refresh.data;
-        message = "Provider was activated in Famlo after verified connection and mappings.";
+        message = capabilities.supportsAutoActivation
+          ? "Provider was activated in Famlo after verified connection and mappings."
+          : "Provider was moved to assisted live in Famlo after operator activation review.";
       }
     }
 
@@ -736,7 +828,7 @@ export async function executeChannelProviderOperation(
         },
         metadata: {
           ...asObject(beforeConnection?.metadata),
-          deactivated_at: new Date().toISOString(),
+          deactivated_at: nowIso,
           deactivated_by: input.actorUserId ?? null,
           deactivation_reason: asString(input.payload?.reason),
         },
@@ -778,6 +870,32 @@ export async function executeChannelProviderOperation(
       payload: {
         operation_id: operation.id,
         dry_run: dryRun,
+        requested_by: input.actorUserId ?? null,
+        actor_role: input.actorRole ?? null,
+        property: {
+          family_id: input.familyId,
+          external_property_id:
+            asString(connection?.external_property_id) ??
+            asString(beforeConnection?.external_property_id) ??
+            null,
+        },
+        transition:
+          input.operationType === "activate_provider" || input.operationType === "deactivate_provider"
+            ? {
+                requested_at: nowIso,
+                provider: input.providerKey,
+                old_status: {
+                  sync_status: asString(beforeConnection?.sync_status) ?? null,
+                  connection_status: asString(beforeConnection?.connection_status) ?? null,
+                  activation_status: asString(beforeConnection?.activation_status) ?? null,
+                },
+                new_status: {
+                  sync_status: asString(connection?.sync_status) ?? asString(beforeConnection?.sync_status) ?? null,
+                  connection_status: asString(connection?.connection_status) ?? asString(beforeConnection?.connection_status) ?? null,
+                  activation_status: asString(connection?.activation_status) ?? asString(beforeConnection?.activation_status) ?? null,
+                },
+              }
+            : null,
         data,
       },
     } as never);
@@ -838,6 +956,10 @@ export async function enqueueChannelSyncJob(
       | "booking_modification_apply"
       | "booking_cancellation_apply"
       | "ari_push"
+      | "availability_update"
+      | "rate_update"
+      | "restriction_update"
+      | "full_sync"
       | "diagnostic_check";
     payload?: JsonRecord;
     idempotencyKey?: string | null;
@@ -869,6 +991,32 @@ export async function enqueueChannelSyncJob(
   return asString((data as JsonRecord | null)?.id);
 }
 
+async function deferChannexAriJobForRateLimit(
+  supabase: SupabaseClient,
+  input: { jobId: string }
+): Promise<boolean> {
+  const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
+  const { count, error } = await supabase
+    .from("channel_sync_jobs")
+    .select("id", { count: "exact", head: true })
+    .in("job_type", ["availability_update", "rate_update", "restriction_update", "full_sync"])
+    .in("status", ["running", "succeeded"])
+    .gte("updated_at", oneMinuteAgo);
+  if (error) throw error;
+  if ((count ?? 0) < 20) return false;
+
+  await supabase
+    .from("channel_sync_jobs")
+    .update({
+      status: "retrying",
+      last_error: "Deferred to respect Channex ARI rate limit (20 requests/minute).",
+      run_after: new Date(Date.now() + 60_000).toISOString(),
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", input.jobId);
+  return true;
+}
+
 export async function processDueChannelSyncJobs(
   supabase: SupabaseClient,
   input?: { limit?: number; workerId?: string }
@@ -894,6 +1042,52 @@ export async function processDueChannelSyncJobs(
     if (!jobId || !familyId || !providerKey || !jobType) continue;
 
     try {
+      if (isChannexAriJobType(jobType)) {
+        const deferredForRateLimit = await deferChannexAriJobForRateLimit(supabase, { jobId });
+        if (deferredForRateLimit) {
+          failed += 1;
+          results.push({ job_id: jobId, ok: false, deferred: true, reason: "channex_ari_rate_limit" });
+          continue;
+        }
+
+        const ariResult = await processChannexAriSyncJob(supabase, job);
+        const retryable = ariResult.httpStatus === 429 || (ariResult.httpStatus != null && ariResult.httpStatus >= 500);
+        const nextStatus = ariResult.ok
+          ? "succeeded"
+          : retryable
+            ? attempts >= maxAttempts
+              ? "dead_lettered"
+              : "retrying"
+            : "failed";
+
+        await supabase
+          .from("channel_sync_jobs")
+          .update({
+            status: nextStatus,
+            result: {
+              ...ariResult.result,
+              task_ids: ariResult.taskIds,
+            },
+            last_error: ariResult.ok ? null : ariResult.message,
+            dead_lettered_at: nextStatus === "dead_lettered" ? new Date().toISOString() : null,
+            completed_at: nextStatus === "succeeded" || nextStatus === "failed" ? new Date().toISOString() : null,
+            processed_at: ariResult.ok ? new Date().toISOString() : null,
+            channex_task_id: ariResult.taskIds[0] ?? null,
+            run_after:
+              nextStatus === "retrying"
+                ? ariResult.retryAfterAt ?? nextChannexRetryAt(attempts, null)
+                : new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          } as never)
+          .eq("id", jobId);
+
+        if (ariResult.ok) succeeded += 1;
+        else if (nextStatus === "dead_lettered") deadLettered += 1;
+        else failed += 1;
+        results.push({ job_id: jobId, ok: ariResult.ok, result: ariResult.result, task_ids: ariResult.taskIds });
+        continue;
+      }
+
       const operationType: ChannelProviderOperationType =
         jobType === "provider_reconcile"
           ? "reconcile"
@@ -919,6 +1113,7 @@ export async function processDueChannelSyncJobs(
           last_error: result.ok ? null : result.message,
           dead_lettered_at: !result.ok && attempts >= maxAttempts ? new Date().toISOString() : null,
           completed_at: result.ok ? new Date().toISOString() : null,
+          processed_at: result.ok ? new Date().toISOString() : null,
           run_after: result.ok ? new Date().toISOString() : new Date(Date.now() + Math.min(60, attempts * 10) * 60_000).toISOString(),
           updated_at: new Date().toISOString(),
         } as never)

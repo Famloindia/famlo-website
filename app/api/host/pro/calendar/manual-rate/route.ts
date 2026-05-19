@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
+import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -132,12 +133,26 @@ export async function POST(request: Request): Promise<NextResponse> {
       connectionId: null,
     });
 
+    const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
+      familyId: hostAccess.familyId,
+      dateFrom: date,
+      dateTo: date,
+      jobTypes: ["rate_update"],
+      certificationScenario: action === "save" ? "price_save" : "price_reset",
+      sourceUiAction: action === "save" ? "Famlo PMS rate save" : "Famlo PMS rate reset",
+      sourceRoute: "/api/host/pro/calendar/manual-rate",
+      stayUnitIds: [roomId],
+      actorUserId: hostAccess.hostUserId ?? null,
+      actorRole: hostAccess.isAdmin ? "admin" : "host",
+    });
+
     return NextResponse.json({
       ok: true,
       action,
       date,
       roomId,
       amount: action === "save" ? amount : null,
+      queuedJobIds,
     });
   } catch (error) {
     console.error("[host.pro.calendar.manual-rate] error", error);

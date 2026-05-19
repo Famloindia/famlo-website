@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
 import type { ChannelProviderKey } from "@/lib/channel-providers/provider-registry";
 import { isChannelProviderKey } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
@@ -255,7 +256,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const auth = await authorize(request, familyId);
     if (auth.error) return auth.error;
-    const { supabase } = auth;
+    const { supabase, authorizedResource } = auth;
 
     const [{ data: providerRow, error: providerError }, { data: channexRow, error: channexError }, { data: existingRoomMapping, error: existingRoomMappingError }, { data: existingRatePlan, error: existingRatePlanError }] = await Promise.all([
       supabase
@@ -391,9 +392,24 @@ export async function POST(request: Request): Promise<NextResponse> {
       },
     });
 
+    const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
+      familyId,
+      dateFrom: nowIso.slice(0, 10),
+      dateTo: nowIso.slice(0, 10),
+      jobTypes: ["full_sync"],
+      certificationScenario: "room_rate_mapping_saved",
+      sourceUiAction: "Famlo PMS room/rate mapping save",
+      sourceRoute: "/api/host/pro/channel/mappings",
+      stayUnitIds: [stayUnitId],
+      actorUserId: authorizedResource?.hostUserId ?? null,
+      actorRole: authorizedResource?.isAdmin ? "admin" : "host",
+      providerKeys: [providerKey],
+    });
+
     return NextResponse.json({
       ok: true,
       message: "Mapping saved.",
+      queuedJobIds,
     });
   } catch (error) {
     if (familyId && storageProviderCode) {

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { enqueueBookingInventoryAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { appendInventoryEvent, assertCanonicalInventoryAvailability, projectInventoryRange } from "@/lib/inventory";
 import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
 
@@ -230,6 +231,19 @@ async function reprojectModificationInventory(
       new_start_date: input.newStartDate,
       new_end_date: input.newEndDate,
     },
+  });
+
+  const stayUnitIds = [...new Set([input.oldStayUnitId, input.newStayUnitId].filter((value): value is string => Boolean(value)))];
+  const dateFrom = input.oldStartDate < input.newStartDate ? input.oldStartDate : input.newStartDate;
+  const dateTo = input.oldEndDate > input.newEndDate ? input.oldEndDate : input.newEndDate;
+  await enqueueBookingInventoryAriSyncJobs(supabase, {
+    familyId: input.familyId,
+    stayUnitIds,
+    dateFrom,
+    dateTo,
+    certificationScenario: "booking_modify",
+    sourceUiAction: "Famlo PMS booking modification apply",
+    sourceRoute: input.source,
   });
 }
 

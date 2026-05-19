@@ -150,6 +150,7 @@ export type ChannexAriPushResult = {
   environment: ChannexEnvironment;
   endpoint: string;
   httpStatus: number | null;
+  retryAfterSeconds: number | null;
   message: string;
   meta: Record<string, unknown> | null;
   warnings: unknown[];
@@ -1196,6 +1197,7 @@ async function postChannexJson(
       environment,
       endpoint: endpointPath,
       httpStatus: null,
+      retryAfterSeconds: null,
       message: "Channex staging configuration is incomplete. Add the server-side API key first.",
       meta: null,
       warnings: [],
@@ -1224,6 +1226,11 @@ async function postChannexJson(
     }
 
     if (!response.ok) {
+      const retryAfterHeader = response.headers.get("retry-after");
+      const retryAfterSeconds =
+        retryAfterHeader && retryAfterHeader.trim().length > 0
+          ? Number(retryAfterHeader)
+          : null;
       const errors =
         parsed &&
         typeof parsed.errors === "object" &&
@@ -1237,6 +1244,7 @@ async function postChannexJson(
         environment,
         endpoint: endpointPath,
         httpStatus: response.status,
+        retryAfterSeconds: Number.isFinite(retryAfterSeconds ?? NaN) ? retryAfterSeconds : null,
         message: errorTitle
           ? `Channex ARI push failed: ${errorTitle}.`
           : `Channex ARI push failed with HTTP ${response.status}.`,
@@ -1267,6 +1275,7 @@ async function postChannexJson(
       environment,
       endpoint: endpointPath,
       httpStatus: response.status,
+      retryAfterSeconds: null,
       message,
       meta,
       warnings,
@@ -1279,6 +1288,7 @@ async function postChannexJson(
       environment,
       endpoint: endpointPath,
       httpStatus: null,
+      retryAfterSeconds: null,
       message: error instanceof Error ? `Channex ARI push failed: ${error.message}` : "Channex ARI push failed.",
       meta: null,
       warnings: [],

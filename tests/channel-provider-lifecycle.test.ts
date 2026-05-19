@@ -12,6 +12,12 @@ import {
   getChannelProviderCapabilities,
   resolveChannelStorageProviderCode,
 } from "@/lib/channel-providers/provider-capabilities";
+import {
+  assertChannelProviderOperationPermission,
+  ChannelProviderPermissionError,
+} from "@/lib/channel-provider-framework";
+import { resolveProviderOperationPolicy } from "@/app/api/host/pro/channel/providers/operation/route";
+import { verifyChannexWebhookRequest } from "@/app/api/webhooks/channex/bookings/route";
 
 function buildAriSnapshot(label: string): ChannexAriHealthSnapshot {
   return {
@@ -193,4 +199,123 @@ test("Modification ingest is enabled provider-by-provider on shared OTA lifecycl
   assert.equal(getChannelProviderCapabilities("agoda").supportsModificationIngest, true);
   assert.equal(getChannelProviderCapabilities("expedia").supportsModificationIngest, true);
   assert.equal(getChannelProviderCapabilities("google-hotel").supportsModificationIngest, false);
+});
+
+test("Webhook auth rejects missing secret configuration", () => {
+  const rawBody = JSON.stringify({ property_id: "prop_1" });
+  const request = new Request("https://famlo.test/api/webhooks/channex/bookings", {
+    method: "POST",
+    body: rawBody,
+    headers: { "content-type": "application/json" },
+  });
+
+  const result = verifyChannexWebhookRequest({
+    request,
+    rawBody,
+    env: { NODE_ENV: "test" },
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    status: 503,
+    error: "webhook not configured",
+  });
+});
+
+test("Webhook auth rejects wrong secret", () => {
+  const rawBody = JSON.stringify({ property_id: "prop_1" });
+  const request = new Request("https://famlo.test/api/webhooks/channex/bookings", {
+    method: "POST",
+    body: rawBody,
+    headers: {
+      "content-type": "application/json",
+      "x-channex-webhook-secret": "wrong-secret",
+    },
+  });
+
+  const result = verifyChannexWebhookRequest({
+    request,
+    rawBody,
+    env: { NODE_ENV: "test", CHANNEX_WEBHOOK_SECRET: "correct-secret" },
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    status: 401,
+    error: "Unauthorized",
+  });
+});
+
+test("Webhook auth accepts correct secret", () => {
+  const rawBody = JSON.stringify({ property_id: "prop_1" });
+  const request = new Request("https://famlo.test/api/webhooks/channex/bookings", {
+    method: "POST",
+    body: rawBody,
+    headers: {
+      "content-type": "application/json",
+      "x-channex-webhook-secret": "correct-secret",
+    },
+  });
+
+  const result = verifyChannexWebhookRequest({
+    request,
+    rawBody,
+    env: { NODE_ENV: "test", CHANNEX_WEBHOOK_SECRET: "correct-secret" },
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    mode: "shared_secret",
+  });
+});
+
+test("Host operation policy blocks activation and dry-run bypass", () => {
+  const activationPolicy = resolveProviderOperationPolicy({
+    actorRole: "host",
+    operationType: "activate_provider",
+    requestedDryRun: true,
+  });
+  assert.equal(activationPolicy.allowed, false);
+  assert.equal(activationPolicy.status, 403);
+
+  const writePolicy = resolveProviderOperationPolicy({
+    actorRole: "host",
+    operationType: "connect_provider",
+    requestedDryRun: false,
+  });
+  assert.equal(writePolicy.allowed, false);
+  assert.equal(writePolicy.status, 403);
+});
+
+test("Host operation policy allows request review in dry-run mode", () => {
+  const reviewPolicy = resolveProviderOperationPolicy({
+    actorRole: "host",
+    operationType: "request_review",
+    requestedDryRun: null,
+  });
+
+  assert.equal(reviewPolicy.allowed, true);
+  assert.equal(reviewPolicy.effectiveDryRun, true);
+});
+
+test("Framework permission guard rejects host activation and allows admin activation", () => {
+  assert.throws(
+    () =>
+      assertChannelProviderOperationPermission({
+        actorRole: "host",
+        operationType: "activate_provider",
+        dryRun: true,
+      }),
+    (error: unknown) =>
+      error instanceof ChannelProviderPermissionError &&
+      error.message === "Operator access is required to activate a provider."
+  );
+
+  assert.doesNotThrow(() =>
+    assertChannelProviderOperationPermission({
+      actorRole: "admin",
+      operationType: "activate_provider",
+      dryRun: false,
+    })
+  );
 });

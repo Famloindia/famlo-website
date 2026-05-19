@@ -5,6 +5,7 @@ import { getErrorMessage } from "@/lib/error-utils";
 import { appendLedgerEntryIfMissing } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { recordBookingInventoryTransition } from "@/lib/payment-booking-finalization";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -20,8 +21,13 @@ type CancellationBookingRow = {
   host_id?: string | null;
   family_id?: string | null;
   legacy_booking_id?: string | null;
+  stay_unit_id?: string | null;
+  quarter_type?: string | null;
+  pricing_snapshot?: Record<string, unknown> | null;
+  hosts?: Record<string, unknown> | Record<string, unknown>[] | null;
   total_price?: number | null;
   start_date?: string | null;
+  end_date?: string | null;
   date_from?: string | null;
   date_to?: string | null;
   created_at?: string | null;
@@ -105,7 +111,7 @@ function isCancellableStatus(status: string | null): boolean {
 async function loadCancellationTarget(supabase: ReturnType<typeof createAdminSupabaseClient>, bookingId: string): Promise<CancellationTarget | null> {
   const { data: v2Booking, error: v2BookingError } = await supabase
     .from("bookings_v2")
-    .select("id,user_id,status,payment_status,host_id,legacy_booking_id,total_price,start_date,created_at")
+    .select("id,user_id,status,payment_status,host_id,legacy_booking_id,stay_unit_id,quarter_type,pricing_snapshot,total_price,start_date,end_date,created_at,hosts(legacy_family_id)")
     .or(`id.eq.${bookingId},legacy_booking_id.eq.${bookingId}`)
     .maybeSingle();
   if (v2BookingError) throw v2BookingError;
@@ -521,6 +527,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     if (target.source === "v2") {
       await cancelV2Booking(supabase, target.booking, now, cancellationReason, cancelledStatus, authUser.id);
+      await recordBookingInventoryTransition(supabase, {
+        booking: {
+          ...target.booking,
+          status: cancelledStatus,
+          payment_status: target.booking.payment_status ?? null,
+        },
+        eventType: "booking_cancelled",
+        eventSource: "/api/bookings/cancel",
+        actorUserId: authUser.id,
+        actorRole: actorMode === "host" ? "host" : "guest",
+        payload: {
+          cancellation_reason: cancellationReason,
+          cancelled_status: cancelledStatus,
+        },
+      });
       await ensurePendingRefundForPaidCancellation(supabase, {
         bookingId: target.booking.id,
         actorUserId: authUser.id,

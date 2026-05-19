@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { syncChannexAriForFamily } from "@/lib/channex-ari-sync";
+import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
@@ -67,17 +67,32 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const result = await syncChannexAriForFamily({
-      supabase,
+    const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
       familyId,
-      hostId: authorizedResource.hostId,
-      windowDays,
-      action: logAction,
-      route: "/api/host/pro/channel/channex/ari/push",
-      requireActiveChannel: false,
+      dateFrom: new Date().toISOString().slice(0, 10),
+      dateTo: new Date().toISOString().slice(0, 10),
+      jobTypes: ["full_sync"],
+      certificationScenario: windowDays === LONG_WINDOW_DAYS ? "operator_full_sync_long_window" : "operator_full_sync",
+      sourceUiAction:
+        windowDays === LONG_WINDOW_DAYS
+          ? "Famlo operator full sync (365 day request)"
+          : "Famlo operator full sync",
+      sourceRoute: "/api/host/pro/channel/channex/ari/push",
+      stayUnitIds: null,
+      actorUserId: authorizedResource.hostUserId ?? null,
+      actorRole: "admin",
     });
 
-    return NextResponse.json(result, { status: result.ok ? 200 : 502 });
+    return NextResponse.json(
+      {
+        ok: true,
+        status: "queued",
+        configured: true,
+        queuedJobIds,
+        message: "Channex ARI full sync was queued from the Famlo operator flow.",
+      },
+      { status: 202 }
+    );
   } catch (error) {
     console.error("[host.pro.channel.channex.ari.push] failed:", error);
     return NextResponse.json(

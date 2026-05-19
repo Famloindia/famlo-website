@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadStayUnitsForSelector, mapStayUnitRow } from "@/lib/stay-units";
 import { normalizeAmenityList } from "@/lib/room-amenities";
@@ -354,7 +355,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         },
         roomDraftPatch
       );
-      return NextResponse.json({ stayUnit: mapStayUnitRow(data as JsonRecord), clientId });
+      const mappedStayUnit = mapStayUnitRow(data as JsonRecord);
+      const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
+        familyId,
+        dateFrom: new Date().toISOString().slice(0, 10),
+        dateTo: new Date().toISOString().slice(0, 10),
+        jobTypes: ["full_sync"],
+        certificationScenario: "room_setup_saved",
+        sourceUiAction: "Famlo PMS room setup save",
+        sourceRoute: "/api/host/stay-units",
+        stayUnitIds: mappedStayUnit?.id ? [mappedStayUnit.id] : [],
+        actorUserId: hostAccess.hostUserId ?? null,
+        actorRole: hostAccess.isAdmin ? "admin" : "host",
+      });
+      return NextResponse.json({ stayUnit: mappedStayUnit, clientId, queuedJobIds });
     }
 
     const { data, error, strippedColumns } = await mutateStayUnitWithSchemaFallback(
@@ -379,7 +393,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         id: asNullableString((data as JsonRecord | null)?.id) ?? roomDraftPatch.id,
       }
     );
-    return NextResponse.json({ stayUnit: mapStayUnitRow(data as JsonRecord), clientId });
+    const mappedStayUnit = mapStayUnitRow(data as JsonRecord);
+    const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
+      familyId,
+      dateFrom: new Date().toISOString().slice(0, 10),
+      dateTo: new Date().toISOString().slice(0, 10),
+      jobTypes: ["full_sync"],
+      certificationScenario: "room_setup_saved",
+      sourceUiAction: "Famlo PMS room setup save",
+      sourceRoute: "/api/host/stay-units",
+      stayUnitIds: mappedStayUnit?.id ? [mappedStayUnit.id] : [],
+      actorUserId: hostAccess.hostUserId ?? null,
+      actorRole: hostAccess.isAdmin ? "admin" : "host",
+    });
+    return NextResponse.json({ stayUnit: mappedStayUnit, clientId, queuedJobIds });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to save room." },

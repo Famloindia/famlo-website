@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { toCalendarEventUid, upsertCalendarEvent } from "@/lib/calendar";
+import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { appendInventoryEvent, projectInventoryRange } from "@/lib/inventory";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -139,11 +140,25 @@ export async function POST(request: Request): Promise<NextResponse> {
       connectionId: null,
     });
 
+    const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
+      familyId: hostAccess.familyId,
+      dateFrom: date,
+      dateTo: date,
+      jobTypes: ["availability_update", "restriction_update"],
+      certificationScenario: action === "block" ? "availability_block" : "availability_unblock",
+      sourceUiAction: action === "block" ? "Famlo PMS availability block" : "Famlo PMS availability unblock",
+      sourceRoute: "/api/host/pro/calendar/manual-block",
+      stayUnitIds: [roomId],
+      actorUserId: hostAccess.hostUserId ?? null,
+      actorRole: hostAccess.isAdmin ? "admin" : "host",
+    });
+
     return NextResponse.json({
       ok: true,
       action,
       date,
       roomId,
+      queuedJobIds,
     });
   } catch (error) {
     console.error("[host.pro.calendar.manual-block] error", error);

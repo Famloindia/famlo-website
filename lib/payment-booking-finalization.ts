@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { assertBookingSlotStillAvailableForPayment } from "@/lib/booking-compat";
+import { enqueueBookingInventoryAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { createCalendarConflict } from "@/lib/calendar";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { appendInventoryEvent, projectInventoryRange, type InventoryEventType } from "@/lib/inventory";
@@ -63,14 +64,29 @@ function resolveStayUnitId(record: PaymentConflictBooking | JsonRecord | null | 
   return asString(snapshot?.stay_unit_id);
 }
 
-function resolveBookingFamilyId(record: PaymentConflictBooking | JsonRecord | null | undefined): string | null {
+async function resolveBookingFamilyId(
+  supabase: SupabaseClient,
+  record: PaymentConflictBooking | JsonRecord | null | undefined
+): Promise<string | null> {
   const relation = (record as JsonRecord | null | undefined)?.hosts;
   const hostRelation = Array.isArray(relation) ? relation[0] : relation;
   const hostRecord =
     hostRelation && typeof hostRelation === "object" && !Array.isArray(hostRelation)
       ? (hostRelation as JsonRecord)
       : null;
-  return asString(hostRecord?.legacy_family_id);
+  const embeddedFamilyId = asString(hostRecord?.legacy_family_id);
+  if (embeddedFamilyId) return embeddedFamilyId;
+
+  const hostId = asString((record as JsonRecord | null | undefined)?.host_id);
+  if (!hostId) return null;
+
+  const { data, error } = await supabase
+    .from("hosts")
+    .select("legacy_family_id")
+    .eq("id", hostId)
+    .maybeSingle();
+  if (error) throw error;
+  return asString((data as JsonRecord | null)?.legacy_family_id);
 }
 
 export async function loadBookingForPaymentFinalization(
@@ -355,7 +371,7 @@ export async function recordBookingInventoryTransition(
   }
 ): Promise<void> {
   const bookingId = asString(input.booking?.id);
-  const familyId = resolveBookingFamilyId(input.booking);
+  const familyId = await resolveBookingFamilyId(supabase, input.booking);
   const stayUnitId = resolveStayUnitId(input.booking);
   const startDate = asString(input.booking?.start_date);
   const endDate = asString(input.booking?.end_date) ?? startDate;
@@ -388,6 +404,18 @@ export async function recordBookingInventoryTransition(
     stayUnitId,
     from: startDate,
     to: endDate,
+  });
+
+  await enqueueBookingInventoryAriSyncJobs(supabase, {
+    familyId,
+    stayUnitIds: [stayUnitId],
+    dateFrom: startDate,
+    dateTo: endDate,
+    certificationScenario: input.eventType,
+    sourceUiAction: `Famlo PMS booking inventory transition (${input.eventType})`,
+    sourceRoute: input.eventSource,
+    actorUserId: input.actorUserId ?? null,
+    actorRole: input.actorRole ?? null,
   });
 }
 

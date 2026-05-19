@@ -1,9 +1,20 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { pollChannexBookingFeedForFamily } from "@/lib/channex-booking-feed-sync";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type JsonRecord = Record<string, unknown>;
+type ChannexWebhookAuthMode = "shared_secret" | "signature";
+
+type ChannexWebhookAuthConfig =
+  | { configured: false; error: "webhook_not_configured" }
+  | { configured: true; mode: ChannexWebhookAuthMode; secret: string };
+
+type ChannexWebhookAuthResult =
+  | { ok: true; mode: ChannexWebhookAuthMode }
+  | { ok: false; status: 401 | 503; error: "Unauthorized" | "webhook not configured" };
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -13,16 +24,93 @@ function asObject(value: unknown): JsonRecord | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
 }
 
-function readWebhookSecretAuthorized(request: Request): boolean {
-  const secret = process.env.CHANNEX_WEBHOOK_SECRET?.trim();
-  if (!secret) return true;
+function readEnvString(value: string | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
 
-  const bearer = request.headers.get("authorization");
+function constantTimeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function readSignatureHeader(request: Request): string | null {
+  return (
+    request.headers.get("x-channex-signature") ??
+    request.headers.get("x-famlo-webhook-signature") ??
+    request.headers.get("x-webhook-signature")
+  )?.trim() || null;
+}
+
+export function readChannexWebhookAuthConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  request?: Request
+): ChannexWebhookAuthConfig {
+  const secret = readEnvString(env.CHANNEX_WEBHOOK_SECRET);
+  if (!secret) {
+    return { configured: false, error: "webhook_not_configured" };
+  }
+
+  const configuredMode = readEnvString(env.CHANNEX_WEBHOOK_AUTH_MODE)?.toLowerCase();
+  if (configuredMode === "signature") {
+    return { configured: true, mode: "signature", secret };
+  }
+  if (configuredMode === "shared_secret" || configuredMode === "token") {
+    return { configured: true, mode: "shared_secret", secret };
+  }
+
+  return {
+    configured: true,
+    mode: request && readSignatureHeader(request) ? "signature" : "shared_secret",
+    secret,
+  };
+}
+
+function verifySharedSecretRequest(request: Request, secret: string): boolean {
+  const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ?? null;
   const headerSecret =
-    request.headers.get("x-famlo-webhook-secret") ??
-    request.headers.get("x-channex-webhook-secret");
+    request.headers.get("x-famlo-webhook-secret")?.trim() ??
+    request.headers.get("x-channex-webhook-secret")?.trim() ??
+    request.headers.get("x-webhook-token")?.trim();
+  const url = new URL(request.url);
+  const querySecret =
+    url.searchParams.get("secret")?.trim() ??
+    url.searchParams.get("token")?.trim() ??
+    url.searchParams.get("webhook_secret")?.trim();
 
-  return bearer === `Bearer ${secret}` || headerSecret === secret;
+  return [bearer, headerSecret, querySecret].some((candidate) => Boolean(candidate) && constantTimeEqual(candidate!, secret));
+}
+
+function verifySignatureRequest(request: Request, rawBody: string, secret: string): boolean {
+  const provided = readSignatureHeader(request);
+  if (!provided) return false;
+
+  const digestHex = createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
+  const digestBase64 = Buffer.from(digestHex, "hex").toString("base64");
+  return [`sha256=${digestHex}`, digestHex, digestBase64].some((candidate) => constantTimeEqual(provided, candidate));
+}
+
+export function verifyChannexWebhookRequest(input: {
+  request: Request;
+  rawBody: string;
+  env?: NodeJS.ProcessEnv;
+}): ChannexWebhookAuthResult {
+  const config = readChannexWebhookAuthConfig(input.env, input.request);
+  if (!config.configured) {
+    return { ok: false, status: 503, error: "webhook not configured" };
+  }
+
+  const authorized =
+    config.mode === "signature"
+      ? verifySignatureRequest(input.request, input.rawBody, config.secret)
+      : verifySharedSecretRequest(input.request, config.secret);
+
+  if (!authorized) {
+    return { ok: false, status: 401, error: "Unauthorized" };
+  }
+
+  return { ok: true, mode: config.mode };
 }
 
 function extractPropertyId(payload: unknown): string | null {
@@ -45,6 +133,59 @@ function extractPropertyId(payload: unknown): string | null {
     asString(asObject(data.attributes)?.propertyId) ??
     asString(asObject(data.relationships)?.property_id)
   );
+}
+
+function extractBookingId(payload: unknown): string | null {
+  const root = asObject(payload);
+  if (!root) return null;
+
+  return (
+    asString(root.booking_id) ??
+    asString(root.bookingId) ??
+    asString(root.external_booking_id) ??
+    asString(asObject(root.data)?.booking_id) ??
+    asString(asObject(asObject(root.data)?.attributes)?.booking_id) ??
+    asString(asObject(asObject(root.data)?.attributes)?.ota_reservation_code)
+  );
+}
+
+function extractRevisionId(payload: unknown): string | null {
+  const root = asObject(payload);
+  if (!root) return null;
+
+  return (
+    asString(root.revision_id) ??
+    asString(root.revisionId) ??
+    asString(root.id) ??
+    asString(asObject(root.data)?.revision_id) ??
+    asString(asObject(root.data)?.id) ??
+    asString(asObject(asObject(root.data)?.attributes)?.revision_id)
+  );
+}
+
+function extractEventType(payload: unknown): string | null {
+  const root = asObject(payload);
+  if (!root) return null;
+
+  return (
+    asString(root.event_type) ??
+    asString(root.eventType) ??
+    asString(root.type) ??
+    asString(root.event) ??
+    asString(asObject(root.data)?.type) ??
+    asString(asObject(asObject(root.data)?.attributes)?.event_type)
+  );
+}
+
+function buildSafeWebhookMetadata(payload: unknown, receivedAt: string): JsonRecord {
+  return {
+    provider: "channex",
+    property_id: extractPropertyId(payload),
+    booking_id: extractBookingId(payload),
+    revision_id: extractRevisionId(payload),
+    event_type: extractEventType(payload),
+    received_at: receivedAt,
+  };
 }
 
 async function logWebhookEvent(input: {
@@ -74,11 +215,18 @@ export async function POST(request: Request): Promise<NextResponse> {
   const supabase = createAdminSupabaseClient();
 
   try {
-    if (!readWebhookSecretAuthorized(request)) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    const rawBody = await request.text();
+    const authResult = verifyChannexWebhookRequest({ request, rawBody });
+    if (!authResult.ok) {
+      return NextResponse.json({ ok: false, error: authResult.error }, { status: authResult.status });
     }
 
-    const payload = (await request.json().catch(() => ({}))) as JsonRecord;
+    const payload =
+      rawBody.trim().length > 0
+        ? (JSON.parse(rawBody) as JsonRecord)
+        : ({} as JsonRecord);
+    const receivedAt = new Date().toISOString();
+    const webhookMetadata = buildSafeWebhookMetadata(payload, receivedAt);
     const externalPropertyId = extractPropertyId(payload);
 
     if (!externalPropertyId) {
@@ -119,10 +267,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       familyId,
       status: "received",
       message: "Channex booking webhook received.",
-      payload: {
-        external_property_id: externalPropertyId,
-        raw: payload,
-      },
+      payload: webhookMetadata,
     });
 
     const result = await pollChannexBookingFeedForFamily({
@@ -136,12 +281,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       familyId,
       status: result.ok ? "processed" : "failed",
       message: result.message,
-      payload: {
-        external_property_id: externalPropertyId,
-        total_fetched: result.totalFetched,
-        revisions_found: result.revisionsFound,
-        stored_count: result.storedCount,
-      },
+      payload: webhookMetadata,
     });
 
     return NextResponse.json(
@@ -169,4 +309,3 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 }
-
