@@ -1,0 +1,177 @@
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index bc37d809..85035e1b 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -3738,20 +3738,6 @@ export default function FamloProDashboardShell({
+       ? "No sync checks yet"
+       : `${selectedRoomConflictCount} issue${selectedRoomConflictCount === 1 ? "" : "s"}`;
+   const roomEditorPrimaryActionLabel = roomEditorMode === "create" ? "Create room" : "Edit room";
+-  const selectedRoomCalendarCounts = selectedRoomCalendarRow
+-    ? selectedRoomCalendarRow.availabilityCells.reduce(
+-      (acc, cell) => {
+-        acc.total += 1;
+-        if (cell.status === "available") acc.available += 1;
+-        if (cell.status === "famlo" || cell.status === "ota") acc.booked += 1;
+-        if (cell.status === "manual_block") acc.blocked += 1;
+-        if (cell.status === "pending") acc.pending += 1;
+-        if (cell.status === "past") acc.past += 1;
+-        return acc;
+-      },
+-      { total: 0, available: 0, booked: 0, blocked: 0, pending: 0, past: 0 }
+-    )
+-    : { total: 0, available: 0, booked: 0, blocked: 0, pending: 0, past: 0 };
+   const selectedRoomMappingStatus = roomEditorRoom
+     ? roomMappingsByRoomId.get(roomEditorRoom.id)?.externalRoomTypeId
+       ? "Matched"
+@@ -4430,40 +4416,123 @@ export default function FamloProDashboardShell({
+                   <article className={styles.roomControlPlaceholder}>
+                     <div className={styles.placeholderTitle}>Calendar</div>
+                     <div className={styles.placeholderCopy}>
+-                      Review this room&apos;s calendar status here first. Block/unblock dates are managed from the property calendar for now. OTA calendar sync depends on connected channels.
++                      Review this room&apos;s live calendar here. Click an available date to block it, click a manual block to unblock it, or click a future rate cell to edit pricing for this room.
+                     </div>
+-                    <div className={styles.roomInlineSummaryGrid}>
+-                      <div className={styles.summaryCard}>
+-                        <div className={styles.summaryLabel}>Visible room status</div>
+-                        <div className={styles.summaryValue}>{selectedRoomCalendarHealthy ? "Visible" : "Needs review"}</div>
+-                        <div className={styles.summaryCopy}>
+-                          {selectedRoomCalendarHealthy ? "This room appears in the property calendar grid." : "Check the property calendar after saving or reviewing room setup."}
+-                        </div>
+-                      </div>
+-                      <div className={styles.summaryCard}>
+-                        <div className={styles.summaryLabel}>Calendar cells</div>
+-                        <div className={styles.summaryValue}>{selectedRoomCalendarCounts.total}</div>
+-                        <div className={styles.summaryCopy}>Current visible calendar window for this room.</div>
+-                      </div>
++                    <div className={`${styles.filterRow} ${styles.calendarLuxuryLegend}`} style={{ marginBottom: "20px" }}>
++                      {CALENDAR_LEGEND.map((item) => (
++                        <span key={item.title} className={styles.filterChip}>
++                          {item.title} = {item.copy}
++                        </span>
++                      ))}
+                     </div>
+-                    <div className={styles.placeholderGrid}>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Available</div>
+-                        <div className={styles.placeholderValue}>{selectedRoomCalendarCounts.available}</div>
++                    {calendarActionFeedback ? (
++                      <div
++                        className={`${styles.feedbackBox} ${calendarActionFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
++                        style={{ marginBottom: "20px" }}
++                      >
++                        {calendarActionFeedback.text}
+                       </div>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Booked</div>
+-                        <div className={styles.placeholderValue}>{selectedRoomCalendarCounts.booked}</div>
++                    ) : null}
++                    {calendarRateFeedback ? (
++                      <div
++                        className={`${styles.feedbackBox} ${calendarRateFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
++                        style={{ marginBottom: "20px" }}
++                      >
++                        {calendarRateFeedback.text}
+                       </div>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Manual blocks</div>
+-                        <div className={styles.placeholderValue}>{selectedRoomCalendarCounts.blocked}</div>
++                    ) : null}
++                    {selectedRoomCalendarRow ? (
++                      <div className={`${styles.calendarBoard} ${styles.calendarBoardLuxury}`}>
++                        <div className={styles.calendarGrid}>
++                          <div className={`${styles.calendarHeaderCell} ${styles.calendarRoomHeader}`}>Room / Unit</div>
++                          {calendarColumns.map((column) => (
++                            <div key={column.date} className={styles.calendarHeaderCell}>
++                              <div className={styles.calendarHeaderDay}>{column.dayLabel}</div>
++                              <div className={styles.calendarHeaderDate}>{column.dateLabel}</div>
++                            </div>
++                          ))}
++
++                          <div className={styles.calendarRowSpacer} style={{ gridColumn: `span ${calendarColumns.length + 1}` }} />
++
++                          <div className={styles.calendarRoomCell}>
++                            <div className={styles.calendarRoomName}>{selectedRoomCalendarRow.roomName}</div>
++                            <div className={styles.calendarRoomType}>{selectedRoomCalendarRow.unitType}</div>
++                            <div className={styles.calendarMetricLabel}>Availability</div>
++                          </div>
++                          {selectedRoomCalendarRow.availabilityCells.map((cell) => {
++                            const isActionable =
++                              Boolean(cell.bookingDetail) || cell.status === "available" || cell.status === "manual_block";
++                            const isBusy = isCalendarActionPending && calendarActionDate === cell.date;
++                            const title =
++                              cell.bookingDetail
++                                ? cell.label
++                                : cell.status === "available"
++                                  ? `${cell.label}. Click to block this date for ${selectedRoomCalendarRow.roomName}.`
++                                  : cell.status === "manual_block"
++                                    ? `${cell.label}. Click to unblock this date for ${selectedRoomCalendarRow.roomName}.`
++                                    : cell.label;
++
++                            return (
++                              <button
++                                type="button"
++                                key={`${selectedRoomCalendarRow.roomId}-${cell.date}-availability`}
++                                className={`${styles.calendarCell} ${calendarCellClass(cell.status)} ${isActionable ? styles.calendarCellInteractive : ""}`}
++                                title={title}
++                                onClick={() => handleCalendarCellAction(cell, selectedRoomCalendarRow.roomId, selectedRoomCalendarRow.roomName)}
++                                disabled={!isActionable || isBusy}
++                              >
++                                {isBusy ? "..." : cell.status === "available" ? "1" : cell.status === "past" ? "—" : "0"}
++                              </button>
++                            );
++                          })}
++
++                          <div className={`${styles.calendarRoomCell} ${styles.calendarRateLabel}`}>
++                            <div className={styles.calendarMetricLabel}>Rate</div>
++                            <div className={styles.calendarRoomType}>Click a future date to edit room price</div>
++                          </div>
++                          {selectedRoomCalendarRow.rateCells.map((cell, index) => {
++                            const override =
++                              calendarRateOverrides[getCalendarRateOverrideKey(selectedRoomCalendarRow.roomId, cell.date)] ?? null;
++                            const visibleCell = override
++                              ? {
++                                  ...cell,
++                                  amount: override.amount,
++                                  displayValue: override.displayValue,
++                                  isOverridden: override.isOverridden,
++                                }
++                              : cell;
++
++                            return (
++                              <button
++                                type="button"
++                                key={`${selectedRoomCalendarRow.roomId}-${calendarColumns[index]?.date ?? index}-rate`}
++                                className={`${styles.calendarCell} ${visibleCell.isPast ? styles.calendarCellPast : styles.calendarRateCell} ${!visibleCell.isPast ? styles.calendarCellInteractive : ""}`}
++                                disabled={visibleCell.isPast}
++                                onClick={() => handleCalendarRateCellAction(visibleCell, selectedRoomCalendarRow)}
++                                title={
++                                  visibleCell.isPast
++                                    ? `${selectedRoomCalendarRow.roomName} rate on ${cell.date} is in the past.`
++                                    : `${selectedRoomCalendarRow.roomName} rate on ${cell.date}: ${visibleCell.displayValue}. Click to edit.`
++                                }
++                              >
++                                {visibleCell.displayValue}
++                              </button>
++                            );
++                          })}
++                        </div>
+                       </div>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderLabel}>Pending approval</div>
+-                        <div className={styles.placeholderValue}>{selectedRoomCalendarCounts.pending}</div>
++                    ) : (
++                      <div className={styles.placeholderGrid}>
++                        <div className={styles.placeholderRow}>
++                          <div className={styles.placeholderLabel}>Room calendar status</div>
++                          <div className={styles.placeholderValue}>{selectedRoomCalendarHealthy ? "Visible" : "Needs review"}</div>
++                        </div>
++                        <div className={styles.placeholderRow}>
++                          <div className={styles.placeholderLabel}>What to do</div>
++                          <div className={styles.placeholderValue}>Save the room and check the property calendar if dates are still missing.</div>
++                        </div>
+                       </div>
+-                    </div>
++                    )}
+                     <div className={styles.inlineActionRow}>
+                       <button type="button" className={styles.primaryActionButton} onClick={() => router.push(`/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=inventory-calendar`)}>
+                         Open Property Calendar
