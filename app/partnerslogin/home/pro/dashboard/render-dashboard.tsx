@@ -6,7 +6,10 @@ import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
 
 import FamloProDashboardShell from "@/components/partners/pro/FamloProDashboardShell";
 import { hasValidAdminSession } from "@/lib/admin-auth";
-import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
+import {
+  fetchChannexRestrictionsSnapshot,
+  getChannexConfigSummary,
+} from "@/lib/channel-providers/channex/client";
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { loadCanonicalCalendar } from "@/lib/calendar";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
@@ -932,6 +935,54 @@ export async function renderFamloProDashboardPage({
 
   const roomManualBlockDates = new Map<string, Set<string>>();
   const roomDailyRateOverrides = new Map<string, Map<string, number>>();
+  const roomChannexRateSnapshots = new Map<string, Map<string, number>>();
+  const channexProperty = channelFoundation.properties.find(
+    (property) => property.providerCode === "channex" && property.externalPropertyId
+  ) ?? null;
+  const channexRatePlanByRoomId = new Map(
+    channelFoundation.ratePlans
+      .filter((ratePlan) => ratePlan.providerCode === "channex" && ratePlan.stayUnitId && ratePlan.externalRatePlanId)
+      .map((ratePlan) => [ratePlan.stayUnitId as string, ratePlan])
+  );
+
+  if (
+    rooms.length > 0 &&
+    channexProperty?.externalPropertyId &&
+    getChannexConfigSummary().configured
+  ) {
+    try {
+      const restrictionsSnapshot = await fetchChannexRestrictionsSnapshot({
+        propertyId: channexProperty.externalPropertyId,
+        dateFrom: calendarFrom,
+        dateTo: calendarTo,
+      });
+
+      if (restrictionsSnapshot.ok) {
+        for (const room of rooms) {
+          const mappedRatePlanId = channexRatePlanByRoomId.get(room.id)?.externalRatePlanId;
+          if (!mappedRatePlanId) continue;
+          const snapshotByDate = restrictionsSnapshot.data[mappedRatePlanId];
+          if (!snapshotByDate || typeof snapshotByDate !== "object") continue;
+
+          const roomRates = new Map<string, number>();
+          for (const [date, payload] of Object.entries(snapshotByDate)) {
+            if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
+            const rateValue = asNumber((payload as Record<string, unknown>).rate);
+            if (rateValue > 0) {
+              roomRates.set(date, rateValue);
+            }
+          }
+
+          if (roomRates.size > 0) {
+            roomChannexRateSnapshots.set(room.id, roomRates);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("[famlo-pro-dashboard] Channex restrictions snapshot skipped", error);
+    }
+  }
+
   if (rooms.length > 0) {
     const roomCalendarEvents = await Promise.all(
       rooms.map(async (room) => ({
@@ -1212,7 +1263,11 @@ export async function renderFamloProDashboardPage({
     }),
     rateCells: calendarColumns.map((column) => {
       const overrideAmount = roomDailyRateOverrides.get(room.id)?.get(column.date) ?? null;
-      const displayAmount = overrideAmount ?? (room.priceFullday > 0 ? room.priceFullday : null);
+      const channexAmount = roomChannexRateSnapshots.get(room.id)?.get(column.date) ?? null;
+      const displayAmount =
+        overrideAmount ??
+        channexAmount ??
+        (room.priceFullday > 0 ? room.priceFullday : null);
       return {
         date: column.date,
         displayValue:
@@ -1224,7 +1279,7 @@ export async function renderFamloProDashboardPage({
         amount: displayAmount,
         baseAmount: room.priceFullday,
         isPast: column.isPast,
-        isOverridden: overrideAmount != null,
+        isOverridden: overrideAmount != null || channexAmount != null,
       } satisfies CalendarRateCell;
     }),
   }));
