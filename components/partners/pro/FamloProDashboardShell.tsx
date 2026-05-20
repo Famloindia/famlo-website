@@ -5845,6 +5845,75 @@ export default function FamloProDashboardShell({
                     <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
                       Quickly block or unblock a date range for the selected room scope. This uses the same Famlo-to-Channex bulk availability path as the existing calendar sync.
                     </div>
+                    {bulkCalendarFeedback ? (
+                      <div
+                        className={`${styles.feedbackBox} ${bulkCalendarFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
+                        style={{ marginBottom: 14 }}
+                      >
+                        {bulkCalendarFeedback.text}
+                      </div>
+                    ) : null}
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Room scope</span>
+                        <select
+                          className={styles.fieldInput}
+                          value={bulkCalendarDraft.roomId}
+                          onChange={(event) =>
+                            setBulkCalendarDraft((current) => ({
+                              ...current,
+                              roomId: event.target.value,
+                              applyToAllRooms: event.target.value === "__all__" ? current.applyToAllRooms : false,
+                            }))}
+                        >
+                          <option value="__all__">All visible rooms</option>
+                          {calendarRows.map((row) => (
+                            <option key={row.roomId} value={row.roomId}>
+                              {row.roomName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {bulkCalendarDraft.roomId === "__all__" ? (
+                        <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>Confirm all-room apply</span>
+                          <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <input
+                              type="checkbox"
+                              checked={bulkCalendarDraft.applyToAllRooms}
+                              onChange={(event) =>
+                                setBulkCalendarDraft((current) => ({
+                                  ...current,
+                                  applyToAllRooms: event.target.checked,
+                                }))}
+                            />
+                            <span className={styles.feedCopy} style={{ marginBottom: 0 }}>
+                              I want this block or unblock to affect every visible room.
+                            </span>
+                          </label>
+                        </label>
+                      ) : null}
+                      <div className={styles.calendarJumpForm}>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>From</span>
+                          <input
+                            className={styles.fieldInput}
+                            type="date"
+                            value={bulkCalendarDraft.dateFrom}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateFrom: event.target.value }))}
+                          />
+                        </label>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>To</span>
+                          <input
+                            className={styles.fieldInput}
+                            type="date"
+                            value={bulkCalendarDraft.dateTo}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateTo: event.target.value }))}
+                          />
+                        </label>
+                      </div>
+                    </div>
                     <div className={styles.roomReadinessRow} style={{ marginTop: "auto", paddingTop: 14 }}>
                       <button
                         type="button"
