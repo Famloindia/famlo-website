@@ -8,6 +8,7 @@ import {
   shouldIgnoreFeedRevisionForProvider,
   type ChannexFeedHealthSnapshot,
 } from "@/lib/channex-booking-feed-sync";
+import { findStaleMappingRebindCandidate, projectChannexAvailabilityValue } from "@/lib/channex-ari-jobs";
 import {
   getChannelProviderCapabilities,
   resolveChannelStorageProviderCode,
@@ -16,7 +17,6 @@ import {
   assertChannelProviderOperationPermission,
   ChannelProviderPermissionError,
 } from "@/lib/channel-provider-framework";
-import { findStaleMappingRebindCandidate } from "@/lib/channex-ari-jobs";
 import { normalizeInventoryRateAmount } from "@/lib/inventory";
 import { resolveProviderOperationPolicy } from "@/app/api/host/pro/channel/providers/operation/route";
 import { resolveBulkRoomScopePolicy } from "@/app/api/host/pro/calendar/bulk-update/route";
@@ -254,6 +254,36 @@ test("Bulk calendar room scope only allows one selected room unless all-room app
       applyToAllRooms: true,
     }),
     { ok: true, roomIds: ["room-double", "room-twin"] }
+  );
+});
+
+test("Blocked inventory days push zero Channex availability even when physical units remain", () => {
+  assert.equal(
+    projectChannexAvailabilityValue({
+      familyId: "family-1",
+      stayUnitId: "room-1",
+      date: "2026-11-21",
+      timezone: "Asia/Kolkata",
+      currency: "INR",
+      baseRate: 100,
+      effectiveRate: 100,
+      rateSource: "manual_rate",
+      isBlocked: true,
+      blockReason: "manual_block",
+      isSellable: false,
+      availableUnits: 1,
+      allotmentLimit: 1,
+      confirmedUnits: 0,
+      holdUnits: 0,
+      cta: false,
+      ctd: false,
+      minStay: 1,
+      minStayArrival: 1,
+      maxStay: 30,
+      stopSell: false,
+      manualBlockPresent: true,
+    }),
+    0
   );
 });
 

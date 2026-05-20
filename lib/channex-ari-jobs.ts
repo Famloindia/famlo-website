@@ -209,7 +209,7 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
   }> = [];
 
   for (const day of days) {
-    const availability = Math.max(0, day.availableUnits);
+    const availability = projectChannexAvailabilityValue(day);
     const rate = formatPrice(day.effectiveRate);
     const stopSell = day.stopSell || day.isBlocked;
     const minStayThrough = Math.max(1, day.minStay);
@@ -248,6 +248,10 @@ function buildSegments(days: InventoryProjectionDay[]): Array<{
   }
 
   return segments;
+}
+
+export function projectChannexAvailabilityValue(day: InventoryProjectionDay): number {
+  return day.isBlocked ? 0 : Math.max(0, day.availableUnits);
 }
 
 function extractTaskIds(result: ChannexAriPushResult): string[] {
