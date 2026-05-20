@@ -19,6 +19,7 @@ import {
 import { findStaleMappingRebindCandidate } from "@/lib/channex-ari-jobs";
 import { normalizeInventoryRateAmount } from "@/lib/inventory";
 import { resolveProviderOperationPolicy } from "@/app/api/host/pro/channel/providers/operation/route";
+import { resolveBulkRoomScopePolicy } from "@/app/api/host/pro/calendar/bulk-update/route";
 import { verifyChannexWebhookRequest } from "@/app/api/webhooks/channex/bookings/route";
 import { assessImportPreviewEligibility } from "@/app/api/host/pro/channel/channex/bookings/import-preview/route";
 import { assessModificationApplyEligibility } from "@/app/api/host/pro/channel/channex/bookings/apply-modification/route";
@@ -212,6 +213,48 @@ test("Inventory rate normalization preserves two-decimal manual overrides", () =
   assert.equal(normalizeInventoryRateAmount("312.664"), 312.66);
   assert.equal(normalizeInventoryRateAmount("312.665"), 312.67);
   assert.equal(normalizeInventoryRateAmount(-10), 0);
+});
+
+test("Bulk calendar room scope only allows one selected room unless all-room apply is explicitly confirmed", () => {
+  assert.deepEqual(
+    resolveBulkRoomScopePolicy({
+      roomIds: ["room-double"],
+      roomScope: "single",
+      selectedRoomId: "room-double",
+      applyToAllRooms: false,
+    }),
+    { ok: true, roomIds: ["room-double"] }
+  );
+
+  assert.deepEqual(
+    resolveBulkRoomScopePolicy({
+      roomIds: ["room-double", "room-twin"],
+      roomScope: "single",
+      selectedRoomId: "room-double",
+      applyToAllRooms: false,
+    }),
+    { ok: false, error: "Bulk calendar update room scope did not match the selected room." }
+  );
+
+  assert.deepEqual(
+    resolveBulkRoomScopePolicy({
+      roomIds: ["room-double", "room-twin"],
+      roomScope: "all",
+      selectedRoomId: null,
+      applyToAllRooms: false,
+    }),
+    { ok: false, error: "Confirm all-room bulk apply before updating every visible room." }
+  );
+
+  assert.deepEqual(
+    resolveBulkRoomScopePolicy({
+      roomIds: ["room-double", "room-twin"],
+      roomScope: "all",
+      selectedRoomId: null,
+      applyToAllRooms: true,
+    }),
+    { ok: true, roomIds: ["room-double", "room-twin"] }
+  );
 });
 
 test("Webhook auth rejects missing secret configuration", () => {

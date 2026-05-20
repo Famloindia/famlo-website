@@ -1639,6 +1639,7 @@ export default function FamloProDashboardShell({
   const [isCalendarRatePending, startCalendarRateTransition] = useTransition();
   const [bulkCalendarDraft, setBulkCalendarDraft] = useState<{
     roomId: string;
+    applyToAllRooms: boolean;
     dateFrom: string;
     dateTo: string;
     availabilityAction: "none" | "block" | "unblock";
@@ -1651,6 +1652,7 @@ export default function FamloProDashboardShell({
     stopSell: "unchanged" | "true" | "false";
   }>(() => ({
     roomId: rooms[0]?.id ?? "",
+    applyToAllRooms: false,
     dateFrom: calendarWindow.startDate,
     dateTo: calendarWindow.startDate,
     availabilityAction: "none",
@@ -1696,6 +1698,7 @@ export default function FamloProDashboardShell({
     setBulkCalendarDraft((current) => ({
       ...current,
       roomId: current.roomId || rooms[0]?.id || "",
+      applyToAllRooms: current.roomId === "__all__" ? current.applyToAllRooms : false,
       dateFrom: calendarWindow.startDate,
       dateTo: calendarWindow.startDate,
     }));
@@ -1930,6 +1933,10 @@ export default function FamloProDashboardShell({
       setBulkCalendarFeedback({ type: "error", text: "Select at least one room for the bulk calendar update." });
       return;
     }
+    if (bulkCalendarDraft.roomId === "__all__" && !bulkCalendarDraft.applyToAllRooms) {
+      setBulkCalendarFeedback({ type: "error", text: "Confirm all-room bulk apply before updating every visible room." });
+      return;
+    }
     if (!bulkCalendarDraft.dateFrom || !bulkCalendarDraft.dateTo || bulkCalendarDraft.dateTo < bulkCalendarDraft.dateFrom) {
       setBulkCalendarFeedback({ type: "error", text: "Choose a valid bulk date range." });
       return;
@@ -1953,6 +1960,9 @@ export default function FamloProDashboardShell({
           body: JSON.stringify({
             familyId,
             roomIds: targetRoomIds,
+            roomScope: bulkCalendarDraft.roomId === "__all__" ? "all" : "single",
+            selectedRoomId: bulkCalendarDraft.roomId === "__all__" ? null : bulkCalendarDraft.roomId,
+            applyToAllRooms: bulkCalendarDraft.roomId === "__all__" ? bulkCalendarDraft.applyToAllRooms : false,
             dateFrom: bulkCalendarDraft.dateFrom,
             dateTo: bulkCalendarDraft.dateTo,
             rateAction: bulkCalendarDraft.rateAmount.trim().length > 0 ? "save" : null,
@@ -5844,7 +5854,12 @@ export default function FamloProDashboardShell({
                         <select
                           className={styles.fieldInput}
                           value={bulkCalendarDraft.roomId}
-                          onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, roomId: event.target.value }))}
+                          onChange={(event) =>
+                            setBulkCalendarDraft((current) => ({
+                              ...current,
+                              roomId: event.target.value,
+                              applyToAllRooms: event.target.value === "__all__" ? current.applyToAllRooms : false,
+                            }))}
                         >
                           <option value="__all__">All visible rooms</option>
                           {calendarRows.map((row) => (
@@ -5854,6 +5869,25 @@ export default function FamloProDashboardShell({
                           ))}
                         </select>
                       </label>
+                      {bulkCalendarDraft.roomId === "__all__" ? (
+                        <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>Confirm all-room apply</span>
+                          <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <input
+                              type="checkbox"
+                              checked={bulkCalendarDraft.applyToAllRooms}
+                              onChange={(event) =>
+                                setBulkCalendarDraft((current) => ({
+                                  ...current,
+                                  applyToAllRooms: event.target.checked,
+                                }))}
+                            />
+                            <span className={styles.feedCopy} style={{ marginBottom: 0 }}>
+                              I want this bulk change to affect every visible room.
+                            </span>
+                          </label>
+                        </label>
+                      ) : null}
                       <div className={styles.calendarJumpForm}>
                         <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
                           <span className={styles.fieldLabel}>From</span>

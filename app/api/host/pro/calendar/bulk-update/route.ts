@@ -14,6 +14,9 @@ type JsonRecord = Record<string, unknown>;
 type BulkCalendarUpdateBody = {
   familyId?: unknown;
   roomIds?: unknown;
+  roomScope?: unknown;
+  selectedRoomId?: unknown;
+  applyToAllRooms?: unknown;
   dateFrom?: unknown;
   dateTo?: unknown;
   rateAction?: unknown;
@@ -58,11 +61,43 @@ function asObject(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
 
+export function resolveBulkRoomScopePolicy(input: {
+  roomIds: string[];
+  roomScope: string | null;
+  selectedRoomId: string | null;
+  applyToAllRooms: boolean;
+}): { ok: true; roomIds: string[] } | { ok: false; error: string } {
+  if (input.roomIds.length === 0) {
+    return { ok: false, error: "Select at least one room." };
+  }
+
+  if (input.roomScope === "all") {
+    if (!input.applyToAllRooms) {
+      return { ok: false, error: "Confirm all-room bulk apply before updating every visible room." };
+    }
+    if (input.roomIds.length < 2) {
+      return { ok: false, error: "All-room bulk apply needs at least two visible rooms." };
+    }
+    return { ok: true, roomIds: input.roomIds };
+  }
+
+  if (!input.selectedRoomId) {
+    return { ok: false, error: "Select one room for the bulk calendar update." };
+  }
+  if (input.roomIds.length !== 1 || input.roomIds[0] !== input.selectedRoomId) {
+    return { ok: false, error: "Bulk calendar update room scope did not match the selected room." };
+  }
+  return { ok: true, roomIds: input.roomIds };
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const body = (await request.json()) as BulkCalendarUpdateBody;
     const familyId = asString(body.familyId);
     const roomIds = [...new Set(asStringArray(body.roomIds))];
+    const roomScope = body.roomScope === "all" ? "all" : "single";
+    const selectedRoomId = asString(body.selectedRoomId);
+    const applyToAllRooms = body.applyToAllRooms === true;
     const dateFrom = asString(body.dateFrom);
     const dateTo = asString(body.dateTo) ?? dateFrom;
     const rateAction = body.rateAction === "reset" ? "reset" : body.rateAction === "save" ? "save" : null;
@@ -78,9 +113,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!familyId || !dateFrom || !dateTo || !isIsoDate(dateFrom) || !isIsoDate(dateTo) || dateTo < dateFrom) {
       return NextResponse.json({ error: "Valid familyId, dateFrom, and dateTo are required." }, { status: 400 });
     }
-    if (roomIds.length === 0) {
-      return NextResponse.json({ error: "Select at least one room." }, { status: 400 });
+    const roomScopePolicy = resolveBulkRoomScopePolicy({
+      roomIds,
+      roomScope,
+      selectedRoomId,
+      applyToAllRooms,
+    });
+    if (!roomScopePolicy.ok) {
+      return NextResponse.json({ error: roomScopePolicy.error }, { status: 400 });
     }
+    const scopedRoomIds = roomScopePolicy.roomIds;
     if (!rateAction && !availabilityAction && Object.keys(restrictions).length === 0) {
       return NextResponse.json({ error: "Choose at least one bulk calendar change." }, { status: 400 });
     }
@@ -122,12 +164,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       .from("stay_units_v2")
       .select("id")
       .eq("legacy_family_id", familyId)
-      .in("id", roomIds);
+      .in("id", scopedRoomIds);
     if (roomError) throw roomError;
     const resolvedRoomIds = ((roomRows ?? []) as Array<{ id?: string | null }>)
       .map((row) => asString(row.id))
       .filter((value): value is string => Boolean(value));
-    if (resolvedRoomIds.length !== roomIds.length) {
+    if (resolvedRoomIds.length !== scopedRoomIds.length) {
       return NextResponse.json({ error: "One or more selected rooms do not belong to this property." }, { status: 403 });
     }
 
