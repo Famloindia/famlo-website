@@ -7,10 +7,6 @@
     {
       "path": "/api/internal/cron/channel-sync-jobs",
       "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/internal/cron/channex-booking-feed",
-      "schedule": "*/15 * * * *"
     }
   ]
 }

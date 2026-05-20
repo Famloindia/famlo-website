@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { autoProcessPendingChannexFeedRevisions } from "@/lib/channex-booking-auto-apply";
 import { pollChannexBookingFeedForFamily } from "@/lib/channex-booking-feed-sync";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
@@ -79,15 +78,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       providerKey,
     });
 
-    const autoApplySummary = await autoProcessPendingChannexFeedRevisions({
-      supabase,
-      familyId,
-    });
-
     return NextResponse.json(
       {
         ...result,
-        autoApplySummary,
         operatorOnly: true,
         providerKey,
         providerStatus: capabilities.displayStatus,

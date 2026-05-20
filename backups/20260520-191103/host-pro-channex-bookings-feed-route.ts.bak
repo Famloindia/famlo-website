@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { autoProcessPendingChannexFeedRevisions } from "@/lib/channex-booking-auto-apply";
 import { pollChannexBookingFeedForFamily } from "@/lib/channex-booking-feed-sync";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
-import { getChannelProviderCapabilities } from "@/lib/channel-providers/provider-capabilities";
-import { isChannelProviderKey } from "@/lib/channel-setup-state";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
-type OperatorFeedBody = {
+type FeedBody = {
   familyId?: string;
-  providerKey?: string;
 };
 
 function asString(value: unknown): string {
@@ -20,26 +16,11 @@ function asString(value: unknown): string {
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const body = (await request.json()) as OperatorFeedBody;
+    const body = (await request.json()) as FeedBody;
     const familyId = asString(body.familyId);
-    const providerKey = asString(body.providerKey) || "booking";
 
     if (!familyId) {
       return NextResponse.json({ error: "familyId is required." }, { status: 400 });
-    }
-    if (!isChannelProviderKey(providerKey)) {
-      return NextResponse.json({ error: "providerKey is invalid." }, { status: 400 });
-    }
-
-    const capabilities = getChannelProviderCapabilities(providerKey);
-    if (!capabilities.supportsBookingIngest) {
-      return NextResponse.json(
-        {
-          error: "This provider does not currently support booking ingestion in Famlo.",
-          providerStatus: capabilities.displayStatus,
-        },
-        { status: 409 }
-      );
     }
 
     const supabase = createAdminSupabaseClient();
@@ -76,31 +57,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       supabase,
       familyId,
       action: "fetch_booking_feed",
-      providerKey,
     });
 
-    const autoApplySummary = await autoProcessPendingChannexFeedRevisions({
-      supabase,
-      familyId,
-    });
-
-    return NextResponse.json(
-      {
-        ...result,
-        autoApplySummary,
-        operatorOnly: true,
-        providerKey,
-        providerStatus: capabilities.displayStatus,
-      },
-      { status: result.ok ? 200 : 502 }
-    );
+    return NextResponse.json(result, { status: result.ok ? 200 : 502 });
   } catch (error) {
-    console.error("[host.pro.channel.channex.operator.bookings.feed] failed:", error);
+    console.error("[host.pro.channel.channex.bookings.feed] failed:", error);
     return NextResponse.json(
       {
         ok: false,
         status: "failed",
-        message: error instanceof Error ? error.message : "Unable to poll selected-property booking feed.",
+        message: error instanceof Error ? error.message : "Failed to fetch the Channex booking feed.",
         revisions: [],
       },
       { status: 500 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { autoProcessPendingChannexFeedRevisions } from "@/lib/channex-booking-auto-apply";
 import { pollChannexBookingFeedForFamily } from "@/lib/channex-booking-feed-sync";
 import { getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
@@ -59,7 +60,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       action: "fetch_booking_feed",
     });
 
-    return NextResponse.json(result, { status: result.ok ? 200 : 502 });
+    const autoApplySummary = await autoProcessPendingChannexFeedRevisions({
+      supabase,
+      familyId,
+    });
+
+    return NextResponse.json(
+      {
+        ...result,
+        autoApplySummary,
+      },
+      { status: result.ok ? 200 : 502 }
+    );
   } catch (error) {
     console.error("[host.pro.channel.channex.bookings.feed] failed:", error);
     return NextResponse.json(

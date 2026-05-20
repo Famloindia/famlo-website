@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, type CSSProperties, useEffect, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import {
   Activity,
   ArrowRightLeft,
@@ -176,13 +176,6 @@ type ProBookingSummary = {
   ackStatus: string | null;
   linkedBookingId: string | null;
   isOta: boolean;
-};
-
-type OtaEditDraft = {
-  startDate: string;
-  endDate: string;
-  stayUnitId: string;
-  totalAmount: string;
 };
 
 type BookingWorkspaceFilter =
@@ -941,18 +934,6 @@ function parseBookingAmount(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-const bookingEditInputStyle: CSSProperties = {
-  width: "100%",
-  borderRadius: "12px",
-  border: "1px solid rgba(255, 255, 255, 0.12)",
-  background: "rgba(15, 23, 42, 0.66)",
-  color: "#ffffff",
-  padding: "10px 12px",
-  fontSize: "13px",
-};
-
-const OTA_HOST_EDIT_VISIBLE = false;
-
 function asStringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -1690,10 +1671,7 @@ export default function FamloProDashboardShell({
   const [reportWindow, setReportWindow] = useState<ReportWindowFilter>("This month");
   const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
-  const [editingOtaBookingId, setEditingOtaBookingId] = useState<string | null>(null);
-  const [otaEditDraft, setOtaEditDraft] = useState<OtaEditDraft | null>(null);
   const [bookingActionFeedback, setBookingActionFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [isSubmittingOtaEdit, startOtaEditTransition] = useTransition();
   const [activeMessageConversationId, setActiveMessageConversationId] = useState<string | null>(null);
   const [activeChannelSetup, setActiveChannelSetup] = useState<ChannelProviderKey | null>(null);
   const [selectedChannelToAdd, setSelectedChannelToAdd] = useState<ChannelProviderKey>("booking");
@@ -2030,32 +2008,27 @@ export default function FamloProDashboardShell({
   };
 
   const handleHostBookingCancel = async (booking: ProBookingSummary): Promise<void> => {
-    if (cancellingBookingId === booking.bookingId) return;
+    if (booking.isOta || cancellingBookingId === booking.bookingId) return;
 
     try {
       setCancellingBookingId(booking.bookingId);
       setBookingActionFeedback(null);
 
-      const response = await fetch(booking.isOta ? "/api/host/pro/channel/channex/bookings/request-cancellation" : "/api/bookings/cancel", {
+      const response = await fetch("/api/bookings/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-famlo-actor-role": "host" },
         body: JSON.stringify({ bookingId: booking.bookingId, action: "cancel" }),
       });
 
-      const payload = (await response.json()) as { error?: string; message?: string; status?: string };
+      const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
         throw new Error(payload.error ?? "Unable to cancel booking.");
       }
 
       setBookingActionFeedback({
         type: "success",
-        text:
-          payload.message ??
-          (booking.isOta
-            ? `OTA booking ${booking.bookingId.slice(0, 8)} cancellation was sent to Channex.`
-            : `Booking ${booking.bookingId.slice(0, 8)} was cancelled.`),
+        text: `Booking ${booking.bookingId.slice(0, 8)} was cancelled.`,
       });
-      router.refresh();
     } catch (error) {
       setBookingActionFeedback({
         type: "error",
@@ -2066,74 +2039,6 @@ export default function FamloProDashboardShell({
     }
   };
 
-  const openOtaEditDraft = (booking: ProBookingSummary): void => {
-    const startingAmount = parseBookingAmount(booking.amount);
-    setBookingActionFeedback(null);
-    setExpandedBookingId(booking.bookingId);
-    setEditingOtaBookingId(booking.bookingId);
-    setOtaEditDraft({
-      startDate: booking.startDate,
-      endDate: booking.endDate,
-      stayUnitId: booking.roomId ?? "",
-      totalAmount: startingAmount != null && startingAmount > 0 ? String(startingAmount) : "",
-    });
-  };
-
-  const handleOtaBookingEditSubmit = (booking: ProBookingSummary): void => {
-    if (!otaEditDraft || editingOtaBookingId !== booking.bookingId) return;
-    const totalAmount = Number(otaEditDraft.totalAmount);
-    if (!otaEditDraft.startDate || !otaEditDraft.endDate || !otaEditDraft.stayUnitId) {
-      setBookingActionFeedback({
-        type: "error",
-        text: "Choose valid OTA check-in, check-out, and room details before sending the edit.",
-      });
-      return;
-    }
-    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
-      setBookingActionFeedback({
-        type: "error",
-        text: "Enter a valid OTA total amount before sending the edit.",
-      });
-      return;
-    }
-
-    setBookingActionFeedback(null);
-    startOtaEditTransition(async () => {
-      try {
-        const response = await fetch("/api/host/pro/channel/channex/bookings/request-modification", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-famlo-actor-role": "host" },
-          body: JSON.stringify({
-            bookingId: booking.bookingId,
-            startDate: otaEditDraft.startDate,
-            endDate: otaEditDraft.endDate,
-            stayUnitId: otaEditDraft.stayUnitId,
-            totalAmount,
-          }),
-        });
-        const payload = (await response.json()) as { error?: string; message?: string; status?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Unable to modify OTA booking.");
-        }
-
-        setBookingActionFeedback({
-          type: "success",
-          text:
-            payload.message ??
-            `OTA booking ${booking.bookingId.slice(0, 8)} modification was sent to Channex and is syncing back into Famlo.`,
-        });
-        setEditingOtaBookingId(null);
-        setOtaEditDraft(null);
-        router.refresh();
-      } catch (error) {
-        setBookingActionFeedback({
-          type: "error",
-          text: error instanceof Error ? error.message : "Unable to modify OTA booking.",
-        });
-      }
-    });
-  };
-
   useEffect(() => {
     setActiveSection(initialSection);
     setPropertyContent(initialPropertyContent);
@@ -2141,8 +2046,6 @@ export default function FamloProDashboardShell({
     setPropertyContentFeedback(null);
     setBookingFilter("All");
     setExpandedBookingId(null);
-    setEditingOtaBookingId(null);
-    setOtaEditDraft(null);
     setBookingActionFeedback(null);
     setActiveMessageConversationId(null);
     setRoomEditorTab("details");
@@ -7158,14 +7061,12 @@ export default function FamloProDashboardShell({
                       {filteredProBookings.map((booking) => {
                         const linkedRoom = booking.roomId ? roomById.get(booking.roomId) ?? null : null;
                         const isActionNeeded = isActionNeededBooking(booking);
-                        const isCancelled = isCancelledBooking(booking);
+                        const isCancelled = booking.status === "cancelled" || booking.status === "cancelled_by_guest" || booking.status === "cancelled_by_host";
                         const healthLabel = bookingHealthLabel(booking);
                         const paymentStatus = labelizeToken(booking.paymentStatus, "unknown");
                         const bookingStatus = labelizeToken(booking.status, "unknown");
                         const isExpanded = expandedBookingId === booking.bookingId;
-                        const isEditingOta = editingOtaBookingId === booking.bookingId;
-                        const canHostCancel = !isCancelled;
-                        const canHostEditOta = OTA_HOST_EDIT_VISIBLE && booking.isOta && !isCancelled;
+                        const canHostCancel = !booking.isOta && !isCancelled;
 
                         return (
                           <div
@@ -7259,127 +7160,6 @@ export default function FamloProDashboardShell({
                                 </div>
                               ) : null}
 
-                              {isExpanded && booking.isOta && isEditingOta && otaEditDraft ? (
-                                <div
-                                  style={{
-                                    display: "grid",
-                                    gap: "12px",
-                                    padding: "14px",
-                                    borderRadius: "16px",
-                                    background: "rgba(37, 99, 235, 0.08)",
-                                    border: "1px solid rgba(96, 165, 250, 0.22)",
-                                  }}
-                                >
-                                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#dbeafe" }}>
-                                    Send OTA edit to Channex first, then wait for Famlo to confirm the returned revision.
-                                  </div>
-                                  <div
-                                    style={{
-                                      display: "grid",
-                                      gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                                      gap: "10px",
-                                    }}
-                                  >
-                                    <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)" }}>
-                                      <span>Check-in</span>
-                                      <input
-                                        type="date"
-                                        value={otaEditDraft.startDate}
-                                        onChange={(event) =>
-                                          setOtaEditDraft((current) => (current ? { ...current, startDate: event.target.value } : current))
-                                        }
-                                        style={bookingEditInputStyle}
-                                      />
-                                    </label>
-                                    <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)" }}>
-                                      <span>Check-out</span>
-                                      <input
-                                        type="date"
-                                        value={otaEditDraft.endDate}
-                                        onChange={(event) =>
-                                          setOtaEditDraft((current) => (current ? { ...current, endDate: event.target.value } : current))
-                                        }
-                                        style={bookingEditInputStyle}
-                                      />
-                                    </label>
-                                    <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)" }}>
-                                      <span>Room</span>
-                                      <select
-                                        value={otaEditDraft.stayUnitId}
-                                        onChange={(event) =>
-                                          setOtaEditDraft((current) => (current ? { ...current, stayUnitId: event.target.value } : current))
-                                        }
-                                        style={bookingEditInputStyle}
-                                      >
-                                        <option value="">Select room</option>
-                                        {rooms.map((room) => (
-                                          <option key={room.id} value={room.id}>
-                                            {room.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-                                    <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)" }}>
-                                      <span>Total amount</span>
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        inputMode="decimal"
-                                        value={otaEditDraft.totalAmount}
-                                        onChange={(event) =>
-                                          setOtaEditDraft((current) => (current ? { ...current, totalAmount: event.target.value } : current))
-                                        }
-                                        style={bookingEditInputStyle}
-                                      />
-                                    </label>
-                                  </div>
-                                  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                                    <button
-                                      type="button"
-                                      className={styles.secondaryActionButton}
-                                      onClick={() => handleOtaBookingEditSubmit(booking)}
-                                      disabled={isSubmittingOtaEdit}
-                                      style={{
-                                        border: "1px solid rgba(96, 165, 250, 0.28)",
-                                        background: "rgba(37, 99, 235, 0.16)",
-                                        color: "#dbeafe",
-                                        borderRadius: "12px",
-                                        padding: "8px 16px",
-                                        fontSize: "12px",
-                                        fontWeight: 700,
-                                        cursor: "pointer",
-                                        opacity: isSubmittingOtaEdit ? 0.7 : 1,
-                                      }}
-                                    >
-                                      {isSubmittingOtaEdit ? "Sending OTA edit..." : "Save OTA edit"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={styles.secondaryActionButton}
-                                      onClick={() => {
-                                        setEditingOtaBookingId(null);
-                                        setOtaEditDraft(null);
-                                      }}
-                                      disabled={isSubmittingOtaEdit}
-                                      style={{
-                                        border: "1px solid rgba(255, 255, 255, 0.15)",
-                                        background: "rgba(255, 255, 255, 0.05)",
-                                        color: "#ffffff",
-                                        borderRadius: "12px",
-                                        padding: "8px 16px",
-                                        fontSize: "12px",
-                                        fontWeight: 700,
-                                        cursor: "pointer",
-                                        opacity: isSubmittingOtaEdit ? 0.7 : 1,
-                                      }}
-                                    >
-                                      Close edit
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : null}
-
                               {/* Card Footer badges & action row */}
                               <div className={styles.propertyRoomShowcaseFooter} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "auto", paddingTop: "12px", borderTop: "1px solid rgba(255, 255, 255, 0.06)" }}>
                                 <div className={styles.propertyRoomFooterBadges} style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
@@ -7395,27 +7175,6 @@ export default function FamloProDashboardShell({
                                 </div>
 
                                 <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                                  {canHostEditOta ? (
-                                    <button
-                                      type="button"
-                                      className={styles.secondaryActionButton}
-                                      onClick={() => openOtaEditDraft(booking)}
-                                      disabled={isSubmittingOtaEdit && isEditingOta}
-                                      style={{
-                                        border: "1px solid rgba(96, 165, 250, 0.24)",
-                                        background: "rgba(37, 99, 235, 0.08)",
-                                        color: "#dbeafe",
-                                        borderRadius: "12px",
-                                        padding: "8px 16px",
-                                        fontSize: "12px",
-                                        fontWeight: 700,
-                                        cursor: "pointer",
-                                        opacity: isSubmittingOtaEdit && isEditingOta ? 0.7 : 1,
-                                      }}
-                                    >
-                                      {isEditingOta ? (isSubmittingOtaEdit ? "Sending..." : "Editing") : "Edit"}
-                                    </button>
-                                  ) : null}
                                   {canHostCancel ? (
                                     <button
                                       type="button"
@@ -7435,9 +7194,7 @@ export default function FamloProDashboardShell({
                                         opacity: cancellingBookingId === booking.bookingId ? 0.7 : 1,
                                       }}
                                     >
-                                      {cancellingBookingId === booking.bookingId
-                                        ? (booking.isOta ? "Sending..." : "Cancelling...")
-                                        : "Cancel"}
+                                      {cancellingBookingId === booking.bookingId ? "Cancelling..." : "Cancel"}
                                     </button>
                                   ) : null}
                                   <button

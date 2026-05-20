@@ -113,7 +113,7 @@ async function markRevisionFailure(
   revision: RevisionRecord,
   importStatus: string,
   message: string,
-  kind: "import" | "cancellation" | "modification"
+  kind: "import" | "cancellation"
 ): Promise<void> {
   const now = new Date().toISOString();
   await supabase
@@ -138,7 +138,7 @@ async function acknowledgeRevision(
   if (revision.ack_status === "acknowledged") {
     return { ok: true };
   }
-  if (!["imported", "cancelled_applied", "modified_applied"].includes(revision.import_status)) {
+  if (revision.import_status !== "imported") {
     return { ok: false, message: `Automatic acknowledgement is not supported for ${revision.import_status} revisions yet.` };
   }
   if (!revision.external_revision_id) {
@@ -170,48 +170,6 @@ async function acknowledgeRevision(
     .eq("id", revision.id);
 
   return { ok: true };
-}
-
-function rangesOverlapExclusive(
-  leftStart: string,
-  leftEndExclusive: string,
-  rightStart: string,
-  rightEndExclusive: string
-): boolean {
-  return leftStart < rightEndExclusive && rightStart < leftEndExclusive;
-}
-
-function resolveStayUnitId(record: JsonRecord | null | undefined): string | null {
-  const direct = asStringOrNull(record?.stay_unit_id);
-  if (direct) return direct;
-  return asStringOrNull(asObject(record?.pricing_snapshot).stay_unit_id);
-}
-
-function resolveChannelExternalBookingId(record: JsonRecord | null | undefined): string | null {
-  return asStringOrNull(asObject(record?.pricing_snapshot).channel_external_booking_id);
-}
-
-function resolveChannelExternalRoomTypeId(record: JsonRecord | null | undefined): string | null {
-  return asStringOrNull(asObject(record?.pricing_snapshot).channel_external_room_type_id);
-}
-
-function resolveIncomingGuestName(rawPayload: JsonRecord, fallbackName: string | null): string {
-  const attributes = asObject(rawPayload.attributes);
-  const firstRoom = asObject((Array.isArray(attributes.rooms) ? attributes.rooms : [])[0]);
-  const firstGuest = asObject((Array.isArray(firstRoom.guests) ? firstRoom.guests : [])[0]);
-  const roomGuestName = [asStringOrNull(firstGuest.name), asStringOrNull(firstGuest.surname)].filter(Boolean).join(" ");
-  if (roomGuestName) return roomGuestName;
-
-  const customer = asObject(attributes.customer);
-  const customerName = [asStringOrNull(customer.name), asStringOrNull(customer.surname)].filter(Boolean).join(" ");
-  if (customerName) return customerName;
-
-  return fallbackName ?? "OTA Guest";
-}
-
-function isBlockingBookingStatus(status: string | null): boolean {
-  const normalized = String(status ?? "").trim().toLowerCase();
-  return !["", "cancelled", "cancelled_by_user", "cancelled_by_partner", "rejected"].includes(normalized);
 }
 
 async function autoImportNewRevision(
@@ -483,294 +441,6 @@ async function autoApplyCancellationRevision(
   return { ok: true, bookingId: revision.linked_booking_id };
 }
 
-async function autoApplyModificationRevision(
-  supabase: SupabaseClient,
-  revision: RevisionRecord
-): Promise<{ ok: true; bookingId: string } | { ok: false; message: string }> {
-  if (!revision.linked_booking_id) {
-    return { ok: false, message: "A linked Famlo booking is required before applying a modification." };
-  }
-  if (!revision.external_booking_id || !revision.external_room_type_id || !revision.arrival_date || !revision.departure_date) {
-    return { ok: false, message: "Revision is missing required booking, room, or date fields." };
-  }
-
-  const assuredArrivalDate = normalizeDateOnly(revision.arrival_date);
-  const assuredDepartureDate = normalizeDateOnly(revision.departure_date);
-  if (!assuredArrivalDate || !assuredDepartureDate || assuredArrivalDate >= assuredDepartureDate) {
-    return { ok: false, message: "Revision has an invalid date range." };
-  }
-
-  const revisionProvider = resolveProviderFromRevision({
-    otaProviderCode: revision.ota_provider_code,
-    otaName: revision.ota_name,
-  });
-  const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
-
-  const { data: roomMappingRow, error: roomMappingError } = await supabase
-    .from("channel_room_mappings")
-    .select("stay_unit_id")
-    .eq("family_id", revision.family_id)
-    .eq("provider_code", storageProviderCode)
-    .eq("external_room_type_id", revision.external_room_type_id)
-    .maybeSingle();
-  if (roomMappingError) throw roomMappingError;
-
-  const targetStayUnitId = asStringOrNull(roomMappingRow?.stay_unit_id);
-  if (!targetStayUnitId) {
-    return { ok: false, message: "Mapped stay unit was not found for this external room type." };
-  }
-
-  const { data: stayUnitRow, error: stayUnitError } = await supabase
-    .from("stay_units_v2")
-    .select("id,host_id,legacy_family_id")
-    .eq("id", targetStayUnitId)
-    .maybeSingle();
-  if (stayUnitError) throw stayUnitError;
-  if (!stayUnitRow?.id) {
-    return { ok: false, message: "Resolved stay unit no longer exists." };
-  }
-  if (asStringOrNull(stayUnitRow.legacy_family_id) && asStringOrNull(stayUnitRow.legacy_family_id) !== revision.family_id) {
-    return { ok: false, message: "Mapped stay unit does not belong to this property." };
-  }
-
-  let linkedBookingResult;
-  try {
-    linkedBookingResult = await supabase
-      .from("bookings_v2")
-      .select("id,host_id,stay_unit_id,status,payment_status,total_price,start_date,end_date,pricing_snapshot")
-      .eq("id", revision.linked_booking_id)
-      .maybeSingle();
-  } catch (error) {
-    if (!isMissingColumnError(error, "stay_unit_id")) throw error;
-    linkedBookingResult = await supabase
-      .from("bookings_v2")
-      .select("id,host_id,status,payment_status,total_price,start_date,end_date,pricing_snapshot")
-      .eq("id", revision.linked_booking_id)
-      .maybeSingle();
-  }
-
-  if (linkedBookingResult.error) {
-    if (!isMissingColumnError(linkedBookingResult.error, "stay_unit_id")) throw linkedBookingResult.error;
-    linkedBookingResult = await supabase
-      .from("bookings_v2")
-      .select("id,host_id,status,payment_status,total_price,start_date,end_date,pricing_snapshot")
-      .eq("id", revision.linked_booking_id)
-      .maybeSingle();
-  }
-
-  if (linkedBookingResult.error) throw linkedBookingResult.error;
-  const linkedBooking = asObject(linkedBookingResult.data);
-  if (!linkedBooking?.id) {
-    return { ok: false, message: "Linked Famlo booking no longer exists." };
-  }
-
-  const linkedHostId = asStringOrNull(linkedBooking.host_id);
-  if (!linkedHostId) {
-    return { ok: false, message: "Linked Famlo booking is missing host ownership." };
-  }
-
-  const { data: hostRow, error: hostLookupError } = await supabase
-    .from("hosts")
-    .select("legacy_family_id")
-    .eq("id", linkedHostId)
-    .maybeSingle();
-  if (hostLookupError) throw hostLookupError;
-  if (asStringOrNull(hostRow?.legacy_family_id) && asStringOrNull(hostRow?.legacy_family_id) !== revision.family_id) {
-    return { ok: false, message: "Linked Famlo booking does not belong to this property." };
-  }
-
-  const currentPricingSnapshot = asObject(linkedBooking.pricing_snapshot);
-  const currentStayUnitId = resolveStayUnitId(linkedBooking);
-  const currentExternalBookingId = resolveChannelExternalBookingId(linkedBooking);
-  const currentExternalRoomTypeId = resolveChannelExternalRoomTypeId(linkedBooking);
-  const currentStartDate = normalizeDateOnly(asStringOrNull(linkedBooking.start_date));
-  const currentEndDate = normalizeDateOnly(asStringOrNull(linkedBooking.end_date));
-  if (!currentStartDate || !currentEndDate) {
-    return { ok: false, message: "Linked Famlo booking is missing a valid date range." };
-  }
-  if (currentExternalBookingId && currentExternalBookingId !== revision.external_booking_id) {
-    return { ok: false, message: "Linked Famlo booking does not match this external booking id." };
-  }
-  if (currentExternalRoomTypeId && currentExternalRoomTypeId !== revision.external_room_type_id) {
-    return { ok: false, message: "Room type changed in the Channex revision. Leave this for manual operator review." };
-  }
-
-  let overlapResult:
-    | {
-        data: JsonRecord[] | null;
-        error: unknown;
-      }
-    | undefined;
-
-  try {
-    overlapResult = await supabase
-      .from("bookings_v2")
-      .select("id,host_id,stay_unit_id,start_date,end_date,status,payment_status,pricing_snapshot")
-      .eq("stay_unit_id", targetStayUnitId);
-  } catch (error) {
-    if (!isMissingColumnError(error, "stay_unit_id")) throw error;
-    overlapResult = undefined;
-  }
-
-  if (!overlapResult || overlapResult.error) {
-    overlapResult = await supabase
-      .from("bookings_v2")
-      .select("id,host_id,start_date,end_date,status,payment_status,pricing_snapshot")
-      .eq("host_id", linkedHostId);
-  }
-
-  if (overlapResult.error) throw overlapResult.error;
-
-  const candidateEndExclusive = assuredDepartureDate;
-  const overlappingRows = ((overlapResult.data ?? []) as JsonRecord[]).filter((row) => {
-    const rowBookingId = asStringOrNull(row.id);
-    const rowStayUnitId = resolveStayUnitId(row);
-    const rowStartDate = normalizeDateOnly(asStringOrNull(row.start_date));
-    const rowEndDate = normalizeDateOnly(asStringOrNull(row.end_date));
-
-    if (!rowBookingId || rowBookingId === revision.linked_booking_id || !rowStartDate || !rowEndDate) {
-      return false;
-    }
-    if (!isBlockingBookingStatus(asStringOrNull(row.status))) {
-      return false;
-    }
-    if (rowStayUnitId && rowStayUnitId !== targetStayUnitId) {
-      return false;
-    }
-
-    const rowEndExclusive = rowEndDate;
-    return rangesOverlapExclusive(assuredArrivalDate, candidateEndExclusive, rowStartDate, rowEndExclusive);
-  });
-
-  if (overlappingRows.length > 0) {
-    return { ok: false, message: "Another Famlo booking already blocks the target room/date range." };
-  }
-
-  const now = new Date().toISOString();
-  const nextTotalPrice = revision.amount != null ? Math.round(revision.amount) : asNumberOrNull(linkedBooking.total_price);
-  const guestEmail =
-    asStringOrNull(revision.raw_payload.email) ??
-    asStringOrNull(revision.raw_payload.guest_email) ??
-    asStringOrNull(revision.raw_payload.customer_email);
-  const guestPhone =
-    asStringOrNull(revision.raw_payload.phone) ??
-    asStringOrNull(revision.raw_payload.guest_phone) ??
-    asStringOrNull(revision.raw_payload.customer_phone);
-  const guestName = resolveIncomingGuestName(
-    revision.raw_payload,
-    revision.guest_name ?? asStringOrNull(currentPricingSnapshot.channel_guest_name)
-  );
-  const nextPricingSnapshot: JsonRecord = {
-    ...currentPricingSnapshot,
-    stay_unit_id: targetStayUnitId,
-    channel_provider: "channex",
-    channel_source: revision.source,
-    channel_import_source: revision.source,
-    channel_external_booking_id: revision.external_booking_id,
-    channel_external_revision_id: revision.external_revision_id,
-    channel_external_room_type_id: revision.external_room_type_id,
-    channel_external_rate_plan_id: revision.external_rate_plan_id,
-    channel_booking_revision_id: revision.id,
-    channel_last_applied_action: "modification",
-    channel_last_applied_source: revision.source,
-    channel_last_applied_at: now,
-    channel_modified_from: {
-      start_date: currentStartDate,
-      end_date: currentEndDate,
-      stay_unit_id: currentStayUnitId,
-      total_price: asNumberOrNull(linkedBooking.total_price),
-    },
-    channel_modified_to: {
-      start_date: assuredArrivalDate,
-      end_date: assuredDepartureDate,
-      stay_unit_id: targetStayUnitId,
-      total_price: nextTotalPrice,
-    },
-    channel_guest_name: guestName,
-    channel_guest_display_name: guestName,
-    guest_name: guestName,
-    channel_guest_email: guestEmail,
-    channel_guest_phone: guestPhone,
-    channel_modification: {
-      external_revision_id: revision.external_revision_id,
-      raw_payload: revision.raw_payload,
-      from: {
-        start_date: currentStartDate,
-        end_date: currentEndDate,
-        amount: asNumberOrNull(linkedBooking.total_price),
-        currency: asStringOrNull(currentPricingSnapshot.currency),
-        guest_name: asStringOrNull(currentPricingSnapshot.channel_guest_name) ?? asStringOrNull(currentPricingSnapshot.guest_name),
-      },
-      to: {
-        start_date: assuredArrivalDate,
-        end_date: assuredDepartureDate,
-        amount: nextTotalPrice,
-        currency: revision.currency,
-        guest_name: guestName,
-      },
-    },
-  };
-
-  if (revision.currency) {
-    nextPricingSnapshot.currency = revision.currency;
-    if (revision.amount != null && nextTotalPrice != null) {
-      nextPricingSnapshot.base_price = nextTotalPrice;
-      nextPricingSnapshot.unit_price = nextTotalPrice;
-      nextPricingSnapshot.total_amount = revision.amount.toFixed(2);
-    }
-  }
-
-  const updatePayload: Record<string, unknown> = {
-    start_date: assuredArrivalDate,
-    end_date: assuredDepartureDate,
-    pricing_snapshot: nextPricingSnapshot,
-    updated_at: now,
-    payment_status: "not_required",
-  };
-  if (nextTotalPrice != null && Number.isFinite(nextTotalPrice)) {
-    updatePayload.total_price = nextTotalPrice;
-  }
-
-  let bookingUpdateError: unknown = null;
-  try {
-    const result = await supabase
-      .from("bookings_v2")
-      .update({
-        ...updatePayload,
-        stay_unit_id: targetStayUnitId,
-      } as never)
-      .eq("id", revision.linked_booking_id);
-    bookingUpdateError = result.error;
-  } catch (error) {
-    if (!isMissingColumnError(error, "stay_unit_id")) throw error;
-    bookingUpdateError = error;
-  }
-
-  if (bookingUpdateError && !isMissingColumnError(bookingUpdateError, "stay_unit_id")) {
-    throw bookingUpdateError;
-  }
-
-  if (bookingUpdateError && isMissingColumnError(bookingUpdateError, "stay_unit_id")) {
-    const fallbackResult = await supabase
-      .from("bookings_v2")
-      .update(updatePayload as never)
-      .eq("id", revision.linked_booking_id);
-    if (fallbackResult.error) throw fallbackResult.error;
-  }
-
-  await supabase
-    .from("channel_booking_revisions")
-    .update({
-      import_status: "modified_applied",
-      ack_status: "not_acknowledged",
-      linked_booking_id: revision.linked_booking_id,
-      updated_at: now,
-    } as never)
-    .eq("id", revision.id);
-
-  return { ok: true, bookingId: revision.linked_booking_id };
-}
-
 export async function autoProcessPendingChannexFeedRevisions(input: {
   supabase: SupabaseClient;
   familyId: string;
@@ -790,7 +460,6 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
 
   let autoImportedCount = 0;
   let autoCancelledCount = 0;
-  let autoModifiedCount = 0;
   let acknowledgedCount = 0;
   let pendingManualReviewCount = 0;
   let failedAutoApplyCount = 0;
@@ -843,8 +512,6 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
         }
         autoImportedCount += 1;
         lastAutoApplyAt = new Date().toISOString();
-        revision.import_status = "imported";
-        revision.linked_booking_id = importResult.bookingId;
         const ackResult = await acknowledgeRevision(input.supabase, revision);
         if (!ackResult.ok) {
           failedAutoApplyCount += 1;
@@ -885,19 +552,9 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
         }
         autoCancelledCount += 1;
         lastAutoApplyAt = new Date().toISOString();
-        revision.import_status = "cancelled_applied";
-        revision.linked_booking_id = applyResult.bookingId;
-        const ackResult = await acknowledgeRevision(input.supabase, revision);
-        if (!ackResult.ok) {
-          failedAutoApplyCount += 1;
-          lastAutoApplyState = "failed_cancellation_apply";
-          lastAutoApplyMessage = ackResult.message;
-          await markRevisionFailure(input.supabase, revision, "cancelled_applied", ackResult.message, "cancellation");
-          continue;
-        }
-        acknowledgedCount += 1;
-        lastAutoApplyState = "synced";
-        lastAutoApplyMessage = "Cancellation revisions were applied and acknowledged automatically.";
+        pendingManualReviewCount += 1;
+        lastAutoApplyState = "waiting_for_manual_review";
+        lastAutoApplyMessage = "Cancellation revisions were applied, but acknowledgement still needs operator review.";
       } catch (processingError) {
         const message = processingError instanceof Error ? processingError.message : "Auto-cancellation apply failed.";
         failedAutoApplyCount += 1;
@@ -908,68 +565,28 @@ export async function autoProcessPendingChannexFeedRevisions(input: {
       continue;
     }
 
-    if (status === "modified") {
-      try {
-        if (!["modified_pending_review", "modified_applied"].includes(revision.import_status)) {
-          await input.supabase
-            .from("channel_booking_revisions")
-            .update({
-              import_status: "modified_pending_review",
-              raw_payload: {
-                ...revision.raw_payload,
-                auto_apply_attempted_at: new Date().toISOString(),
-              },
-              updated_at: new Date().toISOString(),
-            } as never)
-            .eq("id", revision.id);
-          revision.import_status = "modified_pending_review";
-        }
-
-        const applyResult = await autoApplyModificationRevision(input.supabase, revision);
-        if (!applyResult.ok) {
-          pendingManualReviewCount += 1;
-          lastAutoApplyState = "needs_review";
-          lastAutoApplyMessage = applyResult.message;
-          await markRevisionFailure(input.supabase, revision, "modified_pending_review", applyResult.message, "modification");
-          continue;
-        }
-
-        lastAutoApplyAt = new Date().toISOString();
-        autoModifiedCount += 1;
-        revision.import_status = "modified_applied";
-        revision.linked_booking_id = applyResult.bookingId;
-        const ackResult = await acknowledgeRevision(input.supabase, revision);
-        if (!ackResult.ok) {
-          failedAutoApplyCount += 1;
-          lastAutoApplyState = "needs_review";
-          lastAutoApplyMessage = ackResult.message;
-          await markRevisionFailure(input.supabase, revision, "modified_applied", ackResult.message, "modification");
-          continue;
-        }
-
-        acknowledgedCount += 1;
-        lastAutoApplyState = "synced";
-        lastAutoApplyMessage = "Modification revisions were applied and acknowledged automatically.";
-        continue;
-      } catch (processingError) {
-        const message = processingError instanceof Error ? processingError.message : "Auto-modification apply failed.";
-        pendingManualReviewCount += 1;
-        lastAutoApplyState = "needs_review";
-        lastAutoApplyMessage = message;
-        await markRevisionFailure(input.supabase, revision, "modified_pending_review", message, "modification");
-        continue;
-      }
+    if (!["modified_pending_review", "modified_applied"].includes(revision.import_status)) {
+      await input.supabase
+        .from("channel_booking_revisions")
+        .update({
+          import_status: "modified_pending_review",
+          raw_payload: {
+            ...revision.raw_payload,
+            waiting_for_manual_review: true,
+            manual_review_marked_at: new Date().toISOString(),
+          },
+        } as never)
+        .eq("id", revision.id);
     }
-
     pendingManualReviewCount += 1;
     if (failedAutoApplyCount === 0) {
       lastAutoApplyState = "waiting_for_manual_review";
-      lastAutoApplyMessage = "Some Channex feed revisions still need manual review.";
+      lastAutoApplyMessage = "Modification revisions are stored for manual review and are not auto-applied yet.";
     }
   }
 
   const summary: ChannexAutoApplySummary = {
-    autoAppliedCount: autoImportedCount + autoCancelledCount + autoModifiedCount,
+    autoAppliedCount: autoImportedCount + autoCancelledCount,
     autoImportedCount,
     autoCancelledCount,
     pendingManualReviewCount,
