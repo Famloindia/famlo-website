@@ -64,6 +64,11 @@ function asStringArray(value: unknown): string[] {
   return [];
 }
 
+function normalizeMoney(value: unknown, fallback = 0): number {
+  const amount = Math.max(0, asNumber(value, fallback));
+  return Number(amount.toFixed(2));
+}
+
 function makeUnitKey(name: string): string {
   const slug = name
     .toLowerCase()
@@ -370,10 +375,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       room_size_sqm: typeof unit.roomSizeSqm === "number" || typeof unit.roomSizeSqm === "string" ? asNumber(unit.roomSizeSqm, 0) : null,
       lat: normalizedLat,
       lng: normalizedLng,
-      price_morning: Math.max(0, Math.trunc(asNumber(unit.priceMorning, 0))),
-      price_afternoon: Math.max(0, Math.trunc(asNumber(unit.priceAfternoon, 0))),
-      price_evening: Math.max(0, Math.trunc(asNumber(unit.priceEvening, 0))),
-      price_fullday: Math.max(0, Math.trunc(asNumber(unit.priceFullday, 0))),
+      price_morning: normalizeMoney(unit.priceMorning, 0),
+      price_afternoon: normalizeMoney(unit.priceAfternoon, 0),
+      price_evening: normalizeMoney(unit.priceEvening, 0),
+      price_fullday: normalizeMoney(unit.priceFullday, 0),
       quarter_enabled: asBoolean(unit.quarterEnabled, true),
       is_active: asBoolean(unit.isActive, true),
       is_primary: asBoolean(unit.isPrimary, false),
@@ -398,9 +403,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       lng: normalizedLng,
       latitude: normalizedLat,
       longitude: normalizedLng,
-      standardPrice: Math.max(0, Math.trunc(asNumber(unit.priceFullday, 0))),
-      lowDemandPrice: Math.max(0, Math.trunc(asNumber(unit.priceMorning, 0))),
-      highDemandPrice: Math.max(0, Math.trunc(asNumber(unit.priceEvening, 0))),
+      standardPrice: normalizeMoney(unit.priceFullday, 0),
+      lowDemandPrice: normalizeMoney(unit.priceMorning, 0),
+      highDemandPrice: normalizeMoney(unit.priceEvening, 0),
       smartPricingEnabled: asBoolean(unit.quarterEnabled, true),
       isActive: asBoolean(unit.isActive, true),
       isPrimary: asBoolean(unit.isPrimary, false),

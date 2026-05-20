@@ -682,8 +682,8 @@ export async function resolveCanonicalInventoryPrice(
   if (days.length === 0) return null;
   const totalPrice = days.reduce((sum, day) => sum + Math.max(0, day.effectiveRate), 0);
   return {
-    unitPrice: days.length > 0 ? Math.round(totalPrice / days.length) : 0,
-    totalPrice,
+    unitPrice: days.length > 0 ? Number((totalPrice / days.length).toFixed(2)) : 0,
+    totalPrice: Number(totalPrice.toFixed(2)),
     currency: days[0]?.currency ?? "INR",
     source: days[0]?.rateSource ?? "inventory_day_projection",
     days,
