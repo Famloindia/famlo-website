@@ -1913,37 +1913,42 @@ export default function FamloProDashboardShell({
     });
   };
 
-  const submitBulkCalendarUpdate = (): void => {
+  const submitBulkCalendarUpdate = (overrides?: Partial<typeof bulkCalendarDraft>): void => {
+    const effectiveDraft = {
+      ...bulkCalendarDraft,
+      ...overrides,
+    };
+
     const targetRoomIds =
-      bulkCalendarDraft.roomId === "__all__"
+      effectiveDraft.roomId === "__all__"
         ? calendarRows.map((row) => row.roomId)
-        : bulkCalendarDraft.roomId
-          ? [bulkCalendarDraft.roomId]
+        : effectiveDraft.roomId
+          ? [effectiveDraft.roomId]
           : [];
 
     const hasRestrictionPayload =
-      bulkCalendarDraft.minStay.trim().length > 0 ||
-      bulkCalendarDraft.minStayArrival.trim().length > 0 ||
-      bulkCalendarDraft.maxStay.trim().length > 0 ||
-      bulkCalendarDraft.cta !== "unchanged" ||
-      bulkCalendarDraft.ctd !== "unchanged" ||
-      bulkCalendarDraft.stopSell !== "unchanged";
+      effectiveDraft.minStay.trim().length > 0 ||
+      effectiveDraft.minStayArrival.trim().length > 0 ||
+      effectiveDraft.maxStay.trim().length > 0 ||
+      effectiveDraft.cta !== "unchanged" ||
+      effectiveDraft.ctd !== "unchanged" ||
+      effectiveDraft.stopSell !== "unchanged";
 
     if (targetRoomIds.length === 0) {
       setBulkCalendarFeedback({ type: "error", text: "Select at least one room for the bulk calendar update." });
       return;
     }
-    if (bulkCalendarDraft.roomId === "__all__" && !bulkCalendarDraft.applyToAllRooms) {
+    if (effectiveDraft.roomId === "__all__" && !effectiveDraft.applyToAllRooms) {
       setBulkCalendarFeedback({ type: "error", text: "Confirm all-room bulk apply before updating every visible room." });
       return;
     }
-    if (!bulkCalendarDraft.dateFrom || !bulkCalendarDraft.dateTo || bulkCalendarDraft.dateTo < bulkCalendarDraft.dateFrom) {
+    if (!effectiveDraft.dateFrom || !effectiveDraft.dateTo || effectiveDraft.dateTo < effectiveDraft.dateFrom) {
       setBulkCalendarFeedback({ type: "error", text: "Choose a valid bulk date range." });
       return;
     }
     if (
-      bulkCalendarDraft.availabilityAction === "none" &&
-      bulkCalendarDraft.rateAmount.trim().length === 0 &&
+      effectiveDraft.availabilityAction === "none" &&
+      effectiveDraft.rateAmount.trim().length === 0 &&
       !hasRestrictionPayload
     ) {
       setBulkCalendarFeedback({ type: "error", text: "Choose at least one bulk rate, availability, or restriction change." });
@@ -1960,25 +1965,25 @@ export default function FamloProDashboardShell({
           body: JSON.stringify({
             familyId,
             roomIds: targetRoomIds,
-            roomScope: bulkCalendarDraft.roomId === "__all__" ? "all" : "single",
-            selectedRoomId: bulkCalendarDraft.roomId === "__all__" ? null : bulkCalendarDraft.roomId,
-            applyToAllRooms: bulkCalendarDraft.roomId === "__all__" ? bulkCalendarDraft.applyToAllRooms : false,
-            dateFrom: bulkCalendarDraft.dateFrom,
-            dateTo: bulkCalendarDraft.dateTo,
-            rateAction: bulkCalendarDraft.rateAmount.trim().length > 0 ? "save" : null,
-            rateAmount: bulkCalendarDraft.rateAmount.trim().length > 0 ? Number(bulkCalendarDraft.rateAmount) : null,
-            availabilityAction: bulkCalendarDraft.availabilityAction === "none" ? null : bulkCalendarDraft.availabilityAction,
+            roomScope: effectiveDraft.roomId === "__all__" ? "all" : "single",
+            selectedRoomId: effectiveDraft.roomId === "__all__" ? null : effectiveDraft.roomId,
+            applyToAllRooms: effectiveDraft.roomId === "__all__" ? effectiveDraft.applyToAllRooms : false,
+            dateFrom: effectiveDraft.dateFrom,
+            dateTo: effectiveDraft.dateTo,
+            rateAction: effectiveDraft.rateAmount.trim().length > 0 ? "save" : null,
+            rateAmount: effectiveDraft.rateAmount.trim().length > 0 ? Number(effectiveDraft.rateAmount) : null,
+            availabilityAction: effectiveDraft.availabilityAction === "none" ? null : effectiveDraft.availabilityAction,
             restrictions: {
-              minStay: bulkCalendarDraft.minStay.trim().length > 0 ? Number(bulkCalendarDraft.minStay) : undefined,
+              minStay: effectiveDraft.minStay.trim().length > 0 ? Number(effectiveDraft.minStay) : undefined,
               minStayArrival:
-                bulkCalendarDraft.minStayArrival.trim().length > 0 ? Number(bulkCalendarDraft.minStayArrival) : undefined,
-              maxStay: bulkCalendarDraft.maxStay.trim().length > 0 ? Number(bulkCalendarDraft.maxStay) : undefined,
+                effectiveDraft.minStayArrival.trim().length > 0 ? Number(effectiveDraft.minStayArrival) : undefined,
+              maxStay: effectiveDraft.maxStay.trim().length > 0 ? Number(effectiveDraft.maxStay) : undefined,
               cta:
-                bulkCalendarDraft.cta === "unchanged" ? undefined : bulkCalendarDraft.cta === "true",
+                effectiveDraft.cta === "unchanged" ? undefined : effectiveDraft.cta === "true",
               ctd:
-                bulkCalendarDraft.ctd === "unchanged" ? undefined : bulkCalendarDraft.ctd === "true",
+                effectiveDraft.ctd === "unchanged" ? undefined : effectiveDraft.ctd === "true",
               stopSell:
-                bulkCalendarDraft.stopSell === "unchanged" ? undefined : bulkCalendarDraft.stopSell === "true",
+                effectiveDraft.stopSell === "unchanged" ? undefined : effectiveDraft.stopSell === "true",
             },
           }),
         });
@@ -5836,6 +5841,39 @@ export default function FamloProDashboardShell({
                   </article>
 
                   <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
+                    <div className={styles.listTitle}>Multiple block / unblock</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
+                      Quickly block or unblock a date range for the selected room scope. This uses the same Famlo-to-Channex bulk availability path as the existing calendar sync.
+                    </div>
+                    <div className={styles.roomReadinessRow} style={{ marginTop: "auto", paddingTop: 14 }}>
+                      <button
+                        type="button"
+                        className={styles.secondaryActionButton}
+                        onClick={() =>
+                          submitBulkCalendarUpdate({
+                            availabilityAction: "block",
+                            rateAmount: "",
+                          })}
+                        disabled={isBulkCalendarPending}
+                      >
+                        {isBulkCalendarPending ? "Applying..." : "Block selected dates"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryActionButton}
+                        onClick={() =>
+                          submitBulkCalendarUpdate({
+                            availabilityAction: "unblock",
+                            rateAmount: "",
+                          })}
+                        disabled={isBulkCalendarPending}
+                      >
+                        {isBulkCalendarPending ? "Applying..." : "Unblock selected dates"}
+                      </button>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
                     <div className={styles.listTitle}>Bulk calendar and restrictions</div>
                     <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
                       Use one PMS save flow to batch prices, availability, and restriction changes across a date range. Famlo queues the resulting Channex ARI updates instead of pushing directly from the browser.
@@ -6010,7 +6048,7 @@ export default function FamloProDashboardShell({
                       <button
                         type="button"
                         className={styles.secondaryActionButton}
-                        onClick={submitBulkCalendarUpdate}
+                        onClick={() => submitBulkCalendarUpdate()}
                         disabled={isBulkCalendarPending}
                       >
                         {isBulkCalendarPending ? "Applying..." : "Apply bulk PMS update"}
