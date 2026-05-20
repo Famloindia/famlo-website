@@ -1620,6 +1620,7 @@ export default function FamloProDashboardShell({
   const [propertyContentFeedback, setPropertyContentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [selectedCalendarBooking, setSelectedCalendarBooking] = useState<CalendarBookingDetail | null>(null);
   const [calendarActionFeedback, setCalendarActionFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [bulkCalendarFeedback, setBulkCalendarFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [calendarActionDate, setCalendarActionDate] = useState<string | null>(null);
   const [isCalendarActionPending, startCalendarAction] = useTransition();
   const [selectedCalendarRateCell, setSelectedCalendarRateCell] = useState<{
@@ -1681,6 +1682,7 @@ export default function FamloProDashboardShell({
   useEffect(() => {
     setChannelSetupOverrides({});
     setCalendarActionFeedback(null);
+    setBulkCalendarFeedback(null);
     setCalendarActionDate(null);
     setCalendarRateFeedback(null);
     setCalendarRateActionDate(null);
@@ -1697,6 +1699,7 @@ export default function FamloProDashboardShell({
       dateFrom: calendarWindow.startDate,
       dateTo: calendarWindow.startDate,
     }));
+    setBulkCalendarFeedback(null);
   }, [calendarWindow.startDate]);
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
@@ -1787,7 +1790,9 @@ export default function FamloProDashboardShell({
 
   const handleCalendarRateCellAction = (cell: CalendarRateCell, row: CalendarRow): void => {
     if (cell.isPast) return;
+    setCalendarActionFeedback(null);
     setCalendarRateFeedback(null);
+    setBulkCalendarFeedback(null);
     setSelectedCalendarRateCell({
       roomId: row.roomId,
       roomName: row.roomName,
@@ -1922,11 +1927,11 @@ export default function FamloProDashboardShell({
       bulkCalendarDraft.stopSell !== "unchanged";
 
     if (targetRoomIds.length === 0) {
-      setCalendarActionFeedback({ type: "error", text: "Select at least one room for the bulk calendar update." });
+      setBulkCalendarFeedback({ type: "error", text: "Select at least one room for the bulk calendar update." });
       return;
     }
     if (!bulkCalendarDraft.dateFrom || !bulkCalendarDraft.dateTo || bulkCalendarDraft.dateTo < bulkCalendarDraft.dateFrom) {
-      setCalendarActionFeedback({ type: "error", text: "Choose a valid bulk date range." });
+      setBulkCalendarFeedback({ type: "error", text: "Choose a valid bulk date range." });
       return;
     }
     if (
@@ -1934,11 +1939,12 @@ export default function FamloProDashboardShell({
       bulkCalendarDraft.rateAmount.trim().length === 0 &&
       !hasRestrictionPayload
     ) {
-      setCalendarActionFeedback({ type: "error", text: "Choose at least one bulk rate, availability, or restriction change." });
+      setBulkCalendarFeedback({ type: "error", text: "Choose at least one bulk rate, availability, or restriction change." });
       return;
     }
 
     setCalendarActionFeedback(null);
+    setBulkCalendarFeedback(null);
     startBulkCalendarTransition(async () => {
       try {
         const response = await fetch("/api/host/pro/calendar/bulk-update", {
@@ -1971,13 +1977,15 @@ export default function FamloProDashboardShell({
           throw new Error(payload.error ?? "Failed to apply bulk calendar update.");
         }
 
-        setCalendarActionFeedback({
+        setCalendarActionFeedback(null);
+        setBulkCalendarFeedback({
           type: "success",
           text: `Applied bulk PMS calendar update for ${payload.affectedRoomCount ?? targetRoomIds.length} room(s) and queued Channex sync safely.`,
         });
         router.refresh();
       } catch (error) {
-        setCalendarActionFeedback({
+        setCalendarActionFeedback(null);
+        setBulkCalendarFeedback({
           type: "error",
           text: error instanceof Error ? error.message : "Failed to apply bulk calendar update.",
         });
@@ -5822,6 +5830,14 @@ export default function FamloProDashboardShell({
                     <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
                       Use one PMS save flow to batch prices, availability, and restriction changes across a date range. Famlo queues the resulting Channex ARI updates instead of pushing directly from the browser.
                     </div>
+                    {bulkCalendarFeedback ? (
+                      <div
+                        className={`${styles.feedbackBox} ${bulkCalendarFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
+                        style={{ marginBottom: 14 }}
+                      >
+                        {bulkCalendarFeedback.text}
+                      </div>
+                    ) : null}
                     <div style={{ display: "grid", gap: 12 }}>
                       <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
                         <span className={styles.fieldLabel}>Room scope</span>
