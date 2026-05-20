@@ -1000,12 +1000,17 @@ export async function renderFamloProDashboardPage({
 
     for (const roomProjection of projectedInventoryByRoom) {
       const rates = new Map<string, number>();
+      const blockedDates = new Set<string>();
       for (const day of roomProjection.days) {
         if (day.effectiveRate > 0) {
           rates.set(day.date, day.effectiveRate);
         }
+        if (day.manualBlockPresent) {
+          blockedDates.add(day.date);
+        }
       }
       roomProjectedRates.set(roomProjection.roomId, rates);
+      roomManualBlockDates.set(roomProjection.roomId, blockedDates);
     }
 
     const roomCalendarEvents = await Promise.all(
@@ -1021,18 +1026,8 @@ export async function renderFamloProDashboardPage({
     );
 
     for (const roomCalendar of roomCalendarEvents) {
-      const blockedDates = new Set<string>();
       const rateOverrides = new Map<string, number>();
       for (const event of roomCalendar.events) {
-        if (event.sourceType === "manual_block" && event.isBlocking) {
-          let cursor = event.startDate;
-          while (cursor <= event.endDate) {
-            blockedDates.add(cursor);
-            cursor = addIndiaDays(cursor, 1);
-          }
-          continue;
-        }
-
         if (event.sourceType === "manual_rate" && event.status !== "released") {
           const amountRaw =
             event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
@@ -1047,7 +1042,6 @@ export async function renderFamloProDashboardPage({
           }
         }
       }
-      roomManualBlockDates.set(roomCalendar.roomId, blockedDates);
       roomDailyRateOverrides.set(roomCalendar.roomId, rateOverrides);
     }
   }
