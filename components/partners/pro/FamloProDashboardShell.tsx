@@ -749,6 +749,15 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
+function formatCalendarCurrency(value: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 function formatDateTime(value: string | null): string {
   if (!value) return "Not synced";
   const date = new Date(value);
@@ -1846,7 +1855,7 @@ export default function FamloProDashboardShell({
           type: "success",
           text:
             action === "save"
-              ? `Saved ${formatCurrency(parsedAmount)} for ${selectedCalendarRateCell.roomName} on ${formatShortDate(selectedCalendarRateCell.date)}.`
+              ? `Saved ${formatCalendarCurrency(parsedAmount)} for ${selectedCalendarRateCell.roomName} on ${formatShortDate(selectedCalendarRateCell.date)}.`
               : `Reset ${selectedCalendarRateCell.roomName} on ${formatShortDate(selectedCalendarRateCell.date)} back to base price.`,
         });
         if (action === "save") {
@@ -1854,14 +1863,14 @@ export default function FamloProDashboardShell({
             ...current,
             [getCalendarRateOverrideKey(selectedCalendarRateCell.roomId, selectedCalendarRateCell.date)]: {
               amount: parsedAmount,
-              displayValue: formatCurrency(parsedAmount),
+              displayValue: formatCalendarCurrency(parsedAmount),
               isOverridden: true,
             },
           }));
           setSelectedCalendarRateCell({
             ...selectedCalendarRateCell,
             amount: parsedAmount,
-            displayValue: formatCurrency(parsedAmount),
+            displayValue: formatCalendarCurrency(parsedAmount),
             isOverridden: true,
           });
           setCalendarRateDraft(String(parsedAmount));
@@ -1870,14 +1879,14 @@ export default function FamloProDashboardShell({
             ...current,
             [getCalendarRateOverrideKey(selectedCalendarRateCell.roomId, selectedCalendarRateCell.date)]: {
               amount: selectedCalendarRateCell.baseAmount > 0 ? selectedCalendarRateCell.baseAmount : null,
-              displayValue: selectedCalendarRateCell.baseAmount > 0 ? formatCurrency(selectedCalendarRateCell.baseAmount) : "Missing",
+              displayValue: selectedCalendarRateCell.baseAmount > 0 ? formatCalendarCurrency(selectedCalendarRateCell.baseAmount) : "Missing",
               isOverridden: false,
             },
           }));
           setSelectedCalendarRateCell({
             ...selectedCalendarRateCell,
             amount: selectedCalendarRateCell.baseAmount > 0 ? selectedCalendarRateCell.baseAmount : null,
-            displayValue: selectedCalendarRateCell.baseAmount > 0 ? formatCurrency(selectedCalendarRateCell.baseAmount) : "Missing",
+            displayValue: selectedCalendarRateCell.baseAmount > 0 ? formatCalendarCurrency(selectedCalendarRateCell.baseAmount) : "Missing",
             isOverridden: false,
           });
           setCalendarRateDraft(
@@ -5770,7 +5779,7 @@ export default function FamloProDashboardShell({
                           <div className={styles.placeholderTitle}>{selectedCalendarRateCell.roomName}</div>
                           <div className={styles.placeholderValue}>{formatShortDate(selectedCalendarRateCell.date)}</div>
                           <div className={styles.placeholderCopy}>
-                            Base price {selectedCalendarRateCell.baseAmount > 0 ? formatCurrency(selectedCalendarRateCell.baseAmount) : "Missing"}
+                            Base price {selectedCalendarRateCell.baseAmount > 0 ? formatCalendarCurrency(selectedCalendarRateCell.baseAmount) : "Missing"}
                             {selectedCalendarRateCell.isOverridden ? ` · Override active (${selectedCalendarRateCell.displayValue})` : " · No override yet"}
                           </div>
                         </div>

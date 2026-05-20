@@ -18,6 +18,7 @@ import { isFamloProDashboardEnabled, loadHostProAccess, loadHostProAccessMap } f
 import { loadHostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
 import { loadHostProSettings } from "@/lib/host-pro-settings";
 import { buildHostProSetupReadiness } from "@/lib/host-pro-setup-readiness";
+import { ensureProjectedInventory } from "@/lib/inventory";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -935,6 +936,7 @@ export async function renderFamloProDashboardPage({
 
   const roomManualBlockDates = new Map<string, Set<string>>();
   const roomDailyRateOverrides = new Map<string, Map<string, number>>();
+  const roomProjectedRates = new Map<string, Map<string, number>>();
   const roomChannexRateSnapshots = new Map<string, Map<string, number>>();
   const channexProperty = channelFoundation.properties.find(
     (property) => property.providerCode === "channex" && property.externalPropertyId
@@ -984,6 +986,28 @@ export async function renderFamloProDashboardPage({
   }
 
   if (rooms.length > 0) {
+    const projectedInventoryByRoom = await Promise.all(
+      rooms.map(async (room) => ({
+        roomId: room.id,
+        days: await ensureProjectedInventory(supabase, {
+          familyId,
+          stayUnitId: room.id,
+          from: calendarFrom,
+          to: calendarTo,
+        }),
+      }))
+    );
+
+    for (const roomProjection of projectedInventoryByRoom) {
+      const rates = new Map<string, number>();
+      for (const day of roomProjection.days) {
+        if (day.effectiveRate > 0) {
+          rates.set(day.date, day.effectiveRate);
+        }
+      }
+      roomProjectedRates.set(roomProjection.roomId, rates);
+    }
+
     const roomCalendarEvents = await Promise.all(
       rooms.map(async (room) => ({
         roomId: room.id,
@@ -1263,23 +1287,26 @@ export async function renderFamloProDashboardPage({
     }),
     rateCells: calendarColumns.map((column) => {
       const overrideAmount = roomDailyRateOverrides.get(room.id)?.get(column.date) ?? null;
+      const projectedAmount = roomProjectedRates.get(room.id)?.get(column.date) ?? null;
       const channexAmount = roomChannexRateSnapshots.get(room.id)?.get(column.date) ?? null;
       const displayAmount =
         overrideAmount ??
+        projectedAmount ??
+        (room.priceFullday > 0 ? room.priceFullday : null) ??
         channexAmount ??
-        (room.priceFullday > 0 ? room.priceFullday : null);
+        null;
       return {
         date: column.date,
         displayValue:
           column.isPast
             ? "Past"
             : displayAmount != null && displayAmount > 0
-              ? formatCurrency(displayAmount)
+              ? (formatCalendarAmount(displayAmount, "INR") ?? "Missing")
               : "Missing",
         amount: displayAmount,
         baseAmount: room.priceFullday,
         isPast: column.isPast,
-        isOverridden: overrideAmount != null || channexAmount != null,
+        isOverridden: overrideAmount != null || (projectedAmount != null && projectedAmount !== room.priceFullday) || channexAmount != null,
       } satisfies CalendarRateCell;
     }),
   }));

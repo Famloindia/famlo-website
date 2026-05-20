@@ -121,6 +121,11 @@ function pickBaseRate(row: StayUnitInventoryRow): number {
   );
 }
 
+export function normalizeInventoryRateAmount(value: unknown): number {
+  const amount = Math.max(0, asNumber(value));
+  return Number(amount.toFixed(2));
+}
+
 function normalizeAllotment(row: StayUnitInventoryRow, rules: InventoryRuleSet): number {
   const mode = asString(row.inventory_mode) ?? "physical_unit";
   const explicitAllotment = Math.max(1, Math.trunc(asNumber(row.inventory_allotment, 1)));
@@ -363,7 +368,7 @@ function projectDay(input: {
   const ratePayload = (rateEvent?.payload as JsonRecord | null) ?? {};
   const restrictionPayload = (restrictionEvent?.payload as JsonRecord | null) ?? {};
   const manualRateAmount =
-    asString(rateEvent?.event_type) === "manual_rate_set" ? Math.max(0, Math.round(asNumber(ratePayload.amount))) : 0;
+    asString(rateEvent?.event_type) === "manual_rate_set" ? normalizeInventoryRateAmount(ratePayload.amount) : 0;
   const effectiveRate = manualRateAmount > 0 ? manualRateAmount : baseRate;
   const rateSource = manualRateAmount > 0 ? "manual_rate" : "stay_units_v2";
   const manualBlockPresent =

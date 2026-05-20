@@ -17,6 +17,7 @@ import {
   ChannelProviderPermissionError,
 } from "@/lib/channel-provider-framework";
 import { findStaleMappingRebindCandidate } from "@/lib/channex-ari-jobs";
+import { normalizeInventoryRateAmount } from "@/lib/inventory";
 import { resolveProviderOperationPolicy } from "@/app/api/host/pro/channel/providers/operation/route";
 import { verifyChannexWebhookRequest } from "@/app/api/webhooks/channex/bookings/route";
 import { assessImportPreviewEligibility } from "@/app/api/host/pro/channel/channex/bookings/import-preview/route";
@@ -204,6 +205,13 @@ test("Modification ingest is enabled provider-by-provider on shared OTA lifecycl
   assert.equal(getChannelProviderCapabilities("agoda").supportsModificationIngest, true);
   assert.equal(getChannelProviderCapabilities("expedia").supportsModificationIngest, true);
   assert.equal(getChannelProviderCapabilities("google-hotel").supportsModificationIngest, false);
+});
+
+test("Inventory rate normalization preserves two-decimal manual overrides", () => {
+  assert.equal(normalizeInventoryRateAmount(312.66), 312.66);
+  assert.equal(normalizeInventoryRateAmount("312.664"), 312.66);
+  assert.equal(normalizeInventoryRateAmount("312.665"), 312.67);
+  assert.equal(normalizeInventoryRateAmount(-10), 0);
 });
 
 test("Webhook auth rejects missing secret configuration", () => {

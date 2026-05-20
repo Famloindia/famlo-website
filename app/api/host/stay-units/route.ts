@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { projectInventoryRange } from "@/lib/inventory";
 import { loadStayUnitsForSelector, mapStayUnitRow } from "@/lib/stay-units";
 import { normalizeAmenityList } from "@/lib/room-amenities";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -70,6 +71,12 @@ function makeUnitKey(name: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 24);
   return `room-${slug || "unit"}-${Date.now().toString(36)}`;
+}
+
+function addIndiaDays(date: string, days: number): string {
+  const base = new Date(`${date}T00:00:00.000Z`);
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().slice(0, 10);
 }
 
 function extractMissingColumnFromSchemaError(error: unknown): string | null {
@@ -260,6 +267,48 @@ async function findExistingStayUnitIdForSave(
   return Array.isArray(sameNameRows) ? asNullableString((sameNameRows[0] as JsonRecord | undefined)?.id) : null;
 }
 
+async function collapseDuplicateStayUnits(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  input: {
+    familyId: string;
+    keepUnitId: string;
+    unitKey: string | null;
+  }
+): Promise<void> {
+  if (!input.unitKey) return;
+
+  const { data: rows, error } = await supabase
+    .from("stay_units_v2")
+    .select("id")
+    .eq("legacy_family_id", input.familyId)
+    .eq("unit_key", input.unitKey)
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+
+  const duplicateIds = (rows ?? [])
+    .map((row) => asNullableString((row as JsonRecord).id))
+    .filter((value): value is string => Boolean(value) && value !== input.keepUnitId);
+  if (duplicateIds.length === 0) return;
+
+  const migrationResults = await Promise.all([
+    supabase.from("channel_room_mappings").update({ stay_unit_id: input.keepUnitId } as never).in("stay_unit_id", duplicateIds),
+    supabase.from("channel_rate_plans").update({ stay_unit_id: input.keepUnitId } as never).in("stay_unit_id", duplicateIds),
+    supabase.from("inventory_event_log").update({ stay_unit_id: input.keepUnitId } as never).in("stay_unit_id", duplicateIds),
+    supabase.from("inventory_day_projection").update({ stay_unit_id: input.keepUnitId } as never).in("stay_unit_id", duplicateIds),
+    supabase
+      .from("calendar_events")
+      .update({ owner_id: input.keepUnitId } as never)
+      .eq("owner_type", "stay_unit")
+      .in("owner_id", duplicateIds),
+  ]);
+  for (const result of migrationResults) {
+    if (result.error) throw result.error;
+  }
+
+  const { error: deleteError } = await supabase.from("stay_units_v2").delete().in("id", duplicateIds);
+  if (deleteError) throw deleteError;
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const familyId = request.nextUrl.searchParams.get("familyId");
   if (!familyId) {
@@ -401,6 +450,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         roomDraftPatch
       );
       const mappedStayUnit = mapStayUnitRow(data as JsonRecord);
+      if (mappedStayUnit?.id) {
+        await collapseDuplicateStayUnits(supabase, {
+          familyId,
+          keepUnitId: mappedStayUnit.id,
+          unitKey: mappedStayUnit.unitKey,
+        });
+      }
+      if (mappedStayUnit?.id) {
+        const today = new Date().toISOString().slice(0, 10);
+        await projectInventoryRange(supabase, {
+          familyId,
+          stayUnitId: mappedStayUnit.id,
+          from: today,
+          to: addIndiaDays(today, 364),
+        });
+      }
       const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
         familyId,
         dateFrom: new Date().toISOString().slice(0, 10),
@@ -439,6 +504,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     );
     const mappedStayUnit = mapStayUnitRow(data as JsonRecord);
+    if (mappedStayUnit?.id) {
+      await collapseDuplicateStayUnits(supabase, {
+        familyId,
+        keepUnitId: mappedStayUnit.id,
+        unitKey: mappedStayUnit.unitKey,
+      });
+    }
+    if (mappedStayUnit?.id) {
+      const today = new Date().toISOString().slice(0, 10);
+      await projectInventoryRange(supabase, {
+        familyId,
+        stayUnitId: mappedStayUnit.id,
+        from: today,
+        to: addIndiaDays(today, 364),
+      });
+    }
     const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
       familyId,
       dateFrom: new Date().toISOString().slice(0, 10),
