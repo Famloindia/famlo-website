@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, type CSSProperties, useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, type CSSProperties, useEffect, useState, useTransition } from "react";
 import {
   Activity,
   ArrowRightLeft,
@@ -1699,8 +1699,6 @@ export default function FamloProDashboardShell({
   const [selectedChannelToAdd, setSelectedChannelToAdd] = useState<ChannelProviderKey>("booking");
   const [channelSetupOverrides, setChannelSetupOverrides] = useState<Partial<Record<ChannelProviderKey, ChannelSetupState>>>({});
   const [timeAnchor] = useState(() => Date.now());
-  const bookingFeedLastAttemptAtRef = useRef(0);
-  const bookingFeedRefreshInFlightRef = useRef(false);
   const initialCalendarDate = new Date(`${calendarWindow.startDate}T12:00:00+05:30`);
   const [calendarJumpMonth, setCalendarJumpMonth] = useState(String(initialCalendarDate.getMonth() + 1).padStart(2, "0"));
   const [calendarJumpYear, setCalendarJumpYear] = useState(String(initialCalendarDate.getFullYear()));
@@ -1742,12 +1740,6 @@ export default function FamloProDashboardShell({
   });
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0] ?? null;
   const roomById = new Map(rooms.map((room) => [room.id, room]));
-  const hasChannexPropertyConnection = channelFoundation.properties.some(
-    (property) => property.providerCode === "channex" && Boolean(property.externalPropertyId)
-  );
-  const shouldAutoRefreshBookingFeed =
-    hasChannexPropertyConnection &&
-    (activeSection === "dashboard" || activeSection === "bookings" || activeSection === "inventory-calendar");
   const showChannelOperatorDiagnostics = isAdminView;
   const simplePropertiesHref = `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=properties-home`;
   const hostWorkspacePropertyCount = propertyOptions.length;
@@ -2164,60 +2156,6 @@ export default function FamloProDashboardShell({
     setIsPropertySwitchPending(false);
     setPendingPropertyLabel(null);
   }, [familyId, initialSection, initialPropertyContent, propertyPhotos, roomRouteState, rooms]);
-
-  useEffect(() => {
-    if (!shouldAutoRefreshBookingFeed) return;
-    let cancelled = false;
-
-    const triggerBookingFeedRefresh = (): void => {
-      const now = Date.now();
-      if (bookingFeedRefreshInFlightRef.current) return;
-      if (now - bookingFeedLastAttemptAtRef.current < 15_000) return;
-
-      bookingFeedLastAttemptAtRef.current = now;
-      bookingFeedRefreshInFlightRef.current = true;
-
-      void (async () => {
-        try {
-          const response = await fetch("/api/host/pro/channel/channex/bookings/feed", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-famlo-actor-role": "host" },
-            body: JSON.stringify({ familyId }),
-          });
-          const payload = (await response.json()) as {
-            ok?: boolean;
-            status?: string;
-            storedCount?: number;
-            autoApplySummary?: { autoAppliedCount?: number; autoImportedCount?: number; autoCancelledCount?: number } | null;
-          };
-
-          if (!response.ok || cancelled) return;
-
-          const changedCount =
-            (payload.storedCount ?? 0) +
-            (payload.autoApplySummary?.autoAppliedCount ?? 0) +
-            (payload.autoApplySummary?.autoImportedCount ?? 0) +
-            (payload.autoApplySummary?.autoCancelledCount ?? 0);
-
-          if ((payload.status && payload.status !== "skipped") || changedCount > 0) {
-            router.refresh();
-          }
-        } catch {
-          // Keep the dashboard usable even if the background booking refresh misses.
-        } finally {
-          bookingFeedRefreshInFlightRef.current = false;
-        }
-      })();
-    };
-
-    triggerBookingFeedRefresh();
-    const intervalId = window.setInterval(triggerBookingFeedRefresh, 45_000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [activeSection, familyId, router, shouldAutoRefreshBookingFeed]);
 
   const handleSavePropertyContent = async (options: {
     updatedListing: PropertyContentDraft;

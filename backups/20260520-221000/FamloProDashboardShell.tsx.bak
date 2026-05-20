@@ -1699,7 +1699,7 @@ export default function FamloProDashboardShell({
   const [selectedChannelToAdd, setSelectedChannelToAdd] = useState<ChannelProviderKey>("booking");
   const [channelSetupOverrides, setChannelSetupOverrides] = useState<Partial<Record<ChannelProviderKey, ChannelSetupState>>>({});
   const [timeAnchor] = useState(() => Date.now());
-  const bookingFeedLastAttemptAtRef = useRef(0);
+  const bookingFeedRefreshKeyRef = useRef<string | null>(null);
   const bookingFeedRefreshInFlightRef = useRef(false);
   const initialCalendarDate = new Date(`${calendarWindow.startDate}T12:00:00+05:30`);
   const [calendarJumpMonth, setCalendarJumpMonth] = useState(String(initialCalendarDate.getMonth() + 1).padStart(2, "0"));
@@ -2167,56 +2167,46 @@ export default function FamloProDashboardShell({
 
   useEffect(() => {
     if (!shouldAutoRefreshBookingFeed) return;
-    let cancelled = false;
 
-    const triggerBookingFeedRefresh = (): void => {
-      const now = Date.now();
-      if (bookingFeedRefreshInFlightRef.current) return;
-      if (now - bookingFeedLastAttemptAtRef.current < 15_000) return;
+    const refreshKey = `${familyId}:${activeSection}`;
+    if (bookingFeedRefreshKeyRef.current === refreshKey || bookingFeedRefreshInFlightRef.current) {
+      return;
+    }
 
-      bookingFeedLastAttemptAtRef.current = now;
-      bookingFeedRefreshInFlightRef.current = true;
+    bookingFeedRefreshKeyRef.current = refreshKey;
+    bookingFeedRefreshInFlightRef.current = true;
 
-      void (async () => {
-        try {
-          const response = await fetch("/api/host/pro/channel/channex/bookings/feed", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-famlo-actor-role": "host" },
-            body: JSON.stringify({ familyId }),
-          });
-          const payload = (await response.json()) as {
-            ok?: boolean;
-            status?: string;
-            storedCount?: number;
-            autoApplySummary?: { autoAppliedCount?: number; autoImportedCount?: number; autoCancelledCount?: number } | null;
-          };
+    void (async () => {
+      try {
+        const response = await fetch("/api/host/pro/channel/channex/bookings/feed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-famlo-actor-role": "host" },
+          body: JSON.stringify({ familyId }),
+        });
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          status?: string;
+          storedCount?: number;
+          autoApplySummary?: { autoAppliedCount?: number; autoImportedCount?: number; autoCancelledCount?: number } | null;
+        };
 
-          if (!response.ok || cancelled) return;
+        if (!response.ok) return;
 
-          const changedCount =
-            (payload.storedCount ?? 0) +
-            (payload.autoApplySummary?.autoAppliedCount ?? 0) +
-            (payload.autoApplySummary?.autoImportedCount ?? 0) +
-            (payload.autoApplySummary?.autoCancelledCount ?? 0);
+        const changedCount =
+          (payload.storedCount ?? 0) +
+          (payload.autoApplySummary?.autoAppliedCount ?? 0) +
+          (payload.autoApplySummary?.autoImportedCount ?? 0) +
+          (payload.autoApplySummary?.autoCancelledCount ?? 0);
 
-          if ((payload.status && payload.status !== "skipped") || changedCount > 0) {
-            router.refresh();
-          }
-        } catch {
-          // Keep the dashboard usable even if the background booking refresh misses.
-        } finally {
-          bookingFeedRefreshInFlightRef.current = false;
+        if ((payload.status && payload.status !== "skipped") || changedCount > 0) {
+          router.refresh();
         }
-      })();
-    };
-
-    triggerBookingFeedRefresh();
-    const intervalId = window.setInterval(triggerBookingFeedRefresh, 45_000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
+      } catch {
+        // Keep the dashboard usable even if the background booking refresh misses.
+      } finally {
+        bookingFeedRefreshInFlightRef.current = false;
+      }
+    })();
   }, [activeSection, familyId, router, shouldAutoRefreshBookingFeed]);
 
   const handleSavePropertyContent = async (options: {
