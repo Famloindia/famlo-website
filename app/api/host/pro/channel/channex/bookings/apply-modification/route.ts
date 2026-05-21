@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 
 import { acknowledgeChannexBookingRevision } from "@/lib/channel-providers/channex/client";
 import { ensureChannexMutationAllowed } from "@/lib/channel-providers/channex/mutation-guard";
+import { resolveNormalizedOtaSourceChannel } from "@/lib/channel-booking-normalization";
 import {
   resolveChannelStorageProviderCode,
   resolveProviderFromRevision,
 } from "@/lib/channel-providers/provider-capabilities";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -605,6 +607,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     const updatePayload: Record<string, unknown> = {
       start_date: assuredArrivalDate,
       end_date: assuredDepartureDate,
+      source_channel: resolveNormalizedOtaSourceChannel({
+        otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+        otaName: asStringOrNull(revisionRow.ota_name),
+        source: asStringOrNull(revisionRow.source),
+      }),
       pricing_snapshot: nextPricingSnapshot,
       updated_at: now,
       payment_status: "not_required",
@@ -653,6 +660,34 @@ export async function POST(request: Request): Promise<NextResponse> {
       .eq("id", channelBookingRevisionId);
 
     if (revisionUpdateError) throw revisionUpdateError;
+
+    const assuredLinkedBookingId = String(linkedBookingId);
+
+    await processFinanceEventContract(supabase, {
+      bookingId: assuredLinkedBookingId,
+      eventType: "OTA_BOOKING_MODIFIED",
+      sourceEventId: channelBookingRevisionId,
+      calculationVersion: "batch3-ota-folio-v1",
+      currency: currency ?? asStringOrNull(currentPricingSnapshot.currency) ?? "INR",
+      bookingAmount: nextTotalPrice ?? undefined,
+      adjustmentAmount:
+        nextTotalPrice != null && asNumberOrNull(linkedBooking.total_price) != null
+          ? nextTotalPrice - asNumberOrNull(linkedBooking.total_price)!
+          : undefined,
+      sourceChannel: resolveNormalizedOtaSourceChannel({
+        otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+        otaName: asStringOrNull(revisionRow.ota_name),
+        source: asStringOrNull(revisionRow.source),
+      }),
+      paymentCollectMode: asStringOrNull(revisionRow.payment_collect),
+      metadata: {
+        source: "channex.apply_modification",
+        external_booking_id: externalBookingId,
+        external_revision_id: asStringOrNull(revisionRow.external_revision_id),
+        previous_total_price: asNumberOrNull(linkedBooking.total_price),
+        next_total_price: nextTotalPrice,
+      },
+    });
 
     const externalRevisionId = asStringOrNull(revisionRow.external_revision_id);
     if (!externalRevisionId) {

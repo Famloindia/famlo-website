@@ -5,6 +5,10 @@ import AdminLayout from "@/components/admin/AdminLayout";
 import FinanceOverview from "@/components/admin/FinanceOverview";
 import { getAdminCookieName, verifyAdminSessionToken } from "@/lib/admin-auth";
 import { estimateCancellationRefundAmount } from "@/lib/cancellation-history";
+import { isAdminFinanceFolioUiEnabled, isAdminSettlementActionsEnabled, isSettlementDraftGenerationEnabled } from "@/lib/finance/feature-flags";
+import { getFinanceSettings } from "@/lib/finance/settings";
+import { listSettlementCandidates } from "@/lib/finance/settlement-engine";
+import { getSafeTaxDisplayState } from "@/lib/finance/tax-compliance-guard";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import type { FinanceOverviewMetrics } from "@/lib/finance/types";
 import type { FinanceRecentBookingRow } from "@/lib/finance/types";
@@ -27,6 +31,8 @@ export default async function AdminFinancePage() {
   }
 
   const supabase = createAdminSupabaseClient();
+  const financeSettings = await getFinanceSettings({ scopeType: "GLOBAL", scopeId: null }, supabase);
+  const taxDisplay = getSafeTaxDisplayState(financeSettings);
   const { data: killSwitchData } = await supabase
     .from("platform_settings")
     .select("value")
@@ -160,13 +166,59 @@ export default async function AdminFinancePage() {
     };
   });
 
+  const [{ data: folioRows }, { data: settlementRows }] = await Promise.all([
+    supabase.from("reservation_folios_v2").select("id,host_id").not("booking_id", "is", null),
+    supabase.from("host_settlements_v2").select("id,status,net_payable_amount"),
+  ]);
+
+  const hostIds = Array.from(new Set((folioRows ?? []).map((row) => row.host_id).filter(Boolean)));
+  const candidateResults = await Promise.all(
+    hostIds.map((hostId) =>
+      listSettlementCandidates(supabase, {
+        hostId: String(hostId),
+        periodStart: "2020-01-01",
+        periodEnd: "2100-12-31",
+        includeOta: false,
+      })
+    )
+  );
+
+  const eligibleSettlementCandidatesCount = candidateResults.reduce((sum, result) => sum + result.eligibleFolios.length, 0);
+  const excludedCandidates = candidateResults.flatMap((result) => result.excludedFolios);
+  const warningSummary = {
+    ambiguousOtaCollectMode: excludedCandidates.filter((candidate) => candidate.reasons.includes("unknown_payment_collect_mode")).length,
+    unknownOtaSource: excludedCandidates.filter((candidate) => candidate.reasons.includes("unknown_ota_source")).length,
+    refundUnresolved: excludedCandidates.filter((candidate) => candidate.reasons.includes("refund_not_resolved")).length,
+    missingFolioProofLines: excludedCandidates.filter((candidate) => candidate.reasons.includes("missing_required_proof_lines")).length,
+    alreadyInActiveSettlement: excludedCandidates.filter((candidate) => candidate.reasons.includes("already_in_active_settlement")).length,
+  };
+  const settlementSummary = {
+    totalFoliosCount: (folioRows ?? []).length,
+    eligibleSettlementCandidatesCount,
+    draftSettlementsCount: (settlementRows ?? []).filter((row) => row.status === "draft").length,
+    approvedSettlementsCount: (settlementRows ?? []).filter((row) => row.status === "approved").length,
+    cancelledSettlementsCount: (settlementRows ?? []).filter((row) => row.status === "cancelled").length,
+    totalNetPayableInDraftSettlements: (settlementRows ?? [])
+      .filter((row) => row.status === "draft")
+      .reduce((sum, row) => sum + readAggregate(row.net_payable_amount), 0),
+    warningSummary,
+  };
+
   return (
     <AdminLayout
       admin={{ id: "system-admin", name: "Famlo Admin", email: "admin@famlo.in" }}
       activeTab="finance"
       killSwitchActive={killSwitchActive}
     >
-      <FinanceOverview metrics={metrics} recentBookings={recentBookings} />
+      <FinanceOverview
+        metrics={metrics}
+        recentBookings={recentBookings}
+        settlementSummary={settlementSummary}
+        financeUiEnabled={isAdminFinanceFolioUiEnabled()}
+        settlementActionsEnabled={isAdminSettlementActionsEnabled()}
+        settlementDraftGenerationEnabled={isSettlementDraftGenerationEnabled()}
+        taxDisplay={taxDisplay}
+      />
     </AdminLayout>
   );
 }

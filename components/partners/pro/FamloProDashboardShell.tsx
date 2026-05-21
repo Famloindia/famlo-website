@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, type CSSProperties, useEffect, useRef, useState, useTransition } from "react";
@@ -33,13 +34,8 @@ import {
   X,
 } from "lucide-react";
 
-import HostRoomsManager from "@/components/partners/rooms/HostRoomsManager";
-import PropertyContentManager from "@/components/partners/property/PropertyContentManager";
-import ChannelSetupWizard, {
-  type ChannelSetupWizardSummary,
-} from "@/components/partners/pro/ChannelSetupWizard";
-import MessagesTab from "@/components/partners/tabs/MessagesTab";
 import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
+import type { ChannelSetupWizardSummary } from "@/components/partners/pro/ChannelSetupWizard";
 import {
   CHANNEL_PROVIDER_REGISTRY,
   getChannelProviderDefinition,
@@ -73,6 +69,11 @@ import {
 } from "@/lib/channel-providers/channex/client";
 import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
 import styles from "./pro-dashboard.module.css";
+
+const HostRoomsManager = dynamic(() => import("@/components/partners/rooms/HostRoomsManager"));
+const PropertyContentManager = dynamic(() => import("@/components/partners/property/PropertyContentManager"));
+const ChannelSetupWizard = dynamic(() => import("@/components/partners/pro/ChannelSetupWizard"));
+const MessagesTab = dynamic(() => import("@/components/partners/tabs/MessagesTab"));
 
 type ProSectionId =
   | "dashboard"

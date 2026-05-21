@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getAdminCookieName, verifyAdminSessionToken } from "@/lib/admin-auth";
 import { ensureCreditNoteForRefund } from "@/lib/finance/operations";
+import { isTaxComplianceGuardError } from "@/lib/finance/tax-compliance-guard";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -28,6 +29,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ success: true, creditNoteId });
   } catch (error) {
+    if (isTaxComplianceGuardError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to create credit note." },
       { status: 500 }

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPaymentGatewayFeeConfig, getWithholdingConfig, isClientPricingFallbackEnabled } from "@/lib/finance/config";
 import { computeFinanceContractV1 } from "@/lib/finance/engine";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { resolveBookingUnitPrice } from "@/lib/finance/pricing";
 import { resolveFinanceRules } from "@/lib/finance/rules";
 import { getTodayInIndia } from "@/lib/booking-time";
@@ -1597,6 +1598,21 @@ export async function createBookingCompatibility(
     bookingId: asString((v2Booking as JsonRecord).id) ?? "",
     source: "booking_create",
     sourceKind: "direct",
+  });
+
+  await processFinanceEventContract(supabase, {
+    bookingId: asString((v2Booking as JsonRecord).id) ?? "",
+    eventType: "BOOKING_CREATED",
+    sourceEventId: asString((v2Booking as JsonRecord).id) ?? "",
+    calculationVersion: "batch2-direct-folio-v1",
+    currency: asString(quote.pricingSnapshot.currency) ?? "INR",
+    bookingAmount: quote.totalPrice,
+    platformFeeAmount: quote.platformFee,
+    hostPayoutAmount: quote.partnerPayoutAmount,
+    sourceChannel: "famlo_direct",
+    metadata: {
+      source: "booking.create",
+    },
   });
 
   let legacyBookingId: string | null = null;

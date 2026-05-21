@@ -683,7 +683,7 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
                 <small>{isFullDayBooking ? `Total for ${bookingDayLabel}` : "Total for booking"}</small>
                 <strong>Rs. {(quote?.totalPrice ?? estimatedTotalPrice).toLocaleString("en-IN")}</strong>
               </div>
-              <span>{quoteLoading ? "Updating..." : quote ? "No extra GST added" : "Final amount shown at checkout"}</span>
+              <span>{quoteLoading ? "Updating..." : quote ? "No GST collected right now" : "Final amount shown at checkout"}</span>
             </div>
 
             {step !== "confirm" ? (

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { isExternalOtaGuestIdentityMode } from "@/lib/channel-booking-normalization";
 import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
 
 export type ReservationOperationalStatus =
@@ -69,6 +70,43 @@ function asObject(value: unknown): JsonRecord | null {
 function firstObject(value: unknown): JsonRecord | null {
   if (Array.isArray(value)) return asObject(value[0]);
   return asObject(value);
+}
+
+function resolveReservationGuestIdentity(booking: BookingReservationRow): {
+  platformUserId: string | null;
+  fullName: string;
+  email: string;
+  phone: string;
+  metadata: JsonRecord;
+} {
+  const pricingSnapshot = asObject(booking.pricing_snapshot);
+  const guestProfile = firstObject(booking.users);
+  const externalOtaGuest = isExternalOtaGuestIdentityMode(pricingSnapshot?.channel_user_id_mode);
+
+  if (externalOtaGuest) {
+    return {
+      platformUserId: null,
+      fullName: asString(pricingSnapshot?.channel_guest_display_name) || asString(pricingSnapshot?.channel_guest_name) || "OTA Guest",
+      email: asString(pricingSnapshot?.channel_guest_email) || "",
+      phone: asString(pricingSnapshot?.channel_guest_phone) || "",
+      metadata: {
+        source: "booking_bridge",
+        guest_identity_mode: "external_ota_guest",
+        technical_owner_user_id: asString(pricingSnapshot?.technical_owner_user_id),
+      },
+    };
+  }
+
+  return {
+    platformUserId: asString(booking.user_id),
+    fullName: asString(guestProfile?.name) || "",
+    email: asString(guestProfile?.email) || "",
+    phone: asString(guestProfile?.phone) || "",
+    metadata: {
+      source: "booking_bridge",
+      guest_identity_mode: "platform_user",
+    },
+  };
 }
 
 function normalizeReservationStatus(status: string | null | undefined): ReservationOperationalStatus {
@@ -174,7 +212,7 @@ async function ensureReservationGuest(
   supabase: SupabaseClient,
   input: { reservationId: string; booking: BookingReservationRow; actorSource: string }
 ): Promise<void> {
-  const guestProfile = firstObject(input.booking.users);
+  const guestIdentity = resolveReservationGuestIdentity(input.booking);
   const existing = await supabase
     .from("reservation_guests_v2")
     .select("id")
@@ -189,14 +227,15 @@ async function ensureReservationGuest(
 
   const payload = {
     reservation_id: input.reservationId,
-    platform_user_id: asString(input.booking.user_id),
+    platform_user_id: guestIdentity.platformUserId,
     guest_role: "primary",
     guest_type: "adult",
     is_primary: true,
-    full_name: asString(guestProfile?.name),
-    email: asString(guestProfile?.email),
-    phone: asString(guestProfile?.phone),
+    full_name: guestIdentity.fullName,
+    email: guestIdentity.email,
+    phone: guestIdentity.phone,
     metadata: {
+      ...guestIdentity.metadata,
       source: input.actorSource,
     },
     updated_at: new Date().toISOString(),
@@ -471,6 +510,7 @@ export async function ensureReservationForBooking(
 
   const hostRelation = firstObject(booking.hosts);
   const pricingSnapshot = asObject(booking.pricing_snapshot);
+  const guestIdentity = resolveReservationGuestIdentity(booking);
   const validStayUnitId = await resolveValidStayUnitId(
     supabase,
     asString(booking.stay_unit_id) ?? asString(pricingSnapshot?.stay_unit_id)
@@ -486,7 +526,7 @@ export async function ensureReservationForBooking(
     operational_status: reservationStatus,
     source_kind: sourceKind,
     source_channel: sourceChannel,
-    primary_guest_user_id: asString(booking.user_id),
+    primary_guest_user_id: guestIdentity.platformUserId,
     host_id: asString(booking.host_id),
     family_id: asString(hostRelation?.legacy_family_id),
     stay_unit_id: validStayUnitId,

@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { appendLedgerEntryIfMissing } from "@/lib/finance/runtime";
+import { getFinanceSettings } from "@/lib/finance/settings";
+import { assertTaxArtifactAllowed } from "@/lib/finance/tax-compliance-guard";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -60,6 +62,9 @@ export async function ensureInvoiceForBooking(
 
   if (existingError) throw existingError;
   if (existing?.id) return existing.id as string;
+
+  const settings = await getFinanceSettings({}, supabase);
+  assertTaxArtifactAllowed(settings, "CREATE_TAX_INVOICE");
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings_v2")
@@ -126,6 +131,9 @@ export async function ensureCreditNoteForRefund(
     .maybeSingle();
   if (existingError) throw existingError;
   if (existing?.id) return existing.id as string;
+
+  const settings = await getFinanceSettings({}, supabase);
+  assertTaxArtifactAllowed(settings, "CREATE_CREDIT_NOTE");
 
   const { data: refund, error: refundError } = await supabase
     .from("refunds_v2")

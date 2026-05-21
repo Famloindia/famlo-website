@@ -6,6 +6,7 @@ import {
   createOrReuseBookingWhatsAppAction,
 } from "@/lib/booking-whatsapp-actions";
 import { getErrorDiagnostics, getErrorMessage } from "@/lib/error-utils";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { appendPaymentEventAudit } from "@/lib/finance/payment-audit";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { buildBookingReceiptDocument, enqueueNotification } from "@/lib/booking-platform";
@@ -112,12 +113,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const paymentLookup = paymentRowId
       ? await supabase
           .from("payments_v2")
-          .select("id,booking_id,status,raw_response")
+          .select("id,booking_id,status,raw_response,amount_total,tax_amount,currency")
           .eq("id", paymentRowId)
           .maybeSingle()
       : await supabase
           .from("payments_v2")
-          .select("id,booking_id,status,raw_response")
+          .select("id,booking_id,status,raw_response,amount_total,tax_amount,currency")
           .eq("booking_id", bookingId)
           .eq("gateway_order_id", orderId)
           .maybeSingle();
@@ -390,6 +391,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         });
       }
     }
+
+    await processFinanceEventContract(supabase, {
+      bookingId: payment.booking_id,
+      eventType: "PAYMENT_CAPTURED",
+      sourceEventId: gatewayPaymentId,
+      calculationVersion: "batch2-direct-folio-v1",
+      currency:
+        typeof (booking?.pricing_snapshot as Record<string, unknown> | null)?.currency === "string"
+          ? String((booking?.pricing_snapshot as Record<string, unknown>).currency)
+          : "INR",
+      guestPaidAmount:
+        typeof (payment as { amount_total?: number }).amount_total === "number"
+          ? (payment as { amount_total?: number }).amount_total ?? 0
+          : 0,
+      sourceChannel: typeof booking?.source_channel === "string" ? booking.source_channel : "famlo_direct",
+      metadata: {
+        source: "payments.verify",
+        payment_id: payment.id,
+        payout_id: payoutId,
+      },
+    });
 
     await appendPaymentEventAudit(supabase, {
       paymentId: payment.id,

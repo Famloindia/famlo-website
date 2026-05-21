@@ -7,6 +7,7 @@ import {
   createOrReuseBookingWhatsAppAction,
 } from "@/lib/booking-whatsapp-actions";
 import { buildBookingReceiptDocument, enqueueNotification } from "@/lib/booking-platform";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
 import {
@@ -141,13 +142,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const paymentLookup = gatewayPaymentId
       ? await supabase
           .from("payments_v2")
-          .select("id,booking_id,status,raw_response,amount_total,platform_fee,tax_amount")
+          .select("id,booking_id,status,raw_response,amount_total,platform_fee,tax_amount,currency")
           .eq("gateway_payment_id", gatewayPaymentId)
           .maybeSingle()
       : gatewayOrderId
         ? await supabase
             .from("payments_v2")
-            .select("id,booking_id,status,raw_response,amount_total,platform_fee,tax_amount")
+            .select("id,booking_id,status,raw_response,amount_total,platform_fee,tax_amount,currency")
             .eq("gateway_order_id", gatewayOrderId)
             .maybeSingle()
         : { data: null, error: null };
@@ -386,6 +387,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           },
         });
       }
+
+      await processFinanceEventContract(supabase, {
+        bookingId: payment.booking_id,
+        eventType: "REFUND_CREATED",
+        sourceEventId: refundRow.id,
+        calculationVersion: "batch2-direct-folio-v1",
+        currency: typeof payment.currency === "string" ? payment.currency : "INR",
+        refundAmount,
+        metadata: {
+          source: "payments.webhook",
+          refund_status: refundStatus,
+          provider_event: eventName,
+        },
+      });
 
       await appendPaymentEventAudit(supabase, {
         paymentId: payment.id,
@@ -827,6 +842,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           },
         });
       }
+
+      await processFinanceEventContract(supabase, {
+        bookingId: payment.booking_id,
+        eventType: "PAYMENT_CAPTURED",
+        sourceEventId: gatewayPaymentId || gatewayOrderId || payment.id,
+        calculationVersion: "batch2-direct-folio-v1",
+        currency: typeof payment.currency === "string" ? payment.currency : "INR",
+        guestPaidAmount: typeof payment.amount_total === "number" ? payment.amount_total : Number(payment.amount_total ?? 0),
+        sourceChannel: typeof booking?.source_channel === "string" ? booking.source_channel : "famlo_direct",
+        metadata: {
+          source: "payments.webhook",
+          payment_id: payment.id,
+          provider_event: eventName,
+          payout_id: payoutId,
+        },
+      });
     }
 
     await appendPaymentEventAudit(supabase, {

@@ -158,8 +158,8 @@ export default function ManualPayoutDesk({ rows }: { rows: PayoutRow[] }) {
       <div>
         <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 900, color: "white" }}>Manual Settlement Desk</h1>
         <p style={{ marginTop: "8px", color: "rgba(255,255,255,0.45)", fontSize: "13px", lineHeight: 1.6 }}>
-          This is your payout operations screen. It shows what Famlo owes hosts and hommies after platform fee and GST math are
-          already applied. After you pay manually by UPI or bank, mark the payout as paid here so finance stays in sync.
+          This is your payout operations screen. It shows what Famlo owes hosts and hommies after platform fee and current tax-placeholder fields are
+          already reflected. After you pay manually by UPI or bank, mark the payout as paid here so finance stays in sync.
         </p>
       </div>
 
@@ -243,7 +243,7 @@ export default function ManualPayoutDesk({ rows }: { rows: PayoutRow[] }) {
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1480px" }}>
             <thead>
               <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                {["Partner", "Type", "Guest", "Booking", "Booking Status", "Payout Status", "Gross", "Fee", "GST", "Net Owed", "Destination", "Created", "Action"].map((label) => (
+                {["Partner", "Type", "Guest", "Booking", "Booking Status", "Payout Status", "Gross", "Fee", "Platform Fee Tax", "Net Owed", "Destination", "Created", "Action"].map((label) => (
                   <th key={label} style={{ padding: "12px 10px", fontSize: "11px", color: "rgba(255,255,255,0.45)", textTransform: "uppercase" }}>
                     {label}
                   </th>

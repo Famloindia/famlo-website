@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { enqueueNotification } from "@/lib/booking-platform";
 import { getErrorMessage } from "@/lib/error-utils";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { appendLedgerEntryIfMissing } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
@@ -548,6 +549,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         quote,
         now,
       });
+      const { data: latestRefund, error: latestRefundError } = await supabase
+        .from("refunds_v2")
+        .select("id,amount_total")
+        .eq("booking_id", target.booking.id)
+        .order("initiated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestRefundError) throw latestRefundError;
+
+      if (latestRefund?.id) {
+        await processFinanceEventContract(supabase, {
+          bookingId: target.booking.id,
+          eventType: "REFUND_CREATED",
+          sourceEventId: String(latestRefund.id),
+          calculationVersion: "batch2-direct-folio-v1",
+          refundAmount: asNumber(latestRefund.amount_total, 0),
+          metadata: {
+            source: "bookings.cancel",
+            cancellation_reason: cancellationReason,
+          },
+        });
+      }
     } else {
       await cancelLegacyBooking(supabase, target.booking, now, cancelledStatus);
     }

@@ -360,6 +360,14 @@ function isIsoDate(value: string | undefined): value is string {
   return !Number.isNaN(parsed.getTime());
 }
 
+function shouldPreloadBookingWorkspace(section: ProSectionId): boolean {
+  return section === "dashboard" || section === "bookings" || section === "revenue" || section === "reports";
+}
+
+function shouldPreloadCalendarWorkspace(section: ProSectionId): boolean {
+  return section === "dashboard" || section === "bookings" || section === "inventory-calendar";
+}
+
 export async function renderFamloProDashboardPage({
   searchParams,
   roomRouteState = null,
@@ -872,7 +880,10 @@ export async function renderFamloProDashboardPage({
 
   let bookingRowsForCalendar: Array<Record<string, unknown>> = [];
   let bookingRowsForWorkspace: Array<Record<string, unknown>> = [];
-  if (host?.id) {
+  const preloadBookingWorkspace = shouldPreloadBookingWorkspace(initialSection);
+  const preloadCalendarWorkspace = shouldPreloadCalendarWorkspace(initialSection);
+
+  if (host?.id && preloadCalendarWorkspace) {
     const selectWithStayUnit =
       "id,status,payment_status,total_price,start_date,end_date,stay_unit_id,pricing_snapshot,users!user_id(name)";
     const selectFallback =
@@ -903,6 +914,9 @@ export async function renderFamloProDashboardPage({
       bookingRowsForCalendar = (bookingCalendarInitialResult.data ?? []) as Array<Record<string, unknown>>;
     }
 
+  }
+
+  if (host?.id && preloadBookingWorkspace) {
     const workspaceSelectWithStayUnit =
       "id,status,payment_status,total_price,partner_payout_amount,start_date,end_date,created_at,stay_unit_id,pricing_snapshot,users!user_id(name)";
     const workspaceSelectFallback =
@@ -948,6 +962,7 @@ export async function renderFamloProDashboardPage({
   );
 
   if (
+    preloadCalendarWorkspace &&
     rooms.length > 0 &&
     channexProperty?.externalPropertyId &&
     getChannexConfigSummary().configured
@@ -985,7 +1000,7 @@ export async function renderFamloProDashboardPage({
     }
   }
 
-  if (rooms.length > 0) {
+  if (preloadCalendarWorkspace && rooms.length > 0) {
     const projectedInventoryByRoom = await Promise.all(
       rooms.map(async (room) => ({
         roomId: room.id,

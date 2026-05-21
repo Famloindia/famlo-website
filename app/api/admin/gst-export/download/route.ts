@@ -1,6 +1,8 @@
-// app/api/admin/gst-export/download/route.ts
 import { NextResponse } from "next/server";
+
 import { hasValidAdminSession } from "@/lib/admin-auth";
+import { getFinanceSettings } from "@/lib/finance/settings";
+import { assertGstExportAllowed, getSafeTaxDisplayState } from "@/lib/finance/tax-compliance-guard";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export async function GET(request: Request) {
@@ -18,34 +20,31 @@ export async function GET(request: Request) {
     }
 
     const supabase = createAdminSupabaseClient();
+    const settings = await getFinanceSettings({ scopeType: "GLOBAL", scopeId: null }, supabase);
 
-    // Fetch full dataset for the CSV
-    const { data: fees } = await supabase
-      .from("platform_fees")
-      .select("*")
-      .gte("created_at", startDate)
-      .lte("created_at", endDate);
+    try {
+      assertGstExportAllowed(settings);
+    } catch (error) {
+      return NextResponse.json(
+        {
+          success: false,
+          disabled: true,
+          error: error instanceof Error ? error.message : "GST export download is disabled.",
+          taxDisplay: getSafeTaxDisplayState(settings),
+        },
+        { status: 403 }
+      );
+    }
 
-    // Create CSV content
-    const headers = ["Invoice Date", "HSN Code", "Taxable Value", "CGST (9%)", "SGST (9%)", "IGST (18%)", "Total"];
-    const rows = (fees ?? []).map((fee: any) => [
-      fee.created_at.split("T")[0],
-      "9963",
-      fee.amount,
-      (fee.amount * 0.09).toFixed(2),
-      (fee.amount * 0.09).toFixed(2),
-      "0.00",
-      (fee.amount * 1.18).toFixed(2),
-    ]);
-
-    const csvContent = [headers, ...rows].map((r) => r.join(",")).join("\n");
-
-    return new Response(csvContent, {
-      headers: {
-        "Content-Type": "text/csv",
-        "Content-Disposition": `attachment; filename="famlo-gst-${startDate}-${endDate}.csv"`,
+    return NextResponse.json(
+      {
+        success: false,
+        disabled: true,
+        error: "GST export download remains disabled until a compliant export source is implemented.",
+        taxDisplay: getSafeTaxDisplayState(settings),
       },
-    });
+      { status: 409 }
+    );
   } catch (err) {
     console.error("GST export download failed:", err);
     return NextResponse.json({ error: "Action failed" }, { status: 500 });

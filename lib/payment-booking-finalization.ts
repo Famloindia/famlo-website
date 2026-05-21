@@ -96,7 +96,7 @@ export async function loadBookingForPaymentFinalization(
   try {
     const { data, error } = await supabase
       .from("bookings_v2")
-      .select("id,status,payment_status,payment_id,legacy_booking_id,conversation_id,user_id,recipient_type,host_id,hommie_id,stay_unit_id,start_date,end_date,quarter_type,created_at,pricing_snapshot,partner_payout_amount,hosts(user_id,legacy_family_id,display_name),hommie_profiles_v2(user_id)")
+      .select("id,status,payment_status,payment_id,legacy_booking_id,conversation_id,user_id,recipient_type,host_id,hommie_id,stay_unit_id,source_channel,start_date,end_date,quarter_type,created_at,pricing_snapshot,partner_payout_amount,hosts(user_id,legacy_family_id,display_name),hommie_profiles_v2(user_id)")
       .eq("id", bookingId)
       .maybeSingle();
 
@@ -112,7 +112,7 @@ export async function loadBookingForPaymentFinalization(
 
     const { data, error: fallbackError } = await supabase
       .from("bookings_v2")
-      .select("id,status,payment_status,payment_id,legacy_booking_id,conversation_id,user_id,recipient_type,host_id,hommie_id,start_date,end_date,quarter_type,created_at,pricing_snapshot,partner_payout_amount,hosts(user_id,legacy_family_id,display_name),hommie_profiles_v2(user_id)")
+      .select("id,status,payment_status,payment_id,legacy_booking_id,conversation_id,user_id,recipient_type,host_id,hommie_id,source_channel,start_date,end_date,quarter_type,created_at,pricing_snapshot,partner_payout_amount,hosts(user_id,legacy_family_id,display_name),hommie_profiles_v2(user_id)")
       .eq("id", bookingId)
       .maybeSingle();
 

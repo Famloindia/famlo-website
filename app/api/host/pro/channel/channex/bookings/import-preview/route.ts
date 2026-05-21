@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 
 import {
+  resolveNormalizedOtaSourceChannel,
+  resolveOtaPaymentCollectMode,
+} from "@/lib/channel-booking-normalization";
+import {
   resolveChannelStorageProviderCode,
   resolveProviderFromRevision,
 } from "@/lib/channel-providers/provider-capabilities";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -344,6 +349,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       asStringOrNull(rawPayload.guest_phone) ??
       asStringOrNull(rawPayload.customer_phone);
     const guestHidden = !guestName && !guestEmail && !guestPhone;
+    const sourceChannel = resolveNormalizedOtaSourceChannel({
+      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+      otaName: asStringOrNull(revisionRow.ota_name),
+      source: asStringOrNull(revisionRow.source),
+    });
+    const paymentCollectMode = resolveOtaPaymentCollectMode(asStringOrNull(revisionRow.payment_collect));
 
     const pricingSnapshot = {
       stay_unit_id: stayUnitId,
@@ -369,8 +380,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       channel_guest_phone: guestPhone,
       channel_guest_hidden: guestHidden,
       channel_guest_display_name: guestName || "OTA Guest",
-      channel_user_id_mode: "technical_owner_placeholder",
+      channel_user_id_mode: "external_ota_guest",
       technical_owner_user_id: technicalUserId,
+      payment_collect_mode: paymentCollectMode,
     };
 
     const bookingPayload: Record<string, unknown> = {
@@ -389,6 +401,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       guests_count: 1,
       notes: `Imported from Channex preview ${externalBookingId}. Not acknowledged yet.`,
       pricing_snapshot: pricingSnapshot,
+      source_channel: sourceChannel,
       total_price: amountRounded,
       partner_payout_amount: 0,
       payment_status: "not_required",
@@ -427,6 +440,20 @@ export async function POST(request: Request): Promise<NextResponse> {
       .eq("id", channelBookingRevisionId);
 
     if (revisionUpdateError) throw revisionUpdateError;
+
+    await processFinanceEventContract(supabase, {
+      bookingId,
+      eventType: "OTA_BOOKING_IMPORTED",
+      sourceEventId: channelBookingRevisionId,
+      calculationVersion: "batch2-direct-folio-v1",
+      bookingAmount: amountRounded,
+      sourceChannel,
+      paymentCollectMode,
+      metadata: {
+        source: "channex.import_preview",
+        external_booking_id: externalBookingId,
+      },
+    });
 
     await logImportResult({
       supabase,

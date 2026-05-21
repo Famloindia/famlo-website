@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { resolveNormalizedOtaSourceChannel } from "@/lib/channel-booking-normalization";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -40,6 +42,15 @@ function asString(value: unknown): string {
 
 function asStringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asNumberOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function asObject(value: unknown): JsonRecord {
@@ -205,6 +216,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         .update({
           status: "cancelled",
           payment_status: "not_required",
+          source_channel: resolveNormalizedOtaSourceChannel({
+            otaName: asStringOrNull(revisionRow.ota_name),
+            source,
+          }),
           pricing_snapshot: nextPricingSnapshot,
           updated_at: now,
         } as never)
@@ -216,6 +231,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         .from("bookings_v2")
         .update({
           payment_status: "not_required",
+          source_channel: resolveNormalizedOtaSourceChannel({
+            otaName: asStringOrNull(revisionRow.ota_name),
+            source,
+          }),
           pricing_snapshot: nextPricingSnapshot,
           updated_at: now,
         } as never)
@@ -236,6 +255,27 @@ export async function POST(request: Request): Promise<NextResponse> {
       .eq("id", channelBookingRevisionId);
 
     if (revisionUpdateError) throw revisionUpdateError;
+
+    const assuredLinkedBookingId = String(linkedBookingId);
+
+    await processFinanceEventContract(supabase, {
+      bookingId: assuredLinkedBookingId,
+      eventType: "OTA_BOOKING_CANCELLED",
+      sourceEventId: channelBookingRevisionId,
+      calculationVersion: "batch3-ota-folio-v1",
+      bookingAmount: asNumberOrNull(linkedBooking.total_price) ?? undefined,
+      sourceChannel: resolveNormalizedOtaSourceChannel({
+        otaName: asStringOrNull(revisionRow.ota_name),
+        source,
+      }),
+      paymentCollectMode: asStringOrNull(revisionRow.payment_collect),
+      metadata: {
+        source: "channex.apply_cancellation",
+        external_booking_id: externalBookingId,
+        external_revision_id: asStringOrNull(revisionRow.external_revision_id),
+        ambiguity_reason: "ota_cancellation_financials_not_explicit",
+      },
+    });
 
     await logApplyResult({
       supabase,

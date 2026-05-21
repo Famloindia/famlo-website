@@ -562,7 +562,6 @@ function HomeBookingFlow(_a) {
                 {quote ? (<>
                     <div className="booking-summary-row"><span>Room amount</span><strong>Rs. {quote.subtotal.toLocaleString("en-IN")}</strong></div>
                     {quote.discountAmount > 0 ? (<div className="booking-summary-row"><span>Discount</span><strong>- Rs. {quote.discountAmount.toLocaleString("en-IN")}</strong></div>) : null}
-                    <div className="booking-summary-row"><span>GST and taxes</span><strong>Rs. {quote.taxAmount.toLocaleString("en-IN")}</strong></div>
                   </>) : null}
                 <label className="famlo-picker-field">
                   <span>Coupon code</span>
@@ -578,7 +577,7 @@ function HomeBookingFlow(_a) {
                 <small>{isFullDayBooking ? "Total for ".concat(bookingDayLabel) : "Total for booking"}</small>
                 <strong>Rs. {((_c = quote === null || quote === void 0 ? void 0 : quote.totalPrice) !== null && _c !== void 0 ? _c : estimatedTotalPrice).toLocaleString("en-IN")}</strong>
               </div>
-              <span>{quoteLoading ? "Updating..." : quote ? "GST included" : "Taxes calculated at checkout"}</span>
+              <span>{quoteLoading ? "Updating..." : quote ? "No GST collected right now" : "Final amount shown at checkout"}</span>
             </div>
 
             {step !== "confirm" ? (<div className="detail-actions famlo-widget-actions">

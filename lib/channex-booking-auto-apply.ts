@@ -1,10 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  resolveNormalizedOtaSourceChannel,
+  resolveOtaPaymentCollectMode,
+} from "@/lib/channel-booking-normalization";
 import { acknowledgeChannexBookingRevision, getChannexConfigSummary } from "@/lib/channel-providers/channex/client";
 import {
   resolveChannelStorageProviderCode,
   resolveProviderFromRevision,
 } from "@/lib/channel-providers/provider-capabilities";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -313,6 +318,12 @@ async function autoImportNewRevision(
     asStringOrNull(revision.raw_payload.customer_phone);
   const guestName = revision.guest_name ?? "OTA Guest";
   const amountRounded = Math.round(revision.amount);
+  const sourceChannel = resolveNormalizedOtaSourceChannel({
+    otaProviderCode: revision.ota_provider_code,
+    otaName: revision.ota_name,
+    source: revision.source,
+  });
+  const paymentCollectMode = resolveOtaPaymentCollectMode(revision.payment_collect);
 
   const pricingSnapshot = {
     stay_unit_id: stayUnitId,
@@ -338,8 +349,9 @@ async function autoImportNewRevision(
     channel_guest_phone: guestPhone,
     channel_guest_hidden: !guestName && !guestEmail && !guestPhone,
     channel_guest_display_name: guestName || "OTA Guest",
-    channel_user_id_mode: "technical_owner_placeholder",
+    channel_user_id_mode: "external_ota_guest",
     technical_owner_user_id: technicalUserId,
+    payment_collect_mode: paymentCollectMode,
   };
 
   const bookingPayload: Record<string, unknown> = {
@@ -358,6 +370,7 @@ async function autoImportNewRevision(
     guests_count: 1,
     notes: `Imported automatically from Channex feed ${revision.external_booking_id}.`,
     pricing_snapshot: pricingSnapshot,
+    source_channel: sourceChannel,
     total_price: amountRounded,
     partner_payout_amount: 0,
     payment_status: "not_required",
@@ -391,6 +404,20 @@ async function autoImportNewRevision(
       updated_at: now,
     } as never)
     .eq("id", revision.id);
+
+  await processFinanceEventContract(supabase, {
+    bookingId,
+    eventType: "OTA_BOOKING_IMPORTED",
+    sourceEventId: revision.id,
+    calculationVersion: "batch2-direct-folio-v1",
+    bookingAmount: amountRounded,
+    sourceChannel,
+    paymentCollectMode,
+    metadata: {
+      source: "channex.auto_apply",
+      external_booking_id: revision.external_booking_id,
+    },
+  });
 
   return { ok: true, bookingId };
 }
@@ -465,6 +492,11 @@ async function autoApplyCancellationRevision(
     .update({
       status: existingStatus === "cancelled" ? linkedBooking.status : "cancelled",
       payment_status: "not_required",
+      source_channel: resolveNormalizedOtaSourceChannel({
+        otaProviderCode: revision.ota_provider_code,
+        otaName: revision.ota_name,
+        source: revision.source,
+      }),
       pricing_snapshot: nextPricingSnapshot,
       updated_at: now,
     } as never)
@@ -479,6 +511,25 @@ async function autoApplyCancellationRevision(
       updated_at: now,
     } as never)
     .eq("id", revision.id);
+
+  await processFinanceEventContract(supabase, {
+    bookingId: revision.linked_booking_id,
+    eventType: "OTA_BOOKING_CANCELLED",
+    sourceEventId: revision.id,
+    calculationVersion: "batch3-ota-folio-v1",
+    bookingAmount: asNumberOrNull(linkedBooking.total_price) ?? undefined,
+    sourceChannel: resolveNormalizedOtaSourceChannel({
+      otaProviderCode: revision.ota_provider_code,
+      otaName: revision.ota_name,
+      source: revision.source,
+    }),
+    paymentCollectMode: revision.payment_collect,
+    metadata: {
+      source: "channex.auto_apply_cancellation",
+      external_booking_id: revision.external_booking_id,
+      ambiguity_reason: "ota_cancellation_financials_not_explicit",
+    },
+  });
 
   return { ok: true, bookingId: revision.linked_booking_id };
 }
@@ -723,6 +774,11 @@ async function autoApplyModificationRevision(
   const updatePayload: Record<string, unknown> = {
     start_date: assuredArrivalDate,
     end_date: assuredDepartureDate,
+    source_channel: resolveNormalizedOtaSourceChannel({
+      otaProviderCode: revision.ota_provider_code,
+      otaName: revision.ota_name,
+      source: revision.source,
+    }),
     pricing_snapshot: nextPricingSnapshot,
     updated_at: now,
     payment_status: "not_required",
@@ -767,6 +823,31 @@ async function autoApplyModificationRevision(
       updated_at: now,
     } as never)
     .eq("id", revision.id);
+
+  await processFinanceEventContract(supabase, {
+    bookingId: revision.linked_booking_id,
+    eventType: "OTA_BOOKING_MODIFIED",
+    sourceEventId: revision.id,
+    calculationVersion: "batch3-ota-folio-v1",
+    currency: asStringOrNull(nextPricingSnapshot.currency) ?? "INR",
+    bookingAmount: nextTotalPrice ?? undefined,
+    adjustmentAmount:
+      nextTotalPrice != null && asNumberOrNull(linkedBooking.total_price) != null
+        ? nextTotalPrice - asNumberOrNull(linkedBooking.total_price)!
+        : undefined,
+    sourceChannel: resolveNormalizedOtaSourceChannel({
+      otaProviderCode: revision.ota_provider_code,
+      otaName: revision.ota_name,
+      source: revision.source,
+    }),
+    paymentCollectMode: revision.payment_collect,
+    metadata: {
+      source: "channex.auto_apply_modification",
+      external_booking_id: revision.external_booking_id,
+      previous_total_price: asNumberOrNull(linkedBooking.total_price),
+      next_total_price: nextTotalPrice,
+    },
+  });
 
   return { ok: true, bookingId: revision.linked_booking_id };
 }

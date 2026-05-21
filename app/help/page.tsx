@@ -42,7 +42,7 @@ export default function HelpCenterPage(): React.JSX.Element {
             How can we help you today?
           </h1>
           <p style={{ fontSize: "18px", color: "#64748B", maxWidth: "600px", margin: "0 auto", lineHeight: 1.6 }}>
-            Famlo is a people-first homestay and local connection platform. We're here to ensure your experience is smooth and meaningful.
+            Famlo is a people-first homestay and local connection platform. We&apos;re here to ensure your experience is smooth and meaningful.
           </p>
         </div>
 
@@ -118,7 +118,7 @@ export default function HelpCenterPage(): React.JSX.Element {
               ]} />
               <HelpSection title="C. Payments & Refunds" topics={[
                 "How payment works",
-                "Platform fee / GST explanation",
+                "Platform fee / tax status explanation",
                 "Cancellation policy",
                 "Refund timeline",
                 "Failed payment issue",
@@ -162,7 +162,7 @@ export default function HelpCenterPage(): React.JSX.Element {
               <HelpSection title="D. Payouts & Commission" topics={[
                 "How host payout works",
                 "Famlo commission",
-                "GST on platform commission",
+                "Tax status on platform commission",
                 "Payout timeline",
                 "Cancellation penalty and host preparation fee"
               ]} />
