@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { isCheckoutSection95PricingEnabled } from "@/lib/finance/feature-flags";
+import { isSection95TaxMode } from "@/lib/finance/finance-contracts";
+import { calculateSection95FinanceContract } from "@/lib/finance/section-9-5-engine";
+import { getFinanceSettings } from "@/lib/finance/settings";
 import { upsertPaymentIntentAudit } from "@/lib/finance/payment-audit";
 import { ensureBookingFinancialSnapshot } from "@/lib/finance/runtime";
 import { createRazorpayOrder, isRazorpayConfigured } from "@/lib/razorpay";
@@ -19,6 +23,14 @@ type PaymentIntentRow = {
 };
 
 type JsonRecord = Record<string, unknown>;
+
+type ResolvedCheckoutPricing = {
+  amountTotal: number;
+  platformFee: number;
+  taxAmount: number;
+  partnerPayoutAmount: number;
+  pricingSnapshot: JsonRecord;
+};
 
 export type PaymentIntentResult = {
   payment: PaymentIntentRow;
@@ -64,6 +76,137 @@ export function buildRazorpayOrderNotes(input: {
   return notes;
 }
 
+function normalizeSection95Nights(value: unknown): Array<{ roomId?: string | null; date?: string | null; listedValue?: number | null; actualValue: number }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as JsonRecord;
+      const actualValue = Number(record.actualValue ?? record.actual_value ?? record.amount ?? 0);
+      if (!Number.isFinite(actualValue)) return null;
+      return {
+        roomId: asString(record.roomId ?? record.room_id),
+        date: asString(record.date),
+        listedValue: Number(record.listedValue ?? record.listed_value ?? actualValue),
+        actualValue,
+      };
+    })
+    .filter(Boolean) as Array<{ roomId?: string | null; date?: string | null; listedValue?: number | null; actualValue: number }>;
+}
+
+export async function resolveCheckoutPricingForPaymentIntent(
+  supabase: SupabaseClient,
+  input: {
+    totalPrice: number;
+    partnerPayoutAmount: number;
+    pricingSnapshot: JsonRecord | null;
+  }
+): Promise<ResolvedCheckoutPricing> {
+  const snapshot = { ...(input.pricingSnapshot ?? {}) };
+  const fallbackAmount = resolveInternalGuestPayableAmount(input.totalPrice, snapshot);
+  const fallbackPlatformFee =
+    typeof snapshot.platform_fee === "number" ? snapshot.platform_fee : Number(snapshot.platform_fee ?? 0);
+  const fallbackTaxAmount =
+    typeof snapshot.tax_amount === "number" ? snapshot.tax_amount : Number(snapshot.tax_amount ?? 0);
+  const fallbackPartnerPayout = Number.isFinite(input.partnerPayoutAmount) ? input.partnerPayoutAmount : 0;
+
+  if (!isCheckoutSection95PricingEnabled()) {
+    return {
+      amountTotal: fallbackAmount,
+      platformFee: fallbackPlatformFee,
+      taxAmount: fallbackTaxAmount,
+      partnerPayoutAmount: fallbackPartnerPayout,
+      pricingSnapshot: snapshot,
+    };
+  }
+
+  const settings = await getFinanceSettings({}, supabase);
+  if (!isSection95TaxMode(settings.taxMode)) {
+    return {
+      amountTotal: fallbackAmount,
+      platformFee: fallbackPlatformFee,
+      taxAmount: fallbackTaxAmount,
+      partnerPayoutAmount: fallbackPartnerPayout,
+      pricingSnapshot: snapshot,
+    };
+  }
+
+  const section95Input = (snapshot.section_9_5_input as JsonRecord | null) ?? null;
+  const nights = normalizeSection95Nights(
+    snapshot.section_9_5_input_nights ?? section95Input?.nights ?? snapshot.room_nights
+  );
+  if (nights.length === 0) {
+    return {
+      amountTotal: fallbackAmount,
+      platformFee: fallbackPlatformFee,
+      taxAmount: fallbackTaxAmount,
+      partnerPayoutAmount: fallbackPartnerPayout,
+      pricingSnapshot: snapshot,
+    };
+  }
+
+  const contract = calculateSection95FinanceContract({
+    taxMode: settings.taxMode as any,
+    nights,
+  });
+
+  const nextSnapshot: JsonRecord = {
+    ...snapshot,
+    guest_payable_amount: contract.guestPayableAmount,
+    room_base_amount: contract.roomBaseAmount,
+    accommodation_gst_amount: contract.accommodationGstAmount,
+    platform_fee: contract.famloPlatformFeeInclGst,
+    tax_amount: contract.accommodationGstAmount,
+    partner_payout_amount: contract.hostNetPayout,
+    section_9_5_contract: {
+      taxMode: contract.taxMode,
+      calculationVersion: contract.calculationVersion,
+      roomBaseAmount: contract.roomBaseAmount,
+      accommodationGstAmount: contract.accommodationGstAmount,
+      guestPayableAmount: contract.guestPayableAmount,
+      famloPlatformFeeInclGst: contract.famloPlatformFeeInclGst,
+      famloPlatformFeeTaxable: contract.famloPlatformFeeTaxable,
+      famloPlatformFeeGst: contract.famloPlatformFeeGst,
+      hostGrossPayout: contract.hostGrossPayout,
+    },
+    finance_snapshot: {
+      ...((snapshot.finance_snapshot as JsonRecord | null) ?? {}),
+      calculation_mode: "section_9_5",
+      contract_v1: {
+        booking_amount: contract.roomBaseAmount,
+        amount_after_discount: contract.roomBaseAmount,
+        platform_fee: contract.famloPlatformFeeInclGst,
+        gst_on_platform_fee: contract.famloPlatformFeeGst,
+        guest_total: contract.guestPayableAmount,
+        host_payout: contract.hostNetPayout,
+        stay_tax_amount: contract.accommodationGstAmount,
+        tds_amount: contract.tdsAmount,
+        tcs_amount: contract.tcsAmount,
+        famlo_net_revenue: contract.famloPlatformFeeTaxable,
+        commission_rate_bps: 1600,
+        calculation_version: contract.calculationVersion,
+      },
+      tax_breakdown: {
+        accommodation_gst_amount: contract.accommodationGstAmount,
+        accommodation_gst_lines: contract.accommodationGstBreakdown,
+      },
+      payout_breakdown: {
+        host_gross_payout: contract.hostGrossPayout,
+        host_net_payout: contract.hostNetPayout,
+        tds_amount: contract.tdsAmount,
+      },
+    },
+  };
+
+  return {
+    amountTotal: contract.guestPayableAmount,
+    platformFee: contract.famloPlatformFeeInclGst,
+    taxAmount: contract.accommodationGstAmount,
+    partnerPayoutAmount: contract.hostNetPayout,
+    pricingSnapshot: nextSnapshot,
+  };
+}
+
 export async function createPaymentIntentForBooking(
   supabase: SupabaseClient,
   input: { bookingId: string; gateway?: string | null }
@@ -86,16 +229,19 @@ export async function createPaymentIntentForBooking(
     throw new Error("Booking not found.");
   }
 
-  const pricingSnapshot = (booking.pricing_snapshot as Record<string, unknown> | null) ?? {};
-  const amountTotal = resolveInternalGuestPayableAmount(booking.total_price, pricingSnapshot);
-  const platformFee =
-    typeof pricingSnapshot.platform_fee === "number"
-      ? pricingSnapshot.platform_fee
-      : Number(pricingSnapshot.platform_fee ?? 0);
-  const taxAmount =
-    typeof pricingSnapshot.tax_amount === "number"
-      ? pricingSnapshot.tax_amount
-      : Number(pricingSnapshot.tax_amount ?? 0);
+  const basePricingSnapshot = (booking.pricing_snapshot as Record<string, unknown> | null) ?? {};
+  const resolvedPricing = await resolveCheckoutPricingForPaymentIntent(supabase, {
+    totalPrice: Number(booking.total_price ?? 0),
+    partnerPayoutAmount:
+      typeof booking.partner_payout_amount === "number"
+        ? booking.partner_payout_amount
+        : Number(booking.partner_payout_amount ?? 0),
+    pricingSnapshot: basePricingSnapshot,
+  });
+  const pricingSnapshot = resolvedPricing.pricingSnapshot;
+  const amountTotal = resolvedPricing.amountTotal;
+  const platformFee = resolvedPricing.platformFee;
+  const taxAmount = resolvedPricing.taxAmount;
 
   const existingPaymentResult = booking.payment_id
     ? await supabase
@@ -129,9 +275,7 @@ export async function createPaymentIntentForBooking(
         platform_fee: platformFee,
         tax_amount: taxAmount,
         partner_payout_amount:
-          typeof booking.partner_payout_amount === "number"
-            ? booking.partner_payout_amount
-            : Number(booking.partner_payout_amount ?? 0),
+          resolvedPricing.partnerPayoutAmount,
         status: "created",
         raw_response: {
           ...((existingPayment?.raw_response as Record<string, unknown> | null) ?? {}),
@@ -212,9 +356,7 @@ export async function createPaymentIntentForBooking(
       pricingSnapshot,
       totalPrice: amountTotal,
       partnerPayoutAmount:
-        typeof booking.partner_payout_amount === "number"
-          ? booking.partner_payout_amount
-          : Number(booking.partner_payout_amount ?? 0),
+        resolvedPricing.partnerPayoutAmount,
     }),
     upsertPaymentIntentAudit(supabase, {
       bookingId,
