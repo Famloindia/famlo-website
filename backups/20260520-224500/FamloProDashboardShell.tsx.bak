@@ -195,8 +195,6 @@ type BookingWorkspaceFilter =
   | "Modified / Review needed"
   | "Action needed";
 
-type BookingWorkspaceView = "Current" | "History";
-
 type BookingDateFilter = "Check-in" | "Check-out" | "Booking Dates" | "Staying Today";
 
 type RevenueWindowFilter = "Today" | "This week" | "This month" | "All time";
@@ -1687,7 +1685,6 @@ export default function FamloProDashboardShell({
   const [isBulkCalendarPending, startBulkCalendarTransition] = useTransition();
   const [isCalendarJumpPending, startCalendarJumpTransition] = useTransition();
   const [bookingFilter, setBookingFilter] = useState<BookingWorkspaceFilter>("All");
-  const [bookingView, setBookingView] = useState<BookingWorkspaceView>("Current");
   const [bookingDateFilter, setBookingDateFilter] = useState<BookingDateFilter>("Check-in");
   const [revenueWindow, setRevenueWindow] = useState<RevenueWindowFilter>("This month");
   const [reportWindow, setReportWindow] = useState<ReportWindowFilter>("This month");
@@ -2290,26 +2287,16 @@ export default function FamloProDashboardShell({
   const connectedPropertyCount = channelFoundation.properties.filter(
     (property) => property.syncStatus === "connected"
   ).length;
-  const bookingsTodayIsoDate = isoDateFromLocalDate(new Date());
   const totalBookingsCount = proBookings.length;
-  const historyBookingIds = new Set(
-    proBookings
-      .filter((booking) => isCancelledBooking(booking) || booking.endDate < bookingsTodayIsoDate)
-      .map((booking) => booking.bookingId)
-  );
-  const historyBookings = proBookings.filter((booking) => historyBookingIds.has(booking.bookingId));
-  const currentBookings = proBookings.filter((booking) => !historyBookingIds.has(booking.bookingId));
-  const visibleBookingPool = bookingView === "History" ? historyBookings : currentBookings;
-  const currentBookingsCount = currentBookings.length;
-  const historyBookingsCount = historyBookings.length;
-  const famloDirectBookingsCount = visibleBookingPool.filter((booking) => !booking.isOta).length;
-  const otaBookingsCount = visibleBookingPool.filter((booking) => booking.isOta).length;
-  const pendingApprovalBookingsCount = visibleBookingPool.filter(isPendingApprovalBooking).length;
-  const cancelledBookingsCount = visibleBookingPool.filter(isCancelledBooking).length;
-  const modifiedReviewBookingsCount = visibleBookingPool.filter(isModifiedReviewBooking).length;
-  const actionNeededBookingsCount = visibleBookingPool.filter(isActionNeededBooking).length;
-  const confirmedBookingsCount = visibleBookingPool.filter(isConfirmedBooking).length;
-  const filteredProBookings = visibleBookingPool
+  const famloDirectBookingsCount = proBookings.filter((booking) => !booking.isOta).length;
+  const otaBookingsCount = proBookings.filter((booking) => booking.isOta).length;
+  const pendingApprovalBookingsCount = proBookings.filter(isPendingApprovalBooking).length;
+  const cancelledBookingsCount = proBookings.filter(isCancelledBooking).length;
+  const modifiedReviewBookingsCount = proBookings.filter(isModifiedReviewBooking).length;
+  const actionNeededBookingsCount = proBookings.filter(isActionNeededBooking).length;
+  const confirmedBookingsCount = proBookings.filter(isConfirmedBooking).length;
+  const bookingsTodayIsoDate = isoDateFromLocalDate(new Date());
+  const filteredProBookings = proBookings
     .filter((booking) => matchesBookingFilter(booking, bookingFilter))
     .filter((booking) => {
       if (bookingDateFilter !== "Staying Today") return true;
@@ -4811,11 +4798,11 @@ export default function FamloProDashboardShell({
                               calendarRateOverrides[getCalendarRateOverrideKey(selectedRoomCalendarRow.roomId, cell.date)] ?? null;
                             const visibleCell = override
                               ? {
-                                ...cell,
-                                amount: override.amount,
-                                displayValue: override.displayValue,
-                                isOverridden: override.isOverridden,
-                              }
+                                  ...cell,
+                                  amount: override.amount,
+                                  displayValue: override.displayValue,
+                                  isOverridden: override.isOverridden,
+                                }
                               : cell;
 
                             return (
@@ -5658,7 +5645,7 @@ export default function FamloProDashboardShell({
           )}
 
           {activeSection === "inventory-calendar" && (
-            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.calendarLuxuryShell} ${styles.proLuxurySection}`}>
+            <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.calendarLuxuryShell}`}>
               <div>
                 <h3 className={styles.propertyCenterTitle}>Calendar</h3>
               </div>
@@ -5962,57 +5949,13 @@ export default function FamloProDashboardShell({
                   </div>
                 )}
                 <div className={styles.listGrid} style={{ marginTop: "24px" }}>
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      Jump to month
-                      <button type="button" className={styles.infoIconBtn} title="Select a specific month and year to view on the calendar.">i</button>
-                    </div>
-                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
-                      Move the calendar above to the month where you want to block dates or edit room pricing.
-                    </div>
-                    <div className={styles.calendarJumpForm}>
-                      <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
-                        <span className={styles.fieldLabel}>Month</span>
-                        <select className={styles.fieldInput} value={calendarJumpMonth} onChange={(event) => setCalendarJumpMonth(event.target.value)}>
-                          {calendarJumpMonthOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
-                        <span className={styles.fieldLabel}>Year</span>
-                        <select className={styles.fieldInput} value={calendarJumpYear} onChange={(event) => setCalendarJumpYear(event.target.value)}>
-                          {calendarJumpYearOptions.map((year) => (
-                            <option key={year} value={year}>
-                              {year}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-
-                    <div className={styles.calendarJumpActions} style={{ paddingTop: 14 }}>
-                      <button type="button" className={styles.secondaryActionButton} onClick={handleCalendarJump} disabled={isCalendarJumpPending}>
-                        {isCalendarJumpPending ? "Finding..." : "Find month"}
-                      </button>
-                      <button type="button" className={styles.secondaryActionButton} onClick={handleCalendarToday} disabled={isCalendarJumpPending}>
-                        {isCalendarJumpPending ? "Opening..." : "Go to today"}
-                      </button>
-                    </div>
-                  </article>
-
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      Daily room rate
-                      <button type="button" className={styles.infoIconBtn} title="Edit the specific price for this room on the selected calendar date.">i</button>
-                    </div>
+                  <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
+                    <div className={styles.listTitle}>Daily room rate</div>
                     <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
                       Click any future rate cell above to set a room-specific daily rate override for that exact date.
                     </div>
                     {selectedCalendarRateCell ? (
-                      <div className={styles.stack}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
                         <div className={styles.placeholderRow}>
                           <div className={styles.placeholderTitle}>{selectedCalendarRateCell.roomName}</div>
                           <div className={styles.placeholderValue}>{formatShortDate(selectedCalendarRateCell.date)}</div>
@@ -6031,7 +5974,7 @@ export default function FamloProDashboardShell({
                             placeholder={selectedCalendarRateCell.baseAmount > 0 ? String(selectedCalendarRateCell.baseAmount) : "1500"}
                           />
                         </label>
-                        <div className={styles.roomReadinessRow}>
+                        <div className={styles.roomReadinessRow} style={{ marginTop: "auto" }}>
                           <button
                             type="button"
                             className={styles.secondaryActionButton}
@@ -6055,11 +5998,110 @@ export default function FamloProDashboardShell({
                     )}
                   </article>
 
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      Bulk calendar and restrictions
-                      <button type="button" className={styles.infoIconBtn} title="Apply prices, blocks, and rules across a wide date range at once.">i</button>
+                  <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
+                    <div className={styles.listTitle}>Multiple block / unblock</div>
+                    <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
+                      Quickly block or unblock a date range for the selected room scope. This uses the same Famlo-to-Channex bulk availability path as the existing calendar sync.
                     </div>
+                    {bulkCalendarFeedback ? (
+                      <div
+                        className={`${styles.feedbackBox} ${bulkCalendarFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
+                        style={{ marginBottom: 14 }}
+                      >
+                        {bulkCalendarFeedback.text}
+                      </div>
+                    ) : null}
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Room scope</span>
+                        <select
+                          className={styles.fieldInput}
+                          value={bulkCalendarDraft.roomId}
+                          onChange={(event) =>
+                            setBulkCalendarDraft((current) => ({
+                              ...current,
+                              roomId: event.target.value,
+                              applyToAllRooms: event.target.value === "__all__" ? current.applyToAllRooms : false,
+                            }))}
+                        >
+                          <option value="__all__">All visible rooms</option>
+                          {calendarRows.map((row) => (
+                            <option key={row.roomId} value={row.roomId}>
+                              {row.roomName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {bulkCalendarDraft.roomId === "__all__" ? (
+                        <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>Confirm all-room apply</span>
+                          <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <input
+                              type="checkbox"
+                              checked={bulkCalendarDraft.applyToAllRooms}
+                              onChange={(event) =>
+                                setBulkCalendarDraft((current) => ({
+                                  ...current,
+                                  applyToAllRooms: event.target.checked,
+                                }))}
+                            />
+                            <span className={styles.feedCopy} style={{ marginBottom: 0 }}>
+                              I want this block or unblock to affect every visible room.
+                            </span>
+                          </label>
+                        </label>
+                      ) : null}
+                      <div className={styles.calendarJumpForm}>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>From</span>
+                          <input
+                            className={styles.fieldInput}
+                            type="date"
+                            value={bulkCalendarDraft.dateFrom}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateFrom: event.target.value }))}
+                          />
+                        </label>
+                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                          <span className={styles.fieldLabel}>To</span>
+                          <input
+                            className={styles.fieldInput}
+                            type="date"
+                            value={bulkCalendarDraft.dateTo}
+                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateTo: event.target.value }))}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    <div className={styles.roomReadinessRow} style={{ marginTop: "auto", paddingTop: 14 }}>
+                      <button
+                        type="button"
+                        className={styles.secondaryActionButton}
+                        onClick={() =>
+                          submitBulkCalendarUpdate({
+                            availabilityAction: "block",
+                            rateAmount: "",
+                          })}
+                        disabled={isBulkCalendarPending}
+                      >
+                        {isBulkCalendarPending ? "Applying..." : "Block selected dates"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryActionButton}
+                        onClick={() =>
+                          submitBulkCalendarUpdate({
+                            availabilityAction: "unblock",
+                            rateAmount: "",
+                          })}
+                        disabled={isBulkCalendarPending}
+                      >
+                        {isBulkCalendarPending ? "Applying..." : "Unblock selected dates"}
+                      </button>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
+                    <div className={styles.listTitle}>Bulk calendar and restrictions</div>
                     <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
                       Use one PMS save flow to batch prices, availability, and restriction changes across a date range. Famlo queues the resulting Channex ARI updates instead of pushing directly from the browser.
                     </div>
@@ -6160,7 +6202,7 @@ export default function FamloProDashboardShell({
                       </label>
                       <div className={styles.calendarJumpForm}>
                         <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
-                          <span className={styles.fieldLabel} style={{ display: "flex", alignItems: "center", gap: 4 }}>Min stay through <button type="button" className={styles.infoIconBtn} title="Minimum nights a guest must stay if their booking touches these dates." onClick={(e) => e.preventDefault()}>i</button></span>
+                          <span className={styles.fieldLabel}>Min stay through</span>
                           <input
                             className={styles.fieldInput}
                             inputMode="numeric"
@@ -6170,7 +6212,7 @@ export default function FamloProDashboardShell({
                           />
                         </label>
                         <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
-                          <span className={styles.fieldLabel} style={{ display: "flex", alignItems: "center", gap: 4 }}>Min stay arrival <button type="button" className={styles.infoIconBtn} title="Minimum nights a guest must stay if they check in on these dates." onClick={(e) => e.preventDefault()}>i</button></span>
+                          <span className={styles.fieldLabel}>Min stay arrival</span>
                           <input
                             className={styles.fieldInput}
                             inputMode="numeric"
@@ -6181,7 +6223,7 @@ export default function FamloProDashboardShell({
                         </label>
                       </div>
                       <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
-                        <span className={styles.fieldLabel} style={{ display: "flex", alignItems: "center", gap: 4 }}>Max stay <button type="button" className={styles.infoIconBtn} title="Maximum allowed nights for bookings on these dates." onClick={(e) => e.preventDefault()}>i</button></span>
+                        <span className={styles.fieldLabel}>Max stay</span>
                         <input
                           className={styles.fieldInput}
                           inputMode="numeric"
@@ -6192,7 +6234,7 @@ export default function FamloProDashboardShell({
                       </label>
                       <div className={styles.calendarJumpForm}>
                         <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
-                          <span className={styles.fieldLabel} style={{ display: "flex", alignItems: "center", gap: 4 }}>CTA <button type="button" className={styles.infoIconBtn} title="Closed to Arrival: Guests cannot check in on these dates." onClick={(e) => e.preventDefault()}>i</button></span>
+                          <span className={styles.fieldLabel}>CTA</span>
                           <select
                             className={styles.fieldInput}
                             value={bulkCalendarDraft.cta}
@@ -6204,7 +6246,7 @@ export default function FamloProDashboardShell({
                           </select>
                         </label>
                         <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
-                          <span className={styles.fieldLabel} style={{ display: "flex", alignItems: "center", gap: 4 }}>CTD <button type="button" className={styles.infoIconBtn} title="Closed to Departure: Guests cannot check out on these dates." onClick={(e) => e.preventDefault()}>i</button></span>
+                          <span className={styles.fieldLabel}>CTD</span>
                           <select
                             className={styles.fieldInput}
                             value={bulkCalendarDraft.ctd}
@@ -6217,7 +6259,7 @@ export default function FamloProDashboardShell({
                         </label>
                       </div>
                       <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
-                        <span className={styles.fieldLabel} style={{ display: "flex", alignItems: "center", gap: 4 }}>Stop sell <button type="button" className={styles.infoIconBtn} title="Completely hide this room from being booked on these dates." onClick={(e) => e.preventDefault()}>i</button></span>
+                        <span className={styles.fieldLabel}>Stop sell</span>
                         <select
                           className={styles.fieldInput}
                           value={bulkCalendarDraft.stopSell}
@@ -6229,7 +6271,7 @@ export default function FamloProDashboardShell({
                         </select>
                       </label>
                     </div>
-                    <div className={styles.roomReadinessRow} style={{ paddingTop: 14 }}>
+                    <div className={styles.roomReadinessRow} style={{ marginTop: "auto", paddingTop: 14 }}>
                       <button
                         type="button"
                         className={styles.secondaryActionButton}
@@ -6241,107 +6283,40 @@ export default function FamloProDashboardShell({
                     </div>
                   </article>
 
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      Multiple block / unblock
-                      <button type="button" className={styles.infoIconBtn} title="Quickly stop or start selling rooms for a chosen date range.">i</button>
-                    </div>
+                  <article className={styles.listCard} style={{ display: "flex", flexDirection: "column" }}>
+                    <div className={styles.listTitle}>Jump to month</div>
                     <div className={styles.feedCopy} style={{ marginBottom: 14 }}>
-                      Quickly block or unblock a date range for the selected room scope. This uses the same Famlo-to-Channex bulk availability path as the existing calendar sync.
+                      Move the calendar above to the month where you want to block dates or edit room pricing.
                     </div>
-                    {bulkCalendarFeedback ? (
-                      <div
-                        className={`${styles.feedbackBox} ${bulkCalendarFeedback.type === "error" ? styles.feedbackError : styles.feedbackSuccess}`}
-                        style={{ marginBottom: 14 }}
-                      >
-                        {bulkCalendarFeedback.text}
-                      </div>
-                    ) : null}
-                    <div style={{ display: "grid", gap: 12 }}>
-                      <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
-                        <span className={styles.fieldLabel}>Room scope</span>
-                        <select
-                          className={styles.fieldInput}
-                          value={bulkCalendarDraft.roomId}
-                          onChange={(event) =>
-                            setBulkCalendarDraft((current) => ({
-                              ...current,
-                              roomId: event.target.value,
-                              applyToAllRooms: event.target.value === "__all__" ? current.applyToAllRooms : false,
-                            }))}
-                        >
-                          <option value="__all__">All visible rooms</option>
-                          {calendarRows.map((row) => (
-                            <option key={row.roomId} value={row.roomId}>
-                              {row.roomName}
+                    <div className={styles.calendarJumpForm}>
+                      <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Month</span>
+                        <select className={styles.fieldInput} value={calendarJumpMonth} onChange={(event) => setCalendarJumpMonth(event.target.value)}>
+                          {calendarJumpMonthOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
                             </option>
                           ))}
                         </select>
                       </label>
-                      {bulkCalendarDraft.roomId === "__all__" ? (
-                        <label className={styles.fieldGroup} style={{ marginBottom: 0 }}>
-                          <span className={styles.fieldLabel}>Confirm all-room apply</span>
-                          <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <input
-                              type="checkbox"
-                              checked={bulkCalendarDraft.applyToAllRooms}
-                              onChange={(event) =>
-                                setBulkCalendarDraft((current) => ({
-                                  ...current,
-                                  applyToAllRooms: event.target.checked,
-                                }))}
-                            />
-                            <span className={styles.feedCopy} style={{ marginBottom: 0 }}>
-                              I want this block or unblock to affect every visible room.
-                            </span>
-                          </label>
-                        </label>
-                      ) : null}
-                      <div className={styles.calendarJumpForm}>
-                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
-                          <span className={styles.fieldLabel}>From</span>
-                          <input
-                            className={styles.fieldInput}
-                            type="date"
-                            value={bulkCalendarDraft.dateFrom}
-                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateFrom: event.target.value }))}
-                          />
-                        </label>
-                        <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
-                          <span className={styles.fieldLabel}>To</span>
-                          <input
-                            className={styles.fieldInput}
-                            type="date"
-                            value={bulkCalendarDraft.dateTo}
-                            onChange={(event) => setBulkCalendarDraft((current) => ({ ...current, dateTo: event.target.value }))}
-                          />
-                        </label>
-                      </div>
+                      <label className={`${styles.fieldGroup} ${styles.calendarJumpField}`} style={{ marginBottom: 0 }}>
+                        <span className={styles.fieldLabel}>Year</span>
+                        <select className={styles.fieldInput} value={calendarJumpYear} onChange={(event) => setCalendarJumpYear(event.target.value)}>
+                          {calendarJumpYearOptions.map((year) => (
+                            <option key={year} value={year}>
+                              {year}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
-                    <div className={styles.roomReadinessRow} style={{ paddingTop: 14 }}>
-                      <button
-                        type="button"
-                        className={styles.secondaryActionButton}
-                        onClick={() =>
-                          submitBulkCalendarUpdate({
-                            availabilityAction: "block",
-                            rateAmount: "",
-                          })}
-                        disabled={isBulkCalendarPending}
-                      >
-                        {isBulkCalendarPending ? "Applying..." : "Block selected dates"}
+
+                    <div className={styles.calendarJumpActions} style={{ marginTop: "auto", paddingTop: 14 }}>
+                      <button type="button" className={styles.secondaryActionButton} onClick={handleCalendarJump} disabled={isCalendarJumpPending}>
+                        {isCalendarJumpPending ? "Finding..." : "Find month"}
                       </button>
-                      <button
-                        type="button"
-                        className={styles.secondaryActionButton}
-                        onClick={() =>
-                          submitBulkCalendarUpdate({
-                            availabilityAction: "unblock",
-                            rateAmount: "",
-                          })}
-                        disabled={isBulkCalendarPending}
-                      >
-                        {isBulkCalendarPending ? "Applying..." : "Unblock selected dates"}
+                      <button type="button" className={styles.secondaryActionButton} onClick={handleCalendarToday} disabled={isCalendarJumpPending}>
+                        {isCalendarJumpPending ? "Opening..." : "Go to today"}
                       </button>
                     </div>
                   </article>
@@ -7130,38 +7105,13 @@ export default function FamloProDashboardShell({
                 <h3 className={styles.propertyCenterTitle}>Bookings</h3>
               </div>
               <div className={styles.cardBody}>
-                <div className={styles.filterRow}>
-                  {(["Current", "History"] as BookingWorkspaceView[]).map((view) => {
-                    const active = bookingView === view;
-                    const count = view === "Current" ? currentBookingsCount : historyBookingsCount;
-                    return (
-                      <button
-                        key={view}
-                        type="button"
-                        className={`${styles.propertyTabLinkButton} ${active ? styles.propertyTabLinkButtonActive : ""}`}
-                        onClick={() => {
-                          setBookingView(view);
-                          setExpandedBookingId(null);
-                        }}
-                      >
-                        <span className={styles.propertyTabText}>
-                          <span className={styles.propertyTabTitle}>{view} ({count})</span>
-                          <span className={styles.propertyTabHint}>
-                            {view === "Current"
-                              ? "Active and upcoming stays"
-                              : "Cancelled and past bookings"}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+
 
                 <div className={styles.filterRow}>
                   {BOOKING_FILTERS.map((filter) => {
                     const active = bookingFilter === filter;
                     const count = filter === "All"
-                      ? visibleBookingPool.length
+                      ? totalBookingsCount
                       : filter === "Famlo Direct"
                         ? famloDirectBookingsCount
                         : filter === "OTA"
@@ -7254,9 +7204,6 @@ export default function FamloProDashboardShell({
                   <article className={styles.listCard} style={{ background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
                     <div className={styles.listTitle} style={{ color: "#ffffff" }}>Current booking view</div>
                     <div className={styles.feedCopy} style={{ color: "rgba(255, 255, 255, 0.62)" }}>
-                      {bookingView === "History"
-                        ? "History keeps cancelled and past stays out of the main booking view."
-                        : "Current keeps the bookings page focused on active and upcoming stays."}{" "}
                       {bookingDateFilter === "Check-in"
                         ? "Bookings are ordered by check-in date."
                         : bookingDateFilter === "Check-out"
@@ -7267,7 +7214,7 @@ export default function FamloProDashboardShell({
                     </div>
                   </article>
                 </div>
-                {visibleBookingPool.length > 0 ? (
+                {proBookings.length > 0 ? (
                   <>
                     <div className={styles.propertiesRoomShowcaseGrid} style={{ marginTop: "24px" }}>
                       {filteredProBookings.map((booking) => {
@@ -7604,13 +7551,9 @@ export default function FamloProDashboardShell({
                   </>
                 ) : (
                   <div className={styles.emptyState}>
-                    <div className={styles.emptyTitle}>
-                      {bookingView === "History" ? "No booking history yet" : "No bookings surfaced yet"}
-                    </div>
+                    <div className={styles.emptyTitle}>No bookings surfaced yet</div>
                     <div className={styles.emptyCopy}>
-                      {bookingView === "History"
-                        ? "Cancelled bookings and completed stays will collect here once this property builds booking history."
-                        : "Direct Famlo reservations and OTA-linked bookings will appear here once this property starts receiving stays."}
+                      Direct Famlo reservations and OTA-linked bookings will appear here once this property starts receiving stays.
                     </div>
                   </div>
                 )}
@@ -11828,7 +11771,7 @@ function ChannexBookingFeedCard({
               <div className={styles.mappingHeader}>Guest</div>
               <div className={styles.mappingHeader}>Room / Rate</div>
               <div className={styles.mappingHeader}>Amount</div>
-              {(displayedStoredRevisions.length > 0 ? displayedStoredRevisions : feedback.revisions ?? []).map((revision, index) => (
+                  {(displayedStoredRevisions.length > 0 ? displayedStoredRevisions : feedback.revisions ?? []).map((revision, index) => (
                 <Fragment key={revision.revisionId ?? revision.externalBookingId ?? revision.insertedAt ?? `revision-${index}`}>
                   {(() => {
                     const revisionProviderKey =
@@ -11838,95 +11781,346 @@ function ChannexBookingFeedCard({
                     const revisionProviderLabel = getChannelProviderDefinition(revisionProviderKey).displayName;
                     return (
                       <>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
-                          <div className={styles.mappingSubcopy}>Revision {revision.revisionId ?? "Unknown"}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
-                          <div className={styles.mappingSubcopy}>
-                            {revision.importStatus ?? "preview"} · {revision.ackStatus ?? "not_acknowledged"} · {labelizeToken((revision as { source?: string | null }).source, "unknown_source")}
-                          </div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>
-                            Feed {revision.revisionId ?? "missing"} · List {revision.bookingListRevisionId ?? "missing"}
-                          </div>
-                          <div className={styles.mappingSubcopy}>
-                            {revision.isCrsOnly ? "CRS-only / manual" : "Channel-linked"}
-                            {revision.ackEligible ? " · ack eligible" : " · ack blocked"}
-                          </div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{revision.otaName ?? "Unknown"}</div>
-                          <div className={styles.mappingSubcopy}>{revisionProviderLabel} · {revision.paymentCollect ?? "collection unknown"}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"}</div>
-                          <div className={styles.mappingSubcopy}>Received {formatDateTime(revision.insertedAt)}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{revision.guestName ?? "Guest hidden / unavailable"}</div>
-                          <div className={styles.mappingSubcopy}>{revision.paymentType ?? "payment type unknown"}</div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>{revision.externalRoomTypeId ?? "Room unmapped"}</div>
-                          <div className={styles.mappingSubcopy}>
-                            {revision.externalRatePlanId ?? "Rate unmapped"}
-                            {revision.unmatchedRoom ? " · review mapping" : ""}
-                          </div>
-                        </div>
-                        <div className={styles.mappingCell}>
-                          <div className={styles.mappingTitle}>
-                            {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
-                          </div>
-                          <div className={styles.mappingSubcopy}>
-                            {revision.importStatus === "modified_applied"
-                              ? `Modification applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
-                              : revision.importStatus === "cancelled_applied"
-                                ? `Cancellation applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
-                                : revision.importStatus === "imported"
-                                  ? `Imported into Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
-                                  : revision.importStatus === "modified_pending_review"
-                                    ? `Modification preview pending review${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""}`
-                                    : "Preview only, not imported yet"}
-                          </div>
-                          {revision.importStatus === "modified_pending_review" ? (
-                            <div className={styles.mappingSubcopy} style={{ marginTop: 6 }}>
-                              Current Famlo: {revision.currentBooking?.startDate ?? "Unknown"} → {revision.currentBooking?.endDate ?? "Unknown"} · {revision.currentBooking?.amount ?? "Amount unknown"}
-                            </div>
-                          ) : null}
-                          {revision.importStatus === "modified_pending_review" ? (
-                            <div className={styles.mappingSubcopy}>
-                              Incoming channel: {revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"} · {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : "Amount unknown"}
-                            </div>
-                          ) : null}
-                          {revision.importStatus === "modified_pending_review" ? (
-                            <div className={styles.mappingSubcopy}>
-                              Warning: Will update the existing Famlo booking and acknowledge after success.
-                            </div>
-                          ) : null}
-                          {"id" in revision && revision.id ? (
-                            <div className={styles.inlineActionRow} style={{ marginTop: 8 }}>
-                              <button
-                                type="button"
-                                className={styles.secondaryActionButton}
-                                disabled={
-                                  isPreviewingRevision ||
-                                  isImportingPreview ||
-                                  isApplyingCancellation ||
-                                  Boolean(blockedMessage) ||
-                                  !revision.externalRoomTypeId
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.externalBookingId ?? "Unknown booking"}</div>
+                    <div className={styles.mappingSubcopy}>Revision {revision.revisionId ?? "Unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{labelizeToken(revision.status, "unknown")}</div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.importStatus ?? "preview"} · {revision.ackStatus ?? "not_acknowledged"} · {labelizeToken((revision as { source?: string | null }).source, "unknown_source")}
+                    </div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>
+                      Feed {revision.revisionId ?? "missing"} · List {revision.bookingListRevisionId ?? "missing"}
+                    </div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.isCrsOnly ? "CRS-only / manual" : "Channel-linked"}
+                      {revision.ackEligible ? " · ack eligible" : " · ack blocked"}
+                    </div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.otaName ?? "Unknown"}</div>
+                    <div className={styles.mappingSubcopy}>{revisionProviderLabel} · {revision.paymentCollect ?? "collection unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"}</div>
+                    <div className={styles.mappingSubcopy}>Received {formatDateTime(revision.insertedAt)}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.guestName ?? "Guest hidden / unavailable"}</div>
+                    <div className={styles.mappingSubcopy}>{revision.paymentType ?? "payment type unknown"}</div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>{revision.externalRoomTypeId ?? "Room unmapped"}</div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.externalRatePlanId ?? "Rate unmapped"}
+                      {revision.unmatchedRoom ? " · review mapping" : ""}
+                    </div>
+                  </div>
+                  <div className={styles.mappingCell}>
+                    <div className={styles.mappingTitle}>
+                      {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : revision.amount ?? revision.currency ?? "Not available"}
+                    </div>
+                    <div className={styles.mappingSubcopy}>
+                      {revision.importStatus === "modified_applied"
+                        ? `Modification applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
+                        : revision.importStatus === "cancelled_applied"
+                          ? `Cancellation applied to Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
+                          : revision.importStatus === "imported"
+                            ? `Imported into Famlo${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""} · ${revision.ackStatus === "acknowledged" ? "Acknowledged" : "Not acknowledged yet"}`
+                            : revision.importStatus === "modified_pending_review"
+                              ? `Modification preview pending review${revision.linkedBookingId ? ` · ${revision.linkedBookingId}` : ""}`
+                              : "Preview only, not imported yet"}
+                    </div>
+                    {revision.importStatus === "modified_pending_review" ? (
+                      <div className={styles.mappingSubcopy} style={{ marginTop: 6 }}>
+                        Current Famlo: {revision.currentBooking?.startDate ?? "Unknown"} → {revision.currentBooking?.endDate ?? "Unknown"} · {revision.currentBooking?.amount ?? "Amount unknown"}
+                      </div>
+                    ) : null}
+                    {revision.importStatus === "modified_pending_review" ? (
+                      <div className={styles.mappingSubcopy}>
+                        Incoming channel: {revision.arrivalDate ?? "Unknown"} → {revision.departureDate ?? "Unknown"} · {revision.amount && revision.currency ? `${revision.amount} ${revision.currency}` : "Amount unknown"}
+                      </div>
+                    ) : null}
+                    {revision.importStatus === "modified_pending_review" ? (
+                      <div className={styles.mappingSubcopy}>
+                        Warning: Will update the existing Famlo booking and acknowledge after success.
+                      </div>
+                    ) : null}
+                    {"id" in revision && revision.id ? (
+                      <div className={styles.inlineActionRow} style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.secondaryActionButton}
+                          disabled={
+                            isPreviewingRevision ||
+                            isImportingPreview ||
+                            isApplyingCancellation ||
+                            Boolean(blockedMessage) ||
+                            !revision.externalRoomTypeId
+                          }
+                          onClick={() => {
+                            startPreviewingRevision(async () => {
+                              setPreviewingRevisionId(typeof revision.id === "string" ? revision.id : null);
+                              try {
+                                const response = await fetch("/api/host/pro/channel/channex/operator/bookings/preview", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    familyId,
+                                    providerKey: revisionProviderKey,
+                                    channelBookingRevisionId: revision.id,
+                                  }),
+                                });
+
+                                const payload = (await response.json()) as {
+                                  ok?: boolean;
+                                  message?: string;
+                                  error?: string;
+                                  blockers?: string[];
+                                };
+
+                                if (!response.ok || !payload.ok) {
+                                  throw new Error(payload.error ?? payload.message ?? `Unable to preview this ${revisionProviderLabel} revision.`);
                                 }
-                                onClick={() => {
-                                  startPreviewingRevision(async () => {
-                                    setPreviewingRevisionId(typeof revision.id === "string" ? revision.id : null);
-                                    try {
-                                      const response = await fetch("/api/host/pro/channel/channex/operator/bookings/preview", {
-                                        method: "POST",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
+
+                                const blockers = Array.isArray(payload.blockers) && payload.blockers.length > 0
+                                  ? ` Blockers: ${payload.blockers.join(" · ")}`
+                                  : "";
+                                setFeedback({
+                                  ok: true,
+                                  message: `${payload.message ?? "Preview loaded for the selected property."}${blockers}`,
+                                });
+                              } catch (error) {
+                                setFeedback({
+                                  ok: false,
+                                  message: error instanceof Error ? error.message : `Unable to preview this ${revisionProviderLabel} revision.`,
+                                });
+                              } finally {
+                                setPreviewingRevisionId(null);
+                              }
+                            });
+                          }}
+                        >
+                          {isPreviewingRevision && previewingRevisionId === revision.id ? "Previewing..." : "Preview safety"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.secondaryActionButton}
+                          disabled={
+                            isImportingPreview ||
+                            isApplyingCancellation ||
+                            Boolean(blockedMessage) ||
+                            revision.importStatus === "imported" ||
+                            revision.importStatus === "modified_pending_review" ||
+                            revision.importStatus === "modified_applied" ||
+                            revision.importStatus === "cancelled_applied" ||
+                            !revision.externalRoomTypeId
+                          }
+                          onClick={() => {
+                            startImportingPreview(async () => {
+                              setImportingPreviewId(typeof revision.id === "string" ? revision.id : null);
+                              try {
+                                const response = await fetch("/api/host/pro/channel/channex/operator/bookings/apply", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    familyId,
+                                    providerKey: revisionProviderKey,
+                                    channelBookingRevisionId: revision.id,
+                                  }),
+                                });
+
+                                const payload = (await response.json()) as {
+                                  ok?: boolean;
+                                  message?: string;
+                                  error?: string;
+                                  bookingId?: string | null;
+                                };
+
+                                if (!response.ok || !payload.ok) {
+                                  throw new Error(payload.error ?? payload.message ?? "Unable to import this preview booking.");
+                                }
+
+                                setFeedback({
+                                  ok: true,
+                                  message:
+                                    typeof payload.message === "string" && payload.message.trim().length > 0
+                                      ? payload.message
+                                      : "Imported the preview booking into Famlo without acknowledging Channex.",
+                                });
+                                router.refresh();
+                              } catch (error) {
+                                setFeedback({
+                                  ok: false,
+                                  message: error instanceof Error ? error.message : "Unable to import this preview booking.",
+                                });
+                              } finally {
+                                setImportingPreviewId(null);
+                              }
+                            });
+                          }}
+                        >
+                          {isImportingPreview && importingPreviewId === revision.id
+                            ? "Importing..."
+                            : revision.importStatus === "imported"
+                              ? "Imported into Famlo"
+                              : "Import to Famlo"}
+                        </button>
+                        {revision.importStatus === "modified_pending_review" ? (
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            disabled={isApplyingModification || Boolean(blockedMessage)}
+                            onClick={() => {
+                              startApplyingModification(async () => {
+                                setApplyingModificationId(typeof revision.id === "string" ? revision.id : null);
+                                try {
+                                  const response = await fetch("/api/host/pro/channel/channex/operator/bookings/modify", {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      familyId,
+                                      providerKey: revisionProviderKey,
+                                      channelBookingRevisionId: revision.id,
+                                    }),
+                                  });
+
+                                  const payload = (await response.json()) as {
+                                    ok?: boolean;
+                                    message?: string;
+                                    error?: string;
+                                  };
+
+                                  if (!response.ok || !payload.ok) {
+                                    throw new Error(payload.error ?? payload.message ?? "Unable to apply this booking modification.");
+                                  }
+
+                                  setFeedback({
+                                    ok: true,
+                                    message:
+                                      typeof payload.message === "string" && payload.message.trim().length > 0
+                                        ? payload.message
+                                        : `Applied this ${revisionProviderLabel} modification in Famlo. Acknowledgement still depends on supported lifecycle state.`,
+                                  });
+                                  router.refresh();
+                                } catch (error) {
+                                  setFeedback({
+                                    ok: false,
+                                    message: error instanceof Error ? error.message : "Unable to apply this booking modification.",
+                                  });
+                                } finally {
+                                  setApplyingModificationId(null);
+                                }
+                              });
+                            }}
+                          >
+                            {isApplyingModification && applyingModificationId === revision.id ? "Applying..." : "Apply modification"}
+                          </button>
+                        ) : null}
+                        {revision.importStatus === "modified_pending_review" ? (
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            onClick={() => {
+                              setFeedback({
+                                ok: true,
+                                message: "Left this Channex modification for later manual review. No Famlo booking change and no acknowledgement were sent.",
+                              });
+                            }}
+                          >
+                            Leave for later
+                          </button>
+                        ) : null}
+                        {revision.status === "cancelled" &&
+                          revision.importStatus !== "cancelled_applied" &&
+                          revision.linkedBookingId ? (
+                          <button
+                            type="button"
+                            className={styles.secondaryActionButton}
+                            disabled={isApplyingCancellation || Boolean(blockedMessage)}
+                            onClick={() => {
+                              startApplyingCancellation(async () => {
+                                setApplyingCancellationId(typeof revision.id === "string" ? revision.id : null);
+                                try {
+                                  const response = await fetch("/api/host/pro/channel/channex/operator/bookings/cancel", {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      familyId,
+                                      providerKey: revisionProviderKey,
+                                      channelBookingRevisionId: revision.id,
+                                    }),
+                                  });
+
+                                  const payload = (await response.json()) as {
+                                    ok?: boolean;
+                                    message?: string;
+                                    error?: string;
+                                    status?: string;
+                                  };
+
+                                  if (!response.ok || !payload.ok) {
+                                    throw new Error(payload.error ?? payload.message ?? "Unable to apply this Channex booking cancellation.");
+                                  }
+
+                                  setFeedback({
+                                    ok: true,
+                                    message:
+                                      typeof payload.message === "string" && payload.message.trim().length > 0
+                                        ? payload.message
+                                        : "Cancellation applied to Famlo. Not acknowledged yet.",
+                                  });
+                                  router.refresh();
+                                } catch (error) {
+                                  setFeedback({
+                                    ok: false,
+                                    message: error instanceof Error ? error.message : "Unable to apply this Channex booking cancellation.",
+                                  });
+                                } finally {
+                                  setApplyingCancellationId(null);
+                                }
+                              });
+                            }}
+                          >
+                            {isApplyingCancellation && applyingCancellationId === revision.id
+                              ? "Applying..."
+                              : "Apply cancellation"}
+                          </button>
+                        ) : null}
+                        {revision.importStatus === "imported" || revision.importStatus === "modified_applied" || revision.importStatus === "cancelled_applied" ? (
+                          revision.ackStatus === "acknowledged" ? (
+                            <button
+                              type="button"
+                              className={styles.secondaryActionButton}
+                              disabled
+                            >
+                              Acknowledged
+                            </button>
+                          ) : revision.revisionId ? (
+                            <button
+                              type="button"
+                              className={styles.secondaryActionButton}
+                              disabled={isAcknowledgingPreview || Boolean(blockedMessage)}
+                              onClick={() => {
+                                startAcknowledgingPreview(async () => {
+                                  setAcknowledgingPreviewId(typeof revision.id === "string" ? revision.id : null);
+                                  try {
+                                    const response = await fetch("/api/host/pro/channel/channex/operator/bookings/acknowledge", {
+                                      method: "POST",
+                                      headers: {
+                                        "Content-Type": "application/json",
+                                      },
                                         body: JSON.stringify({
                                           familyId,
                                           providerKey: revisionProviderKey,
@@ -11934,300 +12128,49 @@ function ChannexBookingFeedCard({
                                         }),
                                       });
 
-                                      const payload = (await response.json()) as {
-                                        ok?: boolean;
-                                        message?: string;
-                                        error?: string;
-                                        blockers?: string[];
-                                      };
+                                    const payload = (await response.json()) as {
+                                      ok?: boolean;
+                                      message?: string;
+                                      error?: string;
+                                      status?: string;
+                                    };
 
-                                      if (!response.ok || !payload.ok) {
-                                        throw new Error(payload.error ?? payload.message ?? `Unable to preview this ${revisionProviderLabel} revision.`);
-                                      }
-
-                                      const blockers = Array.isArray(payload.blockers) && payload.blockers.length > 0
-                                        ? ` Blockers: ${payload.blockers.join(" · ")}`
-                                        : "";
-                                      setFeedback({
-                                        ok: true,
-                                        message: `${payload.message ?? "Preview loaded for the selected property."}${blockers}`,
-                                      });
-                                    } catch (error) {
-                                      setFeedback({
-                                        ok: false,
-                                        message: error instanceof Error ? error.message : `Unable to preview this ${revisionProviderLabel} revision.`,
-                                      });
-                                    } finally {
-                                      setPreviewingRevisionId(null);
+                                    if (!response.ok || !payload.ok) {
+                                      throw new Error(payload.error ?? payload.message ?? "Unable to acknowledge this Channex booking revision.");
                                     }
-                                  });
-                                }}
-                              >
-                                {isPreviewingRevision && previewingRevisionId === revision.id ? "Previewing..." : "Preview safety"}
-                              </button>
-                              <button
-                                type="button"
-                                className={styles.secondaryActionButton}
-                                disabled={
-                                  isImportingPreview ||
-                                  isApplyingCancellation ||
-                                  Boolean(blockedMessage) ||
-                                  revision.importStatus === "imported" ||
-                                  revision.importStatus === "modified_pending_review" ||
-                                  revision.importStatus === "modified_applied" ||
-                                  revision.importStatus === "cancelled_applied" ||
-                                  !revision.externalRoomTypeId
-                                }
-                                onClick={() => {
-                                  startImportingPreview(async () => {
-                                    setImportingPreviewId(typeof revision.id === "string" ? revision.id : null);
-                                    try {
-                                      const response = await fetch("/api/host/pro/channel/channex/operator/bookings/apply", {
-                                        method: "POST",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({
-                                          familyId,
-                                          providerKey: revisionProviderKey,
-                                          channelBookingRevisionId: revision.id,
-                                        }),
-                                      });
 
-                                      const payload = (await response.json()) as {
-                                        ok?: boolean;
-                                        message?: string;
-                                        error?: string;
-                                        bookingId?: string | null;
-                                      };
-
-                                      if (!response.ok || !payload.ok) {
-                                        throw new Error(payload.error ?? payload.message ?? "Unable to import this preview booking.");
-                                      }
-
-                                      setFeedback({
-                                        ok: true,
-                                        message:
-                                          typeof payload.message === "string" && payload.message.trim().length > 0
-                                            ? payload.message
-                                            : "Imported the preview booking into Famlo without acknowledging Channex.",
-                                      });
-                                      router.refresh();
-                                    } catch (error) {
-                                      setFeedback({
-                                        ok: false,
-                                        message: error instanceof Error ? error.message : "Unable to import this preview booking.",
-                                      });
-                                    } finally {
-                                      setImportingPreviewId(null);
-                                    }
-                                  });
-                                }}
-                              >
-                                {isImportingPreview && importingPreviewId === revision.id
-                                  ? "Importing..."
-                                  : revision.importStatus === "imported"
-                                    ? "Imported into Famlo"
-                                    : "Import to Famlo"}
-                              </button>
-                              {revision.importStatus === "modified_pending_review" ? (
-                                <button
-                                  type="button"
-                                  className={styles.secondaryActionButton}
-                                  disabled={isApplyingModification || Boolean(blockedMessage)}
-                                  onClick={() => {
-                                    startApplyingModification(async () => {
-                                      setApplyingModificationId(typeof revision.id === "string" ? revision.id : null);
-                                      try {
-                                        const response = await fetch("/api/host/pro/channel/channex/operator/bookings/modify", {
-                                          method: "POST",
-                                          headers: {
-                                            "Content-Type": "application/json",
-                                          },
-                                          body: JSON.stringify({
-                                            familyId,
-                                            providerKey: revisionProviderKey,
-                                            channelBookingRevisionId: revision.id,
-                                          }),
-                                        });
-
-                                        const payload = (await response.json()) as {
-                                          ok?: boolean;
-                                          message?: string;
-                                          error?: string;
-                                        };
-
-                                        if (!response.ok || !payload.ok) {
-                                          throw new Error(payload.error ?? payload.message ?? "Unable to apply this booking modification.");
-                                        }
-
-                                        setFeedback({
-                                          ok: true,
-                                          message:
-                                            typeof payload.message === "string" && payload.message.trim().length > 0
-                                              ? payload.message
-                                              : `Applied this ${revisionProviderLabel} modification in Famlo. Acknowledgement still depends on supported lifecycle state.`,
-                                        });
-                                        router.refresh();
-                                      } catch (error) {
-                                        setFeedback({
-                                          ok: false,
-                                          message: error instanceof Error ? error.message : "Unable to apply this booking modification.",
-                                        });
-                                      } finally {
-                                        setApplyingModificationId(null);
-                                      }
-                                    });
-                                  }}
-                                >
-                                  {isApplyingModification && applyingModificationId === revision.id ? "Applying..." : "Apply modification"}
-                                </button>
-                              ) : null}
-                              {revision.importStatus === "modified_pending_review" ? (
-                                <button
-                                  type="button"
-                                  className={styles.secondaryActionButton}
-                                  onClick={() => {
                                     setFeedback({
                                       ok: true,
-                                      message: "Left this Channex modification for later manual review. No Famlo booking change and no acknowledgement were sent.",
+                                      message:
+                                        typeof payload.message === "string" && payload.message.trim().length > 0
+                                          ? payload.message
+                                          : "Acknowledged this imported Channex booking revision.",
                                     });
-                                  }}
-                                >
-                                  Leave for later
-                                </button>
-                              ) : null}
-                              {revision.status === "cancelled" &&
-                                revision.importStatus !== "cancelled_applied" &&
-                                revision.linkedBookingId ? (
-                                <button
-                                  type="button"
-                                  className={styles.secondaryActionButton}
-                                  disabled={isApplyingCancellation || Boolean(blockedMessage)}
-                                  onClick={() => {
-                                    startApplyingCancellation(async () => {
-                                      setApplyingCancellationId(typeof revision.id === "string" ? revision.id : null);
-                                      try {
-                                        const response = await fetch("/api/host/pro/channel/channex/operator/bookings/cancel", {
-                                          method: "POST",
-                                          headers: {
-                                            "Content-Type": "application/json",
-                                          },
-                                          body: JSON.stringify({
-                                            familyId,
-                                            providerKey: revisionProviderKey,
-                                            channelBookingRevisionId: revision.id,
-                                          }),
-                                        });
-
-                                        const payload = (await response.json()) as {
-                                          ok?: boolean;
-                                          message?: string;
-                                          error?: string;
-                                          status?: string;
-                                        };
-
-                                        if (!response.ok || !payload.ok) {
-                                          throw new Error(payload.error ?? payload.message ?? "Unable to apply this Channex booking cancellation.");
-                                        }
-
-                                        setFeedback({
-                                          ok: true,
-                                          message:
-                                            typeof payload.message === "string" && payload.message.trim().length > 0
-                                              ? payload.message
-                                              : "Cancellation applied to Famlo. Not acknowledged yet.",
-                                        });
-                                        router.refresh();
-                                      } catch (error) {
-                                        setFeedback({
-                                          ok: false,
-                                          message: error instanceof Error ? error.message : "Unable to apply this Channex booking cancellation.",
-                                        });
-                                      } finally {
-                                        setApplyingCancellationId(null);
-                                      }
+                                    router.refresh();
+                                  } catch (error) {
+                                    setFeedback({
+                                      ok: false,
+                                      message: error instanceof Error ? error.message : "Unable to acknowledge this Channex booking revision.",
                                     });
-                                  }}
-                                >
-                                  {isApplyingCancellation && applyingCancellationId === revision.id
-                                    ? "Applying..."
-                                    : "Apply cancellation"}
-                                </button>
-                              ) : null}
-                              {revision.importStatus === "imported" || revision.importStatus === "modified_applied" || revision.importStatus === "cancelled_applied" ? (
-                                revision.ackStatus === "acknowledged" ? (
-                                  <button
-                                    type="button"
-                                    className={styles.secondaryActionButton}
-                                    disabled
-                                  >
-                                    Acknowledged
-                                  </button>
-                                ) : revision.revisionId ? (
-                                  <button
-                                    type="button"
-                                    className={styles.secondaryActionButton}
-                                    disabled={isAcknowledgingPreview || Boolean(blockedMessage)}
-                                    onClick={() => {
-                                      startAcknowledgingPreview(async () => {
-                                        setAcknowledgingPreviewId(typeof revision.id === "string" ? revision.id : null);
-                                        try {
-                                          const response = await fetch("/api/host/pro/channel/channex/operator/bookings/acknowledge", {
-                                            method: "POST",
-                                            headers: {
-                                              "Content-Type": "application/json",
-                                            },
-                                            body: JSON.stringify({
-                                              familyId,
-                                              providerKey: revisionProviderKey,
-                                              channelBookingRevisionId: revision.id,
-                                            }),
-                                          });
-
-                                          const payload = (await response.json()) as {
-                                            ok?: boolean;
-                                            message?: string;
-                                            error?: string;
-                                            status?: string;
-                                          };
-
-                                          if (!response.ok || !payload.ok) {
-                                            throw new Error(payload.error ?? payload.message ?? "Unable to acknowledge this Channex booking revision.");
-                                          }
-
-                                          setFeedback({
-                                            ok: true,
-                                            message:
-                                              typeof payload.message === "string" && payload.message.trim().length > 0
-                                                ? payload.message
-                                                : "Acknowledged this imported Channex booking revision.",
-                                          });
-                                          router.refresh();
-                                        } catch (error) {
-                                          setFeedback({
-                                            ok: false,
-                                            message: error instanceof Error ? error.message : "Unable to acknowledge this Channex booking revision.",
-                                          });
-                                        } finally {
-                                          setAcknowledgingPreviewId(null);
-                                        }
-                                      });
-                                    }}
-                                  >
-                                    {isAcknowledgingPreview && acknowledgingPreviewId === revision.id
-                                      ? "Acknowledging..."
-                                      : "Acknowledge Channex"}
-                                  </button>
-                                ) : (
-                                  <div className={styles.mappingSubcopy}>
-                                    Cannot acknowledge Booking List preview; requires feed revision id
-                                  </div>
-                                )
-                              ) : null}
+                                  } finally {
+                                    setAcknowledgingPreviewId(null);
+                                  }
+                                });
+                              }}
+                            >
+                              {isAcknowledgingPreview && acknowledgingPreviewId === revision.id
+                                ? "Acknowledging..."
+                                : "Acknowledge Channex"}
+                            </button>
+                          ) : (
+                            <div className={styles.mappingSubcopy}>
+                              Cannot acknowledge Booking List preview; requires feed revision id
                             </div>
-                          ) : null}
-                        </div>
+                          )
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                       </>
                     );
                   })()}
