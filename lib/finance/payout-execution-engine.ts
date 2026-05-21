@@ -35,8 +35,12 @@ type HostPayoutAccountRow = {
   host_id: string;
   provider: string;
   provider_fund_account_id?: string | null;
+  account_number_masked?: string | null;
+  ifsc?: string | null;
+  vpa?: string | null;
   validation_status?: string | null;
   is_active?: boolean | null;
+  updated_at?: string | null;
 };
 
 type HostTaxDetailsRow = {
@@ -58,10 +62,16 @@ type RefundRequestRow = {
 
 type ExistingExecutionRow = {
   id: string;
+  settlement_id?: string | null;
+  host_id?: string | null;
+  provider_fund_account_id?: string | null;
   status?: string | null;
   provider_payout_id?: string | null;
   amount?: number | null;
   reference_id?: string | null;
+  failure_reason?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type DisputeRow = {
@@ -132,6 +142,29 @@ function mapProviderSubmissionStatus(status: string | null | undefined): HostPay
   if (normalized === "processing" || normalized === "queued" || normalized === "pending") return "processing";
   if (normalized === "failed" || normalized === "rejected") return "failed";
   return "submitted";
+}
+
+function normalizeValidationStatus(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function isRetryRevalidatedStatus(value: unknown): boolean {
+  return normalizeValidationStatus(value) === "validated";
+}
+
+function parseIsoTime(value: string | null | undefined): number {
+  const parsed = Date.parse(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function buildMaskedDestination(account: HostPayoutAccountRow | null): string {
+  if (!account) return "";
+  if (asString(account.vpa)) return `UPI ${String(account.vpa)}`;
+  if (asString(account.account_number_masked)) {
+    const ifsc = asString(account.ifsc);
+    return ifsc ? `${String(account.account_number_masked)} · ${ifsc}` : String(account.account_number_masked);
+  }
+  return "";
 }
 
 export function resolvePayoutWebhookOutcome(eventName: string, payoutStatus: string | null | undefined): {
@@ -231,10 +264,20 @@ async function loadOpenDisputes(supabase: SupabaseClient, legacyBookingIds: stri
 async function loadExistingActiveExecution(supabase: SupabaseClient, settlementId: string): Promise<ExistingExecutionRow | null> {
   const { data, error } = await supabase
     .from("host_payout_executions")
-    .select("id,status,provider_payout_id,amount,reference_id")
+    .select("id,settlement_id,host_id,provider_fund_account_id,status,provider_payout_id,amount,reference_id,failure_reason,created_at,updated_at")
     .eq("settlement_id", settlementId)
     .in("status", ["created", "submitted", "processing"])
     .order("created_at", { ascending: false })
+    .maybeSingle();
+  if (error) throw error;
+  return (data as ExistingExecutionRow | null) ?? null;
+}
+
+async function loadExecutionById(supabase: SupabaseClient, payoutExecutionId: string): Promise<ExistingExecutionRow | null> {
+  const { data, error } = await supabase
+    .from("host_payout_executions")
+    .select("id,settlement_id,host_id,provider_fund_account_id,status,provider_payout_id,amount,reference_id,failure_reason,created_at,updated_at")
+    .eq("id", payoutExecutionId)
     .maybeSingle();
   if (error) throw error;
   return (data as ExistingExecutionRow | null) ?? null;
@@ -246,9 +289,10 @@ function assertSettlementReadyForPayout(
   refundRequests: RefundRequestRow[],
   disputes: DisputeRow[],
   payoutAccount: HostPayoutAccountRow | null,
-  hostTaxDetails: HostTaxDetailsRow | null
+  hostTaxDetails: HostTaxDetailsRow | null,
+  allowedSettlementStatuses: string[] = ["approved"]
 ): void {
-  if (normalizeStatus(settlement.status) !== "approved") {
+  if (!allowedSettlementStatuses.includes(normalizeStatus(settlement.status))) {
     throw new Error("Only approved settlements can initiate payout execution.");
   }
   if (asNumber(settlement.net_payable_amount) <= 0) {
@@ -289,6 +333,7 @@ export async function initiateApprovedSettlementPayout(
     settlementId: string;
     actorUserId?: string | null;
     explicitAdminAction?: boolean;
+    allowedSettlementStatuses?: string[];
   },
   dependencies: PayoutExecutionDependencies = {}
 ): Promise<SettlementPayoutExecutionResult> {
@@ -321,7 +366,15 @@ export async function initiateApprovedSettlementPayout(
   const legacyBookingIds = bookingSummaries.map((row) => asString(row.legacy_booking_id)).filter(Boolean) as string[];
   const disputes = await loadOpenDisputes(supabase, legacyBookingIds);
 
-  assertSettlementReadyForPayout(settlement, bookingSummaries, refundRequests, disputes, payoutAccount, hostTaxDetails);
+  assertSettlementReadyForPayout(
+    settlement,
+    bookingSummaries,
+    refundRequests,
+    disputes,
+    payoutAccount,
+    hostTaxDetails,
+    input.allowedSettlementStatuses ?? ["approved"]
+  );
 
   if (!razorpayXConfigured) {
     throw new Error("RazorpayX is not configured.");
@@ -447,6 +500,142 @@ export async function initiateApprovedSettlementPayout(
 
     throw error;
   }
+}
+
+export async function retryFailedSettlementPayout(
+  supabase: SupabaseClient,
+  input: {
+    payoutExecutionId: string;
+    actorUserId?: string | null;
+    explicitAdminAction?: boolean;
+  },
+  dependencies: PayoutExecutionDependencies = {}
+): Promise<SettlementPayoutExecutionResult> {
+  const execution = await loadExecutionById(supabase, input.payoutExecutionId);
+  if (!execution?.id || !execution.settlement_id) {
+    throw new Error("Payout execution not found.");
+  }
+
+  const executionStatus = normalizeStatus(execution.status);
+  if (executionStatus === "reversed" || executionStatus === "cancelled" || executionStatus === "needs_review") {
+    throw new Error("Reversed or review-required payouts cannot be retried until admin review is completed.");
+  }
+  if (executionStatus !== "failed") {
+    throw new Error("Only failed payout executions can be retried manually.");
+  }
+
+  const settlement = await loadSettlement(supabase, String(execution.settlement_id));
+  if (normalizeStatus(settlement.status) === "needs_review") {
+    throw new Error("Settlement is in needs_review and must be cleared before retry.");
+  }
+
+  const lineItems = await loadSettlementLineItems(supabase, String(execution.settlement_id));
+  const bookingIds = Array.from(new Set(lineItems.map((row) => asString(row.booking_id)).filter(Boolean))) as string[];
+  const [payoutAccount, hostTaxDetails, bookingSummaries, refundRequests] = await Promise.all([
+    loadActivePayoutAccount(supabase, settlement.host_id),
+    loadHostTaxDetails(supabase, asString(settlement.host_user_id)),
+    loadBookingSummaries(supabase, bookingIds),
+    loadOpenRefundRequests(supabase, bookingIds),
+  ]);
+  const legacyBookingIds = bookingSummaries.map((row) => asString(row.legacy_booking_id)).filter(Boolean) as string[];
+  const disputes = await loadOpenDisputes(supabase, legacyBookingIds);
+
+  assertSettlementReadyForPayout(
+    settlement,
+    bookingSummaries,
+    refundRequests,
+    disputes,
+    payoutAccount,
+    hostTaxDetails,
+    ["approved", "payout_failed"]
+  );
+
+  const accountChanged = Boolean(
+    payoutAccount &&
+      asString(payoutAccount.provider_fund_account_id) &&
+      asString(execution.provider_fund_account_id) &&
+      asString(payoutAccount.provider_fund_account_id) !== asString(execution.provider_fund_account_id)
+  );
+  const accountUpdatedAfterFailure =
+    parseIsoTime(asString(payoutAccount?.updated_at)) > parseIsoTime(asString(execution.updated_at) ?? asString(execution.created_at));
+
+  if ((accountChanged || accountUpdatedAfterFailure) && !isRetryRevalidatedStatus(payoutAccount?.validation_status)) {
+    throw new Error("Payout account changed after failure and requires revalidation before retry.");
+  }
+
+  await appendFinanceAuditLog(supabase, {
+    actorUserId: input.actorUserId ?? null,
+    actionType: "settlement_payout_retry_requested",
+    resourceType: "host_payout_execution",
+    resourceId: input.payoutExecutionId,
+    beforeValue: execution as unknown as JsonRecord,
+    afterValue: {
+      settlementId: execution.settlement_id,
+      destination: buildMaskedDestination(payoutAccount),
+    },
+    reason: "manual_failed_payout_retry",
+  });
+
+  return initiateApprovedSettlementPayout(
+    supabase,
+    {
+      settlementId: String(execution.settlement_id),
+      actorUserId: input.actorUserId ?? null,
+      explicitAdminAction: input.explicitAdminAction ?? true,
+      allowedSettlementStatuses: ["approved", "payout_failed"],
+    },
+    dependencies
+  );
+}
+
+export async function markPayoutExecutionNeedsReview(
+  supabase: SupabaseClient,
+  input: {
+    payoutExecutionId: string;
+    actorUserId?: string | null;
+    reason?: string | null;
+  }
+): Promise<{ payoutExecutionId: string; settlementId: string; status: "needs_review" }> {
+  const execution = await loadExecutionById(supabase, input.payoutExecutionId);
+  if (!execution?.id || !execution.settlement_id) {
+    throw new Error("Payout execution not found.");
+  }
+
+  const now = new Date().toISOString();
+  await supabase
+    .from("host_payout_executions")
+    .update({
+      status: "needs_review",
+      failure_reason: input.reason ?? execution.failure_reason ?? "Marked for manual review.",
+      updated_at: now,
+      processed_at: now,
+    } as never)
+    .eq("id", execution.id);
+
+  await supabase
+    .from("host_settlements_v2")
+    .update({
+      status: "needs_review",
+      failed_at: now,
+      updated_at: now,
+    } as never)
+    .eq("id", execution.settlement_id);
+
+  await appendFinanceAuditLog(supabase, {
+    actorUserId: input.actorUserId ?? null,
+    actionType: "settlement_payout_marked_needs_review",
+    resourceType: "host_payout_execution",
+    resourceId: execution.id,
+    beforeValue: execution as unknown as JsonRecord,
+    afterValue: { status: "needs_review", reason: input.reason ?? null },
+    reason: input.reason ?? "manual_payout_review_hold",
+  });
+
+  return {
+    payoutExecutionId: execution.id,
+    settlementId: String(execution.settlement_id),
+    status: "needs_review",
+  };
 }
 
 export async function applyRazorpayXPayoutWebhook(

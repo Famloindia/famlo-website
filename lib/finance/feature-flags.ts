@@ -187,3 +187,15 @@ export function isPlatformFeeInvoiceGenerationEnabled(): boolean {
 export function isCreditNoteGenerationEnabled(): boolean {
   return isEnabled(process.env.CREDIT_NOTE_GENERATION_ENABLED, false);
 }
+
+export function isInvoicePdfGenerationEnabled(): boolean {
+  return isEnabled(process.env.INVOICE_PDF_GENERATION_ENABLED, false);
+}
+
+export function isInvoiceEmailDeliveryEnabled(): boolean {
+  return isEnabled(process.env.INVOICE_EMAIL_DELIVERY_ENABLED, false);
+}
+
+export function isAdminFinanceOpsUiEnabled(): boolean {
+  return isEnabled(process.env.ADMIN_FINANCE_OPS_UI_ENABLED, false);
+}

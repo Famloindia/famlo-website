@@ -472,6 +472,40 @@ test("checkout guest payable includes GST when flag on", async () => {
   assert.equal(result.amountTotal, 1050);
 });
 
+test("mixed-room booking shows mixed tax lines when enabled", async () => {
+  const { client, state } = createInvoiceSupabase();
+  state.finance_settings.push({
+    id: "settings-1",
+    scope_type: "GLOBAL",
+    scope_id: null,
+    tax_mode: "ECO_SECTION_9_5",
+    gst_invoice_generation_enabled: false,
+  });
+
+  const result = await withEnv(
+    {
+      CHECKOUT_SECTION_9_5_PRICING_ENABLED: "true",
+    },
+    () =>
+      resolveCheckoutPricingForPaymentIntent(client, {
+        totalPrice: 9000,
+        partnerPayoutAmount: 7560,
+        pricingSnapshot: {
+          section_9_5_input_nights: [
+            { actualValue: 1000, listedValue: 1000, date: "2026-05-21" },
+            { actualValue: 8000, listedValue: 8000, date: "2026-05-22" },
+          ],
+        },
+      })
+  );
+
+  assert.equal(result.amountTotal, 1000 + 50 + 8000 + 1440);
+  assert.deepEqual(
+    ((result.pricingSnapshot.finance_snapshot as any)?.tax_breakdown?.accommodation_gst_lines as any[])?.map((row: any) => row.gstRateBps),
+    [500, 1800]
+  );
+});
+
 test("Razorpay order amount equals guest payable when flag on", async () => {
   const { client, state } = createInvoiceSupabase();
   state.finance_settings.push({
@@ -496,4 +530,49 @@ test("Razorpay order amount equals guest payable when flag on", async () => {
       })
   );
   assert.equal(result.amountTotal * 100, 944000);
+});
+
+test("guest invoice cannot be generated before payment capture", async () => {
+  const { client, state } = createInvoiceSupabase();
+  state.finance_settings.push({
+    id: "settings-1",
+    scope_type: "GLOBAL",
+    scope_id: null,
+    tax_mode: "ECO_SECTION_9_5",
+    gst_invoice_generation_enabled: true,
+    approved_by: "admin-1",
+    approved_at: "2026-05-21T00:00:00.000Z",
+  });
+  state.bookings_v2.push({
+    id: "booking-uncaptured",
+    user_id: "guest-1",
+    guest_name: "Aryan",
+    payment_status: "pending",
+    pricing_snapshot: {
+      property_name: "Famlo Villa",
+      property_address: "Goa",
+      place_of_supply: "Goa",
+      section_9_5_input_nights: [{ actualValue: 1000, listedValue: 1000, date: "2026-05-21" }],
+    },
+    start_date: "2026-05-21",
+    end_date: "2026-05-22",
+  });
+  state.reservations_v2.push({
+    id: "reservation-uncaptured",
+    booking_id: "booking-uncaptured",
+  });
+
+  await assert.rejects(
+    () =>
+      withEnv(
+        {
+          GST_INVOICE_GENERATION_ENABLED: "true",
+          FAMLO_LEGAL_ENTITY_NAME: "Famlo Private Limited",
+          FAMLO_GSTIN: "27ABCDE1234F1Z5",
+          FAMLO_LEGAL_ADDRESS: "Mumbai, India",
+        },
+        () => generateGuestTaxInvoice(client, { bookingId: "booking-uncaptured" })
+      ),
+    /payment capture/i
+  );
 });

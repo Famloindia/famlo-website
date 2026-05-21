@@ -5,7 +5,10 @@ import {
   applyRazorpayXPayoutWebhook,
   initiateApprovedSettlementPayout,
   isPayoutAutoRetryAllowed,
+  markPayoutExecutionNeedsReview,
+  retryFailedSettlementPayout,
 } from "@/lib/finance/payout-execution-engine";
+import { listHostPayouts } from "@/lib/finance/payout-admin";
 
 function createPayoutExecutionSupabase() {
   const state = {
@@ -166,6 +169,8 @@ function seedApprovedSettlement(state: ReturnType<typeof createPayoutExecutionSu
     host_id: "host-1",
     provider: "RAZORPAYX",
     provider_fund_account_id: "fa_123",
+    account_number_masked: "XXXX1234",
+    ifsc: "HDFC0001234",
     validation_status: "validation_unavailable",
     is_active: true,
     updated_at: "2026-05-21T00:00:00.000Z",
@@ -484,6 +489,201 @@ test("reference_id uses internal payout id", async () => {
   );
 
   assert.equal(result.referenceId, state.host_payout_executions[0]?.id);
+});
+
+test("failed payout can be manually retried when safe", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_settlements_v2[0]!.status = "payout_failed";
+  state.host_payout_executions.push({
+    id: "exec-failed",
+    settlement_id: "settlement-1",
+    host_id: "host-1",
+    provider: "RAZORPAYX",
+    provider_fund_account_id: "fa_123",
+    amount: 8400,
+    currency: "INR",
+    reference_id: "exec-failed",
+    status: "failed",
+    created_at: "2026-05-21T00:00:00.000Z",
+    updated_at: "2026-05-21T00:00:00.000Z",
+  });
+
+  const result = await retryFailedSettlementPayout(
+    client,
+    { payoutExecutionId: "exec-failed", explicitAdminAction: true },
+    {
+      isSettlementPayoutExecutionEnabled: () => true,
+      isRazorpayXEnabled: () => true,
+      isRazorpayXConfigured: () => true,
+      createPayout: async () =>
+        ({
+          id: "pout_retry_1",
+          entity: "payout",
+          amount: 840000,
+          currency: "INR",
+          status: "queued",
+        }) as any,
+    }
+  );
+
+  assert.equal(result.providerPayoutId, "pout_retry_1");
+  assert.equal(state.host_payout_executions.length, 2);
+});
+
+test("reversed payout cannot retry without review", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_settlements_v2[0]!.status = "needs_review";
+  state.host_payout_executions.push({
+    id: "exec-reversed",
+    settlement_id: "settlement-1",
+    host_id: "host-1",
+    provider: "RAZORPAYX",
+    provider_fund_account_id: "fa_123",
+    amount: 8400,
+    currency: "INR",
+    reference_id: "exec-reversed",
+    status: "reversed",
+    created_at: "2026-05-21T00:00:00.000Z",
+    updated_at: "2026-05-21T00:00:00.000Z",
+  });
+
+  await assert.rejects(
+    () =>
+      retryFailedSettlementPayout(client, {
+        payoutExecutionId: "exec-reversed",
+        explicitAdminAction: true,
+      }),
+    /review/
+  );
+});
+
+test("payout retry blocked when refund hold exists", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_settlements_v2[0]!.status = "payout_failed";
+  state.refund_requests.push({
+    id: "refund-1",
+    booking_id: "booking-1",
+    status: "approved",
+  });
+  state.host_payout_executions.push({
+    id: "exec-failed",
+    settlement_id: "settlement-1",
+    host_id: "host-1",
+    provider: "RAZORPAYX",
+    provider_fund_account_id: "fa_123",
+    amount: 8400,
+    currency: "INR",
+    reference_id: "exec-failed",
+    status: "failed",
+    created_at: "2026-05-21T00:00:00.000Z",
+    updated_at: "2026-05-21T00:00:00.000Z",
+  });
+
+  await assert.rejects(
+    () =>
+      retryFailedSettlementPayout(client, {
+        payoutExecutionId: "exec-failed",
+        explicitAdminAction: true,
+      }),
+    /refund request/
+  );
+});
+
+test("payout retry blocked when account changed and needs revalidation", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_settlements_v2[0]!.status = "payout_failed";
+  state.host_payout_accounts[0]!.provider_fund_account_id = "fa_changed";
+  state.host_payout_accounts[0]!.validation_status = "pending";
+  state.host_payout_accounts[0]!.updated_at = "2026-05-22T00:00:00.000Z";
+  state.host_payout_executions.push({
+    id: "exec-failed",
+    settlement_id: "settlement-1",
+    host_id: "host-1",
+    provider: "RAZORPAYX",
+    provider_fund_account_id: "fa_123",
+    amount: 8400,
+    currency: "INR",
+    reference_id: "exec-failed",
+    status: "failed",
+    created_at: "2026-05-21T00:00:00.000Z",
+    updated_at: "2026-05-21T00:00:00.000Z",
+  });
+
+  await assert.rejects(
+    () =>
+      retryFailedSettlementPayout(client, {
+        payoutExecutionId: "exec-failed",
+        explicitAdminAction: true,
+      }),
+    /revalidation/
+  );
+});
+
+test("host payout list is host scoped", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_settlements_v2.push({
+    id: "settlement-2",
+    host_id: "host-2",
+    settlement_code: "SET-2",
+    status: "paid",
+  });
+  state.host_payout_executions.push({
+    id: "exec-1",
+    settlement_id: "settlement-1",
+    host_id: "host-1",
+    provider: "RAZORPAYX",
+    amount: 8400,
+    currency: "INR",
+    reference_id: "exec-1",
+    status: "processed",
+    created_at: "2026-05-21T00:00:00.000Z",
+  });
+  state.host_payout_executions.push({
+    id: "exec-2",
+    settlement_id: "settlement-2",
+    host_id: "host-2",
+    provider: "RAZORPAYX",
+    amount: 9100,
+    currency: "INR",
+    reference_id: "exec-2",
+    status: "processed",
+    created_at: "2026-05-21T00:00:00.000Z",
+  });
+
+  const rows = await listHostPayouts(client, "host-1");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.id, "exec-1");
+});
+
+test("manual review action marks payout and settlement needs_review", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_payout_executions.push({
+    id: "exec-1",
+    settlement_id: "settlement-1",
+    host_id: "host-1",
+    provider: "RAZORPAYX",
+    amount: 8400,
+    currency: "INR",
+    reference_id: "exec-1",
+    status: "failed",
+    created_at: "2026-05-21T00:00:00.000Z",
+    updated_at: "2026-05-21T00:00:00.000Z",
+  });
+
+  const result = await markPayoutExecutionNeedsReview(client, {
+    payoutExecutionId: "exec-1",
+    reason: "manual review required",
+  });
+
+  assert.equal(result.status, "needs_review");
+  assert.equal(state.host_payout_executions[0]?.status, "needs_review");
+  assert.equal(state.host_settlements_v2[0]?.status, "needs_review");
 });
 
 test("no checkout, refund, or invoice behavior is mutated by payout initiation", async () => {

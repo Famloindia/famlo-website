@@ -76,6 +76,18 @@ export function buildRazorpayOrderNotes(input: {
   return notes;
 }
 
+type CheckoutPricingBreakdown = {
+  roomBaseAmount: number;
+  accommodationGstAmount: number;
+  guestPayableAmount: number;
+  calculationVersion: string | null;
+  famloPlatformFeeInclGst: number;
+  famloPlatformFeeTaxable: number;
+  famloPlatformFeeGst: number;
+  hostGrossPayout: number;
+  gatewayFeeEstimate: number;
+};
+
 function normalizeSection95Nights(value: unknown): Array<{ roomId?: string | null; date?: string | null; listedValue?: number | null; actualValue: number }> {
   if (!Array.isArray(value)) return [];
   return value
@@ -92,6 +104,26 @@ function normalizeSection95Nights(value: unknown): Array<{ roomId?: string | nul
       };
     })
     .filter(Boolean) as Array<{ roomId?: string | null; date?: string | null; listedValue?: number | null; actualValue: number }>;
+}
+
+export function extractCheckoutPricingBreakdown(pricingSnapshot: JsonRecord | null | undefined): CheckoutPricingBreakdown {
+  const snapshot = pricingSnapshot ?? {};
+  const section95Contract =
+    snapshot.section_9_5_contract && typeof snapshot.section_9_5_contract === "object" && !Array.isArray(snapshot.section_9_5_contract)
+      ? (snapshot.section_9_5_contract as JsonRecord)
+      : null;
+
+  return {
+    roomBaseAmount: Number(snapshot.room_base_amount ?? section95Contract?.roomBaseAmount ?? 0),
+    accommodationGstAmount: Number(snapshot.accommodation_gst_amount ?? section95Contract?.accommodationGstAmount ?? 0),
+    guestPayableAmount: Number(snapshot.guest_payable_amount ?? section95Contract?.guestPayableAmount ?? 0),
+    calculationVersion: asString(snapshot.calculation_version ?? section95Contract?.calculationVersion),
+    famloPlatformFeeInclGst: Number(snapshot.famlo_platform_fee_incl_gst ?? section95Contract?.famloPlatformFeeInclGst ?? snapshot.platform_fee ?? 0),
+    famloPlatformFeeTaxable: Number(snapshot.famlo_platform_fee_taxable ?? section95Contract?.famloPlatformFeeTaxable ?? 0),
+    famloPlatformFeeGst: Number(snapshot.famlo_platform_fee_gst ?? section95Contract?.famloPlatformFeeGst ?? 0),
+    hostGrossPayout: Number(snapshot.host_gross_payout ?? section95Contract?.hostGrossPayout ?? 0),
+    gatewayFeeEstimate: Number(snapshot.gateway_fee_estimate ?? section95Contract?.gatewayFeeTotal ?? 0),
+  };
 }
 
 export async function resolveCheckoutPricingForPaymentIntent(
@@ -155,9 +187,15 @@ export async function resolveCheckoutPricingForPaymentIntent(
     guest_payable_amount: contract.guestPayableAmount,
     room_base_amount: contract.roomBaseAmount,
     accommodation_gst_amount: contract.accommodationGstAmount,
+    calculation_version: contract.calculationVersion,
+    famlo_platform_fee_incl_gst: contract.famloPlatformFeeInclGst,
+    famlo_platform_fee_taxable: contract.famloPlatformFeeTaxable,
+    famlo_platform_fee_gst: contract.famloPlatformFeeGst,
+    host_gross_payout: contract.hostGrossPayout,
     platform_fee: contract.famloPlatformFeeInclGst,
     tax_amount: contract.accommodationGstAmount,
     partner_payout_amount: contract.hostNetPayout,
+    gateway_fee_estimate: contract.gatewayFeeTotal,
     section_9_5_contract: {
       taxMode: contract.taxMode,
       calculationVersion: contract.calculationVersion,
@@ -296,6 +334,7 @@ export async function createPaymentIntentForBooking(
     "Create your Razorpay or Stripe order from this pricing payload, then write the gateway IDs back into payments_v2 on capture.";
 
   if (!manualFallback) {
+    const checkoutBreakdown = extractCheckoutPricingBreakdown(pricingSnapshot);
     const propertyId =
       asString(pricingSnapshot.property_id) ??
       asString(pricingSnapshot.propertyId) ??
@@ -342,6 +381,7 @@ export async function createPaymentIntentForBooking(
       currency: "INR",
       bookingId,
       paymentRowId: payment.id,
+      checkoutBreakdown,
     };
     integrationStatus = "razorpay_ready";
     nextStep = "Open Razorpay Checkout with this order payload, then call /api/payments/verify on success.";

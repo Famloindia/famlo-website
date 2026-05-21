@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Script from "next/script";
 import { useSearchParams } from "next/navigation";
 
@@ -10,6 +10,43 @@ declare global {
       open: () => void;
       on: (event: "payment.failed", handler: (response: { error?: { description?: string; reason?: string } }) => void) => void;
     };
+  }
+}
+
+type CheckoutBreakdown = {
+  roomBaseAmount: number;
+  accommodationGstAmount: number;
+  guestPayableAmount: number;
+  calculationVersion: string | null;
+  famloPlatformFeeInclGst: number;
+  famloPlatformFeeTaxable: number;
+  famloPlatformFeeGst: number;
+  hostGrossPayout: number;
+  gatewayFeeEstimate: number;
+};
+
+function formatInr(value: number): string {
+  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function parseCheckoutBreakdown(value: string | null): CheckoutBreakdown | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<CheckoutBreakdown>;
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      roomBaseAmount: Number(parsed.roomBaseAmount ?? 0),
+      accommodationGstAmount: Number(parsed.accommodationGstAmount ?? 0),
+      guestPayableAmount: Number(parsed.guestPayableAmount ?? 0),
+      calculationVersion: typeof parsed.calculationVersion === "string" ? parsed.calculationVersion : null,
+      famloPlatformFeeInclGst: Number(parsed.famloPlatformFeeInclGst ?? 0),
+      famloPlatformFeeTaxable: Number(parsed.famloPlatformFeeTaxable ?? 0),
+      famloPlatformFeeGst: Number(parsed.famloPlatformFeeGst ?? 0),
+      hostGrossPayout: Number(parsed.hostGrossPayout ?? 0),
+      gatewayFeeEstimate: Number(parsed.gatewayFeeEstimate ?? 0),
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -26,8 +63,7 @@ function appendStatus(returnUrl: string, params: Record<string, string>): string
 function PaymentCheckoutScreen(): React.JSX.Element {
   const searchParams = useSearchParams();
   const [scriptReady, setScriptReady] = useState(false);
-  const [launching, setLaunching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const launchedRef = useRef(false);
 
   const payload = useMemo(
     () => ({
@@ -42,22 +78,27 @@ function PaymentCheckoutScreen(): React.JSX.Element {
       email: searchParams.get("email") ?? "",
       phone: searchParams.get("phone") ?? "",
       listingName: searchParams.get("listingName") ?? "Famlo booking",
+      checkoutBreakdown: parseCheckoutBreakdown(searchParams.get("checkoutBreakdown")),
     }),
     [searchParams]
   );
 
-  useEffect(() => {
-    if (!scriptReady || launching) return;
+  const blockingError = useMemo(() => {
     if (!payload.bookingId || !payload.paymentRowId || !payload.orderId || !payload.returnUrl) {
-      setError("Missing required payment checkout parameters.");
-      return;
+      return "Missing required payment checkout parameters.";
     }
-    if (!window.Razorpay) {
-      setError("Razorpay Checkout failed to load.");
-      return;
+    if (scriptReady && !window.Razorpay) {
+      return "Razorpay Checkout failed to load.";
     }
+    return null;
+  }, [payload.bookingId, payload.orderId, payload.paymentRowId, payload.returnUrl, scriptReady]);
 
-    setLaunching(true);
+  useEffect(() => {
+    if (!scriptReady || launchedRef.current) return;
+    if (blockingError) {
+      return;
+    }
+    launchedRef.current = true;
 
     const redirect = (params: Record<string, string>) => {
       const bookingUrl = payload.bookingId
@@ -70,7 +111,12 @@ function PaymentCheckoutScreen(): React.JSX.Element {
       window.location.assign(nextUrl);
     };
 
-    const instance = new window.Razorpay({
+    const RazorpayCheckout = window.Razorpay;
+    if (!RazorpayCheckout) {
+      return;
+    }
+
+    const instance = new RazorpayCheckout({
       key: payload.keyId,
       amount: payload.amount,
       currency: payload.currency,
@@ -135,7 +181,7 @@ function PaymentCheckoutScreen(): React.JSX.Element {
     });
 
     instance.open();
-  }, [launching, payload, scriptReady]);
+  }, [blockingError, payload, scriptReady]);
 
   return (
     <main
@@ -168,10 +214,40 @@ function PaymentCheckoutScreen(): React.JSX.Element {
           Stay on this page while Famlo opens the payment sheet. If the sheet closes, you will be redirected back to the app.
         </p>
         <div style={{ marginTop: "18px", fontSize: "18px", fontWeight: 800 }}>
-          ₹{(payload.amount / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+          {formatInr(payload.amount / 100)}
         </div>
-        {error ? (
-          <div style={{ marginTop: "16px", color: "#fca5a5", fontSize: "14px" }}>{error}</div>
+        {payload.checkoutBreakdown ? (
+          <div
+            style={{
+              marginTop: "18px",
+              display: "grid",
+              gap: "10px",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "18px",
+              padding: "16px",
+              fontSize: "14px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "16px" }}>
+              <span style={{ opacity: 0.72 }}>Room price</span>
+              <strong>{formatInr(payload.checkoutBreakdown.roomBaseAmount)}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "16px" }}>
+              <span style={{ opacity: 0.72 }}>GST / taxes</span>
+              <strong>{formatInr(payload.checkoutBreakdown.accommodationGstAmount)}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "16px", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "10px" }}>
+              <span style={{ opacity: 0.9, fontWeight: 700 }}>Total payable</span>
+              <strong>{formatInr(payload.checkoutBreakdown.guestPayableAmount || payload.amount / 100)}</strong>
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.62)", lineHeight: 1.5 }}>
+              GST and applicable taxes are calculated based on accommodation tariff and applicable law.
+            </div>
+          </div>
+        ) : null}
+        {blockingError ? (
+          <div style={{ marginTop: "16px", color: "#fca5a5", fontSize: "14px" }}>{blockingError}</div>
         ) : (
           <div style={{ marginTop: "16px", color: "#93c5fd", fontSize: "14px" }}>
             {scriptReady ? "Payment sheet ready." : "Loading secure payment script…"}

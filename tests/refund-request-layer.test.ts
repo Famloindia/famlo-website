@@ -8,6 +8,7 @@ import {
   resolveRefundWebhookTransition,
   shouldRequireAdminRefundApproval,
 } from "@/lib/finance/refund-requests";
+import { evaluateAutoRefundEligibility } from "@/lib/finance/refunds/auto-refund-engine";
 import { calculateRefundPolicy } from "@/lib/finance/refund-policy";
 
 function createRefundSupabase() {
@@ -216,6 +217,97 @@ test("provider execution is blocked when flag is off", async () => {
   assert.equal(result.providerExecutionBlocked, true);
   assert.equal(state.refund_attempts.length, 0);
   assert.equal(state.refund_requests[0]?.status, "approved");
+});
+
+test("safe full free cancellation is auto-refund eligible", () => {
+  const result = evaluateAutoRefundEligibility({
+    cancellationSource: "guest",
+    policyCase: "FREE_CANCELLATION",
+    paymentCaptured: true,
+    hasSettlementPayout: false,
+    hasHostPayoutExecution: false,
+    hasDispute: false,
+    refundAmount: 10500,
+    autoRefundMaxAmount: 20000,
+    providerSupportsRefund: true,
+    hasCriticalReconciliationIssue: false,
+  });
+
+  assert.equal(result.eligible, true);
+  assert.deepEqual(result.blockedReasons, []);
+});
+
+test("partial cancellation is not auto-refund eligible", () => {
+  const result = evaluateAutoRefundEligibility({
+    cancellationSource: "guest",
+    policyCase: "PARTIAL_CANCELLATION",
+    paymentCaptured: true,
+    hasSettlementPayout: false,
+    hasHostPayoutExecution: false,
+    hasDispute: false,
+    refundAmount: 5250,
+    autoRefundMaxAmount: 20000,
+    providerSupportsRefund: true,
+    hasCriticalReconciliationIssue: false,
+  });
+
+  assert.equal(result.eligible, false);
+  assert.equal(result.blockedReasons.includes("full_free_cancellation_required"), true);
+});
+
+test("refund after payout is not auto-eligible", () => {
+  const result = evaluateAutoRefundEligibility({
+    cancellationSource: "guest",
+    policyCase: "FREE_CANCELLATION",
+    paymentCaptured: true,
+    hasSettlementPayout: true,
+    hasHostPayoutExecution: true,
+    hasDispute: false,
+    refundAmount: 10500,
+    autoRefundMaxAmount: 20000,
+    providerSupportsRefund: true,
+    hasCriticalReconciliationIssue: false,
+  });
+
+  assert.equal(result.eligible, false);
+  assert.equal(result.blockedReasons.includes("settlement_payout_exists"), true);
+  assert.equal(result.blockedReasons.includes("host_payout_execution_exists"), true);
+});
+
+test("refund above max amount is not auto-eligible", () => {
+  const result = evaluateAutoRefundEligibility({
+    cancellationSource: "guest",
+    policyCase: "FREE_CANCELLATION",
+    paymentCaptured: true,
+    hasSettlementPayout: false,
+    hasHostPayoutExecution: false,
+    hasDispute: false,
+    refundAmount: 10500,
+    autoRefundMaxAmount: 5000,
+    providerSupportsRefund: true,
+    hasCriticalReconciliationIssue: false,
+  });
+
+  assert.equal(result.eligible, false);
+  assert.equal(result.blockedReasons.includes("refund_exceeds_auto_refund_max_amount"), true);
+});
+
+test("critical reconciliation issue blocks auto-refund", () => {
+  const result = evaluateAutoRefundEligibility({
+    cancellationSource: "guest",
+    policyCase: "FREE_CANCELLATION",
+    paymentCaptured: true,
+    hasSettlementPayout: false,
+    hasHostPayoutExecution: false,
+    hasDispute: false,
+    refundAmount: 10500,
+    autoRefundMaxAmount: 20000,
+    providerSupportsRefund: true,
+    hasCriticalReconciliationIssue: true,
+  });
+
+  assert.equal(result.eligible, false);
+  assert.equal(result.blockedReasons.includes("critical_reconciliation_issue_present"), true);
 });
 
 test("Razorpay refund API response creates attempt but not final state", async () => {
