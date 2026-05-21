@@ -18,12 +18,51 @@ type PaymentIntentRow = {
   raw_response: Record<string, unknown> | null;
 };
 
+type JsonRecord = Record<string, unknown>;
+
 export type PaymentIntentResult = {
   payment: PaymentIntentRow;
   order: Record<string, unknown> | null;
   integrationStatus: string;
   nextStep: string;
 };
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+export function resolveInternalGuestPayableAmount(
+  totalPrice: unknown,
+  pricingSnapshot: JsonRecord | null
+): number {
+  const snapshotGuestPayable =
+    typeof pricingSnapshot?.guest_payable_amount === "number"
+      ? pricingSnapshot.guest_payable_amount
+      : typeof pricingSnapshot?.guest_total === "number"
+        ? pricingSnapshot.guest_total
+        : null;
+  const bookingTotal = typeof totalPrice === "number" ? totalPrice : Number(totalPrice ?? 0);
+  return typeof snapshotGuestPayable === "number" && Number.isFinite(snapshotGuestPayable)
+    ? snapshotGuestPayable
+    : bookingTotal;
+}
+
+export function buildRazorpayOrderNotes(input: {
+  bookingId: string;
+  hostId?: string | null;
+  propertyId?: string | null;
+  paymentIntentId: string;
+}): Record<string, string> {
+  const notes: Record<string, string> = {
+    booking_id: input.bookingId,
+    payment_intent_id: input.paymentIntentId,
+  };
+  const hostId = asString(input.hostId);
+  const propertyId = asString(input.propertyId);
+  if (hostId) notes.host_id = hostId;
+  if (propertyId) notes.property_id = propertyId;
+  return notes;
+}
 
 export async function createPaymentIntentForBooking(
   supabase: SupabaseClient,
@@ -38,7 +77,7 @@ export async function createPaymentIntentForBooking(
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings_v2")
-    .select("id,booking_type,total_price,partner_payout_amount,pricing_snapshot,payment_id")
+    .select("id,booking_type,total_price,partner_payout_amount,pricing_snapshot,payment_id,host_id,stay_unit_id")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -48,7 +87,7 @@ export async function createPaymentIntentForBooking(
   }
 
   const pricingSnapshot = (booking.pricing_snapshot as Record<string, unknown> | null) ?? {};
-  const amountTotal = typeof booking.total_price === "number" ? booking.total_price : Number(booking.total_price ?? 0);
+  const amountTotal = resolveInternalGuestPayableAmount(booking.total_price, pricingSnapshot);
   const platformFee =
     typeof pricingSnapshot.platform_fee === "number"
       ? pricingSnapshot.platform_fee
@@ -97,6 +136,7 @@ export async function createPaymentIntentForBooking(
         raw_response: {
           ...((existingPayment?.raw_response as Record<string, unknown> | null) ?? {}),
           intent_type: manualFallback ? "manual_integration_pending" : "razorpay_order_pending",
+          internal_guest_payable_amount: amountTotal,
         },
       },
       { onConflict: "id" }
@@ -112,6 +152,10 @@ export async function createPaymentIntentForBooking(
     "Create your Razorpay or Stripe order from this pricing payload, then write the gateway IDs back into payments_v2 on capture.";
 
   if (!manualFallback) {
+    const propertyId =
+      asString(pricingSnapshot.property_id) ??
+      asString(pricingSnapshot.propertyId) ??
+      asString(booking.stay_unit_id);
     const order =
       typeof payment.gateway_order_id === "string" && payment.gateway_order_id.length > 0
         ? {
@@ -121,11 +165,13 @@ export async function createPaymentIntentForBooking(
           }
         : await createRazorpayOrder({
             amountRupees: amountTotal,
-            receipt: `famlo_${bookingId.slice(0, 8)}`,
-            notes: {
-              booking_id: bookingId,
-              payment_id: payment.id,
-            },
+            receipt: payment.id,
+            notes: buildRazorpayOrderNotes({
+              bookingId,
+              hostId: asString(booking.host_id),
+              propertyId,
+              paymentIntentId: payment.id,
+            }),
           });
 
     const { error: orderUpdateError } = await supabase

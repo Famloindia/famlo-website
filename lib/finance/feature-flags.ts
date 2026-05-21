@@ -131,3 +131,59 @@ export function isTdsEnabledFlag(): boolean {
 export function isGstExportEnabledFlag(): boolean {
   return isEnabled(process.env.GST_EXPORT_ENABLED, false);
 }
+
+export function isAutoRefundEnabled(): boolean {
+  return isEnabled(process.env.AUTO_REFUND_ENABLED, false);
+}
+
+export function isRefundAdminApprovalRequired(): boolean {
+  return isEnabled(process.env.REFUND_ADMIN_APPROVAL_REQUIRED, true);
+}
+
+export function isRefundProviderExecutionEnabled(): boolean {
+  return isEnabled(process.env.REFUND_PROVIDER_EXECUTION_ENABLED, false);
+}
+
+export function isRazorpayRefundsEnabled(): boolean {
+  return isEnabled(process.env.RAZORPAY_REFUNDS_ENABLED, false);
+}
+
+export function isRazorpayXEnabled(): boolean {
+  return isEnabled(process.env.RAZORPAYX_ENABLED, false);
+}
+
+export function isPayoutAccountCreationEnabled(): boolean {
+  return isEnabled(process.env.PAYOUT_ACCOUNT_CREATION_ENABLED, false);
+}
+
+export function isPayoutAccountValidationEnabled(): boolean {
+  return isEnabled(process.env.PAYOUT_ACCOUNT_VALIDATION_ENABLED, false);
+}
+
+export function isPayoutAdminApprovalRequired(): boolean {
+  return isEnabled(process.env.PAYOUT_ADMIN_APPROVAL_REQUIRED, true);
+}
+
+export function isPayoutAutoRetryEnabled(): boolean {
+  return isEnabled(process.env.PAYOUT_AUTO_RETRY_ENABLED, false);
+}
+
+export function isReconciliationJobsEnabled(): boolean {
+  return isEnabled(process.env.RECONCILIATION_JOBS_ENABLED, false);
+}
+
+export function isAdminReconciliationUiEnabled(): boolean {
+  return isEnabled(process.env.ADMIN_RECONCILIATION_UI_ENABLED, false);
+}
+
+export function isCheckoutSection95PricingEnabled(): boolean {
+  return isEnabled(process.env.CHECKOUT_SECTION_9_5_PRICING_ENABLED, false);
+}
+
+export function isPlatformFeeInvoiceGenerationEnabled(): boolean {
+  return isEnabled(process.env.PLATFORM_FEE_INVOICE_GENERATION_ENABLED, false);
+}
+
+export function isCreditNoteGenerationEnabled(): boolean {
+  return isEnabled(process.env.CREDIT_NOTE_GENERATION_ENABLED, false);
+}

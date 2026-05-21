@@ -8,17 +8,21 @@ import {
 } from "@/lib/booking-whatsapp-actions";
 import { buildBookingReceiptDocument, enqueueNotification } from "@/lib/booking-platform";
 import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
-import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
+import { appendLedgerEntryIfMissing } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
+import { resolveRefundWebhookTransition } from "@/lib/finance/refund-requests";
 import {
-  assertBookingCanFinalizePayment,
+  deriveProviderEventId,
+  safeParseProviderPayload,
+  storePaymentProviderEvent,
+  updatePaymentProviderEventStatus,
+} from "@/lib/finance/provider-event-store";
+import {
+  finalizeCapturedBookingPayment,
   loadBookingForPaymentFinalization,
   markBookingPaymentInventoryConflict,
-  recordBookingInventoryTransition,
-  resolveBookingApprovalRequirement,
 } from "@/lib/payment-booking-finalization";
 import { verifyRazorpayWebhookSignature } from "@/lib/razorpay";
-import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { loadUserProfileCompatibility } from "@/lib/user-profile";
 
@@ -115,30 +119,68 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const rawBody = await req.text();
     const signature = req.headers.get("x-razorpay-signature") ?? "";
-
-    if (!signature) {
-      return NextResponse.json({ error: "Missing Razorpay webhook signature." }, { status: 400 });
-    }
-
-    if (!verifyRazorpayWebhookSignature(rawBody, signature)) {
-      return NextResponse.json({ error: "Invalid Razorpay webhook signature." }, { status: 400 });
-    }
-
-    const payload = JSON.parse(rawBody) as RazorpayWebhookPayload;
+    const headerEventId = req.headers.get("x-razorpay-event-id");
+    const payload = safeParseProviderPayload(rawBody) as RazorpayWebhookPayload;
     const eventName = String(payload.event ?? "");
-    const isRefundEvent = eventName === "refund.created" || eventName === "refund.processed";
-    const update = resolvePaymentUpdate(eventName);
-    if (!update && !isRefundEvent) {
-      return NextResponse.json({ received: true, ignored: true });
-    }
-
     const paymentEntity = payload.payload?.payment?.entity;
     const orderEntity = payload.payload?.order?.entity;
     const refundEntity = payload.payload?.refund?.entity;
     const gatewayOrderId = String(paymentEntity?.order_id ?? orderEntity?.id ?? "").trim();
     const gatewayPaymentId = String(paymentEntity?.id ?? refundEntity?.payment_id ?? "").trim();
+    const providerEventId = deriveProviderEventId("RAZORPAY", rawBody, headerEventId);
+    const signatureValid = Boolean(signature) && verifyRazorpayWebhookSignature(rawBody, signature);
 
     const supabase = createAdminSupabaseClient();
+    const storedEvent = await storePaymentProviderEvent(supabase, {
+      provider: "RAZORPAY",
+      eventId: providerEventId,
+      eventType: eventName || "unknown",
+      entityType: refundEntity?.id ? "refund" : paymentEntity?.id ? "payment" : orderEntity?.id ? "order" : null,
+      entityId: String(refundEntity?.id ?? paymentEntity?.id ?? orderEntity?.id ?? "").trim() || null,
+      rawPayload: payload as Record<string, unknown>,
+      signatureValid,
+      processingStatus: signatureValid ? "received" : "invalid_signature",
+      processedAt: signatureValid ? null : new Date().toISOString(),
+      errorMessage: signatureValid ? null : !signature ? "Missing Razorpay webhook signature." : "Invalid Razorpay webhook signature.",
+    });
+
+    if (storedEvent.isDuplicate) {
+      return NextResponse.json({
+        received: true,
+        ignored: true,
+        duplicate: true,
+        providerEventId,
+        processingStatus: storedEvent.record.processingStatus,
+      });
+    }
+
+    if (!signatureValid) {
+      return NextResponse.json(
+        { error: !signature ? "Missing Razorpay webhook signature." : "Invalid Razorpay webhook signature." },
+        { status: 400 }
+      );
+    }
+
+    const isRefundEvent =
+      eventName === "refund.created" || eventName === "refund.processed" || eventName === "refund.failed";
+    const update = resolvePaymentUpdate(eventName);
+    if (!update && !isRefundEvent) {
+      await updatePaymentProviderEventStatus(supabase, {
+        provider: "RAZORPAY",
+        eventId: providerEventId,
+        processingStatus: "ignored",
+        processedAt: new Date().toISOString(),
+        errorMessage: "unsupported_event",
+      });
+      return NextResponse.json({ received: true, ignored: true });
+    }
+
+    await updatePaymentProviderEventStatus(supabase, {
+      provider: "RAZORPAY",
+      eventId: providerEventId,
+      processingStatus: "processing",
+    });
+
     const paymentLookup = gatewayPaymentId
       ? await supabase
           .from("payments_v2")
@@ -158,6 +200,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     if (!paymentLookup.data) {
+      await updatePaymentProviderEventStatus(supabase, {
+        provider: "RAZORPAY",
+        eventId: providerEventId,
+        processingStatus: "ignored",
+        processedAt: new Date().toISOString(),
+        errorMessage: "payment_not_found",
+      });
       return NextResponse.json({ received: true, ignored: true, reason: "payment_not_found" });
     }
 
@@ -168,14 +217,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const refundAmountPaise = asNumber(refundEntity?.amount);
       const refundAmount = Math.max(0, Math.round(refundAmountPaise / 100));
       const fullRefund = refundAmount >= asNumber(payment.amount_total);
-      const refundStatus = eventName === "refund.processed" ? "processed" : "pending";
+      const refundTransition = resolveRefundWebhookTransition(eventName);
+      const refundStatus = refundTransition.refundStatus;
       const bookingPaymentStatus = fullRefund
         ? refundStatus === "processed"
           ? "refunded"
+          : refundStatus === "failed"
+            ? String(payment.status ?? "").trim().toLowerCase() === "paid"
+              ? "paid"
+              : "refund_pending"
           : "refund_pending"
         : refundStatus === "processed"
           ? "partially_refunded"
+          : refundStatus === "failed"
+            ? String(payment.status ?? "").trim().toLowerCase() === "paid"
+              ? "paid"
+              : "refund_pending"
           : "refund_pending";
+
+      const providerRefundId = String(refundEntity?.id ?? "");
+      const { data: existingAttempt } = providerRefundId
+        ? await supabase
+            .from("refund_attempts")
+            .select("id,refund_request_id,status")
+            .eq("provider", "razorpay")
+            .eq("provider_refund_id", providerRefundId)
+            .maybeSingle()
+        : { data: null };
+
+      const { data: requestForAttempt } = existingAttempt?.refund_request_id
+        ? await supabase
+            .from("refund_requests")
+            .select("id,status")
+            .eq("id", existingAttempt.refund_request_id)
+            .maybeSingle()
+        : { data: null };
 
       const { data: refundRow, error: refundUpsertError } = await supabase
         .from("refunds_v2")
@@ -184,14 +260,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             booking_id: payment.booking_id,
             payment_id: payment.id,
             provider: "razorpay",
-            provider_refund_id: String(refundEntity?.id ?? ""),
+            provider_refund_id: providerRefundId,
             amount_total: refundAmount,
             reason_code: eventName,
-            status: refundStatus,
+            status: refundStatus === "failed" ? "failed" : refundStatus,
             processed_at: refundStatus === "processed" ? now : null,
             metadata: {
               webhook_event: eventName,
               webhook_payload: payload,
+              refund_request_id: existingAttempt?.refund_request_id ?? null,
             },
           },
           { onConflict: "provider,provider_refund_id" }
@@ -300,6 +377,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         } as never)
         .eq("id", payment.booking_id);
 
+      if (existingAttempt?.id) {
+        await supabase
+          .from("refund_attempts")
+          .update({
+            status: refundTransition.attemptStatus,
+            raw_response: payload,
+            updated_at: now,
+          } as never)
+          .eq("id", existingAttempt.id);
+      }
+
+      if (requestForAttempt?.id) {
+        await supabase
+          .from("refund_requests")
+          .update({
+            status: refundTransition.requestStatus,
+          } as never)
+          .eq("id", requestForAttempt.id);
+      }
+
       if (eventName === "refund.created") {
         await appendLedgerEntryIfMissing(supabase, {
           bookingId: payment.booking_id,
@@ -388,19 +485,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         });
       }
 
-      await processFinanceEventContract(supabase, {
-        bookingId: payment.booking_id,
-        eventType: "REFUND_CREATED",
-        sourceEventId: refundRow.id,
-        calculationVersion: "batch2-direct-folio-v1",
-        currency: typeof payment.currency === "string" ? payment.currency : "INR",
-        refundAmount,
-        metadata: {
-          source: "payments.webhook",
-          refund_status: refundStatus,
-          provider_event: eventName,
-        },
-      });
+      if (refundTransition.shouldFinalizeFolio) {
+        await processFinanceEventContract(supabase, {
+          bookingId: payment.booking_id,
+          eventType: "REFUND_CREATED",
+          sourceEventId: refundRow.id,
+          calculationVersion: "batch2-direct-folio-v1",
+          currency: typeof payment.currency === "string" ? payment.currency : "INR",
+          refundAmount,
+          metadata: {
+            source: "payments.webhook",
+            refund_status: refundStatus,
+            provider_event: eventName,
+            refund_request_id: existingAttempt?.refund_request_id ?? null,
+          },
+        });
+      }
 
       await appendPaymentEventAudit(supabase, {
         paymentId: payment.id,
@@ -410,6 +510,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         idempotencyKey: `payment_webhook:${eventName}:${String(refundEntity?.id ?? gatewayPaymentId ?? payment.id)}`,
         payload,
         processingStatus: "processed",
+      });
+
+      await updatePaymentProviderEventStatus(supabase, {
+        provider: "RAZORPAY",
+        eventId: providerEventId,
+        processingStatus: refundStatus === "failed" ? "failed" : "processed",
+        processedAt: now,
+        errorMessage: refundStatus === "failed" ? "refund_failed_requires_review" : null,
       });
 
       return NextResponse.json({ received: true, paymentId: payment.id, bookingId: payment.booking_id, refundId: refundRow.id });
@@ -460,33 +568,92 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ received: true, paymentId: payment.id, bookingId: payment.booking_id, conflict: true });
     }
 
-    try {
-      await assertBookingCanFinalizePayment(supabase, {
-        bookingId: payment.booking_id,
-        paymentId: payment.id,
-        paidAt: now,
-        booking: booking as Record<string, unknown> | null | undefined,
-      });
-    } catch (error) {
-      await markBookingPaymentInventoryConflict(supabase, {
-        booking: booking as Record<string, unknown> | null | undefined,
-        paymentId: payment.id,
-        provider: "razorpay",
-        reason: "inventory_conflict_after_payment",
-        conflictSummary:
-          error instanceof Error
-            ? `${error.message} Payment captured after the slot was no longer available.`
-            : null,
-      });
-      return NextResponse.json({ received: true, paymentId: payment.id, bookingId: payment.booking_id, conflict: true });
+    let finalizationResult:
+      | Awaited<ReturnType<typeof finalizeCapturedBookingPayment>>
+      | null = null;
+    if (update.paymentStatus === "paid") {
+      try {
+        finalizationResult = await finalizeCapturedBookingPayment(supabase, {
+          payment,
+          booking: booking as Record<string, unknown> | null | undefined,
+          gatewayOrderId,
+          gatewayPaymentId,
+          providerPaymentStatus: String(paymentEntity?.status ?? orderEntity?.status ?? update.paymentStatus),
+          providerAmountPaise: asNumber(paymentEntity?.amount ?? orderEntity?.amount),
+          paidAt: now,
+          source: "payments.webhook",
+          providerEventName: eventName,
+          rawResponsePatch: {
+            last_webhook_event: eventName,
+            last_webhook_received_at: now,
+            webhook_payload: payload,
+          },
+        });
+      } catch (error) {
+        await markBookingPaymentInventoryConflict(supabase, {
+          booking: booking as Record<string, unknown> | null | undefined,
+          paymentId: payment.id,
+          provider: "razorpay",
+          reason: "inventory_conflict_after_payment",
+          conflictSummary:
+            error instanceof Error
+              ? `${error.message} Payment captured after the slot was no longer available.`
+              : null,
+        });
+        await updatePaymentProviderEventStatus(supabase, {
+          provider: "RAZORPAY",
+          eventId: providerEventId,
+          processingStatus: "failed",
+          processedAt: now,
+          errorMessage: error instanceof Error ? error.message : "inventory_conflict_after_payment",
+        });
+        return NextResponse.json({ received: true, paymentId: payment.id, bookingId: payment.booking_id, conflict: true });
+      }
+
+      if (finalizationResult.decision === "reject_amount_mismatch") {
+        await updatePaymentProviderEventStatus(supabase, {
+          provider: "RAZORPAY",
+          eventId: providerEventId,
+          processingStatus: "failed",
+          processedAt: now,
+          errorMessage: "amount_mismatch",
+        });
+        return NextResponse.json({ error: "Captured Razorpay amount does not match internal guest payable amount." }, { status: 409 });
+      }
+      if (finalizationResult.decision === "reject_invalid_ids") {
+        await updatePaymentProviderEventStatus(supabase, {
+          provider: "RAZORPAY",
+          eventId: providerEventId,
+          processingStatus: "failed",
+          processedAt: now,
+          errorMessage: "invalid_gateway_ids",
+        });
+        return NextResponse.json({ error: "Missing or malformed Razorpay payment identifiers." }, { status: 400 });
+      }
+      if (finalizationResult.decision === "ignore_not_captured") {
+        await updatePaymentProviderEventStatus(supabase, {
+          provider: "RAZORPAY",
+          eventId: providerEventId,
+          processingStatus: "ignored",
+          processedAt: now,
+          errorMessage: "payment_not_captured",
+        });
+        return NextResponse.json({ received: true, ignored: true, reason: "payment_not_captured" });
+      }
+    } else {
+      await supabase
+        .from("bookings_v2")
+        .update({
+          payment_status: update.bookingPaymentStatus,
+          updated_at: now,
+        } as never)
+        .eq("id", payment.booking_id);
     }
 
-    const approvalRequired = await resolveBookingApprovalRequirement(supabase, booking as Record<string, unknown> | null | undefined);
-    const bookingStatus =
-      update.bookingPaymentStatus === "paid"
-        ? (approvalRequired ? "pending_host_approval" : "confirmed")
-        : booking?.status ?? "pending";
-    const hostRelationForLog = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
+    const approvalRequired = finalizationResult?.approvalRequired ?? false;
+    const bookingForNotifications = (finalizationResult?.booking ?? booking) as Record<string, unknown> | null | undefined;
+    const bookingStatus = finalizationResult?.nextStatus ?? (bookingForNotifications?.status as string | null) ?? "pending";
+    const hostRelationForLog = Array.isArray(bookingForNotifications?.hosts) ? bookingForNotifications.hosts[0] : bookingForNotifications?.hosts;
     const hostLegacyFamilyIdForLog =
       typeof hostRelationForLog?.legacy_family_id === "string" && hostRelationForLog.legacy_family_id.trim().length > 0
         ? hostRelationForLog.legacy_family_id
@@ -495,59 +662,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       source: "payments.webhook",
       approvalRequired,
       bookingId: payment.booking_id,
-      hostId: typeof booking?.host_id === "string" ? booking.host_id : null,
+      hostId: typeof bookingForNotifications?.host_id === "string" ? bookingForNotifications.host_id : null,
       legacyFamilyId: hostLegacyFamilyIdForLog,
       nextStatus: bookingStatus,
+      decision: finalizationResult?.decision ?? "non_paid_update",
     });
 
-    await supabase
-      .from("bookings_v2")
-      .update({
-        payment_status: update.bookingPaymentStatus,
-        status: bookingStatus,
-        hold_expires_at: update.bookingPaymentStatus === "paid" ? null : undefined,
-        updated_at: now,
-      } as never)
-      .eq("id", payment.booking_id);
-
-    if (update.bookingPaymentStatus === "paid") {
-      await recordBookingInventoryTransition(supabase, {
-        booking: {
-          ...(booking as Record<string, unknown> | null),
-          status: bookingStatus,
-          payment_status: update.bookingPaymentStatus,
-        },
-        eventType: "booking_confirmed",
-        eventSource: "payments.webhook",
-        payload: {
-          payment_id: payment.id,
-          webhook_event: eventName,
-          approval_required: approvalRequired,
-        },
-      });
-    }
-
-    await supabase.from("booking_status_history_v2").insert({
-      booking_id: payment.booking_id,
-      old_status: booking?.status ?? null,
-      new_status: bookingStatus,
-      changed_by_user_id: null,
-      reason: `payment_webhook:${eventName}`,
-      created_at: now,
-    } as never);
-
-    await syncReservationFromBooking(supabase, {
-      bookingId: payment.booking_id,
-      source: "payments.webhook",
-      eventType: "status_synced",
-      payload: {
-        payment_id: payment.id,
-        webhook_event: eventName,
-        next_status: bookingStatus,
-      },
-    });
-
-    if (update.paymentStatus === "paid") {
+    if (update.paymentStatus === "paid" && finalizationResult?.finalizedNow) {
       try {
         const receipt = await buildBookingReceiptDocument(supabase, payment.booking_id);
         await supabase.from("document_exports").insert({
@@ -759,105 +880,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         });
       }
 
-      await appendLedgerEntryIfMissing(supabase, {
-        bookingId: payment.booking_id,
-        paymentId: payment.id,
-        entryType: "payment_captured",
-        accountCode: "cash_gateway_clearing",
-        direction: "debit",
-        amount:
-          typeof payment.amount_total === "number" ? payment.amount_total : Number(payment.amount_total ?? 0),
-        referenceType: "payment_webhook",
-        referenceId: `${eventName}:${gatewayPaymentId || gatewayOrderId || payment.id}`,
-        metadata: {
-          provider: "razorpay",
-        },
-      });
-
-      await appendLedgerEntryIfMissing(supabase, {
-        bookingId: payment.booking_id,
-        paymentId: payment.id,
-        entryType: "tax_liability",
-        accountCode: "tax_output_payable",
-        direction: "credit",
-        amount: typeof payment.tax_amount === "number" ? payment.tax_amount : Number(payment.tax_amount ?? 0),
-        referenceType: "payment_webhook_tax",
-        referenceId: `${eventName}:${gatewayPaymentId || gatewayOrderId || payment.id}`,
-        metadata: {
-          provider: "razorpay",
-        },
-      });
-
-      const hommieRelation = Array.isArray(booking?.hommie_profiles_v2)
-        ? booking.hommie_profiles_v2[0]
-        : booking?.hommie_profiles_v2;
-
-      const payoutId =
-        booking?.recipient_type === "host" && booking.host_id && hostRelation?.user_id
-          ? await ensureScheduledPayout(supabase, {
-              bookingId: payment.booking_id,
-              paymentId: payment.id,
-              partnerType: "host",
-              partnerUserId: String(hostRelation.user_id),
-              partnerProfileId: String(booking.host_id),
-              amount:
-                typeof booking.partner_payout_amount === "number"
-                  ? booking.partner_payout_amount
-                  : Number(booking.partner_payout_amount ?? 0),
-                pricingSnapshot: (booking.pricing_snapshot as Record<string, unknown> | null) ?? {},
-                paymentTaxAmount: typeof payment.tax_amount === "number" ? payment.tax_amount : Number(payment.tax_amount ?? 0),
-              })
-          : booking?.recipient_type === "hommie" && booking.hommie_id && hommieRelation?.user_id
-            ? await ensureScheduledPayout(supabase, {
-                bookingId: payment.booking_id,
-                paymentId: payment.id,
-                partnerType: "hommie",
-                partnerUserId: String(hommieRelation.user_id),
-                partnerProfileId: String(booking.hommie_id),
-                amount:
-                  typeof booking.partner_payout_amount === "number"
-                    ? booking.partner_payout_amount
-                    : Number(booking.partner_payout_amount ?? 0),
-                pricingSnapshot: (booking.pricing_snapshot as Record<string, unknown> | null) ?? {},
-                paymentTaxAmount: typeof payment.tax_amount === "number" ? payment.tax_amount : Number(payment.tax_amount ?? 0),
-              })
-            : null;
-
-      if (payoutId) {
-        await appendLedgerEntryIfMissing(supabase, {
-          bookingId: payment.booking_id,
-          paymentId: payment.id,
-          payoutId,
-          entryType: "payout_scheduled",
-          accountCode: "partner_payable",
-          direction: "credit",
-          amount:
-            typeof booking?.partner_payout_amount === "number"
-              ? booking.partner_payout_amount
-              : Number(booking?.partner_payout_amount ?? 0),
-          referenceType: "payout_schedule",
-          referenceId: payoutId,
-          metadata: {
-            provider: "razorpay",
-          },
-        });
-      }
-
-      await processFinanceEventContract(supabase, {
-        bookingId: payment.booking_id,
-        eventType: "PAYMENT_CAPTURED",
-        sourceEventId: gatewayPaymentId || gatewayOrderId || payment.id,
-        calculationVersion: "batch2-direct-folio-v1",
-        currency: typeof payment.currency === "string" ? payment.currency : "INR",
-        guestPaidAmount: typeof payment.amount_total === "number" ? payment.amount_total : Number(payment.amount_total ?? 0),
-        sourceChannel: typeof booking?.source_channel === "string" ? booking.source_channel : "famlo_direct",
-        metadata: {
-          source: "payments.webhook",
-          payment_id: payment.id,
-          provider_event: eventName,
-          payout_id: payoutId,
-        },
-      });
     }
 
     await appendPaymentEventAudit(supabase, {
@@ -868,6 +890,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       idempotencyKey: `payment_webhook:${eventName}:${gatewayPaymentId || gatewayOrderId || payment.id}`,
       payload,
       processingStatus: "processed",
+    });
+
+    await updatePaymentProviderEventStatus(supabase, {
+      provider: "RAZORPAY",
+      eventId: providerEventId,
+      processingStatus:
+        update.paymentStatus === "paid" && finalizationResult && !finalizationResult.finalizedNow
+          ? "ignored_duplicate"
+          : "processed",
+      processedAt: now,
+      errorMessage: null,
     });
 
     return NextResponse.json({ received: true, paymentId: payment.id, bookingId: payment.booking_id });

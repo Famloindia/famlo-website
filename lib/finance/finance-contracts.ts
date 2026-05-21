@@ -74,3 +74,8 @@ export type Section95FinanceContract = {
   tdsTrackedAmount: number;
   accommodationGstBreakdown: Section95NightBreakdown[];
 };
+
+export function isSection95TaxMode(mode: string | null | undefined): boolean {
+  const normalized = String(mode ?? "").trim().toUpperCase();
+  return normalized === "ECO_SECTION_9_5" || normalized === "SECTION_9_5";
+}

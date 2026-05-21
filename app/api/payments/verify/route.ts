@@ -6,18 +6,14 @@ import {
   createOrReuseBookingWhatsAppAction,
 } from "@/lib/booking-whatsapp-actions";
 import { getErrorDiagnostics, getErrorMessage } from "@/lib/error-utils";
-import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { appendPaymentEventAudit } from "@/lib/finance/payment-audit";
-import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { buildBookingReceiptDocument, enqueueNotification } from "@/lib/booking-platform";
 import {
-  assertBookingCanFinalizePayment,
+  finalizeCapturedBookingPayment,
   loadBookingForPaymentFinalization,
   markBookingPaymentInventoryConflict,
-  recordBookingInventoryTransition,
-  resolveBookingApprovalRequirement,
 } from "@/lib/payment-booking-finalization";
-import { verifyRazorpayPaymentSignature } from "@/lib/razorpay";
+import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from "@/lib/razorpay";
 import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { loadUserProfileCompatibility } from "@/lib/user-profile";
@@ -133,25 +129,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const now = new Date().toISOString();
-    const { error: paymentUpdateError } = await supabase
-      .from("payments_v2")
-      .update({
-        gateway: "razorpay",
-        gateway_order_id: orderId,
-        gateway_payment_id: gatewayPaymentId,
-        status: "paid",
-        paid_at: now,
-        raw_response: {
-          ...((payment.raw_response as Record<string, unknown> | null) ?? {}),
-          razorpay_signature: signature,
-          verification_source: "client_callback",
-          verified_at: now,
-        },
-      } as never)
-      .eq("id", payment.id);
-
-    if (paymentUpdateError) {
-      throw paymentUpdateError;
+    const providerPayment = await fetchRazorpayPayment(gatewayPaymentId);
+    if (providerPayment.order_id && providerPayment.order_id !== orderId) {
+      return NextResponse.json({ error: "Razorpay order mismatch for this payment." }, { status: 409 });
     }
 
     const booking = await loadBookingForPaymentFinalization(supabase, payment.booking_id);
@@ -185,12 +165,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
+    let finalizationResult;
     try {
-      await assertBookingCanFinalizePayment(supabase, {
-        bookingId: payment.booking_id,
-        paymentId: payment.id,
-        paidAt: now,
+      finalizationResult = await finalizeCapturedBookingPayment(supabase, {
+        payment,
         booking: booking as Record<string, unknown> | null | undefined,
+        gatewayOrderId: orderId,
+        gatewayPaymentId,
+        providerPaymentStatus: providerPayment.status,
+        providerAmountPaise: providerPayment.amount,
+        paidAt: now,
+        source: "payments.verify",
+        providerEventName: "client.verify.paid",
+        rawResponsePatch: {
+          razorpay_signature: signature,
+          verification_source: "client_callback",
+          verified_at: now,
+          provider_payment_status: providerPayment.status,
+          provider_payment_amount_paise: providerPayment.amount,
+          provider_order_id: providerPayment.order_id ?? null,
+        },
       });
     } catch (error) {
       await markBookingPaymentInventoryConflict(supabase, {
@@ -210,9 +204,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const approvalRequired = await resolveBookingApprovalRequirement(supabase, booking as Record<string, unknown> | null | undefined);
-    const nextStatus = approvalRequired ? "pending_host_approval" : "confirmed";
-    const hostProfile = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
+    if (finalizationResult.decision === "reject_amount_mismatch") {
+      return NextResponse.json({ error: "Captured Razorpay amount does not match internal guest payable amount." }, { status: 409 });
+    }
+    if (finalizationResult.decision === "ignore_not_captured") {
+      return NextResponse.json({ error: "Razorpay payment is not captured yet." }, { status: 409 });
+    }
+    if (finalizationResult.decision === "reject_invalid_ids") {
+      return NextResponse.json({ error: "Missing or malformed Razorpay payment identifiers." }, { status: 400 });
+    }
+
+    const approvalRequired = finalizationResult.approvalRequired;
+    const nextStatus = finalizationResult.nextStatus;
+    const payoutId = finalizationResult.payoutId;
+    const finalizedBooking = (finalizationResult.booking ?? booking) as Record<string, unknown> | null | undefined;
+    const hostProfileForFlow = Array.isArray(finalizedBooking?.hosts) ? finalizedBooking.hosts[0] : finalizedBooking?.hosts;
+    const hostProfile = hostProfileForFlow;
     const hostLegacyFamilyIdForLog =
       typeof hostProfile?.legacy_family_id === "string" && hostProfile.legacy_family_id.trim().length > 0
         ? hostProfile.legacy_family_id
@@ -221,196 +228,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       source: "payments.verify",
       approvalRequired,
       bookingId: payment.booking_id,
-      hostId: typeof booking?.host_id === "string" ? booking.host_id : null,
+      hostId: typeof finalizedBooking?.host_id === "string" ? finalizedBooking.host_id : null,
       legacyFamilyId: hostLegacyFamilyIdForLog,
       nextStatus,
-    });
-    const { error: bookingUpdateError } = await supabase
-      .from("bookings_v2")
-      .update({
-        payment_status: "paid",
-        payment_id: payment.id,
-        status: nextStatus,
-        hold_expires_at: null,
-        updated_at: now,
-      } as never)
-      .eq("id", payment.booking_id);
-
-    if (bookingUpdateError) {
-      throw bookingUpdateError;
-    }
-
-    await recordBookingInventoryTransition(supabase, {
-      booking: {
-        ...(booking as Record<string, unknown> | null),
-        status: nextStatus,
-        payment_status: "paid",
-      },
-      eventType: "booking_confirmed",
-      eventSource: "payments.verify",
-      payload: {
-        payment_id: payment.id,
-        approval_required: approvalRequired,
-      },
-    });
-
-    const legacyBookingId =
-      typeof booking?.legacy_booking_id === "string" && booking.legacy_booking_id.trim().length > 0
-        ? booking.legacy_booking_id
-        : null;
-
-    if (legacyBookingId) {
-      const { error: legacyBookingUpdateError } = await supabase
-        .from("bookings")
-        .update({
-          status: nextStatus,
-          updated_at: now,
-        } as never)
-        .eq("id", legacyBookingId);
-
-      if (legacyBookingUpdateError) {
-        console.error("[payments.verify] legacy booking status update failed:", legacyBookingUpdateError);
-      }
-    }
-
-    await supabase.from("booking_status_history_v2").insert({
-      booking_id: payment.booking_id,
-      old_status: booking?.status ?? null,
-      new_status: nextStatus,
-      changed_by_user_id: null,
-      reason: "payment_verified",
-      created_at: now,
-    } as never);
-
-    await syncReservationFromBooking(supabase, {
-      bookingId: payment.booking_id,
-      source: "payments.verify",
-      eventType: "status_synced",
-      payload: {
-        payment_id: payment.id,
-        approval_required: approvalRequired,
-        next_status: nextStatus,
-      },
-    });
-
-    await appendLedgerEntryIfMissing(supabase, {
-      bookingId: payment.booking_id,
-      paymentId: payment.id,
-      entryType: "payment_captured",
-      accountCode: "cash_gateway_clearing",
-      direction: "debit",
-      amount:
-        typeof (payment as { amount_total?: number }).amount_total === "number"
-          ? (payment as { amount_total?: number }).amount_total ?? 0
-          : 0,
-      referenceType: "payment_verify",
-      referenceId: `${orderId}:${gatewayPaymentId}`,
-      metadata: {
-        provider: "razorpay",
-      },
-    });
-
-    await appendLedgerEntryIfMissing(supabase, {
-      bookingId: payment.booking_id,
-      paymentId: payment.id,
-      entryType: "tax_liability",
-      accountCode: "tax_output_payable",
-      direction: "credit",
-      amount:
-        typeof (payment as { tax_amount?: number }).tax_amount === "number"
-          ? (payment as { tax_amount?: number }).tax_amount ?? 0
-          : 0,
-      referenceType: "payment_verify",
-      referenceId: `tax:${orderId}:${gatewayPaymentId}`,
-      metadata: {
-        provider: "razorpay",
-      },
-    });
-
-    const hommieRelation = Array.isArray(booking?.hommie_profiles_v2)
-      ? booking.hommie_profiles_v2[0]
-      : booking?.hommie_profiles_v2;
-    const hostProfileForFlow = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
-
-    let payoutId: string | null = null;
-    if (!approvalRequired) {
-      payoutId =
-        booking?.recipient_type === "host" && booking.host_id && hostProfileForFlow?.user_id
-          ? await ensureScheduledPayout(supabase, {
-              bookingId: payment.booking_id,
-              paymentId: payment.id,
-              partnerType: "host",
-              partnerUserId: String(hostProfileForFlow.user_id),
-              partnerProfileId: String(booking.host_id),
-              amount:
-                typeof booking.partner_payout_amount === "number"
-                  ? booking.partner_payout_amount
-                  : Number(booking.partner_payout_amount ?? 0),
-              pricingSnapshot: (booking.pricing_snapshot as Record<string, unknown> | null) ?? {},
-              paymentTaxAmount:
-                typeof (payment as { tax_amount?: number }).tax_amount === "number"
-                  ? (payment as { tax_amount?: number }).tax_amount ?? 0
-                  : 0,
-            })
-          : booking?.recipient_type === "hommie" && booking.hommie_id && hommieRelation?.user_id
-            ? await ensureScheduledPayout(supabase, {
-                bookingId: payment.booking_id,
-                paymentId: payment.id,
-                partnerType: "hommie",
-                partnerUserId: String(hommieRelation.user_id),
-                partnerProfileId: String(booking.hommie_id),
-                amount:
-                  typeof booking.partner_payout_amount === "number"
-                    ? booking.partner_payout_amount
-                    : Number(booking.partner_payout_amount ?? 0),
-                pricingSnapshot: (booking.pricing_snapshot as Record<string, unknown> | null) ?? {},
-                paymentTaxAmount:
-                  typeof (payment as { tax_amount?: number }).tax_amount === "number"
-                    ? (payment as { tax_amount?: number }).tax_amount ?? 0
-                    : 0,
-              })
-            : null;
-
-      if (payoutId) {
-        await appendLedgerEntryIfMissing(supabase, {
-          bookingId: payment.booking_id,
-          paymentId: payment.id,
-          payoutId,
-          entryType: "payout_scheduled",
-          accountCode: "partner_payable",
-          direction: "credit",
-          amount:
-            typeof booking?.partner_payout_amount === "number"
-              ? booking.partner_payout_amount
-              : Number(booking?.partner_payout_amount ?? 0),
-          referenceType: "payout_schedule",
-          referenceId: payoutId,
-          metadata: {
-            provider: "razorpay",
-          },
-        });
-      }
-    }
-
-    await processFinanceEventContract(supabase, {
-      bookingId: payment.booking_id,
-      eventType: "PAYMENT_CAPTURED",
-      sourceEventId: gatewayPaymentId,
-      calculationVersion: "batch2-direct-folio-v1",
-      currency:
-        typeof (booking?.pricing_snapshot as Record<string, unknown> | null)?.currency === "string"
-          ? String((booking?.pricing_snapshot as Record<string, unknown>).currency)
-          : "INR",
-      guestPaidAmount:
-        typeof (payment as { amount_total?: number }).amount_total === "number"
-          ? (payment as { amount_total?: number }).amount_total ?? 0
-          : 0,
-      sourceChannel: typeof booking?.source_channel === "string" ? booking.source_channel : "famlo_direct",
-      metadata: {
-        source: "payments.verify",
-        payment_id: payment.id,
-        payout_id: payoutId,
-      },
+      decision: finalizationResult.decision,
     });
 
     await appendPaymentEventAudit(supabase, {
@@ -428,8 +249,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       processingStatus: "processed",
     });
 
-    const conversationId = typeof booking?.conversation_id === "string" ? booking.conversation_id : null;
-    const guestUserId = typeof booking?.user_id === "string" ? booking.user_id : null;
+    if (!finalizationResult.finalizedNow) {
+      return NextResponse.json({
+        success: true,
+        bookingId: payment.booking_id,
+        paymentId: payment.id,
+        idempotentReplay: true,
+      });
+    }
+
+    const conversationId = typeof finalizedBooking?.conversation_id === "string" ? finalizedBooking.conversation_id : null;
+    const guestUserId = typeof finalizedBooking?.user_id === "string" ? finalizedBooking.user_id : null;
+    const legacyBookingId =
+      typeof finalizedBooking?.legacy_booking_id === "string" && finalizedBooking.legacy_booking_id.trim().length > 0
+        ? finalizedBooking.legacy_booking_id
+        : null;
 
     try {
       const receipt = await buildBookingReceiptDocument(supabase, payment.booking_id);
@@ -512,10 +346,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const actionLinks = await createHostBookingActionLinks(supabase, {
         bookingId: payment.booking_id,
         familyId: hostLegacyFamilyId,
-        hostId: typeof booking?.host_id === "string" ? booking.host_id : null,
-        hostUserId,
-        metadata: {
-          source: "payments_verify",
+          hostId: typeof finalizedBooking?.host_id === "string" ? finalizedBooking.host_id : null,
+          hostUserId,
+          metadata: {
+            source: "payments_verify",
         },
       });
 

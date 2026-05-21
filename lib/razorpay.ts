@@ -55,6 +55,34 @@ export interface RazorpayPayout {
   narration?: string;
 }
 
+export interface RazorpayXContact {
+  id: string;
+  entity: string;
+  name: string;
+  type?: string;
+  email?: string;
+  contact?: string;
+  reference_id?: string;
+  active?: boolean;
+}
+
+export interface RazorpayXFundAccount {
+  id: string;
+  entity: string;
+  contact_id: string;
+  account_type: "bank_account" | "vpa";
+  active?: boolean;
+  bank_account?: {
+    name?: string;
+    ifsc?: string;
+    bank_name?: string;
+    account_number?: string;
+  };
+  vpa?: {
+    address?: string;
+  };
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -209,6 +237,84 @@ export async function createRazorpayXPayout(params: {
   return payload;
 }
 
+export async function createRazorpayXContact(params: {
+  name: string;
+  type?: "vendor" | "customer" | "employee" | "self";
+  email?: string;
+  contact?: string;
+  referenceId?: string;
+}): Promise<RazorpayXContact> {
+  const { keyId, keySecret } = getRazorpayXConfig();
+  const response = await fetch("https://api.razorpay.com/v1/contacts", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: params.name,
+      type: params.type ?? "vendor",
+      ...(params.email ? { email: params.email } : {}),
+      ...(params.contact ? { contact: params.contact } : {}),
+      ...(params.referenceId ? { reference_id: params.referenceId } : {}),
+    }),
+    cache: "no-store",
+  });
+
+  const payload = (await response.json()) as RazorpayXContact & { error?: { description?: string } };
+  if (!response.ok) {
+    throw new Error(payload?.error?.description ?? "Failed to create RazorpayX contact.");
+  }
+
+  return payload;
+}
+
+export async function createRazorpayXFundAccount(params: {
+  contactId: string;
+  accountHolderName: string;
+  accountNumber?: string;
+  ifsc?: string;
+  vpa?: string;
+}): Promise<RazorpayXFundAccount> {
+  const { keyId, keySecret } = getRazorpayXConfig();
+  const isVpa = typeof params.vpa === "string" && params.vpa.trim().length > 0;
+
+  const body = isVpa
+    ? {
+        contact_id: params.contactId,
+        account_type: "vpa",
+        vpa: {
+          address: params.vpa?.trim(),
+        },
+      }
+    : {
+        contact_id: params.contactId,
+        account_type: "bank_account",
+        bank_account: {
+          name: params.accountHolderName,
+          account_number: params.accountNumber?.trim(),
+          ifsc: params.ifsc?.trim().toUpperCase(),
+        },
+      };
+
+  const response = await fetch("https://api.razorpay.com/v1/fund_accounts", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  const payload = (await response.json()) as RazorpayXFundAccount & { error?: { description?: string } };
+  if (!response.ok) {
+    throw new Error(payload?.error?.description ?? "Failed to create RazorpayX fund account.");
+  }
+
+  return payload;
+}
+
 export function verifyRazorpayPaymentSignature(params: {
   orderId: string;
   paymentId: string;
@@ -227,6 +333,16 @@ export function verifyRazorpayWebhookSignature(payload: string, signature: strin
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
   if (!webhookSecret) {
     throw new Error("Missing required environment variable: RAZORPAY_WEBHOOK_SECRET");
+  }
+
+  const digest = crypto.createHmac("sha256", webhookSecret).update(payload).digest("hex");
+  return safeCompare(digest, signature);
+}
+
+export function verifyRazorpayXWebhookSignature(payload: string, signature: string): boolean {
+  const webhookSecret = process.env.RAZORPAYX_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    throw new Error("Missing required environment variable: RAZORPAYX_WEBHOOK_SECRET");
   }
 
   const digest = crypto.createHmac("sha256", webhookSecret).update(payload).digest("hex");
