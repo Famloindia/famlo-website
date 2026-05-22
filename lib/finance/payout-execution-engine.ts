@@ -3,12 +3,16 @@ import crypto from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  isAutoPayoutEnabled,
   isPayoutAdminApprovalRequired,
   isPayoutAutoRetryEnabled,
+  isPayoutHoldEnabled,
   isRazorpayXEnabled,
   isSettlementPayoutExecutionEnabled,
 } from "@/lib/finance/feature-flags";
 import { appendFinanceAuditLog } from "@/lib/finance/operations";
+import { loadPayoutHoldSnapshot } from "@/lib/finance/payout-holds";
+import { getFinanceSettings } from "@/lib/finance/settings";
 import type { HostPayoutExecutionStatus } from "@/lib/finance/provider-contracts";
 import { createRazorpayXPayout, isRazorpayXConfigured } from "@/lib/razorpay";
 
@@ -18,6 +22,7 @@ type SettlementRow = {
   id: string;
   host_id: string;
   host_user_id?: string | null;
+  property_id?: string | null;
   status?: string | null;
   net_payable_amount?: number | null;
   currency?: string | null;
@@ -102,10 +107,17 @@ export type PayoutWebhookTransitionResult = {
 export type PayoutExecutionDependencies = {
   isSettlementPayoutExecutionEnabled?: () => boolean;
   isPayoutAdminApprovalRequired?: () => boolean;
+  isAutoPayoutEnabled?: () => boolean;
+  isPayoutHoldEnabled?: () => boolean;
   isPayoutAutoRetryEnabled?: () => boolean;
   isRazorpayXEnabled?: () => boolean;
   isRazorpayXConfigured?: () => boolean;
   createPayout?: typeof createRazorpayXPayout;
+};
+
+export type AutoPayoutScheduleResult = {
+  scheduledSettlementIds: string[];
+  skipped: Array<{ settlementId: string; reason: string }>;
 };
 
 function asString(value: unknown): string | null {
@@ -290,10 +302,14 @@ function assertSettlementReadyForPayout(
   disputes: DisputeRow[],
   payoutAccount: HostPayoutAccountRow | null,
   hostTaxDetails: HostTaxDetailsRow | null,
+  holdStatus: { status: string; source: string | null },
   allowedSettlementStatuses: string[] = ["approved"]
 ): void {
   if (!allowedSettlementStatuses.includes(normalizeStatus(settlement.status))) {
     throw new Error("Only approved settlements can initiate payout execution.");
+  }
+  if (holdStatus.status === "on_hold" || holdStatus.status === "paused") {
+    throw new Error(`Settlement payout is blocked by an active ${holdStatus.source ?? "payout"} hold.`);
   }
   if (asNumber(settlement.net_payable_amount) <= 0) {
     throw new Error("Settlement payout requires a positive net payable amount.");
@@ -334,11 +350,14 @@ export async function initiateApprovedSettlementPayout(
     actorUserId?: string | null;
     explicitAdminAction?: boolean;
     allowedSettlementStatuses?: string[];
+    schedulingReason?: string | null;
   },
   dependencies: PayoutExecutionDependencies = {}
 ): Promise<SettlementPayoutExecutionResult> {
   const payoutExecutionEnabled = (dependencies.isSettlementPayoutExecutionEnabled ?? isSettlementPayoutExecutionEnabled)();
   const adminApprovalRequired = (dependencies.isPayoutAdminApprovalRequired ?? isPayoutAdminApprovalRequired)();
+  const autoPayoutEnabled = (dependencies.isAutoPayoutEnabled ?? isAutoPayoutEnabled)();
+  const payoutHoldEnabled = (dependencies.isPayoutHoldEnabled ?? isPayoutHoldEnabled)();
   const razorpayXEnabled = (dependencies.isRazorpayXEnabled ?? isRazorpayXEnabled)();
   const razorpayXConfigured = (dependencies.isRazorpayXConfigured ?? isRazorpayXConfigured)();
 
@@ -348,6 +367,9 @@ export async function initiateApprovedSettlementPayout(
   if (adminApprovalRequired && !input.explicitAdminAction) {
     throw new Error("Explicit admin payout action is required.");
   }
+  if (!input.explicitAdminAction && !autoPayoutEnabled) {
+    throw new Error("Automatic payout scheduling is disabled.");
+  }
 
   const settlement = await loadSettlement(supabase, input.settlementId);
   const existingExecution = await loadExistingActiveExecution(supabase, input.settlementId);
@@ -356,6 +378,9 @@ export async function initiateApprovedSettlementPayout(
   }
 
   const lineItems = await loadSettlementLineItems(supabase, input.settlementId);
+  if (lineItems.length === 0) {
+    throw new Error("Settlement payout requires at least one settlement line item.");
+  }
   const bookingIds = Array.from(new Set(lineItems.map((row) => asString(row.booking_id)).filter(Boolean))) as string[];
   const [payoutAccount, hostTaxDetails, bookingSummaries, refundRequests] = await Promise.all([
     loadActivePayoutAccount(supabase, settlement.host_id),
@@ -363,8 +388,16 @@ export async function initiateApprovedSettlementPayout(
     loadBookingSummaries(supabase, bookingIds),
     loadOpenRefundRequests(supabase, bookingIds),
   ]);
+  const financeSettings = await getFinanceSettings({}, supabase);
   const legacyBookingIds = bookingSummaries.map((row) => asString(row.legacy_booking_id)).filter(Boolean) as string[];
   const disputes = await loadOpenDisputes(supabase, legacyBookingIds);
+  const holdSnapshot = payoutHoldEnabled
+    ? await loadPayoutHoldSnapshot(supabase, {
+        hostId: settlement.host_id,
+        propertyId: asString(settlement.property_id),
+        settlementId: settlement.id,
+      })
+    : { status: "active", source: null };
 
   assertSettlementReadyForPayout(
     settlement,
@@ -373,8 +406,12 @@ export async function initiateApprovedSettlementPayout(
     disputes,
     payoutAccount,
     hostTaxDetails,
+    holdSnapshot,
     input.allowedSettlementStatuses ?? ["approved"]
   );
+  if (financeSettings.taxMode === "PENDING_COMPLIANCE") {
+    throw new Error("Settlement payout is blocked while compliance lock is active.");
+  }
 
   if (!razorpayXConfigured) {
     throw new Error("RazorpayX is not configured.");
@@ -462,7 +499,7 @@ export async function initiateApprovedSettlementPayout(
         payoutStatus,
         settlementStatus,
       },
-      reason: "manual_settlement_payout_execution",
+      reason: input.schedulingReason ?? (input.explicitAdminAction ? "manual_settlement_payout_execution" : "auto_payout_scheduler"),
     });
 
     return {
@@ -502,6 +539,111 @@ export async function initiateApprovedSettlementPayout(
   }
 }
 
+export async function scheduleEligibleAutoPayouts(
+  supabase: SupabaseClient,
+  input: {
+    actorUserId?: string | null;
+    limit?: number;
+  } = {},
+  dependencies: PayoutExecutionDependencies = {}
+): Promise<AutoPayoutScheduleResult> {
+  const payoutExecutionEnabled = (dependencies.isSettlementPayoutExecutionEnabled ?? isSettlementPayoutExecutionEnabled)();
+  const autoPayoutEnabled = (dependencies.isAutoPayoutEnabled ?? isAutoPayoutEnabled)();
+  const adminApprovalRequired = (dependencies.isPayoutAdminApprovalRequired ?? isPayoutAdminApprovalRequired)();
+  const autoRetryEnabled = (dependencies.isPayoutAutoRetryEnabled ?? isPayoutAutoRetryEnabled)();
+
+  if (!payoutExecutionEnabled || !autoPayoutEnabled || adminApprovalRequired) {
+    return { scheduledSettlementIds: [], skipped: [] };
+  }
+
+  const limit = Math.max(1, Math.min(input.limit ?? 20, 100));
+  const { data, error } = await supabase
+    .from("host_settlements_v2")
+    .select("id,status")
+    .in("status", ["draft", "approved", "payout_failed"])
+    .order("updated_at", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+
+  const scheduledSettlementIds: string[] = [];
+  const skipped: Array<{ settlementId: string; reason: string }> = [];
+
+  for (const row of ((data ?? []) as Array<Record<string, unknown>>)) {
+    const settlementId = asString(row.id);
+    const status = normalizeStatus(row.status);
+    if (!settlementId) continue;
+
+    try {
+      if (status === "payout_failed" && !autoRetryEnabled) {
+        throw new Error("Failed payouts require manual retry while auto retry is disabled.");
+      }
+      if (status === "draft") {
+        const approvedAt = new Date().toISOString();
+        await supabase
+          .from("host_settlements_v2")
+          .update({
+            status: "approved",
+            approved_by: input.actorUserId ?? null,
+            approved_at: approvedAt,
+            payout_eligible_at: approvedAt,
+            auto_payout_last_evaluated_at: approvedAt,
+            updated_at: approvedAt,
+          } as never)
+          .eq("id", settlementId);
+
+        await appendFinanceAuditLog(supabase, {
+          actorUserId: input.actorUserId ?? null,
+          actionType: "settlement_auto_approved",
+          resourceType: "host_settlement",
+          resourceId: settlementId,
+          afterValue: { status: "approved", payout_eligible_at: approvedAt },
+          reason: "auto_payout_settlement_approval",
+        });
+      }
+
+      await initiateApprovedSettlementPayout(
+        supabase,
+        {
+          settlementId,
+          actorUserId: input.actorUserId ?? null,
+          explicitAdminAction: false,
+          allowedSettlementStatuses: ["approved", "payout_failed"],
+          schedulingReason: "auto_payout_scheduler",
+        },
+        dependencies
+      );
+
+      const now = new Date().toISOString();
+      await supabase
+        .from("host_settlements_v2")
+        .update({
+          auto_payout_scheduled_at: now,
+          auto_payout_last_evaluated_at: now,
+          auto_payout_last_error: null,
+          payout_eligible_at: now,
+          updated_at: now,
+        } as never)
+        .eq("id", settlementId);
+
+      scheduledSettlementIds.push(settlementId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Auto payout scheduling failed.";
+      const now = new Date().toISOString();
+      await supabase
+        .from("host_settlements_v2")
+        .update({
+          auto_payout_last_evaluated_at: now,
+          auto_payout_last_error: message,
+          updated_at: now,
+        } as never)
+        .eq("id", settlementId);
+      skipped.push({ settlementId, reason: message });
+    }
+  }
+
+  return { scheduledSettlementIds, skipped };
+}
+
 export async function retryFailedSettlementPayout(
   supabase: SupabaseClient,
   input: {
@@ -530,6 +672,9 @@ export async function retryFailedSettlementPayout(
   }
 
   const lineItems = await loadSettlementLineItems(supabase, String(execution.settlement_id));
+  if (lineItems.length === 0) {
+    throw new Error("Settlement payout requires at least one settlement line item.");
+  }
   const bookingIds = Array.from(new Set(lineItems.map((row) => asString(row.booking_id)).filter(Boolean))) as string[];
   const [payoutAccount, hostTaxDetails, bookingSummaries, refundRequests] = await Promise.all([
     loadActivePayoutAccount(supabase, settlement.host_id),
@@ -537,8 +682,17 @@ export async function retryFailedSettlementPayout(
     loadBookingSummaries(supabase, bookingIds),
     loadOpenRefundRequests(supabase, bookingIds),
   ]);
+  const financeSettings = await getFinanceSettings({}, supabase);
   const legacyBookingIds = bookingSummaries.map((row) => asString(row.legacy_booking_id)).filter(Boolean) as string[];
   const disputes = await loadOpenDisputes(supabase, legacyBookingIds);
+  const payoutHoldEnabled = (dependencies.isPayoutHoldEnabled ?? isPayoutHoldEnabled)();
+  const holdSnapshot = payoutHoldEnabled
+    ? await loadPayoutHoldSnapshot(supabase, {
+        hostId: settlement.host_id,
+        propertyId: asString(settlement.property_id),
+        settlementId: settlement.id,
+      })
+    : { status: "active", source: null };
 
   assertSettlementReadyForPayout(
     settlement,
@@ -547,8 +701,12 @@ export async function retryFailedSettlementPayout(
     disputes,
     payoutAccount,
     hostTaxDetails,
+    holdSnapshot,
     ["approved", "payout_failed"]
   );
+  if (financeSettings.taxMode === "PENDING_COMPLIANCE") {
+    throw new Error("Settlement payout is blocked while compliance lock is active.");
+  }
 
   const accountChanged = Boolean(
     payoutAccount &&

@@ -127,6 +127,35 @@ test("Completed Famlo booking without settlement line appears as pending settlem
   );
 });
 
+test("Held or paused Famlo payout uses host-safe labels", () => {
+  assert.equal(
+    shouldIncludeFamloPayoutInTotals(
+      baseBooking({
+        payoutHoldStatus: "on_hold",
+      })
+    ),
+    false
+  );
+  assert.equal(
+    deriveRevenuePaymentStatusLabel(
+      baseBooking({
+        payoutHoldStatus: "on_hold",
+        payoutHoldIsHostActionable: false,
+      })
+    ),
+    "Payout on hold"
+  );
+  assert.equal(
+    deriveRevenuePaymentStatusLabel(
+      baseBooking({
+        payoutHoldStatus: "paused",
+        payoutHoldIsHostActionable: true,
+      })
+    ),
+    "Action required"
+  );
+});
+
 test("Pending Famlo payout total only includes settlement-backed unpaid eligible amounts", () => {
   assert.equal(
     shouldIncludeFamloPayoutInTotals(

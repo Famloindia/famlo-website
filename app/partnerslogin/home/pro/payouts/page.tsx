@@ -153,8 +153,8 @@ export default async function FamloProPayoutsPage({
   const params = (await searchParams) ?? {};
   const requestedFamilyId = normalizeFamilyId(params.family);
   const supabase = createAdminSupabaseClient();
-  const cookieStore = await cookies();
-  const adminSession = await hasValidAdminSession(cookieStore);
+  await cookies();
+  const adminSession = await hasValidAdminSession();
   const hostSession = await resolveAuthorizedHostSession(supabase);
   const authUser = await resolveAuthenticatedUser(supabase);
 
@@ -284,6 +284,8 @@ export default async function FamloProPayoutsPage({
   const payoutExecutionBySettlementId = new Map<string, Record<string, unknown>>();
   let hostRevenueCompliance: HostRevenueCompliance = { panVerified: false, payoutAccountActive: false };
   let destinationMasked: string | null = null;
+  let hostPayoutHold: Record<string, unknown> | null = null;
+  let propertyPayoutHold: Record<string, unknown> | null = null;
 
   if (bookingWorkspaceIds.length > 0) {
     const [reservationRowsResult, settlementLineRowsResult] = await Promise.all([
@@ -321,12 +323,12 @@ export default async function FamloProPayoutsPage({
         const [settlementsResult, payoutExecutionsResult] = await Promise.all([
           supabase
             .from("host_settlements_v2")
-            .select("id,status,paid_at,approved_at,failed_at,property_id,net_payable_amount")
+            .select("id,status,paid_at,approved_at,failed_at,property_id,net_payable_amount,payout_hold_status,payout_hold_reason,payout_hold_is_host_actionable")
             .in("id", Array.from(settlementIds))
             .eq("property_id", familyId),
           supabase
             .from("host_payout_executions")
-            .select("settlement_id,status,amount,processed_at,created_at")
+            .select("settlement_id,status,amount,processed_at,created_at,payout_hold_status,payout_hold_reason,payout_hold_is_host_actionable")
             .in("settlement_id", Array.from(settlementIds))
             .order("created_at", { ascending: false }),
         ]);
@@ -351,7 +353,7 @@ export default async function FamloProPayoutsPage({
   }
 
   if (host?.id) {
-    const [{ data: payoutAccount }, { data: hostTaxDetails }] = await Promise.all([
+    const [{ data: payoutAccount }, { data: hostTaxDetails }, { data: hostHold }, { data: propertyHold }] = await Promise.all([
       supabase
         .from("host_payout_accounts")
         .select("account_number_masked,vpa,is_active,validation_status")
@@ -366,6 +368,16 @@ export default async function FamloProPayoutsPage({
             .eq("user_id", hostSession.hostUserId)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      supabase
+        .from("hosts")
+        .select("payout_hold_status,payout_hold_reason,payout_hold_is_host_actionable")
+        .eq("id", host.id)
+        .maybeSingle(),
+      supabase
+        .from("families")
+        .select("payout_hold_status,payout_hold_reason,payout_hold_is_host_actionable")
+        .eq("id", familyId)
+        .maybeSingle(),
     ]);
 
     destinationMasked = toMaskedHostRevenueDestination({
@@ -380,6 +392,8 @@ export default async function FamloProPayoutsPage({
         normalizeToken((hostTaxDetails as Record<string, unknown> | null)?.verification_status) === "approved",
       payoutAccountActive: (payoutAccount as Record<string, unknown> | null)?.is_active === true,
     };
+    hostPayoutHold = (hostHold as Record<string, unknown> | null) ?? null;
+    propertyPayoutHold = (propertyHold as Record<string, unknown> | null) ?? null;
   }
 
   const payoutRows: HostPayoutHistoryItem[] = bookingRowsForWorkspace
@@ -413,6 +427,17 @@ export default async function FamloProPayoutsPage({
         isCompletedRevenueStatus(reservationStatus) || isCompletedRevenueStatus(row.status) || Boolean(settlementLine)
           ? checkoutDate
           : null;
+      const payoutHoldStatus =
+        asString(payoutExecution?.payout_hold_status) ??
+        asString(settlement?.payout_hold_status) ??
+        asString(propertyPayoutHold?.payout_hold_status) ??
+        asString(hostPayoutHold?.payout_hold_status) ??
+        "active";
+      const payoutHoldIsHostActionable =
+        payoutExecution?.payout_hold_is_host_actionable === true ||
+        settlement?.payout_hold_is_host_actionable === true ||
+        propertyPayoutHold?.payout_hold_is_host_actionable === true ||
+        hostPayoutHold?.payout_hold_is_host_actionable === true;
       const item: HostPayoutHistoryItem = {
         bookingId,
         guestDisplayName:
@@ -431,6 +456,8 @@ export default async function FamloProPayoutsPage({
         paymentCollectMode,
         famloPayoutEligible,
         settlementEligible: Boolean(settlementLine) || Boolean(settlement),
+        payoutHoldStatus,
+        payoutHoldIsHostActionable,
         payoutStatus: asString(payoutExecution?.status) ?? asString(settlement?.status) ?? null,
         payoutExecutionStatus: asString(payoutExecution?.status) ?? null,
         complianceBlocked: !(hostRevenueCompliance.panVerified && hostRevenueCompliance.payoutAccountActive),
@@ -510,7 +537,7 @@ export default async function FamloProPayoutsPage({
             <div>
               <div className={styles.listTitle}>Payout records</div>
               <div className={styles.feedCopy}>
-                Settlement-backed rows become payable only after finance approval. Completed stays without settlement lines stay visible as settlement pending.
+                Settlement-backed rows become payable automatically once compliance, settlement, and payout readiness checks are clear. Completed stays without settlement lines stay visible as settlement pending.
               </div>
             </div>
             <div

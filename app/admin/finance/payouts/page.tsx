@@ -20,7 +20,7 @@ export default async function AdminFinancePayoutsPage() {
 
   return (
     <AdminLayout admin={{ id: "system-admin", name: "Famlo Admin", email: "admin@famlo.in" }} activeTab="finance" killSwitchActive={pageContext.killSwitchActive}>
-      <AdminFinanceHeader title="Payout executions" description="Track processing, paid, failed, reversed, and needs-review payout states with masked destinations only." nav={getAdminFinanceNav("/admin/finance/payouts")} />
+      <AdminFinanceHeader title="Payout executions" description="Track automatic payout submissions, holds, paid states, failures, reversals, and manual retry cases." nav={getAdminFinanceNav("/admin/finance/payouts")} />
       {blocked.payoutTrigger ? <Banner tone="warning" title="Payout execution blocked" message={blocked.payoutTrigger} /> : null}
       {rows.length === 0 ? (
         <EmptyState title="No payout executions" message="Approved settlements that have been triggered for payout will appear here." />
@@ -38,6 +38,24 @@ export default async function AdminFinancePayoutsPage() {
               <div key="actions" style={{ display: "grid", gap: "8px", minWidth: "170px" }}>
                 <FinanceActionButton label="Retry failed payout" endpoint="/api/admin/finance/payouts/retry" payload={{ payoutExecutionId: row.id }} disabledReason={String(row.status || "") !== "failed" ? "Only failed payouts can be retried." : null} />
                 <FinanceActionButton label="Mark needs review" endpoint="/api/admin/finance/payouts/mark-needs-review" payload={{ payoutExecutionId: row.id }} kind="danger" />
+                <FinanceActionButton
+                  label={String(row.payoutHoldStatus || "active") === "active" ? "Hold payout" : "Release hold"}
+                  endpoint={String(row.payoutHoldStatus || "active") === "active" ? "/api/admin/finance/payouts/hold" : "/api/admin/finance/payouts/release"}
+                  payload={
+                    String(row.payoutHoldStatus || "active") === "active"
+                      ? {
+                          targetType: "payout_execution",
+                          targetId: row.id,
+                          reason: "Finance ops hold",
+                          isHostActionable: false,
+                        }
+                      : {
+                          targetType: "payout_execution",
+                          targetId: row.id,
+                          reason: "Finance ops release",
+                        }
+                  }
+                />
               </div>,
             ])}
           />

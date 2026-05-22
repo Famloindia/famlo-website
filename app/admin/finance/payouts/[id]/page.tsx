@@ -20,7 +20,7 @@ export default async function AdminFinancePayoutDetailPage({ params }: { params:
 
   return (
     <AdminLayout admin={{ id: "system-admin", name: "Famlo Admin", email: "admin@famlo.in" }} activeTab="finance" killSwitchActive={pageContext.killSwitchActive}>
-      <AdminFinanceHeader title={`Payout ${String(id).slice(0, 8)}`} description="Inspect payout provider events, settlement linkage, masked destination, and guarded retry paths." nav={getAdminFinanceNav("/admin/finance/payouts")} />
+      <AdminFinanceHeader title={`Payout ${String(id).slice(0, 8)}`} description="Inspect provider events, settlement linkage, masked destination, and guarded hold or retry actions." nav={getAdminFinanceNav("/admin/finance/payouts")} />
       <Card>
         <SectionHeader title="Payout summary" />
         <div style={{ display: "grid", gap: "16px", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
@@ -34,6 +34,15 @@ export default async function AdminFinancePayoutDetailPage({ params }: { params:
         <div style={{ display: "grid", gap: "10px", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
           <FinanceActionButton label="Retry failed payout" endpoint="/api/admin/finance/payouts/retry" payload={{ payoutExecutionId: id }} disabledReason={asString((detail.execution as any)?.status) !== "failed" ? "Only failed payouts can be retried." : null} />
           <FinanceActionButton label="Mark needs review" endpoint="/api/admin/finance/payouts/mark-needs-review" payload={{ payoutExecutionId: id }} kind="danger" />
+          <FinanceActionButton
+            label={asString((detail.execution as any)?.payout_hold_status) === "on_hold" || asString((detail.execution as any)?.payout_hold_status) === "paused" ? "Release hold" : "Hold payout"}
+            endpoint={asString((detail.execution as any)?.payout_hold_status) === "on_hold" || asString((detail.execution as any)?.payout_hold_status) === "paused" ? "/api/admin/finance/payouts/release" : "/api/admin/finance/payouts/hold"}
+            payload={
+              asString((detail.execution as any)?.payout_hold_status) === "on_hold" || asString((detail.execution as any)?.payout_hold_status) === "paused"
+                ? { targetType: "payout_execution", targetId: id, reason: "Finance ops release" }
+                : { targetType: "payout_execution", targetId: id, reason: "Finance ops hold", isHostActionable: false }
+            }
+          />
         </div>
       </Card>
       <Card style={{ marginTop: "18px" }}>

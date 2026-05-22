@@ -52,6 +52,14 @@ export function isSettlementPayoutExecutionEnabled(): boolean {
   return isEnabled(process.env.SETTLEMENT_PAYOUT_EXECUTION_ENABLED, false);
 }
 
+export function isAutoPayoutEnabled(): boolean {
+  return isEnabled(process.env.AUTO_PAYOUT_ENABLED, false);
+}
+
+export function isPayoutHoldEnabled(): boolean {
+  return isEnabled(process.env.PAYOUT_HOLD_ENABLED, false);
+}
+
 export function isSettlementDebugApiEnabled(): boolean {
   return isEnabled(process.env.SETTLEMENT_DEBUG_API_ENABLED, false);
 }

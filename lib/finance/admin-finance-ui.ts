@@ -51,6 +51,7 @@ export type AdminSettlementRow = {
   payoutStatus: string;
   holdReasons: string[];
   includedBookingCount: number;
+  payoutHoldStatus: string;
 };
 
 export type AdminInvoiceRow = {
@@ -97,14 +98,14 @@ export async function loadAdminDashboardCards(supabase: SupabaseClient): Promise
       detail: "Requests still awaiting ops review",
     },
     {
-      label: "Settlements pending approval",
-      value: String(settlements.filter((row) => row.status === "draft").length),
-      detail: "Draft settlements not yet approved",
+      label: "Auto payout queue",
+      value: String(settlements.filter((row) => row.status === "draft" || row.status === "approved" || row.status === "payout_failed").length),
+      detail: "Settlement-backed payouts waiting for auto scheduling or manual retry",
     },
     {
-      label: "Payouts pending trigger",
-      value: String(settlements.filter((row) => row.status === "approved").length),
-      detail: "Approved settlements ready for payout check",
+      label: "Held payouts",
+      value: String(settlements.filter((row) => row.payoutHoldStatus === "on_hold" || row.payoutHoldStatus === "paused").length),
+      detail: "Admin-held or paused payouts that cannot be submitted",
     },
     {
       label: "Failed payouts",
@@ -153,7 +154,7 @@ export async function loadAdminSettlementRows(supabase: SupabaseClient): Promise
   const [{ data: settlements, error }, payouts] = await Promise.all([
     supabase
       .from("host_settlements_v2")
-      .select("id,settlement_code,status,period_start,period_end,net_payable_amount,metadata,included_booking_count")
+      .select("id,settlement_code,status,period_start,period_end,net_payable_amount,metadata,included_booking_count,payout_hold_status,payout_hold_reason,payout_hold_is_host_actionable,auto_payout_last_error")
       .order("created_at", { ascending: false }),
     listAdminPayouts(supabase),
   ]);
@@ -163,9 +164,14 @@ export async function loadAdminSettlementRows(supabase: SupabaseClient): Promise
   return ((settlements ?? []) as JsonRecord[]).map((row) => {
     const metadata = asRecord(row.metadata);
     const reasons = [];
-    if ((asString(row.status) ?? "") === "draft" && !isSettlementApprovalFlowEnabled()) reasons.push("Approval flow flag is disabled.");
+    const holdStatus = asString(row.payout_hold_status) ?? "active";
+    const holdReason = asString(row.payout_hold_reason);
+    if ((holdStatus === "on_hold" || holdStatus === "paused") && holdReason) reasons.push(holdReason);
+    if ((holdStatus === "on_hold" || holdStatus === "paused") && !holdReason) reasons.push("Payout hold is active.");
+    if ((asString(row.status) ?? "") === "draft" && !isSettlementApprovalFlowEnabled()) reasons.push("Manual settlement approval flow is disabled; auto payout scheduler will evaluate this draft.");
     if ((asString(row.status) ?? "") === "approved" && !isSettlementPayoutExecutionEnabled()) reasons.push("Payout execution flag is disabled.");
     if (asNumber(metadata.excluded_candidate_count) > 0) reasons.push(`${asNumber(metadata.excluded_candidate_count)} excluded candidate(s) remained outside this draft.`);
+    if (asString(row.auto_payout_last_error)) reasons.push(`Last auto payout result: ${asString(row.auto_payout_last_error)}`);
     return {
       id: asString(row.id) ?? "",
       settlementCode: asString(row.settlement_code) ?? asString(row.id) ?? "Settlement",
@@ -175,6 +181,7 @@ export async function loadAdminSettlementRows(supabase: SupabaseClient): Promise
       payoutStatus: asString((payoutBySettlementId.get(asString(row.id) ?? "") as JsonRecord | undefined)?.status) ?? "not_started",
       holdReasons: reasons,
       includedBookingCount: asNumber(row.included_booking_count),
+      payoutHoldStatus: holdStatus,
     };
   });
 }
@@ -303,7 +310,7 @@ export function getAdminFinanceBlockedReasons(settingsTaxMode: string) {
       ? "Settlement payout execution is disabled by rollout flags."
       : null,
     settlementApproval: !isAdminSettlementActionsEnabled() || !isSettlementApprovalFlowEnabled()
-      ? "Settlement approval flow is disabled."
+      ? "Manual settlement approval flow is disabled. Auto payout should progress eligible settlements instead."
       : null,
     reports: settingsTaxMode === "PENDING_COMPLIANCE"
       ? "GST exports stay blocked while tax mode remains PENDING_COMPLIANCE."

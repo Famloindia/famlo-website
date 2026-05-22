@@ -190,6 +190,8 @@ type ProBookingSummary = {
   paymentCollectMode: "FAMLO_COLLECT" | "OTA_COLLECT" | "PROPERTY_COLLECT" | "UNKNOWN";
   famloPayoutEligible: boolean;
   settlementEligible: boolean;
+  payoutHoldStatus: string | null;
+  payoutHoldIsHostActionable: boolean;
   settlementStatus: string | null;
   payoutExecutionStatus: string | null;
   complianceBlocked: boolean;
@@ -980,7 +982,7 @@ function hostRevenueStatusTone(booking: ProBookingSummary): string {
   if (isCancelledBooking(booking)) return styles.readinessPillMissing;
   if (isFinanceBackedPaidStatus(booking.payoutExecutionStatus) || isFinanceBackedPaidStatus(booking.payoutStatus)) return styles.readinessPillOk;
   if (!booking.famloPayoutEligible) return styles.readinessPill;
-  if (booking.complianceBlocked) return styles.readinessPillReview;
+  if (booking.complianceBlocked || booking.payoutHoldStatus === "on_hold" || booking.payoutHoldStatus === "paused") return styles.readinessPillReview;
   if (hasPaymentAttention(booking) || isPendingApprovalBooking(booking)) return styles.readinessPillReview;
   return styles.readinessPillOk;
 }
@@ -1011,6 +1013,9 @@ function bookingFamloPayoutHint(booking: ProBookingSummary): string {
   if (booking.paymentCollectMode !== "FAMLO_COLLECT") return "Outside-Famlo payouts stay separate";
   if (!booking.famloPayoutEligible) return "Waiting for a finance-backed settlement line";
   if (booking.complianceBlocked) return "Payout is blocked until compliance is cleared";
+  if (booking.payoutHoldStatus === "on_hold" || booking.payoutHoldStatus === "paused") {
+    return booking.payoutHoldIsHostActionable ? "Host action is needed before payout can resume" : "Famlo has temporarily held this payout";
+  }
   return "Famlo-managed payout amount";
 }
 

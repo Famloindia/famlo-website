@@ -19,7 +19,7 @@ export default async function AdminFinanceSettlementsPage() {
 
   return (
     <AdminLayout admin={{ id: "system-admin", name: "Famlo Admin", email: "admin@famlo.in" }} activeTab="finance" killSwitchActive={pageContext.killSwitchActive}>
-      <AdminFinanceHeader title="Settlement operations" description="Approve, cancel, or trigger payouts from the existing guarded settlement flow." nav={getAdminFinanceNav("/admin/finance/settlements")} />
+      <AdminFinanceHeader title="Settlement operations" description="Monitor auto payout readiness, apply holds when needed, and manually intervene only for exception cases." nav={getAdminFinanceNav("/admin/finance/settlements")} />
       {(blocked.settlementApproval || blocked.payoutTrigger) ? <Banner tone="warning" title="Some actions are blocked" message={[blocked.settlementApproval, blocked.payoutTrigger].filter(Boolean).join(" ")} /> : null}
       {rows.length === 0 ? (
         <EmptyState title="No settlements yet" message="Settlement drafts and approved batches will appear here once the settlement engine creates them." />
@@ -40,7 +40,25 @@ export default async function AdminFinanceSettlementsPage() {
               <div key="actions" style={{ display: "grid", gap: "8px", minWidth: "170px" }}>
                 <FinanceActionButton label="Approve" endpoint="/api/admin/finance/settlements/approve" payload={{ settlementId: row.id }} kind="primary" disabledReason={blocked.settlementApproval || (row.status !== "draft" ? "Only draft settlements can be approved." : null)} />
                 <FinanceActionButton label="Cancel" endpoint="/api/admin/finance/settlements/cancel" payload={{ settlementId: row.id }} kind="danger" disabledReason={row.status !== "draft" ? "Only draft settlements can be cancelled." : null} />
-                <FinanceActionButton label="Trigger payout" endpoint="/api/admin/finance/settlements/payout" payload={{ settlementId: row.id }} disabledReason={blocked.payoutTrigger || (row.status !== "approved" ? "Only approved settlements can trigger payout." : null)} />
+                <FinanceActionButton label="Trigger payout" endpoint="/api/admin/finance/settlements/payout" payload={{ settlementId: row.id }} disabledReason={blocked.payoutTrigger || (!["approved", "payout_failed"].includes(row.status) ? "Only approved or payout-failed settlements can trigger payout." : null)} />
+                <FinanceActionButton
+                  label={row.payoutHoldStatus === "active" ? "Hold payout" : "Release hold"}
+                  endpoint={row.payoutHoldStatus === "active" ? "/api/admin/finance/payouts/hold" : "/api/admin/finance/payouts/release"}
+                  payload={
+                    row.payoutHoldStatus === "active"
+                      ? {
+                          targetType: "settlement",
+                          targetId: row.id,
+                          reason: "Finance ops hold",
+                          isHostActionable: false,
+                        }
+                      : {
+                          targetType: "settlement",
+                          targetId: row.id,
+                          reason: "Finance ops release",
+                        }
+                  }
+                />
               </div>,
             ])}
           />

@@ -1,5 +1,6 @@
 import {
   isAdminFinanceOpsUiEnabled,
+  isAutoPayoutEnabled,
   isCheckoutSection95PricingEnabled,
   isCreditNoteGenerationEnabled,
   isGstCollectionEnabledFlag,
@@ -12,6 +13,7 @@ import {
   isPayoutAccountValidationEnabled,
   isPayoutAdminApprovalRequired,
   isPayoutAutoRetryEnabled,
+  isPayoutHoldEnabled,
   isPlatformFeeInvoiceGenerationEnabled,
   isRazorpayRefundsEnabled,
   isRazorpayXEnabled,
@@ -75,6 +77,8 @@ export type FinanceRuntimeFlags = {
   payoutAccountValidationEnabled: boolean;
   settlementPayoutExecutionEnabled: boolean;
   payoutAdminApprovalRequired: boolean;
+  autoPayoutEnabled: boolean;
+  payoutHoldEnabled: boolean;
   payoutAutoRetryEnabled: boolean;
   invoicePdfGenerationEnabled: boolean;
   invoiceEmailDeliveryEnabled: boolean;
@@ -106,6 +110,8 @@ export function getFinanceRuntimeConfig(): FinanceRuntimeConfig {
       payoutAccountValidationEnabled: isPayoutAccountValidationEnabled(),
       settlementPayoutExecutionEnabled: isSettlementPayoutExecutionEnabled(),
       payoutAdminApprovalRequired: isPayoutAdminApprovalRequired(),
+      autoPayoutEnabled: isAutoPayoutEnabled(),
+      payoutHoldEnabled: isPayoutHoldEnabled(),
       payoutAutoRetryEnabled: isPayoutAutoRetryEnabled(),
       invoicePdfGenerationEnabled: isInvoicePdfGenerationEnabled(),
       invoiceEmailDeliveryEnabled: isInvoiceEmailDeliveryEnabled(),

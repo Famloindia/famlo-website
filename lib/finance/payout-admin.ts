@@ -17,7 +17,7 @@ function maskDestination(account: JsonRecord | null): string {
 export async function listAdminPayouts(supabase: SupabaseClient): Promise<Record<string, unknown>[]> {
   const [{ data: executions, error: executionsError }, { data: settlements, error: settlementsError }, { data: accounts, error: accountsError }] = await Promise.all([
     supabase.from("host_payout_executions").select("*").order("created_at", { ascending: false }),
-    supabase.from("host_settlements_v2").select("id,settlement_code,host_id,status,net_payable_amount,paid_at,failed_at,transfer_reference,updated_at"),
+    supabase.from("host_settlements_v2").select("id,settlement_code,host_id,status,net_payable_amount,paid_at,failed_at,transfer_reference,updated_at,payout_hold_status,payout_hold_reason"),
     supabase.from("host_payout_accounts").select("host_id,is_active,account_number_masked,ifsc,vpa").eq("is_active", true),
   ]);
 
@@ -45,6 +45,8 @@ export async function listAdminPayouts(supabase: SupabaseClient): Promise<Record
       expectedOrProcessedDate: asString(execution.processed_at) ?? asString(settlement?.paid_at) ?? asString(execution.created_at) ?? "",
       failureReason: asString(execution.failure_reason) ?? "",
       destinationMasked: maskDestination(account),
+      payoutHoldStatus: asString(execution.payout_hold_status) ?? asString(settlement?.payout_hold_status) ?? "active",
+      payoutHoldReason: asString(execution.payout_hold_reason) ?? asString(settlement?.payout_hold_reason) ?? "",
     };
   });
 }

@@ -18,6 +18,8 @@ export type RevenueBookingState = {
   paymentCollectMode: RevenuePaymentCollectMode;
   famloPayoutEligible: boolean;
   settlementEligible: boolean;
+  payoutHoldStatus?: string | null;
+  payoutHoldIsHostActionable?: boolean;
   payoutStatus: string | null;
   payoutExecutionStatus: string | null;
   complianceBlocked: boolean;
@@ -85,14 +87,16 @@ export function matchesRevenueWindowDate(
 }
 
 export function shouldIncludeFamloPayoutInTotals(
-  booking: Pick<RevenueBookingState, "famloPayoutEligible" | "complianceBlocked">
+  booking: Pick<RevenueBookingState, "famloPayoutEligible" | "complianceBlocked" | "payoutHoldStatus">
 ): boolean {
-  return booking.famloPayoutEligible && !booking.complianceBlocked;
+  const payoutHoldStatus = normalizeToken(booking.payoutHoldStatus);
+  return booking.famloPayoutEligible && !booking.complianceBlocked && payoutHoldStatus !== "on_hold" && payoutHoldStatus !== "paused";
 }
 
 export function deriveRevenuePaymentStatusLabel(booking: RevenueBookingState): string {
   const payoutExecutionStatus = normalizeToken(booking.payoutExecutionStatus);
   const payoutStatus = normalizeToken(booking.payoutStatus);
+  const payoutHoldStatus = normalizeToken(booking.payoutHoldStatus);
 
   if (booking.sourceCategory === "ota" && booking.paymentCollectMode !== "FAMLO_COLLECT") {
     return "Paid by OTA";
@@ -108,6 +112,10 @@ export function deriveRevenuePaymentStatusLabel(booking: RevenueBookingState): s
 
   if (booking.complianceBlocked) {
     return "Blocked — action required";
+  }
+
+  if (payoutHoldStatus === "on_hold" || payoutHoldStatus === "paused") {
+    return booking.payoutHoldIsHostActionable ? "Action required" : "Payout on hold";
   }
 
   if (isFinanceBackedPaidStatus(payoutExecutionStatus) || isFinanceBackedPaidStatus(payoutStatus)) {

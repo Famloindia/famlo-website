@@ -7,6 +7,7 @@ import {
   isPayoutAutoRetryAllowed,
   markPayoutExecutionNeedsReview,
   retryFailedSettlementPayout,
+  scheduleEligibleAutoPayouts,
 } from "@/lib/finance/payout-execution-engine";
 import { listHostPayouts } from "@/lib/finance/payout-admin";
 
@@ -21,12 +22,16 @@ function createPayoutExecutionSupabase() {
     disputes: [] as Array<Record<string, unknown>>,
     host_payout_executions: [] as Array<Record<string, unknown>>,
     finance_audit_logs: [] as Array<Record<string, unknown>>,
+    hosts: [] as Array<Record<string, unknown>>,
+    families: [] as Array<Record<string, unknown>>,
+    finance_settings: [] as Array<Record<string, unknown>>,
   };
 
-  function matches(row: Record<string, unknown>, filters: Array<{ column: string; op: "eq" | "neq" | "in"; value: unknown }>) {
+  function matches(row: Record<string, unknown>, filters: Array<{ column: string; op: "eq" | "neq" | "in" | "is"; value: unknown }>) {
     return filters.every((filter) => {
       if (filter.op === "eq") return row[filter.column] === filter.value;
       if (filter.op === "neq") return row[filter.column] !== filter.value;
+      if (filter.op === "is") return filter.value == null ? row[filter.column] == null : row[filter.column] === filter.value;
       const values = Array.isArray(filter.value) ? filter.value : [];
       return values.includes(row[filter.column]);
     });
@@ -45,8 +50,9 @@ function createPayoutExecutionSupabase() {
     state,
     client: {
       from(table: string) {
-        const filters: Array<{ column: string; op: "eq" | "neq" | "in"; value: unknown }> = [];
+        const filters: Array<{ column: string; op: "eq" | "neq" | "in" | "is"; value: unknown }> = [];
         let orderBy: { column: string; ascending: boolean } | null = null;
+        let rowLimit: number | null = null;
         const rows = (state as Record<string, Array<Record<string, unknown>>>)[table];
 
         const builder: any = {
@@ -65,8 +71,16 @@ function createPayoutExecutionSupabase() {
             filters.push({ column, op: "in", value });
             return this;
           },
+          is(column: string, value: unknown) {
+            filters.push({ column, op: "is", value });
+            return this;
+          },
           order(column: string, options?: { ascending?: boolean }) {
             orderBy = { column, ascending: options?.ascending ?? true };
+            return this;
+          },
+          limit(count: number) {
+            rowLimit = count;
             return this;
           },
           async maybeSingle() {
@@ -78,7 +92,8 @@ function createPayoutExecutionSupabase() {
             return { data: found, error: found ? null : new Error("Row not found") };
           },
           async then(resolve: (value: { data: Array<Record<string, unknown>>; error: null }) => void) {
-            resolve({ data: sortRows(rows.filter((row) => matches(row, filters)), orderBy), error: null });
+            const sorted = sortRows(rows.filter((row) => matches(row, filters)), orderBy);
+            resolve({ data: rowLimit != null ? sorted.slice(0, rowLimit) : sorted, error: null });
           },
           insert(payload: Record<string, unknown>) {
             const insertBuilder: any = {
@@ -115,6 +130,10 @@ function createPayoutExecutionSupabase() {
               },
               in(column: string, value: unknown[]) {
                 filters.push({ column, op: "in", value });
+                return this;
+              },
+              is(column: string, value: unknown) {
+                filters.push({ column, op: "is", value });
                 return this;
               },
               select() {
@@ -180,6 +199,23 @@ function seedApprovedSettlement(state: ReturnType<typeof createPayoutExecutionSu
     verification_status: "verified",
     is_verified: true,
   });
+  state.finance_settings.push({
+    id: "finance-global",
+    scope_type: "GLOBAL",
+    scope_id: null,
+    tax_mode: "ECO_SECTION_9_5",
+  });
+  state.hosts.push({
+    id: "host-1",
+    payout_hold_status: "active",
+    payout_hold_is_host_actionable: false,
+  });
+  state.families.push({
+    id: "family-1",
+    payout_hold_status: "active",
+    payout_hold_is_host_actionable: false,
+  });
+  state.host_settlements_v2[0]!.property_id = "family-1";
 }
 
 test("draft settlement cannot payout", async () => {
@@ -529,6 +565,132 @@ test("failed payout can be manually retried when safe", async () => {
 
   assert.equal(result.providerPayoutId, "pout_retry_1");
   assert.equal(state.host_payout_executions.length, 2);
+});
+
+test("eligible checked-out settlement auto-schedules payout when auto mode is enabled", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_settlements_v2[0]!.status = "draft";
+
+  const result = await scheduleEligibleAutoPayouts(
+    client,
+    { actorUserId: "scheduler", limit: 10 },
+    {
+      isSettlementPayoutExecutionEnabled: () => true,
+      isAutoPayoutEnabled: () => true,
+      isPayoutAdminApprovalRequired: () => false,
+      isPayoutHoldEnabled: () => true,
+      isRazorpayXEnabled: () => true,
+      isRazorpayXConfigured: () => true,
+      createPayout: async () =>
+        ({
+          id: "pout_auto_1",
+          entity: "payout",
+          amount: 840000,
+          currency: "INR",
+          status: "queued",
+        }) as any,
+    }
+  );
+
+  assert.deepEqual(result.scheduledSettlementIds, ["settlement-1"]);
+  assert.equal(state.host_settlements_v2[0]?.status, "payout_processing");
+  assert.equal(state.host_payout_executions.length, 1);
+});
+
+test("admin hold blocks auto payout scheduling", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_settlements_v2[0]!.status = "approved";
+  state.host_settlements_v2[0]!.payout_hold_status = "on_hold";
+  state.host_settlements_v2[0]!.payout_hold_reason = "manual review";
+
+  const result = await scheduleEligibleAutoPayouts(
+    client,
+    { actorUserId: "scheduler", limit: 10 },
+    {
+      isSettlementPayoutExecutionEnabled: () => true,
+      isAutoPayoutEnabled: () => true,
+      isPayoutAdminApprovalRequired: () => false,
+      isPayoutHoldEnabled: () => true,
+      isRazorpayXEnabled: () => true,
+      isRazorpayXConfigured: () => true,
+    }
+  );
+
+  assert.deepEqual(result.scheduledSettlementIds, []);
+  assert.match(result.skipped[0]?.reason ?? "", /hold/i);
+  assert.equal(state.host_payout_executions.length, 0);
+});
+
+test("failed payout stays review-only when auto retry remains disabled", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.host_settlements_v2[0]!.status = "payout_failed";
+
+  const result = await scheduleEligibleAutoPayouts(
+    client,
+    { actorUserId: "scheduler", limit: 10 },
+    {
+      isSettlementPayoutExecutionEnabled: () => true,
+      isAutoPayoutEnabled: () => true,
+      isPayoutAdminApprovalRequired: () => false,
+      isPayoutAutoRetryEnabled: () => false,
+      isPayoutHoldEnabled: () => true,
+      isRazorpayXEnabled: () => true,
+      isRazorpayXConfigured: () => true,
+      createPayout: async () => {
+        throw new Error("provider should not be called");
+      },
+    }
+  );
+
+  assert.deepEqual(result.scheduledSettlementIds, []);
+  assert.match(result.skipped[0]?.reason ?? "", /manual retry/i);
+});
+
+test("auto payout does not schedule when settlement line is missing", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.settlement_line_items_v2 = [];
+
+  const result = await scheduleEligibleAutoPayouts(
+    client,
+    { actorUserId: "scheduler", limit: 10 },
+    {
+      isSettlementPayoutExecutionEnabled: () => true,
+      isAutoPayoutEnabled: () => true,
+      isPayoutAdminApprovalRequired: () => false,
+      isPayoutHoldEnabled: () => true,
+      isRazorpayXEnabled: () => true,
+      isRazorpayXConfigured: () => true,
+    }
+  );
+
+  assert.deepEqual(result.scheduledSettlementIds, []);
+  assert.match(result.skipped[0]?.reason ?? "", /settlement line item/i);
+});
+
+test("auto payout does not schedule when compliance lock is active", async () => {
+  const { client, state } = createPayoutExecutionSupabase();
+  seedApprovedSettlement(state);
+  state.finance_settings[0]!.tax_mode = "PENDING_COMPLIANCE";
+
+  const result = await scheduleEligibleAutoPayouts(
+    client,
+    { actorUserId: "scheduler", limit: 10 },
+    {
+      isSettlementPayoutExecutionEnabled: () => true,
+      isAutoPayoutEnabled: () => true,
+      isPayoutAdminApprovalRequired: () => false,
+      isPayoutHoldEnabled: () => true,
+      isRazorpayXEnabled: () => true,
+      isRazorpayXConfigured: () => true,
+    }
+  );
+
+  assert.deepEqual(result.scheduledSettlementIds, []);
+  assert.match(result.skipped[0]?.reason ?? "", /compliance lock/i);
 });
 
 test("reversed payout cannot retry without review", async () => {

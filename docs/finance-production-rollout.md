@@ -33,7 +33,9 @@ Warning: never enable all production flags at once.
 - `GST_EXPORT_ENABLED=false`
 - `AUTO_REFUND_ENABLED=false`
 - `REFUND_ADMIN_APPROVAL_REQUIRED=true`
-- `PAYOUT_ADMIN_APPROVAL_REQUIRED=true`
+- `PAYOUT_ADMIN_APPROVAL_REQUIRED=false`
+- `AUTO_PAYOUT_ENABLED=true`
+- `PAYOUT_HOLD_ENABLED=true`
 - `PAYOUT_AUTO_RETRY_ENABLED=false`
 - `SETTLEMENT_PAYOUT_EXECUTION_ENABLED=false`
 - `REFUND_PROVIDER_EXECUTION_ENABLED=false`
@@ -106,10 +108,10 @@ Warning: never enable all production flags at once.
 2. GST checkout and invoice flow in staging
 3. Refunds with admin approval
 4. Payout account setup
-5. Manual settlement payout
+5. Auto payout with admin hold controls
 6. Pilot with 1-2 hosts
 7. Limited production
-8. Safe automation later
+8. Scale after webhook truth and hold workflows are proven
 
 ## Rollout stages
 
@@ -137,7 +139,7 @@ Warning: never enable all production flags at once.
 - Verify masked destination display for hosts
 - Confirm unverified PAN blocks activation
 
-### 5. Manual settlement payout
+### 5. Auto payout with admin hold controls
 
 - Keep payout execution admin-triggered
 - Confirm failed and reversed payout handling
