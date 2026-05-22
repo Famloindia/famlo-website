@@ -40,7 +40,7 @@ const otaConfirmRouteSource = readFileSync(otaConfirmRoutePath, "utf8");
 const otaAirbnbAuthorizeRouteSource = readFileSync(otaAirbnbAuthorizeRoutePath, "utf8");
 const otaAirbnbCallbackRouteSource = readFileSync(otaAirbnbCallbackRoutePath, "utf8");
 const otaServiceSource = readFileSync(otaServicePath, "utf8");
-const roomChannelsSectionSource = shellSource.slice(shellSource.indexOf("Connect this room to OTA"), shellSource.indexOf("Advanced setup tools"));
+const roomChannelsSectionSource = shellSource.slice(shellSource.indexOf("Connect this room to OTA"), shellSource.indexOf('{roomEditorTab === "mapping"'));
 
 test("Add Room card reuses the room showcase card layout", () => {
   assert.match(
@@ -60,7 +60,6 @@ test("room tabs inline reused content replaces old open-another-page CTAs", () =
   assert.doesNotMatch(shellSource, /Open Room Matching/);
   assert.doesNotMatch(shellSource, /View Sync Logs/);
   assert.match(shellSource, /ChannelSetupWizard/);
-  assert.match(shellSource, /Advanced setup tools/);
   assert.match(shellSource, /Go to Channels/);
   assert.match(shellSource, /Advanced sync logs/);
 });

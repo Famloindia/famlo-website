@@ -9,6 +9,7 @@ import {
 import { isChannelProviderKey } from "@/lib/channel-setup-state";
 import { getErrorMessage } from "@/lib/error-utils";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { resolveProviderOperationPolicy } from "@/lib/host/pro/channel/provider-operation-policy";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { asString, type JsonRecord } from "@/lib/platform-utils";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -35,13 +36,6 @@ const OPERATION_TYPES = new Set<ChannelProviderOperationType>([
   "reconcile",
 ]);
 
-const HOST_ALLOWED_OPERATION_TYPES = new Set<ChannelProviderOperationType>([
-  "create_provider",
-  "connect_provider",
-  "verify_mappings",
-  "request_review",
-]);
-
 function asOperationType(value: unknown): ChannelProviderOperationType | null {
   const normalized = asString(value);
   return normalized && OPERATION_TYPES.has(normalized as ChannelProviderOperationType)
@@ -51,70 +45,6 @@ function asOperationType(value: unknown): ChannelProviderOperationType | null {
 
 function asObject(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
-}
-
-export function resolveProviderOperationPolicy(input: {
-  actorRole: "admin" | "host";
-  operationType: ChannelProviderOperationType;
-  requestedDryRun: boolean | null;
-}): {
-  allowed: boolean;
-  status: 200 | 403;
-  error: string | null;
-  effectiveDryRun: boolean;
-} {
-  const requestedDryRun = input.requestedDryRun ?? true;
-  if (input.actorRole === "admin") {
-    return {
-      allowed: true,
-      status: 200,
-      error: null,
-      effectiveDryRun: requestedDryRun,
-    };
-  }
-
-  if (input.operationType === "activate_provider") {
-    return {
-      allowed: false,
-      status: 403,
-      error: "Operator access is required to activate a provider.",
-      effectiveDryRun: true,
-    };
-  }
-
-  if (input.operationType === "deactivate_provider") {
-    return {
-      allowed: false,
-      status: 403,
-      error: "Operator access is required to deactivate a provider.",
-      effectiveDryRun: true,
-    };
-  }
-
-  if (requestedDryRun === false) {
-    return {
-      allowed: false,
-      status: 403,
-      error: "Host-scoped provider operations must stay in dry-run mode.",
-      effectiveDryRun: true,
-    };
-  }
-
-  if (!HOST_ALLOWED_OPERATION_TYPES.has(input.operationType)) {
-    return {
-      allowed: false,
-      status: 403,
-      error: "This provider operation requires operator access.",
-      effectiveDryRun: true,
-    };
-  }
-
-  return {
-    allowed: true,
-    status: 200,
-    error: null,
-    effectiveDryRun: true,
-  };
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

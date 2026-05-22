@@ -18,8 +18,8 @@ import {
   ChannelProviderPermissionError,
 } from "@/lib/channel-provider-framework";
 import { normalizeInventoryRateAmount } from "@/lib/inventory";
-import { resolveProviderOperationPolicy } from "@/app/api/host/pro/channel/providers/operation/route";
-import { resolveBulkRoomScopePolicy } from "@/app/api/host/pro/calendar/bulk-update/route";
+import { resolveProviderOperationPolicy } from "@/lib/host/pro/channel/provider-operation-policy";
+import { resolveBulkRoomScopePolicy } from "@/lib/host/pro/calendar/bulk-room-scope-policy";
 import { verifyChannexWebhookRequest } from "@/app/api/webhooks/channex/bookings/route";
 import { assessImportPreviewEligibility } from "@/app/api/host/pro/channel/channex/bookings/import-preview/route";
 import { assessModificationApplyEligibility } from "@/app/api/host/pro/channel/channex/bookings/apply-modification/route";

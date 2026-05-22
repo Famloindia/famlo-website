@@ -3433,6 +3433,37 @@ export default function FamloProDashboardShell({
     ...channelSetupOverrides,
   };
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const otaAuthProvider = searchParams.get("otaAuthProvider");
+    const otaAuthStatus = searchParams.get("otaAuthStatus");
+
+    if (otaAuthProvider !== "airbnb" || !otaAuthStatus) return;
+
+    setActiveChannelSetup("airbnb");
+    setRoomChannelPanelViewByKey((current) => ({
+      ...current,
+      airbnb: "setup",
+    }));
+    setRoomChannelSetupDrafts((current) => ({
+      ...current,
+      airbnb: {
+        ...(current.airbnb ?? buildHostChannelSetupDraft("airbnb", channelSetupStatesByKey.airbnb)),
+        airbnbAuthorized: otaAuthStatus === "authorized",
+      },
+    }));
+    setRoomChannelFeedbackByKey((current) => ({
+      ...current,
+      airbnb: {
+        type: otaAuthStatus === "authorized" ? "success" : "error",
+        text:
+          otaAuthStatus === "authorized"
+            ? "Airbnb account connected. Preview the property and rooms to continue."
+            : "Airbnb authorization did not complete. Try connecting the Airbnb account again.",
+      },
+    }));
+  }, [channelSetupStatesByKey.airbnb]);
+  useEffect(() => {
     if (!activeChannelSetup) return;
     setRoomChannelSetupDrafts((current) => ({
       ...current,
@@ -5673,12 +5704,13 @@ export default function FamloProDashboardShell({
                       <button
                         type="button"
                         className={styles.primaryActionButton}
-                        onClick={() =>
+                        onClick={() => {
+                          setActiveChannelSetup(roomEditorActiveProviderKey);
                           setRoomChannelPanelViewByKey((current) => ({
                             ...current,
                             [roomEditorActiveProviderKey]: selectedRoomChannelConnected ? "summary" : "setup",
-                          }))
-                        }
+                          }));
+                        }}
                       >
                         Connect
                       </button>
@@ -5995,35 +6027,6 @@ export default function FamloProDashboardShell({
                           </div>
                         ) : null}
 
-                        <details className={styles.operatorDetails}>
-                          <summary className={styles.operatorSummary}>Advanced setup tools</summary>
-                          <ChannelSetupWizard
-                            providerKey={roomEditorActiveProviderKey}
-                            familyId={familyId}
-                            channexPropertyId={primaryProperty?.externalPropertyId ?? null}
-                            summary={channelSetupSummariesByKey[roomEditorActiveProviderKey]}
-                            readinessModel={channelReadinessModelsByKey[roomEditorActiveProviderKey]}
-                            testSyncReadiness={channelTestSyncReadinessByKey[roomEditorActiveProviderKey]}
-                            goLiveReadiness={channelGoLiveReadinessByKey[roomEditorActiveProviderKey]}
-                            matchingSnapshot={channelMatchingSnapshotsByKey[roomEditorActiveProviderKey]}
-                            initialState={channelSetupStatesByKey[roomEditorActiveProviderKey] ?? null}
-                            onSaved={(savedState) => {
-                              setChannelSetupOverrides((current) => ({
-                                ...current,
-                                [savedState.providerKey]: savedState,
-                              }));
-                            }}
-                            onOpenRoomMatching={() => {
-                              setActiveChannelSetup(roomEditorActiveProviderKey);
-                              setRoomEditorTab("mapping");
-                            }}
-                            onOpenPriceMatching={() => {
-                              setActiveChannelSetup(roomEditorActiveProviderKey);
-                              setRoomEditorTab("mapping");
-                            }}
-                            onClose={() => setActiveChannelSetup(null)}
-                          />
-                        </details>
                       </div>
                     ) : roomEditorMode === "edit" ? (
                       <div className={styles.roomDarkCard}>

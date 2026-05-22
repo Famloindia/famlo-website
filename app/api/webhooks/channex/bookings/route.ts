@@ -43,7 +43,7 @@ function readSignatureHeader(request: Request): string | null {
   )?.trim() || null;
 }
 
-export function readChannexWebhookAuthConfig(
+function readChannexWebhookAuthConfig(
   env: NodeJS.ProcessEnv = process.env,
   request?: Request
 ): ChannexWebhookAuthConfig {
@@ -91,7 +91,7 @@ function verifySignatureRequest(request: Request, rawBody: string, secret: strin
   return [`sha256=${digestHex}`, digestHex, digestBase64].some((candidate) => constantTimeEqual(provided, candidate));
 }
 
-export function verifyChannexWebhookRequest(input: {
+function verifyChannexWebhookRequest(input: {
   request: Request;
   rawBody: string;
   env?: NodeJS.ProcessEnv;

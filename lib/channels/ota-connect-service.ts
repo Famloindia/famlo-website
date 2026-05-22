@@ -210,6 +210,8 @@ export async function createAirbnbAuthorizationUrl(input: {
     };
   }
 
+  // TODO(channex-airbnb): replace this fallback redirect with the real Channex Airbnb OAuth endpoint
+  // once the private authorization URL and required credentials are available in this environment.
   const fallbackUrl = new URL(callbackUrl);
   fallbackUrl.searchParams.set("state", state);
   fallbackUrl.searchParams.set("status", "authorized");
@@ -258,12 +260,14 @@ export async function fetchAirbnbListingsPreview(input: {
   roomId: string;
   fields: PreviewFields;
 }) {
+  // TODO(channex-airbnb): if Airbnb requires a dedicated post-OAuth listings endpoint, swap this
+  // preview helper from the generic provider-structure fetch to that Airbnb-specific Channex call.
   return createOtaPreview({
     request: input.request,
     propertyId: input.propertyId,
     roomId: input.roomId,
     otaId: "airbnb",
-    fields,
+    fields: input.fields,
   });
 }
 
