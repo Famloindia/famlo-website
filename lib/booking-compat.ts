@@ -16,6 +16,7 @@ import {
   recordInventoryParityCheck,
   resolveCanonicalInventoryPrice,
 } from "@/lib/inventory";
+import { enumerateStayNights, getStayNightDateRange } from "@/lib/platform-utils";
 import { ensureReservationForBooking } from "@/lib/reservations";
 import { resolvePrimaryStayUnitId } from "@/lib/stay-units";
 
@@ -293,16 +294,7 @@ function isCanonicalDayInventoryEligible(quarterType: string | null | undefined)
 }
 
 function enumerateDates(from: string, to: string): string[] {
-  const start = new Date(`${from}T00:00:00Z`);
-  const end = new Date(`${to}T00:00:00Z`);
-  const output: string[] = [];
-
-  while (start <= end) {
-    output.push(start.toISOString().split("T")[0] ?? from);
-    start.setUTCDate(start.getUTCDate() + 1);
-  }
-
-  return output;
+  return enumerateStayNights(from, to);
 }
 
 export async function assertHostStayAvailability(
@@ -415,6 +407,7 @@ export async function assertHostStayAvailability(
       : ["morning", "afternoon", "evening", "fullday"];
   const blockedDates = familyRow && Array.isArray(familyRow.blocked_dates) ? familyRow.blocked_dates : [];
   const endDate = input.endDate ?? input.startDate;
+  const stayNightRange = getStayNightDateRange(input.startDate, endDate);
   const quarterType = asString(input.quarterType);
   const useCanonicalDayInventory = isCanonicalDayInventoryEligible(quarterType);
   const requestedGuests = Math.max(1, Math.trunc(input.guestsCount || 1));
@@ -434,12 +427,12 @@ export async function assertHostStayAvailability(
 
   const requestedDates = enumerateDates(input.startDate, endDate);
 
-  if (useCanonicalDayInventory && requestedStayUnitId && legacyFamilyId) {
+  if (stayNightRange && useCanonicalDayInventory && requestedStayUnitId && legacyFamilyId) {
     const canonicalDays = await projectInventoryRange(supabase, {
       familyId: legacyFamilyId,
       stayUnitId: requestedStayUnitId,
-      from: input.startDate,
-      to: endDate,
+      from: stayNightRange.from,
+      to: stayNightRange.to,
       excludeBookingId: options?.excludeBookingId ?? null,
     });
 
@@ -1567,15 +1560,16 @@ export async function createBookingCompatibility(
     input.bookingType === "host_stay"
       ? asString(input.legacyFamilyId) ?? (await resolveStayUnitFamilyId(supabase, resolvedStayUnitId))
       : null;
-  if (input.bookingType === "host_stay" && canonicalFamilyId && resolvedStayUnitId) {
+  const stayNightRange = getStayNightDateRange(input.startDate, input.endDate ?? input.startDate);
+  if (input.bookingType === "host_stay" && canonicalFamilyId && resolvedStayUnitId && stayNightRange) {
     await appendInventoryEvent(supabase, {
       familyId: canonicalFamilyId,
       stayUnitId: resolvedStayUnitId,
       eventType: "booking_hold_created",
       eventSource: "famlo_booking",
       sourceReference: asString((v2Booking as JsonRecord).id),
-      effectiveDateStart: input.startDate,
-      effectiveDateEnd: input.endDate ?? input.startDate,
+      effectiveDateStart: stayNightRange.from,
+      effectiveDateEnd: stayNightRange.to,
       slotKey: input.quarterType ?? null,
       payload: {
         booking_id: asString((v2Booking as JsonRecord).id),
@@ -1589,8 +1583,8 @@ export async function createBookingCompatibility(
     await projectInventoryRange(supabase, {
       familyId: canonicalFamilyId,
       stayUnitId: resolvedStayUnitId,
-      from: input.startDate,
-      to: input.endDate ?? input.startDate,
+      from: stayNightRange.from,
+      to: stayNightRange.to,
     });
   }
 

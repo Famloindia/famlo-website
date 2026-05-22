@@ -82,6 +82,20 @@ function resolveReservationGuestIdentity(booking: BookingReservationRow): {
   const pricingSnapshot = asObject(booking.pricing_snapshot);
   const guestProfile = firstObject(booking.users);
   const externalOtaGuest = isExternalOtaGuestIdentityMode(pricingSnapshot?.channel_user_id_mode);
+  const sourceChannel = asString(booking.source_channel);
+
+  if (sourceChannel === "pms_manual") {
+    return {
+      platformUserId: null,
+      fullName: asString(pricingSnapshot?.guest_name) || "Manual PMS Guest",
+      email: asString(pricingSnapshot?.guest_email) || "",
+      phone: asString(pricingSnapshot?.guest_phone) || "",
+      metadata: {
+        source: "booking_bridge",
+        guest_identity_mode: "manual_pms_guest",
+      },
+    };
+  }
 
   if (externalOtaGuest) {
     return {

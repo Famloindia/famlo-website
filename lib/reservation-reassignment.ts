@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { enqueueBookingInventoryAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { appendInventoryEvent, assertCanonicalInventoryAvailability, projectInventoryRange } from "@/lib/inventory";
-import { asString, type JsonRecord } from "@/lib/platform-utils";
+import { asString, getStayNightDateRange, type JsonRecord } from "@/lib/platform-utils";
 
 type ReservationReassignmentRow = {
   id: string;
@@ -77,9 +77,11 @@ async function reprojectReassignmentInventory(
   }
 ): Promise<void> {
   if (!input.familyId || !input.startDate || !input.endDate) return;
+  const stayNightRange = getStayNightDateRange(input.startDate, input.endDate);
+  if (!stayNightRange) return;
   const ranges = [
-    { stayUnitId: input.oldStayUnitId, from: input.startDate, to: input.endDate },
-    { stayUnitId: input.newStayUnitId, from: input.startDate, to: input.endDate },
+    { stayUnitId: input.oldStayUnitId, from: stayNightRange.from, to: stayNightRange.to },
+    { stayUnitId: input.newStayUnitId, from: stayNightRange.from, to: stayNightRange.to },
   ];
 
   for (const range of ranges) {
@@ -98,8 +100,8 @@ async function reprojectReassignmentInventory(
     eventType: "booking_modified",
     eventSource: "reservation_reassignment",
     sourceReference: input.bookingId ?? null,
-    effectiveDateStart: input.startDate,
-    effectiveDateEnd: input.endDate,
+    effectiveDateStart: stayNightRange.from,
+    effectiveDateEnd: stayNightRange.to,
     actorUserId: input.actorUserId ?? null,
     actorRole: input.actorRole ?? null,
     payload: {
@@ -114,8 +116,8 @@ async function reprojectReassignmentInventory(
   await enqueueBookingInventoryAriSyncJobs(supabase, {
     familyId: input.familyId,
     stayUnitIds,
-    dateFrom: input.startDate,
-    dateTo: input.endDate,
+    dateFrom: stayNightRange.from,
+    dateTo: stayNightRange.to,
     certificationScenario: "booking_modify",
     sourceUiAction: "Famlo PMS reservation reassignment",
     sourceRoute: "reservation_reassignment",

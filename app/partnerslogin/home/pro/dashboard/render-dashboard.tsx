@@ -1096,6 +1096,7 @@ export async function renderFamloProDashboardPage({
         (externalBookingId ? bookingRevisionByExternalBookingId.get(externalBookingId) : null) ??
         null;
       const channelProvider = asString(pricingSnapshot.channel_provider);
+      const sourceChannel = asString(row.source_channel);
       const otaName = asString(pricingSnapshot.ota_name) ?? matchedRevision?.otaName ?? null;
       const isOta = channelProvider === "channex";
       const bookingCurrency = asString(pricingSnapshot.currency) ?? matchedRevision?.currency ?? "INR";
@@ -1127,7 +1128,7 @@ export async function renderFamloProDashboardPage({
           if (totalPrice <= 0) return null;
           return totalPrice * ((100 - globalCommission) / 100);
         })(),
-        sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : "Famlo Direct",
+        sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : sourceChannel === "pms_manual" ? "Famlo PMS" : "Famlo Direct",
         externalBookingId: externalBookingId ?? matchedRevision?.externalBookingId ?? null,
         externalRevisionId:
           asString(pricingSnapshot.channel_external_revision_id) ?? matchedRevision?.externalRevisionId ?? null,

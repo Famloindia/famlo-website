@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { isHostBookingInventoryBlocking } from "@/lib/host-booking-state";
-import { asString, enumerateDateRange, type JsonRecord } from "@/lib/platform-utils";
+import { asString, enumerateDateRange, getStayNightDateRange, type JsonRecord } from "@/lib/platform-utils";
 
 export type InventoryEventType =
   | "manual_block_set"
@@ -333,6 +333,18 @@ function bookingBlocksInventory(row: JsonRecord, now: Date): boolean {
   return isHostBookingInventoryBlocking(status, paymentStatus);
 }
 
+export function bookingOccupiesInventoryDate(input: {
+  startDate: string | null | undefined;
+  endDate: string | null | undefined;
+  date: string;
+}): boolean {
+  const start = normalizeDate(input.startDate);
+  const end = normalizeDate(input.endDate) ?? start;
+  const stayNightRange = start ? getStayNightDateRange(start, end) : null;
+  if (!stayNightRange) return false;
+  return input.date >= stayNightRange.from && input.date <= stayNightRange.to;
+}
+
 function latestEventForDate(events: JsonRecord[], date: string, eventTypes: InventoryEventType[]): JsonRecord | null {
   let latest: JsonRecord | null = null;
   for (const event of events) {
@@ -378,9 +390,15 @@ function projectDay(input: {
   let confirmedUnits = 0;
   let holdUnits = 0;
   for (const booking of input.bookings) {
-    const start = normalizeDate(asString(booking.start_date));
-    const end = normalizeDate(asString(booking.end_date)) ?? start;
-    if (!start || !end || input.date < start || input.date > end) continue;
+    if (
+      !bookingOccupiesInventoryDate({
+        startDate: asString(booking.start_date),
+        endDate: asString(booking.end_date),
+        date: input.date,
+      })
+    ) {
+      continue;
+    }
     if (!bookingBlocksInventory(booking, input.now)) continue;
     if (isHoldBooking(booking)) {
       holdUnits += 1;
@@ -648,12 +666,15 @@ export async function assertCanonicalInventoryAvailability(
     excludeBookingId?: string | null;
   }
 ): Promise<InventoryProjectionDay[]> {
-  const endDate = normalizeDate(input.endDate ?? input.startDate) ?? input.startDate;
+  const stayNightRange = getStayNightDateRange(input.startDate, input.endDate ?? input.startDate);
+  if (!stayNightRange) {
+    throw new Error("Valid stay dates are required.");
+  }
   const days = await projectInventoryRange(supabase, {
     familyId: input.familyId,
     stayUnitId: input.stayUnitId,
-    from: input.startDate,
-    to: endDate,
+    from: stayNightRange.from,
+    to: stayNightRange.to,
     excludeBookingId: input.excludeBookingId,
   });
   const firstBlocked = days.find((day) => !day.isSellable);
@@ -673,11 +694,13 @@ export async function resolveCanonicalInventoryPrice(
   supabase: SupabaseClient,
   input: { familyId: string; stayUnitId: string; startDate: string; endDate?: string | null }
 ): Promise<{ unitPrice: number; totalPrice: number; currency: string; source: string; days: InventoryProjectionDay[] } | null> {
+  const stayNightRange = getStayNightDateRange(input.startDate, input.endDate ?? input.startDate);
+  if (!stayNightRange) return null;
   const days = await ensureProjectedInventory(supabase, {
     familyId: input.familyId,
     stayUnitId: input.stayUnitId,
-    from: input.startDate,
-    to: input.endDate ?? input.startDate,
+    from: stayNightRange.from,
+    to: stayNightRange.to,
   });
   if (days.length === 0) return null;
   const totalPrice = days.reduce((sum, day) => sum + Math.max(0, day.effectiveRate), 0);

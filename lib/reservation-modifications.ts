@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { enqueueBookingInventoryAriSyncJobs } from "@/lib/channex-ari-jobs";
 import { appendInventoryEvent, assertCanonicalInventoryAvailability, projectInventoryRange } from "@/lib/inventory";
-import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
+import { asNumber, asString, getStayNightDateRange, type JsonRecord } from "@/lib/platform-utils";
 
 type ModificationDecision = "apply" | "reject";
 
@@ -200,9 +200,17 @@ async function reprojectModificationInventory(
   }
 ): Promise<void> {
   if (!input.familyId) return;
+  const syncWindow = resolveModificationInventorySyncWindow({
+    oldStartDate: input.oldStartDate,
+    oldEndDate: input.oldEndDate,
+    newStartDate: input.newStartDate,
+    newEndDate: input.newEndDate,
+  });
+  if (!syncWindow) return;
+  const { oldStayNightRange, newStayNightRange, dateFrom, dateTo } = syncWindow;
   const ranges = [
-    { stayUnitId: input.oldStayUnitId, from: input.oldStartDate, to: input.oldEndDate },
-    { stayUnitId: input.newStayUnitId, from: input.newStartDate, to: input.newEndDate },
+    { stayUnitId: input.oldStayUnitId, from: oldStayNightRange.from, to: oldStayNightRange.to },
+    { stayUnitId: input.newStayUnitId, from: newStayNightRange.from, to: newStayNightRange.to },
   ];
   for (const range of ranges) {
     if (!range.stayUnitId) continue;
@@ -220,8 +228,8 @@ async function reprojectModificationInventory(
     eventType: "booking_modified",
     eventSource: input.source,
     sourceReference: input.bookingId,
-    effectiveDateStart: input.newStartDate,
-    effectiveDateEnd: input.newEndDate,
+    effectiveDateStart: newStayNightRange.from,
+    effectiveDateEnd: newStayNightRange.to,
     payload: {
       booking_id: input.bookingId,
       old_stay_unit_id: input.oldStayUnitId,
@@ -234,8 +242,6 @@ async function reprojectModificationInventory(
   });
 
   const stayUnitIds = [...new Set([input.oldStayUnitId, input.newStayUnitId].filter((value): value is string => Boolean(value)))];
-  const dateFrom = input.oldStartDate < input.newStartDate ? input.oldStartDate : input.newStartDate;
-  const dateTo = input.oldEndDate > input.newEndDate ? input.oldEndDate : input.newEndDate;
   await enqueueBookingInventoryAriSyncJobs(supabase, {
     familyId: input.familyId,
     stayUnitIds,
@@ -245,6 +251,28 @@ async function reprojectModificationInventory(
     sourceUiAction: "Famlo PMS booking modification apply",
     sourceRoute: input.source,
   });
+}
+
+export function resolveModificationInventorySyncWindow(input: {
+  oldStartDate: string;
+  oldEndDate: string;
+  newStartDate: string;
+  newEndDate: string;
+}): {
+  oldStayNightRange: { from: string; to: string; nights: string[] };
+  newStayNightRange: { from: string; to: string; nights: string[] };
+  dateFrom: string;
+  dateTo: string;
+} | null {
+  const oldStayNightRange = getStayNightDateRange(input.oldStartDate, input.oldEndDate);
+  const newStayNightRange = getStayNightDateRange(input.newStartDate, input.newEndDate);
+  if (!oldStayNightRange || !newStayNightRange) return null;
+  return {
+    oldStayNightRange,
+    newStayNightRange,
+    dateFrom: oldStayNightRange.from < newStayNightRange.from ? oldStayNightRange.from : newStayNightRange.from,
+    dateTo: oldStayNightRange.to > newStayNightRange.to ? oldStayNightRange.to : newStayNightRange.to,
+  };
 }
 
 export async function decideBookingModification(

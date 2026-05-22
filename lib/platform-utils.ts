@@ -26,6 +26,44 @@ export function enumerateDateRange(from: string, to: string): string[] {
   return output;
 }
 
+function normalizeDateOnly(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const candidate = trimmed.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : null;
+}
+
+function addUtcDays(date: string, days: number): string {
+  const base = new Date(`${date}T00:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().slice(0, 10);
+}
+
+export function enumerateStayNights(checkInDate: string, checkOutDate?: string | null): string[] {
+  const checkIn = normalizeDateOnly(checkInDate);
+  if (!checkIn) return [];
+
+  const normalizedCheckout = normalizeDateOnly(checkOutDate ?? null);
+  if (!normalizedCheckout || normalizedCheckout <= checkIn) {
+    return [checkIn];
+  }
+
+  return enumerateDateRange(checkIn, addUtcDays(normalizedCheckout, -1));
+}
+
+export function getStayNightDateRange(
+  checkInDate: string,
+  checkOutDate?: string | null
+): { from: string; to: string; nights: string[] } | null {
+  const nights = enumerateStayNights(checkInDate, checkOutDate);
+  if (nights.length === 0) return null;
+  return {
+    from: nights[0] ?? checkInDate,
+    to: nights[nights.length - 1] ?? checkInDate,
+    nights,
+  };
+}
+
 export function addMinutes(base: Date, minutes: number): Date {
   return new Date(base.getTime() + minutes * 60_000);
 }

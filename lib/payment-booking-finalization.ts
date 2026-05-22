@@ -7,6 +7,7 @@ import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { appendInventoryEvent, projectInventoryRange, type InventoryEventType } from "@/lib/inventory";
+import { enumerateStayNights, getStayNightDateRange } from "@/lib/platform-utils";
 import { syncReservationFromBooking } from "@/lib/reservations";
 
 type JsonRecord = Record<string, unknown>;
@@ -34,6 +35,16 @@ function asNumber(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+export function resolveBookingInventoryImpactRange(input: {
+  startDate?: string | null;
+  endDate?: string | null;
+}): { from: string; to: string; nights: string[] } | null {
+  const startDate = asString(input.startDate);
+  const endDate = asString(input.endDate) ?? startDate;
+  if (!startDate || !endDate) return null;
+  return getStayNightDateRange(startDate, endDate);
 }
 
 export type CapturedPaymentFinalizationDecision =
@@ -372,7 +383,10 @@ export async function assertBookingCanFinalizePayment(
       return false;
     }
 
-    const dateOverlap = enumerateDates(startDate, endDate).some((date) => date >= rowStartDate && date <= rowEndDate);
+    const rowStayNightRange = getStayNightDateRange(rowStartDate, rowEndDate);
+    const dateOverlap = enumerateDates(startDate, endDate).some(
+      (date) => rowStayNightRange && date >= rowStayNightRange.from && date <= rowStayNightRange.to
+    );
     if (!dateOverlap) {
       return false;
     }
@@ -459,15 +473,17 @@ export async function recordBookingInventoryTransition(
     actorRole?: string | null;
     payload?: JsonRecord;
   }
-): Promise<void> {
+): Promise<string[]> {
   const bookingId = asString(input.booking?.id);
   const familyId = await resolveBookingFamilyId(supabase, input.booking);
   const stayUnitId = resolveStayUnitId(input.booking);
-  const startDate = asString(input.booking?.start_date);
-  const endDate = asString(input.booking?.end_date) ?? startDate;
+  const inventoryRange = resolveBookingInventoryImpactRange({
+    startDate: asString(input.booking?.start_date),
+    endDate: asString(input.booking?.end_date),
+  });
 
-  if (!bookingId || !familyId || !stayUnitId || !startDate || !endDate) {
-    return;
+  if (!bookingId || !familyId || !stayUnitId || !inventoryRange) {
+    return [];
   }
 
   await appendInventoryEvent(supabase, {
@@ -476,8 +492,8 @@ export async function recordBookingInventoryTransition(
     eventType: input.eventType,
     eventSource: input.eventSource,
     sourceReference: bookingId,
-    effectiveDateStart: startDate,
-    effectiveDateEnd: endDate,
+    effectiveDateStart: inventoryRange.from,
+    effectiveDateEnd: inventoryRange.to,
     slotKey: asString(input.booking?.quarter_type),
     payload: {
       booking_id: bookingId,
@@ -492,15 +508,15 @@ export async function recordBookingInventoryTransition(
   await projectInventoryRange(supabase, {
     familyId,
     stayUnitId,
-    from: startDate,
-    to: endDate,
+    from: inventoryRange.from,
+    to: inventoryRange.to,
   });
 
-  await enqueueBookingInventoryAriSyncJobs(supabase, {
+  return enqueueBookingInventoryAriSyncJobs(supabase, {
     familyId,
     stayUnitIds: [stayUnitId],
-    dateFrom: startDate,
-    dateTo: endDate,
+    dateFrom: inventoryRange.from,
+    dateTo: inventoryRange.to,
     certificationScenario: input.eventType,
     sourceUiAction: `Famlo PMS booking inventory transition (${input.eventType})`,
     sourceRoute: input.eventSource,
@@ -907,16 +923,7 @@ export async function finalizeCapturedBookingPayment(
 }
 
 function enumerateDates(from: string, to: string): string[] {
-  const start = new Date(`${from}T00:00:00Z`);
-  const end = new Date(`${to}T00:00:00Z`);
-  const output: string[] = [];
-
-  while (start <= end) {
-    output.push(start.toISOString().split("T")[0] ?? from);
-    start.setUTCDate(start.getUTCDate() + 1);
-  }
-
-  return output;
+  return enumerateStayNights(from, to);
 }
 
 function isPaymentWinnerCandidate(

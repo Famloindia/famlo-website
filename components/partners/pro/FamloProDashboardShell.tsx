@@ -780,6 +780,12 @@ function formatDateTime(value: string | null): string {
   }).format(date);
 }
 
+function addDaysToDateString(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function formatRelativeAge(value: string | null, referenceNow: number): string {
   if (!value) return "Not available";
   const date = new Date(value);
@@ -1698,6 +1704,25 @@ export default function FamloProDashboardShell({
   const [otaEditDraft, setOtaEditDraft] = useState<OtaEditDraft | null>(null);
   const [bookingActionFeedback, setBookingActionFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [isSubmittingOtaEdit, startOtaEditTransition] = useTransition();
+  const [manualBookingDraft, setManualBookingDraft] = useState<{
+    stayUnitId: string;
+    guestName: string;
+    checkInDate: string;
+    checkOutDate: string;
+    notes: string;
+  }>(() => ({
+    stayUnitId: rooms[0]?.id ?? "",
+    guestName: "",
+    checkInDate: calendarWindow.startDate,
+    checkOutDate: addDaysToDateString(calendarWindow.startDate, 1),
+    notes: "",
+  }));
+  const [manualBookingFeedback, setManualBookingFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+    queuedJobIds?: string[];
+  } | null>(null);
+  const [isManualBookingPending, startManualBookingTransition] = useTransition();
   const [activeMessageConversationId, setActiveMessageConversationId] = useState<string | null>(null);
   const [activeChannelSetup, setActiveChannelSetup] = useState<ChannelProviderKey | null>(null);
   const [selectedChannelToAdd, setSelectedChannelToAdd] = useState<ChannelProviderKey>("booking");
@@ -1717,6 +1742,14 @@ export default function FamloProDashboardShell({
     setCalendarRateActionDate(null);
     setCalendarRateOverrides({});
     setSelectedCalendarRateCell(null);
+    setManualBookingDraft({
+      stayUnitId: rooms[0]?.id ?? "",
+      guestName: "",
+      checkInDate: calendarWindow.startDate,
+      checkOutDate: addDaysToDateString(calendarWindow.startDate, 1),
+      notes: "",
+    });
+    setManualBookingFeedback(null);
   }, [familyId]);
   useEffect(() => {
     const nextDate = new Date(`${calendarWindow.startDate}T12:00:00+05:30`);
@@ -1730,10 +1763,11 @@ export default function FamloProDashboardShell({
       dateTo: calendarWindow.startDate,
     }));
     setBulkCalendarFeedback(null);
-  }, [calendarWindow.startDate]);
+  }, [calendarWindow.startDate, rooms]);
   const activeTopLevel = resolveTopLevelSection(activeSection);
   const activePropertyTab = resolvePropertyTab(activeSection);
   const activePropertyTabLinks = PROPERTY_TAB_SECTION_LINKS[activePropertyTab];
+  const canUseManualPmsBooking = isAdminView;
   const isPropertiesHomeView = activeSection === "properties-home" && !roomRouteState;
   const currentPropertyOption = propertyOptions.find((option) => option.familyId === familyId) ?? null;
   const calendarJumpYearOptions = Array.from({ length: 5 }, (_, index) => String(initialCalendarDate.getFullYear() - 1 + index));
@@ -7131,6 +7165,188 @@ export default function FamloProDashboardShell({
                 <h3 className={styles.propertyCenterTitle}>Bookings</h3>
               </div>
               <div className={styles.cardBody}>
+                <article
+                  className={styles.listCard}
+                  style={{
+                    background: "rgba(16, 185, 129, 0.08)",
+                    border: "1px solid rgba(16, 185, 129, 0.18)",
+                    marginBottom: "24px",
+                  }}
+                >
+                  <div className={styles.listTitle} style={{ color: "#ffffff" }}>Manual PMS booking</div>
+                  <div className={styles.feedCopy} style={{ color: "rgba(255, 255, 255, 0.68)" }}>
+                    Create a Famlo-origin operator booking for live testing. This books the selected stay unit immediately and queues a scoped Channex availability update for the affected nights only.
+                  </div>
+                  {!canUseManualPmsBooking ? (
+                    <div
+                      className={`${styles.feedbackBox} ${styles.feedbackError}`}
+                      style={{ marginTop: "16px" }}
+                    >
+                      Manual PMS booking is available in the Bookings tab, but creating one still requires an operator/admin session.
+                    </div>
+                  ) : null}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                      gap: "12px",
+                      marginTop: "16px",
+                    }}
+                  >
+                    <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)" }}>
+                      <span>Stay unit</span>
+                      <select
+                        value={manualBookingDraft.stayUnitId}
+                        onChange={(event) =>
+                          setManualBookingDraft((current) => ({ ...current, stayUnitId: event.target.value }))
+                        }
+                        style={bookingEditInputStyle}
+                        disabled={!canUseManualPmsBooking}
+                      >
+                        <option value="">Select stay unit</option>
+                        {rooms.map((room) => (
+                          <option key={room.id} value={room.id}>
+                            {room.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)" }}>
+                      <span>Guest name</span>
+                      <input
+                        type="text"
+                        value={manualBookingDraft.guestName}
+                        onChange={(event) =>
+                          setManualBookingDraft((current) => ({ ...current, guestName: event.target.value }))
+                        }
+                        style={bookingEditInputStyle}
+                        placeholder="Guest full name"
+                        disabled={!canUseManualPmsBooking}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)" }}>
+                      <span>Check-in</span>
+                      <input
+                        type="date"
+                        value={manualBookingDraft.checkInDate}
+                        onChange={(event) =>
+                          setManualBookingDraft((current) => ({
+                            ...current,
+                            checkInDate: event.target.value,
+                            checkOutDate:
+                              current.checkOutDate <= event.target.value
+                                ? addDaysToDateString(event.target.value, 1)
+                                : current.checkOutDate,
+                          }))
+                        }
+                        style={bookingEditInputStyle}
+                        disabled={!canUseManualPmsBooking}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)" }}>
+                      <span>Checkout</span>
+                      <input
+                        type="date"
+                        value={manualBookingDraft.checkOutDate}
+                        onChange={(event) =>
+                          setManualBookingDraft((current) => ({ ...current, checkOutDate: event.target.value }))
+                        }
+                        style={bookingEditInputStyle}
+                        disabled={!canUseManualPmsBooking}
+                      />
+                    </label>
+                  </div>
+                  <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "rgba(255, 255, 255, 0.72)", marginTop: "12px" }}>
+                    <span>Notes</span>
+                    <textarea
+                      value={manualBookingDraft.notes}
+                      onChange={(event) =>
+                        setManualBookingDraft((current) => ({ ...current, notes: event.target.value }))
+                      }
+                      style={{ ...bookingEditInputStyle, minHeight: "84px", resize: "vertical" }}
+                      placeholder="Optional operator note"
+                      disabled={!canUseManualPmsBooking}
+                    />
+                  </label>
+                  <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", marginTop: "16px" }}>
+                    <button
+                      type="button"
+                      className={styles.primaryActionButton}
+                      disabled={
+                        !canUseManualPmsBooking ||
+                        isManualBookingPending ||
+                        !manualBookingDraft.stayUnitId ||
+                        !manualBookingDraft.guestName.trim() ||
+                        !manualBookingDraft.checkInDate ||
+                        !manualBookingDraft.checkOutDate
+                      }
+                      onClick={() => {
+                        startManualBookingTransition(async () => {
+                          setManualBookingFeedback(null);
+                          try {
+                            const response = await fetch("/api/host/pro/bookings/manual", {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({
+                                familyId,
+                                stayUnitId: manualBookingDraft.stayUnitId,
+                                guestName: manualBookingDraft.guestName,
+                                checkInDate: manualBookingDraft.checkInDate,
+                                checkOutDate: manualBookingDraft.checkOutDate,
+                                notes: manualBookingDraft.notes,
+                              }),
+                            });
+                            const payload = (await response.json()) as {
+                              ok?: boolean;
+                              message?: string;
+                              error?: string;
+                              queuedJobIds?: string[];
+                            };
+                            if (!response.ok || !payload.ok) {
+                              throw new Error(payload.error ?? payload.message ?? "Unable to create manual PMS booking.");
+                            }
+                            setManualBookingFeedback({
+                              type: "success",
+                              text: payload.message ?? "Manual PMS booking created.",
+                              queuedJobIds: Array.isArray(payload.queuedJobIds) ? payload.queuedJobIds : [],
+                            });
+                            setManualBookingDraft((current) => ({
+                              ...current,
+                              guestName: "",
+                              notes: "",
+                            }));
+                            router.refresh();
+                          } catch (error) {
+                            setManualBookingFeedback({
+                              type: "error",
+                              text: error instanceof Error ? error.message : "Unable to create manual PMS booking.",
+                            });
+                          }
+                        });
+                      }}
+                    >
+                      {isManualBookingPending ? "Creating manual booking..." : "Create manual booking"}
+                    </button>
+                    <span className={styles.feedCopy} style={{ color: "rgba(255, 255, 255, 0.6)" }}>
+                      Checkout is excluded automatically from inventory and Channex availability updates.
+                    </span>
+                  </div>
+                  {manualBookingFeedback ? (
+                    <div
+                      className={`${styles.feedbackBox} ${manualBookingFeedback.type === "success" ? styles.feedbackSuccess : styles.feedbackError}`}
+                      style={{ marginTop: "16px" }}
+                    >
+                      {manualBookingFeedback.text}
+                      {manualBookingFeedback.queuedJobIds && manualBookingFeedback.queuedJobIds.length > 0 ? (
+                        <div className={styles.feedCopy} style={{ marginTop: "8px" }}>
+                          Queued jobs: {manualBookingFeedback.queuedJobIds.join(", ")}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </article>
                 <div className={styles.filterRow}>
                   {(["Current", "History"] as BookingWorkspaceView[]).map((view) => {
                     const active = bookingView === view;
@@ -10981,7 +11197,7 @@ function ChannexAriSyncCard({
     ok: boolean;
     message: string;
     summary?: {
-      mode?: "push_30" | "push_365" | "verify";
+      mode?: "push_30" | "push_365" | "verify" | "queued";
       windowDays?: number;
       eligibleRooms: number;
       availabilityChanges: number;
@@ -10994,6 +11210,7 @@ function ChannexAriSyncCard({
       availabilityChunkCount?: number;
       restrictionChunkCount?: number;
       dateRange?: { from: string; to: string };
+      queuedJobIds?: string[];
     };
     rooms?: Array<{
       stayUnitId: string;
@@ -11131,8 +11348,16 @@ function ChannexAriSyncCard({
               {typeof feedback.summary.windowDays === "number" ? (
                 <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Date window: {feedback.summary.windowDays} days</span>
               ) : null}
-              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Availability changes: {feedback.summary.availabilityChanges}</span>
-              <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Restriction changes: {feedback.summary.restrictionChanges}</span>
+              {feedback.summary.mode === "queued" ? (
+                <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
+                  Queued jobs: {feedback.summary.queuedJobIds?.length ?? 0}
+                </span>
+              ) : (
+                <>
+                  <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Availability changes: {feedback.summary.availabilityChanges}</span>
+                  <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>Restriction changes: {feedback.summary.restrictionChanges}</span>
+                </>
+              )}
               {typeof feedback.summary.verifiedAvailabilityCount === "number" ? (
                 <span className={`${styles.readinessPill} ${feedback.verificationFailed ? styles.readinessPillReview : styles.readinessPillOk}`}>
                   Verified availability: {feedback.summary.verifiedAvailabilityCount}
@@ -11173,6 +11398,11 @@ function ChannexAriSyncCard({
           {feedback.summary?.dateRange ? (
             <div className={styles.feedCopy} style={{ marginTop: 10 }}>
               Date range: {feedback.summary.dateRange.from} → {feedback.summary.dateRange.to}
+            </div>
+          ) : null}
+          {feedback.summary?.mode === "queued" && feedback.summary.queuedJobIds && feedback.summary.queuedJobIds.length > 0 ? (
+            <div className={styles.feedCopy} style={{ marginTop: 10 }}>
+              Queued job ids: {feedback.summary.queuedJobIds.join(", ")}
             </div>
           ) : null}
           {feedback.rooms && feedback.rooms.length > 0 ? (
@@ -11278,16 +11508,27 @@ function ChannexAriSyncCard({
                   }>;
                   warnings?: string[];
                   verificationFailed?: boolean;
+                  queuedJobIds?: string[];
                 };
 
+                const queuedJobIds = Array.isArray(payload.queuedJobIds) ? payload.queuedJobIds : [];
                 setFeedback({
-                  ok: Boolean(response.ok && payload.ok),
+                  ok: Boolean(response.ok && (payload.ok ?? payload.status === "queued")),
                   message:
                     typeof payload.message === "string" && payload.message.trim().length > 0
                       ? payload.message
                       : "Unable to push Channex staging ARI.",
                   summary:
-                    typeof payload.eligibleRooms === "number" &&
+                    payload.status === "queued"
+                      ? {
+                        mode: "queued",
+                        windowDays: 30,
+                        eligibleRooms,
+                        availabilityChanges: 0,
+                        restrictionChanges: 0,
+                        queuedJobIds,
+                      }
+                      : typeof payload.eligibleRooms === "number" &&
                       typeof payload.availabilityChanges === "number" &&
                       typeof payload.restrictionChanges === "number"
                       ? {
@@ -11371,16 +11612,27 @@ function ChannexAriSyncCard({
                   }>;
                   warnings?: string[];
                   verificationFailed?: boolean;
+                  queuedJobIds?: string[];
                 };
 
+                const queuedJobIds = Array.isArray(payload.queuedJobIds) ? payload.queuedJobIds : [];
                 setFeedback({
-                  ok: Boolean(response.ok && payload.ok),
+                  ok: Boolean(response.ok && (payload.ok ?? payload.status === "queued")),
                   message:
                     typeof payload.message === "string" && payload.message.trim().length > 0
                       ? payload.message
                       : "Unable to push Channex 365-day staging ARI.",
                   summary:
-                    typeof payload.eligibleRooms === "number" &&
+                    payload.status === "queued"
+                      ? {
+                        mode: "queued",
+                        windowDays: 365,
+                        eligibleRooms,
+                        availabilityChanges: 0,
+                        restrictionChanges: 0,
+                        queuedJobIds,
+                      }
+                      : typeof payload.eligibleRooms === "number" &&
                       typeof payload.availabilityChanges === "number" &&
                       typeof payload.restrictionChanges === "number"
                       ? {
@@ -11464,16 +11716,27 @@ function ChannexAriSyncCard({
                   }>;
                   warnings?: string[];
                   verificationFailed?: boolean;
+                  queuedJobIds?: string[];
                 };
 
+                const queuedJobIds = Array.isArray(payload.queuedJobIds) ? payload.queuedJobIds : [];
                 setFeedback({
-                  ok: Boolean(response.ok && payload.ok),
+                  ok: Boolean(response.ok && (payload.ok ?? payload.status === "queued")),
                   message:
                     typeof payload.message === "string" && payload.message.trim().length > 0
                       ? payload.message
                       : "Unable to sync Channex 365-day ARI now.",
                   summary:
-                    typeof payload.eligibleRooms === "number" &&
+                    payload.status === "queued"
+                      ? {
+                        mode: "queued",
+                        windowDays: 365,
+                        eligibleRooms,
+                        availabilityChanges: 0,
+                        restrictionChanges: 0,
+                        queuedJobIds,
+                      }
+                      : typeof payload.eligibleRooms === "number" &&
                       typeof payload.availabilityChanges === "number" &&
                       typeof payload.restrictionChanges === "number"
                       ? {
