@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, type CSSProperties, useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, type CSSProperties, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Activity,
   ArrowRightLeft,
@@ -76,6 +76,11 @@ import {
   matchesRevenueWindowDate,
   shouldIncludeFamloPayoutInTotals,
 } from "@/lib/finance/pro-revenue";
+import {
+  applyRoomCalendarAvailabilityOverride,
+  getRoomCalendarAvailabilityOverrideKey,
+  rollbackRoomCalendarAvailabilityOverride,
+} from "@/lib/pro-room-editor-ui";
 import styles from "./pro-dashboard.module.css";
 
 const HostRoomsManager = dynamic(() => import("@/components/partners/rooms/HostRoomsManager"));
@@ -1737,6 +1742,7 @@ export default function FamloProDashboardShell({
   const [calendarActionFeedback, setCalendarActionFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [bulkCalendarFeedback, setBulkCalendarFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [calendarActionDate, setCalendarActionDate] = useState<string | null>(null);
+  const [calendarAvailabilityOverrides, setCalendarAvailabilityOverrides] = useState<Record<string, CalendarCell["status"]>>({});
   const [isCalendarActionPending, startCalendarAction] = useTransition();
   const [selectedCalendarRateCell, setSelectedCalendarRateCell] = useState<{
     roomId: string;
@@ -1826,6 +1832,7 @@ export default function FamloProDashboardShell({
     setCalendarActionFeedback(null);
     setBulkCalendarFeedback(null);
     setCalendarActionDate(null);
+    setCalendarAvailabilityOverrides({});
     setCalendarRateFeedback(null);
     setCalendarRateActionDate(null);
     setCalendarRateOverrides({});
@@ -1908,6 +1915,13 @@ export default function FamloProDashboardShell({
     const action = cell.status === "manual_block" ? "unblock" : "block";
     setCalendarActionFeedback(null);
     setCalendarActionDate(cell.date);
+    setCalendarAvailabilityOverrides((current) =>
+      applyRoomCalendarAvailabilityOverride(current, {
+        roomId,
+        date: cell.date,
+        action,
+      })
+    );
 
     startCalendarAction(async () => {
       try {
@@ -1934,8 +1948,17 @@ export default function FamloProDashboardShell({
               ? `Blocked ${cell.date} for ${roomName}.`
               : `Unblocked ${cell.date} for ${roomName}.`,
         });
-        router.refresh();
+        window.setTimeout(() => {
+          router.refresh();
+        }, 1200);
       } catch (error) {
+        setCalendarAvailabilityOverrides((current) =>
+          rollbackRoomCalendarAvailabilityOverride(current, {
+            roomId,
+            date: cell.date,
+            previousStatus: cell.status === "available" || cell.status === "manual_block" ? cell.status : null,
+          })
+        );
         setCalendarActionFeedback({
           type: "error",
           text: error instanceof Error ? error.message : "Failed to update the property calendar block.",
@@ -2076,7 +2099,7 @@ export default function FamloProDashboardShell({
 
     const targetRoomIds =
       effectiveDraft.roomId === "__all__"
-        ? calendarRows.map((row) => row.roomId)
+        ? displayedCalendarRows.map((row) => row.roomId)
         : effectiveDraft.roomId
           ? [effectiveDraft.roomId]
           : [];
@@ -4231,6 +4254,7 @@ export default function FamloProDashboardShell({
       room,
       selected: room.id === selectedRoom?.id,
       famloStatus: room.isActive ? "Active in Famlo" : "Inactive in Famlo",
+      photoStatus: room.photosCount > 0 ? `${room.photosCount} photo${room.photosCount === 1 ? "" : "s"} ready` : "Photos missing",
       channelStatus: room.isActive
         ? roomMapping?.externalRoomTypeId
           ? roomRatePlan?.externalRatePlanId
@@ -4248,7 +4272,29 @@ export default function FamloProDashboardShell({
     };
   });
   const selectedRoomCard = roomCards.find((item) => item.room.id === selectedRoom?.id) ?? null;
-  const selectedRoomCalendarRow = calendarRows.find((row) => row.roomId === selectedRoom?.id) ?? null;
+  const displayedCalendarRows = useMemo(
+    () =>
+      calendarRows.map((row) => ({
+        ...row,
+        availabilityCells: row.availabilityCells.map((cell) => {
+          const override = calendarAvailabilityOverrides[getRoomCalendarAvailabilityOverrideKey(row.roomId, cell.date)];
+          return override
+            ? {
+                ...cell,
+                status: override,
+                label:
+                  override === "manual_block"
+                    ? "Manual block"
+                    : override === "available"
+                      ? "Available"
+                      : cell.label,
+              }
+            : cell;
+        }),
+      })),
+    [calendarAvailabilityOverrides, calendarRows]
+  );
+  const selectedRoomCalendarRow = displayedCalendarRows.find((row) => row.roomId === selectedRoom?.id) ?? null;
   const selectedRoomConflictCount = selectedRoom
     ? conflictItems.filter((item) => item.relatedLabel === selectedRoom.name).length
     : 0;
@@ -4302,6 +4348,12 @@ export default function FamloProDashboardShell({
   const selectedRoomHasRateMapping = Boolean(
     roomEditorRoom && ratePlansByRoomId.get(roomEditorRoom.id)?.externalRatePlanId
   );
+  const selectedRoomMappingRow = roomEditorRoom
+    ? roomMappingRows.find((row) => row.room.id === roomEditorRoom.id) ?? null
+    : null;
+  const selectedRoomRateMappingRow = roomEditorRoom
+    ? rateMappingRows.find((row) => row.room.id === roomEditorRoom.id) ?? null
+    : null;
   const bookingComRoomStatus = currentChannelAttached
     ? selectedRoomHasRoomMapping && selectedRoomHasRateMapping
       ? "Ready"
@@ -4313,7 +4365,6 @@ export default function FamloProDashboardShell({
     currentChannelAttached && selectedRoomHasRoomMapping && selectedRoomHasRateMapping
       ? "Ready after sync checks"
       : "Not ready";
-  const makeMyTripStatus = "Not connected";
   const roomEditorIssues =
     roomEditorMode === "create"
       ? []
@@ -4361,6 +4412,18 @@ export default function FamloProDashboardShell({
           }
           : null,
       ].filter(Boolean) as Array<{ title: string; detail: string }>;
+  const selectedRoomSyncLogs = roomEditorRoom
+    ? channelFoundation.syncLogs.filter((log) => {
+        const payload = asObject(log.payload) ?? {};
+        const scopedRoomId =
+          typeof payload.stay_unit_id === "string"
+            ? payload.stay_unit_id
+            : typeof payload.room_id === "string"
+              ? payload.room_id
+              : null;
+        return scopedRoomId === roomEditorRoom.id;
+      }).slice(0, 3)
+    : [];
   const selectedPropertyDisplayLabel = currentPropertyOption
     ? `${currentPropertyOption.name || propertyName}${selectedPropertyLocation ? ` · ${selectedPropertyLocation}` : ""}`
     : `${propertyName}${selectedPropertyLocation ? ` · ${selectedPropertyLocation}` : ""}`;
@@ -4808,7 +4871,9 @@ export default function FamloProDashboardShell({
                           <span className={`${styles.readinessPill} ${item.warning ? styles.readinessPillReview : styles.readinessPillOk}`}>
                             {item.warning ?? "Ready for edit"}
                           </span>
+                          <span className={styles.readinessPill}>{item.photoStatus}</span>
                           <span className={styles.readinessPill}>{item.providerMappingLabel}</span>
+                          <span className={styles.readinessPill}>{item.channelStatus}</span>
                           {item.room.isPrimary ? <span className={styles.readinessPill}>Primary room</span> : null}
                         </div>
 
@@ -4819,13 +4884,15 @@ export default function FamloProDashboardShell({
 
                 <Link
                   href={`/partnerslogin/home/pro/properties/${encodeURIComponent(familyId)}/rooms/new`}
-                  className={styles.addRoomShowcaseCard}
+                  className={`${styles.propertyRoomShowcaseCard} ${styles.addRoomShowcaseCard}`}
                 >
-                  <span className={styles.addRoomShowcaseIcon}>
-                    <Plus size={36} />
-                  </span>
-                  <span className={styles.addRoomShowcaseTitle}>Add Room</span>
-                  <span className={styles.addRoomShowcaseCopy}>Create a new room inside the selected property.</span>
+                  <div className={styles.addRoomShowcaseBody}>
+                    <span className={styles.addRoomShowcaseIcon}>
+                      <Plus size={36} />
+                    </span>
+                    <span className={styles.addRoomShowcaseTitle}>Add Room</span>
+                    <span className={styles.addRoomShowcaseCopy}>Create a new room inside this property.</span>
+                  </div>
                 </Link>
               </div>
 
@@ -5096,29 +5163,89 @@ export default function FamloProDashboardShell({
                   <article className={styles.roomControlPlaceholder}>
                     <div className={styles.placeholderTitle}>Channels</div>
                     <div className={styles.placeholderCopy}>
-                      See whether this room is ready for each channel. This page does not create channel listings or pricing rules.
+                      Reusing the current channel setup and readiness flow inline for this room. Advanced operator diagnostics stay optional.
                     </div>
-                    <div className={styles.placeholderGrid}>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderTitle}>Booking.com</div>
-                        <div className={styles.placeholderCopy}>
-                          Status: {currentChannelAttached ? "Connected" : "Not connected"} · Readiness: {bookingComRoomStatus} · Room: {selectedRoomMappingStatus} · Price: {selectedRoomRateMappingStatus} · Calendar sync: {bookingComCalendarStatus}
+                    <div className={styles.roomInlineSummaryGrid}>
+                      <div className={styles.summaryCard}>
+                        <div className={styles.summaryLabel}>Booking.com readiness</div>
+                        <div className={styles.summaryValue}>{bookingComRoomStatus}</div>
+                        <div className={styles.summaryCopy}>
+                          Room: {selectedRoomMappingStatus} · Price: {selectedRoomRateMappingStatus} · Calendar: {bookingComCalendarStatus}
                         </div>
                       </div>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderTitle}>MakeMyTrip / Goibibo</div>
-                        <div className={styles.placeholderCopy}>
-                          {makeMyTripStatus}. Connect MakeMyTrip setup coming next. Requires existing MMT/Goibibo listing or assisted onboarding.
+                      <div className={styles.summaryCard}>
+                        <div className={styles.summaryLabel}>Current room status</div>
+                        <div className={styles.summaryValue}>{roomEditorChannelStatusLabel}</div>
+                        <div className={styles.summaryCopy}>
+                          Famlo keeps channel setup honest and does not mark this room ready until mapping and sync checks are clear.
                         </div>
                       </div>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderTitle}>Airbnb and other channels</div>
-                        <div className={styles.placeholderCopy}>Coming later. No channel controls are active here yet.</div>
-                      </div>
                     </div>
+                    <div className={styles.mappingTable} style={{ marginTop: 16 }}>
+                      <div className={styles.mappingHeader}>OTA</div>
+                      <div className={styles.mappingHeader}>Status</div>
+                      <div className={styles.mappingHeader}>Room</div>
+                      <div className={styles.mappingHeader}>Price</div>
+                      <div className={styles.mappingHeader}>Next action</div>
+                      <div className={styles.mappingHeader}>Action</div>
+                      {channelProviderCards.map((channel) => {
+                        const provider = getChannelProviderDefinition(channel.key);
+                        return (
+                          <Fragment key={`room-channel-${channel.key}`}>
+                            <div className={styles.mappingCell}>
+                              <div className={styles.mappingTitle}>{provider.displayName}</div>
+                              <div className={styles.mappingSubcopy}>{provider.description}</div>
+                            </div>
+                            <div className={styles.mappingCell}>
+                              <span className={channel.status === "Connected" ? styles.badge : `${styles.badge} ${styles.badgeMuted}`}>
+                                {channel.status}
+                              </span>
+                            </div>
+                            <div className={styles.mappingCellMuted}>{channel.roomStatus}</div>
+                            <div className={styles.mappingCellMuted}>{channel.priceStatus}</div>
+                            <div className={styles.mappingCellMuted}>{channel.nextStep}</div>
+                            <div className={styles.mappingCell}>
+                              <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveChannelSetup(channel.key)}>
+                                Open setup
+                              </button>
+                            </div>
+                          </Fragment>
+                        );
+                      })}
+                    </div>
+                    {activeChannelSetup ? (
+                      <div style={{ marginTop: 16 }}>
+                        <ChannelSetupWizard
+                          providerKey={activeChannelSetup}
+                          familyId={familyId}
+                          channexPropertyId={primaryProperty?.externalPropertyId ?? null}
+                          summary={selectedChannelSetupSummary ?? channelSetupSummariesByKey.booking}
+                          readinessModel={channelReadinessModelsByKey[activeChannelSetup]}
+                          testSyncReadiness={channelTestSyncReadinessByKey[activeChannelSetup]}
+                          goLiveReadiness={channelGoLiveReadinessByKey[activeChannelSetup]}
+                          matchingSnapshot={channelMatchingSnapshotsByKey[activeChannelSetup]}
+                          initialState={channelSetupStatesByKey[activeChannelSetup] ?? null}
+                          onSaved={(savedState) => {
+                            setChannelSetupOverrides((current) => ({
+                              ...current,
+                              [savedState.providerKey]: savedState,
+                            }));
+                          }}
+                          onOpenRoomMatching={() => {
+                            setActiveChannelSetup(null);
+                            setRoomEditorTab("mapping");
+                          }}
+                          onOpenPriceMatching={() => {
+                            setActiveChannelSetup(null);
+                            setRoomEditorTab("mapping");
+                          }}
+                          onClose={() => setActiveChannelSetup(null)}
+                        />
+                      </div>
+                    ) : null}
                     <div className={styles.inlineActionRow}>
-                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("connected-channels")}>
-                        Open Channels
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("connected-channels")}>
+                        Open full Channels workspace
                       </button>
                     </div>
                   </article>
@@ -5128,7 +5255,7 @@ export default function FamloProDashboardShell({
                   <article className={styles.roomControlPlaceholder}>
                     <div className={styles.placeholderTitle}>Room & Price Matching</div>
                     <div className={styles.placeholderCopy}>
-                      Match the Famlo room and Famlo price to the connected channel records. Advanced matching tools stay unchanged.
+                      Reusing the current room and rate matching logic inline for this room.
                     </div>
                     <div className={styles.roomInlineSummaryGrid}>
                       <div className={styles.summaryCard}>
@@ -5147,22 +5274,46 @@ export default function FamloProDashboardShell({
                         <div className={styles.summaryCopy}>Matched channel rate plan, if available.</div>
                       </div>
                     </div>
-                    <div className={styles.placeholderGrid}>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderLabel}>Room match</div>
-                        <div className={styles.placeholderValue}>{selectedRoomMappingStatus}</div>
+                    <div className={styles.mappingTable} style={{ marginTop: 16 }}>
+                      <div className={styles.mappingHeader}>Famlo room</div>
+                      <div className={styles.mappingHeader}>OTA room</div>
+                      <div className={styles.mappingHeader}>Status</div>
+                      <div className={styles.mappingCell}>
+                        <div className={styles.mappingTitle}>{selectedRoomMappingRow?.room.name ?? roomEditorRoom?.name ?? "Save room first"}</div>
+                        <div className={styles.mappingSubcopy}>{selectedRoomMappingRow?.room.unitType ?? "Famlo room"}</div>
                       </div>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderLabel}>Price match</div>
-                        <div className={styles.placeholderValue}>{selectedRoomRateMappingStatus}</div>
+                      <div className={styles.mappingCellMuted}>
+                        {selectedRoomMappingRow?.mapping?.externalRoomTypeId ? selectedRoomMappingRow.providerRoomType : "Connect channel before final matching"}
+                      </div>
+                      <div className={styles.mappingCell}>
+                        <span className={`${styles.badge} ${selectedRoomMappingRow?.mapping?.externalRoomTypeId && currentChannelAttached ? "" : styles.badgeMuted}`.trim()}>
+                          {selectedRoomMappingRow?.mapping?.externalRoomTypeId ? "Matched" : selectedRoomMappingStatus}
+                        </span>
+                      </div>
+                    </div>
+                    <div className={styles.mappingTable} style={{ marginTop: 16 }}>
+                      <div className={styles.mappingHeader}>Famlo rate</div>
+                      <div className={styles.mappingHeader}>OTA rate plan</div>
+                      <div className={styles.mappingHeader}>Status</div>
+                      <div className={styles.mappingCell}>
+                        <div className={styles.mappingTitle}>{standardRatePlanName}</div>
+                        <div className={styles.mappingSubcopy}>{selectedRoomRateMappingRow?.room.name ?? roomEditorRoom?.name ?? "Save room first"}</div>
+                      </div>
+                      <div className={styles.mappingCellMuted}>
+                        {selectedRoomRateMappingRow?.ratePlan?.externalRatePlanId ? selectedRoomRateMappingRow.providerRatePlan : "Connect channel before final price matching"}
+                      </div>
+                      <div className={styles.mappingCell}>
+                        <span className={`${styles.badge} ${selectedRoomRateMappingRow?.ratePlan?.externalRatePlanId && currentChannelAttached ? "" : styles.badgeMuted}`.trim()}>
+                          {selectedRoomRateMappingRow?.ratePlan?.externalRatePlanId ? "Matched" : selectedRoomRateMappingStatus}
+                        </span>
                       </div>
                     </div>
                     <div className={styles.inlineActionRow}>
-                      <button type="button" className={styles.primaryActionButton} onClick={() => setActiveSection("room-mapping")}>
-                        Open Room Matching
+                      <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("room-mapping")}>
+                        Open advanced room matching
                       </button>
                       <button type="button" className={styles.secondaryActionButton} onClick={() => setActiveSection("rate-mapping")}>
-                        Open Price Matching
+                        Open advanced price matching
                       </button>
                     </div>
                   </article>
@@ -5172,7 +5323,7 @@ export default function FamloProDashboardShell({
                   <article className={styles.roomControlPlaceholder}>
                     <div className={styles.placeholderTitle}>Issues & Sync Status</div>
                     <div className={styles.placeholderCopy}>
-                      Review the selected room&apos;s useful issues here first. Advanced sync logs remain available for operational review.
+                      Host-friendly room issues and safe sync summaries are shown inline first. Full operational logs remain optional.
                     </div>
                     <div className={styles.roomInlineSummaryGrid}>
                       <div className={styles.summaryCard}>
@@ -5183,21 +5334,9 @@ export default function FamloProDashboardShell({
                         </div>
                       </div>
                       <div className={styles.summaryCard}>
-                        <div className={styles.summaryLabel}>Advanced review</div>
-                        <div className={styles.summaryValue}>{selectedRoomConflictCount === 0 ? "Sync logs" : "Open issues"}</div>
-                        <div className={styles.summaryCopy}>Advanced sync checks remain available in the existing Pro sections.</div>
-                      </div>
-                    </div>
-                    <div className={styles.placeholderGrid}>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderLabel}>Open issues</div>
-                        <div className={styles.placeholderValue}>{roomEditorSyncStatusLabel}</div>
-                      </div>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderLabel}>Advanced review</div>
-                        <div className={styles.placeholderValue}>
-                          {selectedRoomConflictCount === 0 ? "Sync logs" : "Open issues"}
-                        </div>
+                        <div className={styles.summaryLabel}>Recent sync activity</div>
+                        <div className={styles.summaryValue}>{selectedRoomSyncLogs.length > 0 ? `${selectedRoomSyncLogs.length} entries` : "No room logs"}</div>
+                        <div className={styles.summaryCopy}>Only safe host-facing summaries are shown here.</div>
                       </div>
                     </div>
                     {roomEditorIssues.length > 0 ? (
@@ -5210,13 +5349,51 @@ export default function FamloProDashboardShell({
                         ))}
                       </div>
                     ) : null}
+                    {selectedRoomSyncLogs.length > 0 ? (
+                      <div className={styles.logList} style={{ marginTop: 16 }}>
+                        {selectedRoomSyncLogs.map((log) => {
+                          const payloadSummary = summarizeSafePayload(log.payload);
+                          return (
+                            <article key={log.id} className={styles.logRow}>
+                              <div>
+                                <div className={styles.logTitle}>{labelizeToken(log.action, "Sync action")}</div>
+                                <div className={styles.logCopy}>{log.message ?? "No detail message stored."}</div>
+                                {payloadSummary.length > 0 ? (
+                                  <div className={styles.payloadSummaryList}>
+                                    {payloadSummary.map((line) => (
+                                      <div key={`${log.id}-${line}`} className={styles.payloadSummaryItem}>
+                                        {line}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className={styles.logMeta}>
+                                <span className={`${styles.readinessPill} ${log.status === "success" ? styles.readinessPillOk : styles.readinessPillReview}`}>
+                                  {labelizeToken(log.status, "Unknown")}
+                                </span>
+                                <span className={styles.logTimestamp}>{formatDateTime(log.createdAt)}</span>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    {roomEditorIssues.length === 0 && selectedRoomSyncLogs.length === 0 ? (
+                      <div className={styles.emptyState}>
+                        <div className={styles.emptyTitle}>No room-specific issues</div>
+                        <div className={styles.emptyCopy}>
+                          This room does not currently show host-facing sync issues or room-scoped log activity.
+                        </div>
+                      </div>
+                    ) : null}
                     <div className={styles.inlineActionRow}>
                       <button
                         type="button"
                         className={styles.secondaryActionButton}
-                        onClick={() => setActiveSection("sync-logs")}
+                        onClick={() => setActiveSection(selectedRoomConflictCount > 0 ? "conflicts" : "sync-logs")}
                       >
-                        View Sync Logs
+                        Open full sync workspace
                       </button>
                     </div>
                   </article>
@@ -5918,7 +6095,7 @@ export default function FamloProDashboardShell({
                     {calendarRateFeedback.text}
                   </div>
                 ) : null}
-                {calendarRows.length > 0 ? (
+                {displayedCalendarRows.length > 0 ? (
                   <div className={`${styles.calendarBoard} ${styles.calendarBoardLuxury}`}>
                     <div className={styles.calendarGrid}>
                       <div className={`${styles.calendarHeaderCell} ${styles.calendarRoomHeader}`}>Room / Unit</div>
@@ -5932,7 +6109,7 @@ export default function FamloProDashboardShell({
                       {/* Spacer between header row and first room row */}
                       <div className={styles.calendarRowSpacer} style={{ gridColumn: `span ${calendarColumns.length + 1}` }} />
 
-                      {calendarRows.map((row) => (
+                      {displayedCalendarRows.map((row) => (
                         <Fragment key={row.roomId}>
                           <div className={styles.calendarRoomCell}>
                             <div className={styles.calendarRoomName}>{row.roomName}</div>
@@ -6317,7 +6494,7 @@ export default function FamloProDashboardShell({
                             }))}
                         >
                           <option value="__all__">All visible rooms</option>
-                          {calendarRows.map((row) => (
+                          {displayedCalendarRows.map((row) => (
                             <option key={row.roomId} value={row.roomId}>
                               {row.roomName}
                             </option>
@@ -6503,7 +6680,7 @@ export default function FamloProDashboardShell({
                             }))}
                         >
                           <option value="__all__">All visible rooms</option>
-                          {calendarRows.map((row) => (
+                          {displayedCalendarRows.map((row) => (
                             <option key={row.roomId} value={row.roomId}>
                               {row.roomName}
                             </option>

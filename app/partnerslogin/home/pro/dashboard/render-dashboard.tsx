@@ -427,8 +427,11 @@ function shouldPreloadBookingWorkspace(section: ProSectionId): boolean {
   return section === "dashboard" || section === "bookings" || section === "revenue" || section === "reports";
 }
 
-function shouldPreloadCalendarWorkspace(section: ProSectionId): boolean {
-  return section === "dashboard" || section === "bookings" || section === "inventory-calendar";
+function shouldPreloadCalendarWorkspace(
+  section: ProSectionId,
+  roomRouteState?: FamloProDashboardRenderProps["roomRouteState"]
+): boolean {
+  return section === "dashboard" || section === "bookings" || section === "inventory-calendar" || Boolean(roomRouteState?.roomId);
 }
 
 export async function renderFamloProDashboardPage({
@@ -590,7 +593,53 @@ export async function renderFamloProDashboardPage({
   ]);
 
   const meta = parseHostListingMeta(asString(family?.admin_notes));
-  const storedProSettings = await loadHostProSettings(supabase, familyId);
+  const preloadBookingWorkspace = shouldPreloadBookingWorkspace(initialSection);
+  const preloadCalendarWorkspace = shouldPreloadCalendarWorkspace(initialSection, roomRouteState);
+  const needsChannelSyncHistory =
+    Boolean(roomRouteState) ||
+    initialSection === "dashboard" ||
+    initialSection === "bookings" ||
+    initialSection === "inventory-calendar" ||
+    initialSection === "connected-channels" ||
+    initialSection === "sync-logs" ||
+    initialSection === "conflicts";
+  const needsBookingRevisions =
+    Boolean(roomRouteState?.roomId) ||
+    initialSection === "dashboard" ||
+    initialSection === "bookings" ||
+    initialSection === "inventory-calendar" ||
+    initialSection === "connected-channels" ||
+    initialSection === "conflicts";
+  const [
+    storedProSettings,
+    propertyPhotosResult,
+    channelFoundation,
+    rooms,
+    bookingRowsResult,
+  ] = await Promise.all([
+    loadHostProSettings(supabase, familyId),
+    supabase
+      .from("family_photos")
+      .select("id,url,is_primary,family_id")
+      .eq("family_id", familyId)
+      .order("is_primary", { ascending: false }),
+    loadHostProChannelFoundation(supabase, familyId, {
+      includeSyncLogs: needsChannelSyncHistory,
+      includeBookingRevisions: needsBookingRevisions,
+    }),
+    loadStayUnitsForSelector(supabase, {
+      hostId: asString(host?.id),
+      legacyFamilyId: familyId,
+    }),
+    host?.id
+      ? supabase
+          .from("bookings_v2")
+          .select("id,status,payment_status,total_price,start_date,created_at")
+          .eq("host_id", host.id)
+          .order("created_at", { ascending: false })
+          .limit(120)
+      : Promise.resolve({ data: [] }),
+  ]);
   const propertyLocalityLabel =
     asString(meta.neighbourhood) ??
     asString(meta.neighborhoodDesc);
@@ -713,11 +762,7 @@ export async function renderFamloProDashboardPage({
     asString(host?.display_name) ??
     "Famlo Property";
   const hostCode = asString(family?.host_id);
-  const { data: propertyPhotosRows } = await supabase
-    .from("family_photos")
-    .select("id,url,is_primary,family_id")
-    .eq("family_id", familyId)
-    .order("is_primary", { ascending: false });
+  const propertyPhotosRows = propertyPhotosResult.data;
   const locationLabel =
     [propertyLocalityLabel, resolvedPropertyCity, resolvedPropertyState, resolvedPropertyCountry].filter(Boolean).join(", ") ||
     "Location pending";
@@ -730,7 +775,6 @@ export async function renderFamloProDashboardPage({
     sharedIdentityNote: "This is the shared host identity for this Famlo Pro workspace.",
     selectedPropertyName: propertyName,
   };
-  const channelFoundation = await loadHostProChannelFoundation(supabase, familyId);
   const channexConfig = getChannexConfigSummary();
   const proSettings = {
     ...storedProSettings,
@@ -764,12 +808,7 @@ export async function renderFamloProDashboardPage({
     checkInTime: asString(meta.checkInTime) ?? storedProSettings.checkInTime ?? "",
     checkOutTime: asString(meta.checkOutTime) ?? storedProSettings.checkOutTime ?? "",
   };
-  const rooms = (
-    await loadStayUnitsForSelector(supabase, {
-      hostId: asString(host?.id),
-      legacyFamilyId: familyId,
-    })
-  ).map((room) => ({
+  const roomSummaries = rooms.map((room) => ({
     id: room.id,
     name: room.name,
     unitType: room.unitType,
@@ -788,7 +827,7 @@ export async function renderFamloProDashboardPage({
     photosCount: room.photos.length + room.localityPhotos.length,
     photoUrl: room.photos[0] ?? room.localityPhotos[0] ?? null,
   }));
-  const activeRoomIds = rooms.filter((room) => room.isActive).map((room) => room.id);
+  const activeRoomIds = roomSummaries.filter((room) => room.isActive).map((room) => room.id);
   const roomMappingsByRoomId = new Map(
     channelFoundation.roomMappings.map((mapping) => [mapping.stayUnitId, mapping])
   );
@@ -803,15 +842,7 @@ export async function renderFamloProDashboardPage({
     channelFoundation.ratePlans.length > 0 &&
     channelFoundation.ratePlans.some((ratePlan) => Boolean(ratePlan.externalRatePlanId));
 
-  const { data: bookingRows } =
-    host?.id
-      ? await supabase
-          .from("bookings_v2")
-          .select("id,status,payment_status,total_price,start_date,created_at")
-          .eq("host_id", host.id)
-          .order("created_at", { ascending: false })
-          .limit(120)
-      : { data: [] };
+  const bookingRows = bookingRowsResult.data;
 
   const { data: platformSettings } = await supabase
     .from("admin_platform_settings")
@@ -820,8 +851,8 @@ export async function renderFamloProDashboardPage({
   const globalCommission = Number(platformSettings?.global_family_commission_pct) || 18;
 
   const now = new Date();
-  const openRooms = rooms.filter((room) => room.isActive).length;
-  const closedRooms = rooms.length - openRooms;
+  const openRooms = roomSummaries.filter((room) => room.isActive).length;
+  const closedRooms = roomSummaries.length - openRooms;
   const nonCancelledBookings = ((bookingRows ?? []) as Array<Record<string, unknown>>).filter((row) => {
     const status = String(row.status ?? "").toLowerCase();
     return !status.startsWith("cancelled");
@@ -841,7 +872,7 @@ export async function renderFamloProDashboardPage({
     hostExists: Boolean(host?.id),
     settings: proSettings,
     legacyHouseTypeHint: asString(meta.houseType),
-    rooms: rooms.map((room) => ({
+    rooms: roomSummaries.map((room) => ({
       name: room.name,
       isActive: room.isActive,
       maxGuests: room.maxGuests,
@@ -882,7 +913,7 @@ export async function renderFamloProDashboardPage({
     {
       label: "Rooms Open / Closed",
       value: `${openRooms}/${closedRooms}`,
-      hint: rooms.length > 0 ? "Read-only room status from current Famlo inventory." : "No room inventory available yet.",
+      hint: roomSummaries.length > 0 ? "Read-only room status from current Famlo inventory." : "No room inventory available yet.",
     },
     {
       label: "OTA Bookings",
@@ -914,10 +945,10 @@ export async function renderFamloProDashboardPage({
     },
     {
       title: "Inventory foundation reviewed",
-      body: rooms.length > 0
-        ? `${rooms.length} stay units were loaded from the existing Famlo inventory path without writing any room changes.`
+      body: roomSummaries.length > 0
+        ? `${roomSummaries.length} stay units were loaded from the existing Famlo inventory path without writing any room changes.`
         : "No safe room inventory surfaced, so this dashboard falls back to an inventory placeholder state.",
-      tone: rooms.length > 0 ? ("success" as const) : ("warning" as const),
+      tone: roomSummaries.length > 0 ? ("success" as const) : ("warning" as const),
     },
     {
       title: "Setup readiness scored",
@@ -943,32 +974,37 @@ export async function renderFamloProDashboardPage({
 
   let bookingRowsForCalendar: Array<Record<string, unknown>> = [];
   let bookingRowsForWorkspace: Array<Record<string, unknown>> = [];
-  const preloadBookingWorkspace = shouldPreloadBookingWorkspace(initialSection);
-  const preloadCalendarWorkspace = shouldPreloadCalendarWorkspace(initialSection);
-
   if (host?.id && preloadCalendarWorkspace) {
     const selectWithStayUnit =
       "id,status,payment_status,total_price,start_date,end_date,stay_unit_id,pricing_snapshot,users!user_id(name)";
     const selectFallback =
       "id,status,payment_status,total_price,start_date,end_date,pricing_snapshot,users!user_id(name)";
 
-    const bookingCalendarInitialResult = await supabase
+    let bookingCalendarInitialQuery = supabase
       .from("bookings_v2")
       .select(selectWithStayUnit)
       .eq("host_id", host.id)
       .lte("start_date", calendarTo)
       .gte("end_date", calendarFrom);
+    if (roomRouteState?.roomId) {
+      bookingCalendarInitialQuery = bookingCalendarInitialQuery.eq("stay_unit_id", roomRouteState.roomId);
+    }
+    const bookingCalendarInitialResult = await bookingCalendarInitialQuery;
 
     if (
       bookingCalendarInitialResult.error &&
       String(bookingCalendarInitialResult.error.message ?? "").includes("stay_unit_id")
     ) {
-      const bookingCalendarFallbackResult = await supabase
+      let bookingCalendarFallbackQuery = supabase
         .from("bookings_v2")
         .select(selectFallback)
         .eq("host_id", host.id)
         .lte("start_date", calendarTo)
         .gte("end_date", calendarFrom);
+      if (roomRouteState?.roomId) {
+        bookingCalendarFallbackQuery = bookingCalendarFallbackQuery.eq("pricing_snapshot->>stay_unit_id", roomRouteState.roomId);
+      }
+      const bookingCalendarFallbackResult = await bookingCalendarFallbackQuery;
 
       if (!bookingCalendarFallbackResult.error) {
         bookingRowsForCalendar = (bookingCalendarFallbackResult.data ?? []) as Array<Record<string, unknown>>;
@@ -1011,7 +1047,7 @@ export async function renderFamloProDashboardPage({
     }
   }
 
-  const selectedRoomIds = new Set(rooms.map((room) => room.id));
+  const selectedRoomIds = new Set(roomSummaries.map((room) => room.id));
   const belongsToSelectedProperty = (row: Record<string, unknown>): boolean => {
     const pricingSnapshot = asObject(row.pricing_snapshot) ?? {};
     const stayUnitId = asString(row.stay_unit_id) ?? asString(pricingSnapshot.stay_unit_id);
@@ -1217,7 +1253,7 @@ export async function renderFamloProDashboardPage({
 
   if (
     preloadCalendarWorkspace &&
-    rooms.length > 0 &&
+    roomSummaries.length > 0 &&
     channexProperty?.externalPropertyId &&
     getChannexConfigSummary().configured
   ) {
@@ -1229,7 +1265,10 @@ export async function renderFamloProDashboardPage({
       });
 
       if (restrictionsSnapshot.ok) {
-        for (const room of rooms) {
+        const rateSnapshotRooms = roomRouteState?.roomId
+          ? roomSummaries.filter((room) => room.id === roomRouteState.roomId)
+          : roomSummaries;
+        for (const room of rateSnapshotRooms) {
           const mappedRatePlanId = channexRatePlanByRoomId.get(room.id)?.externalRatePlanId;
           if (!mappedRatePlanId) continue;
           const snapshotByDate = restrictionsSnapshot.data[mappedRatePlanId];
@@ -1254,9 +1293,12 @@ export async function renderFamloProDashboardPage({
     }
   }
 
-  if (preloadCalendarWorkspace && rooms.length > 0) {
+  if (preloadCalendarWorkspace && roomSummaries.length > 0) {
+    const calendarRooms = roomRouteState?.roomId
+      ? roomSummaries.filter((room) => room.id === roomRouteState.roomId)
+      : roomSummaries;
     const projectedInventoryByRoom = await Promise.all(
-      rooms.map(async (room) => ({
+      calendarRooms.map(async (room) => ({
         roomId: room.id,
         days: await ensureProjectedInventory(supabase, {
           familyId,
@@ -1283,7 +1325,7 @@ export async function renderFamloProDashboardPage({
     }
 
     const roomCalendarEvents = await Promise.all(
-      rooms.map(async (room) => ({
+      calendarRooms.map(async (room) => ({
         roomId: room.id,
         events: await loadCanonicalCalendar(supabase, {
           ownerType: "stay_unit",
@@ -1317,7 +1359,7 @@ export async function renderFamloProDashboardPage({
 
   const bookingStatusByRoomDate = new Map<string, CalendarCellStatus>();
   const bookingDetailByRoomDate = new Map<string, CalendarBookingDetail>();
-  const roomNameById = new Map(rooms.map((room) => [room.id, room.name]));
+  const roomNameById = new Map(roomSummaries.map((room) => [room.id, room.name]));
   const bookingRevisionByLinkedBookingId = new Map(
     channelFoundation.bookingRevisions
       .filter((revision) => revision.linkedBookingId)
@@ -1645,7 +1687,7 @@ export async function renderFamloProDashboardPage({
     }
   }
 
-  const calendarRows: CalendarRow[] = rooms.map((room) => ({
+  const calendarRows: CalendarRow[] = roomSummaries.map((room) => ({
     roomId: room.id,
     roomName: room.name,
     unitType: room.unitType,
@@ -1758,7 +1800,7 @@ export async function renderFamloProDashboardPage({
       }
       accessReason={formatAccessReason(access.reason)}
       initialSection={initialSection}
-      rooms={rooms}
+      rooms={roomSummaries}
       metrics={metrics}
       setupItems={setupItems}
       feedItems={feedItems}

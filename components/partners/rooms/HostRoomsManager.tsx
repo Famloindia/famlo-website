@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { compressImageListForUpload } from "@/lib/client-image-upload";
+import { resolveSmartPricingUiState } from "@/lib/pro-room-editor-ui";
 import { normalizeAmenityList, ROOM_AMENITY_OPTIONS } from "@/lib/room-amenities";
 import type { StayUnitRecord } from "@/lib/stay-units";
 
@@ -180,6 +181,7 @@ export default function HostRoomsManager({
   compactMode = false,
   focusSection = "all",
 }: HostRoomsManagerProps) {
+  const smartPricingUi = resolveSmartPricingUiState(false);
   const [roomDrafts, setRoomDrafts] = useState<RoomFormState[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsSaving, setRoomsSaving] = useState(false);
@@ -1034,10 +1036,10 @@ export default function HostRoomsManager({
 
                   {showPricingSection ? (
                   <div style={{ display: "grid", gap: "14px", minWidth: 0 }}>
-                    <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Smart pricing</div>
+                    <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#1d4ed8" }}>Manual pricing</div>
                     {focusSection === "pricing" ? (
                       <div style={{ padding: "12px 14px", borderRadius: "14px", background: "#eff6ff", color: "#1d4ed8", fontSize: "13px", lineHeight: 1.65, fontWeight: 700 }}>
-                        Channel-wise pricing is not connected here yet. This edits the Famlo room price only.
+                        {smartPricingUi.manualPricingLabel}. Smart Pricing is still coming soon and does not currently drive checkout, calendar, or channel rates.
                       </div>
                     ) : null}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "14px", minWidth: 0 }}>
@@ -1046,24 +1048,24 @@ export default function HostRoomsManager({
                         <input className={dashboardStyles.inputField} type="number" min="0" value={room.priceFullday} onChange={(event) => updateRoomField(room.id, "priceFullday", event.target.value)} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
-                        <span style={{ fontSize: "11px", fontWeight: 900, color: "rgba(14,43,87,0.6)", textTransform: "uppercase" }}>Lower-demand backup</span>
-                        <input className={dashboardStyles.inputField} type="number" min="0" value={room.priceMorning} onChange={(event) => updateRoomField(room.id, "priceMorning", event.target.value)} />
+                        <span style={{ fontSize: "11px", fontWeight: 900, color: "rgba(14,43,87,0.6)", textTransform: "uppercase" }}>Lower-demand reference</span>
+                        <input className={dashboardStyles.inputField} type="number" min="0" value={room.priceMorning} disabled readOnly aria-disabled="true" />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0 }}>
-                        <span style={{ fontSize: "11px", fontWeight: 900, color: "rgba(14,43,87,0.6)", textTransform: "uppercase" }}>Higher-demand backup</span>
-                        <input className={dashboardStyles.inputField} type="number" min="0" value={room.priceEvening} onChange={(event) => updateRoomField(room.id, "priceEvening", event.target.value)} />
+                        <span style={{ fontSize: "11px", fontWeight: 900, color: "rgba(14,43,87,0.6)", textTransform: "uppercase" }}>Higher-demand reference</span>
+                        <input className={dashboardStyles.inputField} type="number" min="0" value={room.priceEvening} disabled readOnly aria-disabled="true" />
                       </label>
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", padding: "14px 16px", borderRadius: "16px", background: "#eff6ff", border: "1px solid rgba(37,99,235,0.12)", minWidth: 0 }}>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: "#1d4ed8" }}>Enable Smart Pricing</div>
+                        <div style={{ fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: "#1d4ed8" }}>Smart Pricing</div>
                         <div style={{ marginTop: "4px", fontSize: "12px", fontWeight: 700, color: "rgba(29,78,216,0.78)" }}>
-                          We keep a suggested midpoint for reference, but public booking uses the room price first.
+                          {smartPricingUi.smartPricingLabel}. These reference values are not auto-applied to calendar or channel pricing yet.
                         </div>
                       </div>
                       <label className={dashboardStyles.iosToggleLabel}>
-                        <input type="checkbox" className={dashboardStyles.iosToggleInput} checked={room.quarterEnabled} onChange={(event) => updateRoomField(room.id, "quarterEnabled", event.target.checked)} />
+                        <input type="checkbox" className={dashboardStyles.iosToggleInput} checked={false} disabled aria-disabled="true" readOnly />
                         <div className={dashboardStyles.iosToggleTrack}>
                           <div className={dashboardStyles.iosToggleThumb} />
                         </div>

@@ -126,9 +126,15 @@ function missingTableError(error: unknown): boolean {
 
 export async function loadHostProChannelFoundation(
   supabase: SupabaseClient,
-  familyId: string
+  familyId: string,
+  options?: {
+    includeSyncLogs?: boolean;
+    includeBookingRevisions?: boolean;
+  }
 ): Promise<HostProChannelFoundation> {
   const normalizedFamilyId = familyId.trim();
+  const includeSyncLogs = options?.includeSyncLogs !== false;
+  const includeBookingRevisions = options?.includeBookingRevisions !== false;
   if (!normalizedFamilyId) {
     return {
       providers: [],
@@ -157,18 +163,22 @@ export async function loadHostProChannelFoundation(
       .select("id,family_id,stay_unit_id,provider_code,external_rate_plan_id,title,meal_plan,sync_status,metadata,created_at,updated_at")
       .eq("family_id", normalizedFamilyId)
       .order("created_at", { ascending: false }),
-    supabase
-      .from("channel_sync_logs")
-      .select("id,family_id,provider_code,action,status,message,payload,created_at")
-      .eq("family_id", normalizedFamilyId)
-      .order("created_at", { ascending: false })
-      .limit(20),
-    supabase
-      .from("channel_booking_revisions")
-      .select("id,family_id,provider_code,external_property_id,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,created_at,updated_at")
-      .eq("family_id", normalizedFamilyId)
-      .order("updated_at", { ascending: false })
-      .limit(20),
+    includeSyncLogs
+      ? supabase
+          .from("channel_sync_logs")
+          .select("id,family_id,provider_code,action,status,message,payload,created_at")
+          .eq("family_id", normalizedFamilyId)
+          .order("created_at", { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [], error: null }),
+    includeBookingRevisions
+      ? supabase
+          .from("channel_booking_revisions")
+          .select("id,family_id,provider_code,external_property_id,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id,created_at,updated_at")
+          .eq("family_id", normalizedFamilyId)
+          .order("updated_at", { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   const errors = [
