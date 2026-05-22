@@ -68,6 +68,14 @@ import {
   type ChannexConfigSummary as ChannexSummary,
 } from "@/lib/channel-providers/channex/client";
 import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
+import {
+  deriveRevenuePaymentStatusLabel,
+  isCompletedRevenueBooking,
+  isFinanceBackedPaidStatus,
+  matchesRevenueWindowDate,
+  shouldIncludeFamloPayoutInTotals,
+  toMaskedHostRevenueDestination,
+} from "@/lib/finance/pro-revenue";
 import styles from "./pro-dashboard.module.css";
 
 const HostRoomsManager = dynamic(() => import("@/components/partners/rooms/HostRoomsManager"));
@@ -181,6 +189,10 @@ type ProBookingSummary = {
   sourceCategory: "famlo" | "direct" | "ota";
   paymentCollectMode: "FAMLO_COLLECT" | "OTA_COLLECT" | "PROPERTY_COLLECT" | "UNKNOWN";
   famloPayoutEligible: boolean;
+  settlementEligible: boolean;
+  settlementStatus: string | null;
+  payoutExecutionStatus: string | null;
+  complianceBlocked: boolean;
   payoutStatus: string | null;
   payoutPaidAt: string | null;
   estimatedPayoutDate: string | null;
@@ -188,6 +200,7 @@ type ProBookingSummary = {
   platformFeeAmount: number | null;
   otaCommissionAmount: number | null;
   refundAdjustmentAmount: number | null;
+  creditNoteAmount: number | null;
   taxAmount: number | null;
   externalBookingId: string | null;
   externalRevisionId: string | null;
@@ -202,6 +215,11 @@ type HostPayoutSummaryRow = {
   status: string;
   processedAt: string | null;
   destinationMasked: string | null;
+};
+
+type HostRevenueCompliance = {
+  panVerified: boolean;
+  payoutAccountActive: boolean;
 };
 
 type OtaEditDraft = {
@@ -464,6 +482,7 @@ interface FamloProDashboardShellProps {
   globalCommission: number;
   proBookings: ProBookingSummary[];
   hostPayoutRows: HostPayoutSummaryRow[];
+  hostRevenueCompliance: HostRevenueCompliance;
   calendarColumns: CalendarColumn[];
   calendarRows: CalendarRow[];
   calendarWindow: {
@@ -960,20 +979,16 @@ function bookingNextAction(booking: ProBookingSummary): string {
 
 function hostRevenueStatusLabel(booking: ProBookingSummary): string {
   if (isCancelledBooking(booking)) return "Cancelled";
-  if (booking.sourceCategory === "ota" && !booking.famloPayoutEligible) return "Paid by OTA";
-  if (booking.sourceCategory === "direct" && !booking.famloPayoutEligible) return "Paid outside Famlo";
-  if (booking.sourceCategory === "famlo" && !booking.famloPayoutEligible) return "Outside Famlo";
-  if (normalizeToken(booking.payoutStatus) === "paid" || normalizeToken(booking.payoutStatus) === "processed") return "Paid by Famlo";
   if (hasPaymentAttention(booking)) return "Awaiting guest payment";
   if (isPendingApprovalBooking(booking)) return "Awaiting confirmation";
-  if (booking.famloPayoutEligible) return "Pending";
-  return "In progress";
+  return deriveRevenuePaymentStatusLabel(booking);
 }
 
 function hostRevenueStatusTone(booking: ProBookingSummary): string {
   if (isCancelledBooking(booking)) return styles.readinessPillMissing;
-  if (normalizeToken(booking.payoutStatus) === "paid" || normalizeToken(booking.payoutStatus) === "processed") return styles.readinessPillOk;
+  if (isFinanceBackedPaidStatus(booking.payoutExecutionStatus) || isFinanceBackedPaidStatus(booking.payoutStatus)) return styles.readinessPillOk;
   if (!booking.famloPayoutEligible) return styles.readinessPill;
+  if (booking.complianceBlocked) return styles.readinessPillReview;
   if (hasPaymentAttention(booking) || isPendingApprovalBooking(booking)) return styles.readinessPillReview;
   return styles.readinessPillOk;
 }
@@ -995,7 +1010,8 @@ function revenueSourceHint(booking: ProBookingSummary): string {
 }
 
 function bookingFamloPayoutDisplay(booking: ProBookingSummary): string {
-  if (!booking.famloPayoutEligible) return "Outside Famlo";
+  if (booking.paymentCollectMode !== "FAMLO_COLLECT") return "Outside Famlo";
+  if (!booking.famloPayoutEligible) return "Pending settlement";
   return booking.payoutAmountValue != null ? formatCurrency(booking.payoutAmountValue) : "—";
 }
 
@@ -1696,6 +1712,7 @@ export default function FamloProDashboardShell({
   globalCommission,
   proBookings,
   hostPayoutRows,
+  hostRevenueCompliance,
   calendarColumns,
   calendarRows,
   calendarWindow,
@@ -2448,45 +2465,32 @@ export default function FamloProDashboardShell({
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   })();
   const totalBookingValue = bookingsWithValue.reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const completedRevenueBookings = bookingsWithNetPayout.filter((booking) => {
-    const paymentStatus = normalizeToken(booking.paymentStatus);
-    const bookingStatus = normalizeToken(booking.status);
-    const reservationStatus = normalizeToken(booking.reservationStatus);
-    if (!booking.revenueDate) return false;
-    if (
-      bookingStatus === "cancelled" ||
-      bookingStatus === "cancelled_by_user" ||
-      bookingStatus === "cancelled_by_partner" ||
-      reservationStatus === "cancelled"
-    ) {
-      return false;
-    }
-    if (paymentStatus === "failed" || paymentStatus === "failed_payment" || paymentStatus === "pending") {
-      return false;
-    }
-    return true;
-  });
-  const revenueTodayBookings = completedRevenueBookings.filter((booking) => booking.revenueDate === todayIsoDate);
-  const revenueThisWeekBookings = completedRevenueBookings.filter(
-    (booking) => Boolean(booking.revenueDate) && booking.revenueDate! >= weekStartIsoDate && booking.revenueDate! <= weekEndIsoDate
-  );
+  const completedRevenueBookings = bookingsWithNetPayout.filter((booking) => isCompletedRevenueBooking(booking));
+  const revenueWindowAnchors = {
+    todayIsoDate,
+    weekStartIsoDate,
+    weekEndIsoDate,
+    currentMonthPrefix,
+  };
   const revenueBookingsByWindow: Record<RevenueWindowFilter, typeof completedRevenueBookings> = {
-    Today: revenueTodayBookings,
-    "This week": revenueThisWeekBookings,
-    "This month": completedRevenueBookings.filter((booking) => Boolean(booking.revenueDate) && booking.revenueDate!.startsWith(currentMonthPrefix)),
-    "All time": completedRevenueBookings,
+    Today: completedRevenueBookings.filter((booking) => matchesRevenueWindowDate(booking.revenueDate, "Today", revenueWindowAnchors)),
+    "This week": completedRevenueBookings.filter((booking) => matchesRevenueWindowDate(booking.revenueDate, "This week", revenueWindowAnchors)),
+    "This month": completedRevenueBookings.filter((booking) => matchesRevenueWindowDate(booking.revenueDate, "This month", revenueWindowAnchors)),
+    "All time": completedRevenueBookings.filter((booking) => matchesRevenueWindowDate(booking.revenueDate, "All time", revenueWindowAnchors)),
   };
   const selectedRevenueBookings = revenueBookingsByWindow[revenueWindow];
-  const famloPayoutBookings = selectedRevenueBookings.filter((booking) => booking.famloPayoutEligible);
-  const selectedRevenueNetPayout = famloPayoutBookings.reduce((sum, booking) => sum + (booking.payoutAmountValue ?? booking.netPayoutAmount), 0);
+  const famloPayoutBookings = selectedRevenueBookings.filter((booking) => shouldIncludeFamloPayoutInTotals(booking));
+  const selectedRevenueNetPayout = famloPayoutBookings.reduce((sum, booking) => sum + (booking.payoutAmountValue ?? 0), 0);
   const selectedRevenueGrossValue = selectedRevenueBookings.reduce(
     (sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0),
     0
   );
-  const selectedRevenuePaidToYou = famloPayoutBookings.reduce((sum, booking) => sum + (booking.paidPayoutAmount ?? 0), 0);
+  const selectedRevenuePaidToYou = famloPayoutBookings
+    .filter((booking) => isFinanceBackedPaidStatus(booking.payoutExecutionStatus) || isFinanceBackedPaidStatus(booking.payoutStatus))
+    .reduce((sum, booking) => sum + (booking.paidPayoutAmount ?? booking.payoutAmountValue ?? 0), 0);
   const selectedRevenuePendingPayout = famloPayoutBookings
-    .filter((booking) => (booking.paidPayoutAmount ?? 0) <= 0)
-    .reduce((sum, booking) => sum + (booking.payoutAmountValue ?? booking.netPayoutAmount), 0);
+    .filter((booking) => !isFinanceBackedPaidStatus(booking.payoutExecutionStatus) && !isFinanceBackedPaidStatus(booking.payoutStatus))
+    .reduce((sum, booking) => sum + (booking.payoutAmountValue ?? 0), 0);
   const famloGeneratedBookings = selectedRevenueBookings.filter((booking) => booking.sourceCategory === "famlo");
   const famloGeneratedRevenue = famloGeneratedBookings.reduce(
     (sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0),
@@ -2515,18 +2519,11 @@ export default function FamloProDashboardShell({
       count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "ota").length,
     },
   };
-  const selectedPayoutRows = hostPayoutRows.filter((row) => {
-    const date = row.processedAt?.slice(0, 10);
-    if (!date) return false;
-    if (revenueWindow === "Today") return date === todayIsoDate;
-    if (revenueWindow === "This week") return date >= weekStartIsoDate && date <= weekEndIsoDate;
-    if (revenueWindow === "This month") return date.startsWith(currentMonthPrefix);
-    return true;
-  });
+  const selectedPayoutRows = hostPayoutRows.filter((row) => matchesRevenueWindowDate(row.processedAt?.slice(0, 10) ?? null, revenueWindow, revenueWindowAnchors));
   const payoutReceivedAmount = selectedPayoutRows
-    .filter((row) => normalizeToken(row.status) === "processed" || normalizeToken(row.status) === "paid")
+    .filter((row) => isFinanceBackedPaidStatus(row.status))
     .reduce((sum, row) => sum + row.amount, 0);
-  const lastPayoutRow = [...hostPayoutRows]
+  const lastPayoutRow = [...selectedPayoutRows]
     .filter((row) => Boolean(row.processedAt))
     .sort((left, right) => String(right.processedAt ?? "").localeCompare(String(left.processedAt ?? "")))[0] ?? null;
   const selectedRevenueWindowHint =
@@ -2537,30 +2534,33 @@ export default function FamloProDashboardShell({
         : revenueWindow === "This month"
           ? "Completed earnings for the current month."
           : "Completed earnings across all eligible visible bookings.";
-  const shouldUseRevenueDemo = process.env.NODE_ENV !== "production" && selectedRevenueBookings.length === 0;
-  const demoRevenueRows = [
+  const shouldUseRevenueDemo =
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_FAMLO_PRO_REVENUE_DEMO === "1" &&
+    completedRevenueBookings.length === 0;
+  const demoRevenueRowsAll = [
     {
       bookingId: "demo-rohan",
       guestDisplayName: "Rohan Sharma",
       roomName: "2 nights",
-      startDate: "2026-05-12",
-      endDate: "2026-05-14",
-      checkoutDate: "2026-05-14",
+      startDate: "2026-05-19",
+      endDate: "2026-05-21",
+      checkoutDate: "2026-05-21",
       sourceCategory: "famlo" as const,
-      amount: formatCurrency(6200),
-      payout: formatCurrency(5580),
+      amountValue: 6200,
+      payoutValue: 5580,
       status: "Pending",
     },
     {
       bookingId: "demo-priya",
       guestDisplayName: "Priya Mehta",
       roomName: "1 night",
-      startDate: "2026-05-10",
-      endDate: "2026-05-11",
-      checkoutDate: "2026-05-11",
+      startDate: "2026-05-21",
+      endDate: "2026-05-22",
+      checkoutDate: "2026-05-22",
       sourceCategory: "famlo" as const,
-      amount: formatCurrency(3800),
-      payout: formatCurrency(3420),
+      amountValue: 3800,
+      payoutValue: 3420,
       status: "Paid by Famlo",
     },
     {
@@ -2571,45 +2571,81 @@ export default function FamloProDashboardShell({
       endDate: "2026-05-10",
       checkoutDate: "2026-05-10",
       sourceCategory: "ota" as const,
-      amount: formatCurrency(7500),
-      payout: "Outside Famlo",
+      amountValue: 7500,
+      payoutValue: null,
       status: "Paid by OTA",
     },
     {
       bookingId: "demo-kavya",
       guestDisplayName: "Kavya Singh",
       roomName: "1 night",
-      startDate: "2026-05-06",
-      endDate: "2026-05-07",
-      checkoutDate: "2026-05-07",
+      startDate: "2026-04-06",
+      endDate: "2026-04-07",
+      checkoutDate: "2026-04-07",
       sourceCategory: "direct" as const,
-      amount: formatCurrency(2500),
-      payout: "Outside Famlo",
+      amountValue: 2500,
+      payoutValue: null,
       status: "Paid outside Famlo",
     },
   ];
-  const effectiveRevenueGrossValue = shouldUseRevenueDemo ? 48100 : selectedRevenueGrossValue;
-  const effectiveRevenueNetPayout = shouldUseRevenueDemo ? 21850 : selectedRevenueNetPayout;
-  const effectiveRevenuePaidToYou = shouldUseRevenueDemo ? 13450 : selectedRevenuePaidToYou;
-  const effectiveRevenuePendingPayout = shouldUseRevenueDemo ? 8400 : selectedRevenuePendingPayout;
-  const effectiveFamloGeneratedRevenue = shouldUseRevenueDemo ? 24500 : famloGeneratedRevenue;
-  const effectiveFamloGeneratedCount = shouldUseRevenueDemo ? 6 : famloGeneratedBookings.length;
-  const effectiveFamloGeneratedContribution = shouldUseRevenueDemo
-    ? (24500 / 48100) * 100
-    : famloGeneratedContribution;
-  const effectiveRevenueBySource = shouldUseRevenueDemo
+  const demoRevenueRows = shouldUseRevenueDemo
+    ? demoRevenueRowsAll.filter((booking) => {
+        if (revenueWindow === "Today") return booking.checkoutDate === todayIsoDate;
+        if (revenueWindow === "This week") return booking.checkoutDate >= weekStartIsoDate && booking.checkoutDate <= weekEndIsoDate;
+        if (revenueWindow === "This month") return booking.checkoutDate.startsWith(currentMonthPrefix);
+        return true;
+      })
+    : [];
+  const demoRevenueBySource = shouldUseRevenueDemo
     ? {
-        famlo: { label: "Famlo", amount: 24500, count: 6 },
-        direct: { label: "Direct", amount: 8000, count: 3 },
-        ota: { label: "OTA", amount: 15600, count: 3 },
+        famlo: {
+          label: "Famlo",
+          amount: demoRevenueRows.filter((booking) => booking.sourceCategory === "famlo").reduce((sum, booking) => sum + booking.amountValue, 0),
+          count: demoRevenueRows.filter((booking) => booking.sourceCategory === "famlo").length,
+        },
+        direct: {
+          label: "Direct",
+          amount: demoRevenueRows.filter((booking) => booking.sourceCategory === "direct").reduce((sum, booking) => sum + booking.amountValue, 0),
+          count: demoRevenueRows.filter((booking) => booking.sourceCategory === "direct").length,
+        },
+        ota: {
+          label: "OTA",
+          amount: demoRevenueRows.filter((booking) => booking.sourceCategory === "ota").reduce((sum, booking) => sum + booking.amountValue, 0),
+          count: demoRevenueRows.filter((booking) => booking.sourceCategory === "ota").length,
+        },
       }
-    : revenueBySource;
-  const effectivePayoutReceivedAmount = shouldUseRevenueDemo ? 13450 : payoutReceivedAmount;
+    : null;
+  const demoRevenueGrossValue = shouldUseRevenueDemo
+    ? demoRevenueRows.reduce((sum, booking) => sum + booking.amountValue, 0)
+    : 0;
+  const demoRevenueNetPayout = shouldUseRevenueDemo
+    ? demoRevenueRows
+        .filter((booking) => booking.sourceCategory === "famlo" && booking.payoutValue != null)
+        .reduce((sum, booking) => sum + (booking.payoutValue ?? 0), 0)
+    : 0;
+  const demoRevenuePaidToYou = shouldUseRevenueDemo
+    ? demoRevenueRows
+        .filter((booking) => booking.status === "Paid by Famlo")
+        .reduce((sum, booking) => sum + (booking.payoutValue ?? 0), 0)
+    : 0;
+  const demoRevenuePendingPayout = shouldUseRevenueDemo ? Math.max(0, demoRevenueNetPayout - demoRevenuePaidToYou) : 0;
+  const demoFamloGeneratedRevenue = shouldUseRevenueDemo ? demoRevenueBySource?.famlo.amount ?? 0 : 0;
+  const demoFamloGeneratedCount = shouldUseRevenueDemo ? demoRevenueBySource?.famlo.count ?? 0 : 0;
+  const demoFamloGeneratedContribution = shouldUseRevenueDemo && demoRevenueGrossValue > 0 ? (demoFamloGeneratedRevenue / demoRevenueGrossValue) * 100 : 0;
+  const effectiveRevenueGrossValue = shouldUseRevenueDemo ? demoRevenueGrossValue : selectedRevenueGrossValue;
+  const effectiveRevenueNetPayout = shouldUseRevenueDemo ? demoRevenueNetPayout : selectedRevenueNetPayout;
+  const effectiveRevenuePaidToYou = shouldUseRevenueDemo ? demoRevenuePaidToYou : selectedRevenuePaidToYou;
+  const effectiveRevenuePendingPayout = shouldUseRevenueDemo ? demoRevenuePendingPayout : selectedRevenuePendingPayout;
+  const effectiveFamloGeneratedRevenue = shouldUseRevenueDemo ? demoFamloGeneratedRevenue : famloGeneratedRevenue;
+  const effectiveFamloGeneratedCount = shouldUseRevenueDemo ? demoFamloGeneratedCount : famloGeneratedBookings.length;
+  const effectiveFamloGeneratedContribution = shouldUseRevenueDemo ? demoFamloGeneratedContribution : famloGeneratedContribution;
+  const effectiveRevenueBySource = shouldUseRevenueDemo ? demoRevenueBySource ?? revenueBySource : revenueBySource;
+  const effectivePayoutReceivedAmount = shouldUseRevenueDemo ? demoRevenuePaidToYou : payoutReceivedAmount;
   const effectiveLastPayout = shouldUseRevenueDemo
     ? {
         amount: 8400,
         processedAt: "2026-05-18",
-        destinationMasked: "Bank •••• 4821",
+        destinationMasked: toMaskedHostRevenueDestination({ accountNumberMasked: "•••• 4821" }),
       }
     : lastPayoutRow;
   const averageBookingValue = bookingsWithValue.length > 0 ? totalBookingValue / bookingsWithValue.length : null;
@@ -8219,7 +8255,11 @@ export default function FamloProDashboardShell({
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Famlo payout to you</div>
                     <div className={styles.metricValue}>{formatCurrency(effectiveRevenueNetPayout)}</div>
-                    <div className={styles.metricHint}>Only bookings where payment collection and payout are handled by Famlo are included here.</div>
+                    <div className={styles.metricHint}>
+                      {hostRevenueCompliance.panVerified && hostRevenueCompliance.payoutAccountActive
+                        ? "Only bookings where payment collection and payout are handled by Famlo are included here."
+                        : "Payout release is blocked until PAN/KYC and an active payout account are in place."}
+                    </div>
                   </article>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Paid by Famlo</div>
@@ -8229,7 +8269,11 @@ export default function FamloProDashboardShell({
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Pending Famlo payout</div>
                     <div className={styles.metricValue}>{formatCurrency(effectiveRevenuePendingPayout)}</div>
-                    <div className={styles.metricHint}>Eligible Famlo-collected bookings that are not fully paid out yet.</div>
+                    <div className={styles.metricHint}>
+                      {hostRevenueCompliance.panVerified && hostRevenueCompliance.payoutAccountActive
+                        ? "Eligible Famlo-collected bookings that are not fully paid out yet."
+                        : "Pending payout stays locked until compliance and payout account requirements are cleared."}
+                    </div>
                   </article>
                 </div>
 
@@ -8285,7 +8329,7 @@ export default function FamloProDashboardShell({
                       <div className={styles.placeholderRow}>
                         <div className={styles.placeholderTitle}>Total paid by Famlo</div>
                         <div className={styles.placeholderValue}>{formatCurrency(effectivePayoutReceivedAmount)}</div>
-                        <div className={styles.placeholderCopy}>Processed payout executions in the selected period.</div>
+                        <div className={styles.placeholderCopy}>Completed payout executions for this property in the selected period.</div>
                       </div>
                       <div className={styles.placeholderRow}>
                         <div className={styles.placeholderTitle}>Last payout</div>
@@ -8295,7 +8339,7 @@ export default function FamloProDashboardShell({
                         <div className={styles.placeholderCopy}>
                           {effectiveLastPayout?.processedAt
                             ? `${formatShortDate(effectiveLastPayout.processedAt.slice(0, 10))} · ${effectiveLastPayout.destinationMasked ?? "Destination pending"}`
-                            : "Completed payout details will appear here once Famlo processes one."}
+                            : "The most recent completed Famlo payout will appear here once one is processed."}
                         </div>
                       </div>
                       <div className={styles.inlineActionRow} style={{ marginTop: "4px" }}>
@@ -8353,12 +8397,16 @@ export default function FamloProDashboardShell({
                                 </div>
                               </div>
                               <div className={styles.mappingCell}>
-                                <div className={styles.mappingTitle}>{booking.amount}</div>
+                                <div className={styles.mappingTitle}>{formatCurrency(booking.amountValue)}</div>
                                 <div className={styles.mappingSubcopy}>What the guest paid</div>
                               </div>
                               <div className={styles.mappingCell}>
-                                <div className={styles.mappingTitle}>{booking.payout}</div>
-                                <div className={styles.mappingSubcopy}>Outside-Famlo payouts stay separate</div>
+                                <div className={styles.mappingTitle}>
+                                  {booking.payoutValue != null ? formatCurrency(booking.payoutValue) : "Outside Famlo"}
+                                </div>
+                                <div className={styles.mappingSubcopy}>
+                                  {booking.payoutValue != null ? "Famlo-managed payout amount" : "Outside-Famlo payouts stay separate"}
+                                </div>
                               </div>
                               <div className={styles.mappingCell}>
                                 <span className={`${styles.readinessPill} ${booking.status === "Pending" ? styles.readinessPillReview : styles.readinessPillOk}`}>

@@ -12,6 +12,7 @@ import {
 } from "@/lib/channel-providers/channex/client";
 import { resolveOtaPaymentCollectMode, type OtaPaymentCollectMode } from "@/lib/channel-booking-normalization";
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
+import { toMaskedHostRevenueDestination } from "@/lib/finance/pro-revenue";
 import { loadCanonicalCalendar } from "@/lib/calendar";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
@@ -195,15 +196,6 @@ function resolveLatestPayoutRow(rows: Array<Record<string, unknown>>): Record<st
   })[0] ?? null;
 }
 
-function maskPayoutDestination(account: Record<string, unknown> | null): string | null {
-  if (!account) return null;
-  const vpa = asString(account.vpa);
-  if (vpa) return `UPI ${vpa}`;
-  const masked = asString(account.account_number_masked);
-  if (masked) return masked.startsWith("Bank") ? masked : `Bank ${masked}`;
-  return null;
-}
-
 function isPaidPayoutStatus(value: unknown): boolean {
   const normalized = normalizeToken(value);
   return normalized === "paid" || normalized === "processed" || normalized === "completed";
@@ -345,6 +337,10 @@ type ProBookingSummary = {
   sourceCategory: "famlo" | "direct" | "ota";
   paymentCollectMode: OtaPaymentCollectMode;
   famloPayoutEligible: boolean;
+  settlementEligible: boolean;
+  settlementStatus: string | null;
+  payoutExecutionStatus: string | null;
+  complianceBlocked: boolean;
   payoutStatus: string | null;
   payoutPaidAt: string | null;
   estimatedPayoutDate: string | null;
@@ -352,6 +348,7 @@ type ProBookingSummary = {
   platformFeeAmount: number | null;
   otaCommissionAmount: number | null;
   refundAdjustmentAmount: number | null;
+  creditNoteAmount: number | null;
   taxAmount: number | null;
   externalBookingId: string | null;
   externalRevisionId: string | null;
@@ -366,6 +363,11 @@ type HostPayoutSummaryRow = {
   status: string;
   processedAt: string | null;
   destinationMasked: string | null;
+};
+
+type HostRevenueCompliance = {
+  panVerified: boolean;
+  payoutAccountActive: boolean;
 };
 
 type CalendarWindowSummary = {
@@ -1015,15 +1017,43 @@ export async function renderFamloProDashboardPage({
     }
   }
 
+  const selectedRoomIds = new Set(rooms.map((room) => room.id));
+  const belongsToSelectedProperty = (row: Record<string, unknown>): boolean => {
+    const pricingSnapshot = asObject(row.pricing_snapshot) ?? {};
+    const stayUnitId = asString(row.stay_unit_id) ?? asString(pricingSnapshot.stay_unit_id);
+    if (stayUnitId && selectedRoomIds.has(stayUnitId)) return true;
+    return (
+      asString(pricingSnapshot.family_id) === familyId ||
+      asString(pricingSnapshot.legacy_family_id) === familyId ||
+      asString(pricingSnapshot.property_id) === familyId
+    );
+  };
+
+  bookingRowsForWorkspace = bookingRowsForWorkspace.filter(belongsToSelectedProperty);
+
   const bookingWorkspaceIds = bookingRowsForWorkspace
     .map((row) => asString(row.id))
     .filter((value): value is string => Boolean(value));
   const payoutRowsByBookingId = new Map<string, Array<Record<string, unknown>>>();
   const reservationsByBookingId = new Map<string, Record<string, unknown>>();
   const hostPayoutRows: HostPayoutSummaryRow[] = [];
+  const foliosByBookingId = new Map<string, Record<string, unknown>>();
+  const settlementLineByBookingId = new Map<string, Record<string, unknown>>();
+  const settlementsById = new Map<string, Record<string, unknown>>();
+  const payoutExecutionBySettlementId = new Map<string, Record<string, unknown>>();
+  const platformInvoiceByBookingId = new Map<string, Record<string, unknown>>();
+  const creditNoteTotalByBookingId = new Map<string, number>();
+  let hostRevenueCompliance: HostRevenueCompliance = { panVerified: false, payoutAccountActive: false };
 
   if (bookingWorkspaceIds.length > 0) {
-    const [payoutRowsResult, reservationRowsResult] = await Promise.all([
+    const [
+      payoutRowsResult,
+      reservationRowsResult,
+      folioRowsResult,
+      settlementLineRowsResult,
+      platformInvoicesResult,
+      creditNotesResult,
+    ] = await Promise.all([
       supabase
         .from("payouts_v2")
         .select("booking_id,amount,status,processed_at,created_at")
@@ -1031,6 +1061,23 @@ export async function renderFamloProDashboardPage({
       supabase
         .from("reservations_v2")
         .select("booking_id,operational_status,check_out_date")
+        .in("booking_id", bookingWorkspaceIds),
+      supabase
+        .from("reservation_folios_v2")
+        .select("booking_id,guest_total_amount,host_payout_amount,refund_total_amount,booking_status,payment_status,metadata,property_id")
+        .in("booking_id", bookingWorkspaceIds),
+      supabase
+        .from("settlement_line_items_v2")
+        .select("booking_id,settlement_id,amount,metadata,is_active")
+        .eq("is_active", true)
+        .in("booking_id", bookingWorkspaceIds),
+      supabase
+        .from("platform_fee_invoices")
+        .select("booking_id,total_amount,status,issued_at,created_at")
+        .in("booking_id", bookingWorkspaceIds),
+      supabase
+        .from("credit_notes")
+        .select("booking_id,total_reversal_amount,status,created_at")
         .in("booking_id", bookingWorkspaceIds),
     ]);
 
@@ -1049,27 +1096,111 @@ export async function renderFamloProDashboardPage({
         reservationsByBookingId.set(bookingId, row);
       }
     }
+
+    if (!folioRowsResult.error) {
+      for (const row of (folioRowsResult.data ?? []) as Array<Record<string, unknown>>) {
+        const bookingId = asString(row.booking_id);
+        if (!bookingId || foliosByBookingId.has(bookingId)) continue;
+        foliosByBookingId.set(bookingId, row);
+      }
+    }
+
+    if (!settlementLineRowsResult.error) {
+      const settlementIds = new Set<string>();
+      for (const row of (settlementLineRowsResult.data ?? []) as Array<Record<string, unknown>>) {
+        const bookingId = asString(row.booking_id);
+        const settlementId = asString(row.settlement_id);
+        if (bookingId && !settlementLineByBookingId.has(bookingId)) {
+          settlementLineByBookingId.set(bookingId, row);
+        }
+        if (settlementId) settlementIds.add(settlementId);
+      }
+
+      if (settlementIds.size > 0) {
+        const [settlementsResult, payoutExecutionsResult] = await Promise.all([
+          supabase
+            .from("host_settlements_v2")
+            .select("id,status,paid_at,approved_at,failed_at,property_id,net_payable_amount")
+            .in("id", Array.from(settlementIds))
+            .eq("property_id", familyId),
+          supabase
+            .from("host_payout_executions")
+            .select("settlement_id,status,amount,processed_at,created_at")
+            .in("settlement_id", Array.from(settlementIds))
+            .order("created_at", { ascending: false }),
+        ]);
+
+        if (!settlementsResult.error) {
+          for (const row of (settlementsResult.data ?? []) as Array<Record<string, unknown>>) {
+            const id = asString(row.id);
+            if (!id) continue;
+            settlementsById.set(id, row);
+          }
+        }
+
+        if (!payoutExecutionsResult.error) {
+          for (const row of (payoutExecutionsResult.data ?? []) as Array<Record<string, unknown>>) {
+            const settlementId = asString(row.settlement_id);
+            if (!settlementId || payoutExecutionBySettlementId.has(settlementId)) continue;
+            payoutExecutionBySettlementId.set(settlementId, row);
+          }
+        }
+      }
+    }
+
+    if (!platformInvoicesResult.error) {
+      for (const row of (platformInvoicesResult.data ?? []) as Array<Record<string, unknown>>) {
+        const bookingId = asString(row.booking_id);
+        if (!bookingId || platformInvoiceByBookingId.has(bookingId)) continue;
+        platformInvoiceByBookingId.set(bookingId, row);
+      }
+    }
+
+    if (!creditNotesResult.error) {
+      for (const row of (creditNotesResult.data ?? []) as Array<Record<string, unknown>>) {
+        const bookingId = asString(row.booking_id);
+        if (!bookingId) continue;
+        creditNoteTotalByBookingId.set(
+          bookingId,
+          (creditNoteTotalByBookingId.get(bookingId) ?? 0) + asNumber(row.total_reversal_amount)
+        );
+      }
+    }
   }
 
   if (host?.id && preloadBookingWorkspace) {
-    const [{ data: payoutExecutions }, { data: payoutAccount }] = await Promise.all([
-      supabase
-        .from("host_payout_executions")
-        .select("amount,status,processed_at,created_at")
-        .eq("host_id", host.id)
-        .order("created_at", { ascending: false })
-        .limit(40),
+    const [{ data: payoutAccount }, { data: hostTaxDetails }] = await Promise.all([
       supabase
         .from("host_payout_accounts")
-        .select("account_number_masked,vpa")
+        .select("account_number_masked,vpa,is_active,validation_status")
         .eq("host_id", host.id)
         .eq("is_active", true)
         .order("updated_at", { ascending: false })
         .maybeSingle(),
+      hostSession?.hostUserId
+        ? supabase
+            .from("host_tax_details")
+            .select("verification_status,is_verified")
+            .eq("user_id", hostSession.hostUserId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
-    const destinationMasked = maskPayoutDestination((payoutAccount as Record<string, unknown> | null) ?? null);
-    for (const row of ((payoutExecutions ?? []) as Array<Record<string, unknown>>)) {
+    const destinationMasked = toMaskedHostRevenueDestination({
+      accountNumberMasked: asString((payoutAccount as Record<string, unknown> | null)?.account_number_masked),
+      vpa: asString((payoutAccount as Record<string, unknown> | null)?.vpa),
+    });
+
+    hostRevenueCompliance = {
+      panVerified:
+        ((hostTaxDetails as Record<string, unknown> | null)?.is_verified === true) ||
+        normalizeToken((hostTaxDetails as Record<string, unknown> | null)?.verification_status) === "verified" ||
+        normalizeToken((hostTaxDetails as Record<string, unknown> | null)?.verification_status) === "approved",
+      payoutAccountActive: (payoutAccount as Record<string, unknown> | null)?.is_active === true,
+    };
+
+    for (const [settlementId, row] of payoutExecutionBySettlementId.entries()) {
+      if (!settlementsById.has(settlementId)) continue;
       hostPayoutRows.push({
         amount: asNumber(row.amount),
         status: asString(row.status) ?? "",
@@ -1236,6 +1367,14 @@ export async function renderFamloProDashboardPage({
       const reservation = reservationsByBookingId.get(bookingId) ?? null;
       const reservationStatus = asString(reservation?.operational_status) ?? null;
       const checkoutDate = asString(reservation?.check_out_date) ?? endDate;
+      const folio = foliosByBookingId.get(bookingId) ?? null;
+      const folioMetadata = asObject(folio?.metadata) ?? {};
+      const settlementLine = settlementLineByBookingId.get(bookingId) ?? null;
+      const settlementId = asString(settlementLine?.settlement_id);
+      const settlement = settlementId ? settlementsById.get(settlementId) ?? null : null;
+      const payoutExecution = settlementId ? payoutExecutionBySettlementId.get(settlementId) ?? null : null;
+      const platformInvoice = platformInvoiceByBookingId.get(bookingId) ?? null;
+      const creditNoteAmount = creditNoteTotalByBookingId.get(bookingId) ?? 0;
       const sourceCategory: ProBookingSummary["sourceCategory"] = isOta
         ? "ota"
         : sourceChannel === "pms_manual"
@@ -1245,8 +1384,9 @@ export async function renderFamloProDashboardPage({
       const financeContract = asObject(financeSnapshot.contract_v1) ?? {};
       const payoutBreakdown = asObject(financeSnapshot.payout_breakdown) ?? {};
       const latestPayout = resolveLatestPayoutRow(payoutRowsByBookingId.get(bookingId) ?? []);
-      const payoutAmountValue = asNumber(latestPayout?.amount) || null;
+      const payoutAmountValue = asNumber(settlementLine?.amount) || null;
       const platformFeeAmount =
+        asNumber(platformInvoice?.total_amount) ||
         asNumber(pricingSnapshot.platform_fee) ||
         asNumber(financeContract.platform_fee) ||
         asNumber(pricingSnapshot.famlo_platform_fee_incl_gst) ||
@@ -1258,10 +1398,17 @@ export async function renderFamloProDashboardPage({
         asNumber(pricingSnapshot.tax_amount) ||
         0;
       const refundAdjustmentAmount =
+        asNumber(asObject(settlementLine?.metadata)?.refund_adjustment_amount) ||
+        asNumber(folio?.refund_total_amount) ||
+        creditNoteAmount ||
         asNumber(financeSnapshot.refund_adjustments) ||
         asNumber(pricingSnapshot.refund_adjustment) ||
         0;
       const netPayoutAmount = (() => {
+        const settlementPayout = asNumber(settlementLine?.amount);
+        if (settlementPayout > 0) return settlementPayout;
+        const folioPayout = asNumber(folio?.host_payout_amount);
+        if (folioPayout > 0) return folioPayout;
         const payout = asNumber(row.partner_payout_amount);
         if (payout > 0) return payout;
         const snapshotPayout = asNumber(payoutBreakdown.host_net_payout);
@@ -1273,24 +1420,40 @@ export async function renderFamloProDashboardPage({
         isOta && amountValue != null && netPayoutAmount != null
           ? Math.max(0, amountValue - netPayoutAmount - platformFeeAmount - taxAmount + refundAdjustmentAmount)
           : null;
-      const payoutStatus = asString(latestPayout?.status) ?? null;
-      const payoutPaidAt = asString(latestPayout?.processed_at) ?? asString(latestPayout?.created_at) ?? null;
+      const payoutStatus =
+        asString(payoutExecution?.status) ??
+        asString(settlement?.status) ??
+        asString(latestPayout?.status) ??
+        null;
+      const payoutPaidAt =
+        asString(payoutExecution?.processed_at) ??
+        asString(settlement?.paid_at) ??
+        asString(latestPayout?.processed_at) ??
+        asString(latestPayout?.created_at) ??
+        null;
       const paymentCollectMode =
-        sourceCategory === "famlo"
-          ? "FAMLO_COLLECT"
-          : resolveOtaPaymentCollectMode(
-              asString(pricingSnapshot.payment_collect_mode) ??
-                asString(pricingSnapshot.payment_collect) ??
-                null
-            );
+        sourceChannel === "pms_manual"
+          ? "PROPERTY_COLLECT"
+          : sourceCategory === "famlo"
+            ? "FAMLO_COLLECT"
+            : resolveOtaPaymentCollectMode(
+                asString(folioMetadata.payment_collect_mode) ??
+                  asString(folioMetadata.payment_collect) ??
+                  asString(pricingSnapshot.payment_collect_mode) ??
+                  asString(pricingSnapshot.payment_collect) ??
+                  null
+              );
+      const settlementEligible =
+        folioMetadata.is_settlement_eligible === true ||
+        Boolean(settlementLine) ||
+        Boolean(settlement);
       const famloPayoutEligible =
-        sourceCategory === "famlo" || paymentCollectMode === "FAMLO_COLLECT";
+        paymentCollectMode === "FAMLO_COLLECT" && Boolean(settlementLine);
+      const complianceBlocked = !(hostRevenueCompliance.panVerified && hostRevenueCompliance.payoutAccountActive);
       const revenueDate =
-        isCompletedRevenueStatus(reservationStatus) || isCompletedRevenueStatus(row.status)
+        isCompletedRevenueStatus(reservationStatus) || isCompletedRevenueStatus(row.status) || Boolean(settlementLine)
           ? checkoutDate
-          : checkoutDate < getTodayInIndia()
-            ? checkoutDate
-            : null;
+          : null;
       return [{
         bookingId,
         roomId: stayUnitId,
@@ -1318,22 +1481,28 @@ export async function renderFamloProDashboardPage({
         amountValue,
         currency: bookingCurrency,
         netPayoutAmount,
-        payoutAmountValue: payoutAmountValue ?? netPayoutAmount,
-        paidPayoutAmount: isPaidPayoutStatus(payoutStatus) ? (payoutAmountValue ?? netPayoutAmount) : null,
+        payoutAmountValue,
+        paidPayoutAmount: isPaidPayoutStatus(payoutStatus) ? payoutAmountValue : null,
         sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : sourceChannel === "pms_manual" ? "Famlo PMS" : "Famlo Direct",
         sourceCategory,
         paymentCollectMode,
         famloPayoutEligible,
+        settlementEligible,
+        settlementStatus: asString(settlement?.status) ?? null,
+        payoutExecutionStatus: asString(payoutExecution?.status) ?? null,
+        complianceBlocked,
         payoutStatus,
         payoutPaidAt,
         estimatedPayoutDate: payoutStatus === "paid" ? payoutPaidAt : endDate,
         famloRevenueAmount:
+          asNumber(platformInvoice?.total_amount) ||
           asNumber(financeContract.famlo_net_revenue) ||
           asNumber(pricingSnapshot.famlo_platform_fee_taxable) ||
           null,
         platformFeeAmount: platformFeeAmount > 0 ? platformFeeAmount : null,
         otaCommissionAmount: otaCommissionAmount && otaCommissionAmount > 0 ? otaCommissionAmount : null,
         refundAdjustmentAmount: refundAdjustmentAmount > 0 ? refundAdjustmentAmount : null,
+        creditNoteAmount: creditNoteAmount > 0 ? creditNoteAmount : null,
         taxAmount: taxAmount > 0 ? taxAmount : null,
         externalBookingId: externalBookingId ?? matchedRevision?.externalBookingId ?? null,
         externalRevisionId:
@@ -1600,6 +1769,7 @@ export async function renderFamloProDashboardPage({
       globalCommission={globalCommission}
       proBookings={proBookings}
       hostPayoutRows={hostPayoutRows}
+      hostRevenueCompliance={hostRevenueCompliance}
       calendarColumns={calendarColumns}
       calendarRows={calendarRows}
       calendarWindow={calendarWindow}
