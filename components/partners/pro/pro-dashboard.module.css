@@ -911,6 +911,220 @@
   padding: 18px;
 }
 
+.roomMainGlassPanel {
+  display: grid;
+  gap: 18px;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(15, 23, 42, 0.58)),
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 40%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 22px 42px rgba(5, 10, 22, 0.28);
+}
+
+.roomMainGlassPanelHeader {
+  display: grid;
+  gap: 8px;
+}
+
+.roomWizardStepRow {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.roomWizardStep {
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.6;
+  color: rgba(226, 232, 240, 0.88);
+}
+
+.roomOtaCardGrid,
+.roomMappingCardGrid,
+.roomIssueCardGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roomOtaCard {
+  display: grid;
+  gap: 12px;
+  text-align: left;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.roomOtaCard:hover {
+  transform: translateY(-1px);
+  border-color: rgba(96, 165, 250, 0.32);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.18);
+}
+
+.roomOtaCardActive {
+  border-color: rgba(59, 130, 246, 0.38);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.18), rgba(255, 255, 255, 0.05));
+}
+
+.roomOtaCardHeader,
+.roomIssueCardHeader,
+.roomChannelPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.roomOtaCardTitle {
+  font-size: 15px;
+  font-weight: 900;
+  color: white;
+}
+
+.roomOtaCardCopy,
+.roomOtaCardMeta {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.roomOtaCardCta {
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #93c5fd;
+}
+
+.roomChannelPanel,
+.roomChannelPreviewCard,
+.roomIssueCard {
+  margin-top: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 18px;
+}
+
+.roomDarkCard {
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 16px;
+}
+
+.roomChannelSetupGrid,
+.roomChannelPreviewGrid,
+.roomChannelSummaryGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.roomChannelSetupGrid,
+.roomChannelPreviewGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roomChannelCheckboxRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.roomChannelCheckboxRow input {
+  margin-top: 4px;
+}
+
+.roomChannelStepLabel {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.roomInlineFeedback {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(226, 232, 240, 0.9);
+  border-color: rgba(148, 163, 184, 0.14);
+}
+
+.roomDarkEmptyState {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(15, 23, 42, 0.14));
+  border: 1px dashed rgba(148, 163, 184, 0.18);
+}
+
+.roomMainGlassPanel .placeholderTitle,
+.roomMainGlassPanel .emptyTitle,
+.roomMainGlassPanel .listTitle,
+.roomDarkCard .summaryValue,
+.roomDarkCard .summaryLabel,
+.roomDarkCard .summaryCopy,
+.roomDarkCard .feedTitle,
+.roomDarkCard .feedCopy,
+.roomIssueCard .roomOtaCardTitle,
+.roomIssueCard .roomOtaCardCopy,
+.roomChannelPanel .listTitle,
+.roomChannelPreviewCard .listTitle,
+.roomControlPlaceholder .emptyTitle {
+  color: #f8fafc;
+}
+
+.roomMainGlassPanel .placeholderCopy,
+.roomMainGlassPanel .emptyCopy,
+.roomDarkCard .summaryCopy,
+.roomChannelPanel .placeholderCopy,
+.roomChannelPreviewCard .placeholderCopy,
+.roomControlPlaceholder .emptyCopy {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.roomMainGlassPanel .placeholderLabel,
+.roomMainGlassPanel .summaryLabel,
+.roomMainGlassPanel .fieldLabel,
+.roomControlPlaceholder .summaryLabel {
+  color: rgba(148, 163, 184, 0.82);
+}
+
+.roomMainGlassPanel .placeholderValue,
+.roomMainGlassPanel .summaryValue,
+.roomControlPlaceholder .summaryValue {
+  color: #f8fafc;
+}
+
+.roomMainGlassPanel .fieldInput,
+.roomMainGlassPanel .fieldTextarea,
+.roomControlPlaceholder .fieldInput,
+.roomControlPlaceholder .fieldTextarea {
+  background: rgba(15, 23, 42, 0.52);
+  border-color: rgba(148, 163, 184, 0.18);
+  color: #f8fafc;
+}
+
+.roomMainGlassPanel .fieldInput::placeholder,
+.roomControlPlaceholder .fieldInput::placeholder,
+.roomMainGlassPanel .fieldTextarea::placeholder,
+.roomControlPlaceholder .fieldTextarea::placeholder {
+  color: rgba(148, 163, 184, 0.62);
+}
+
+.roomMainGlassPanel .placeholderRow,
+.roomChannelPreviewCard .placeholderRow,
+.roomControlPlaceholder .placeholderRow {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(148, 163, 184, 0.14);
+}
+
 .roomInlinePhotoPreview {
   border-radius: 20px;
   overflow: hidden;
@@ -2598,8 +2812,14 @@
   .twoCol,
   .checkGrid,
   .summaryGrid,
+  .roomWizardStepRow,
   .roomGrid,
+  .roomOtaCardGrid,
+  .roomMappingCardGrid,
+  .roomIssueCardGrid,
   .roomMetaGrid,
+  .roomChannelSetupGrid,
+  .roomChannelPreviewGrid,
   .mappingPreviewGrid,
   .contentReadinessGrid,
   .placeholderGrid,
@@ -2689,7 +2909,8 @@
   }
 
   .propertiesRoomShowcaseGrid,
-  .roomControlTabRow {
+  .roomControlTabRow,
+  .roomChannelSummaryGrid {
     grid-template-columns: 1fr;
   }
 
