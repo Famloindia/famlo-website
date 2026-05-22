@@ -15,6 +15,12 @@ import { getOtaConnectConfig, type OtaConnectConfig, type OtaConnectId } from ".
 
 type PreviewFields = Record<string, string | undefined>;
 
+type AirbnbAuthorizationState = {
+  propertyId: string;
+  roomId: string;
+  otaId: OtaConnectId;
+};
+
 type ProviderStructurePayload = {
   ok?: boolean;
   status?: string;
@@ -82,6 +88,26 @@ function redactSecretFields(fields: PreviewFields): Record<string, string> {
     acc[key] = /token|secret|password/i.test(key) ? "[redacted]" : value.trim();
     return acc;
   }, {});
+}
+
+function encodeAuthorizationState(state: AirbnbAuthorizationState): string {
+  return Buffer.from(JSON.stringify(state), "utf8").toString("base64url");
+}
+
+function decodeAuthorizationState(value: string): AirbnbAuthorizationState | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<AirbnbAuthorizationState>;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.otaId !== "airbnb") return null;
+    if (!asString(parsed.propertyId) || !asString(parsed.roomId)) return null;
+    return {
+      propertyId: asString(parsed.propertyId),
+      roomId: asString(parsed.roomId),
+      otaId: "airbnb",
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function writeOtaAuditLog(input: {
@@ -156,6 +182,89 @@ export function validateOtaFields(otaId: OtaConnectId, fields: PreviewFields): {
     ok: missingFields.length === 0,
     missingFields,
   };
+}
+
+export async function createAirbnbAuthorizationUrl(input: {
+  request: Request;
+  propertyId: string;
+  roomId: string;
+}): Promise<{ authorizationUrl: string; callbackUrl: string }> {
+  await authorizeRoomAccess(input.request, input.propertyId, input.roomId);
+
+  const origin = new URL(input.request.url).origin;
+  const callbackUrl = `${origin}/api/partners/pro/channels/ota/airbnb/callback`;
+  const state = encodeAuthorizationState({
+    propertyId: input.propertyId,
+    roomId: input.roomId,
+    otaId: "airbnb",
+  });
+  const configuredAuthorizationUrl = process.env.CHANNEX_AIRBNB_AUTHORIZE_URL?.trim() ?? "";
+
+  if (configuredAuthorizationUrl.length > 0) {
+    const authorizationUrl = new URL(configuredAuthorizationUrl);
+    authorizationUrl.searchParams.set("redirect_uri", callbackUrl);
+    authorizationUrl.searchParams.set("state", state);
+    return {
+      authorizationUrl: authorizationUrl.toString(),
+      callbackUrl,
+    };
+  }
+
+  const fallbackUrl = new URL(callbackUrl);
+  fallbackUrl.searchParams.set("state", state);
+  fallbackUrl.searchParams.set("status", "authorized");
+
+  return {
+    authorizationUrl: fallbackUrl.toString(),
+    callbackUrl,
+  };
+}
+
+export async function handleAirbnbAuthorizationCallback(input: {
+  request: Request;
+}): Promise<{
+  redirectUrl: string;
+  propertyId: string;
+  roomId: string;
+  status: "authorized" | "failed";
+}> {
+  const url = new URL(input.request.url);
+  const state = decodeAuthorizationState(asString(url.searchParams.get("state")));
+  if (!state) {
+    throw new Error("Airbnb authorization state is invalid.");
+  }
+
+  await authorizeRoomAccess(input.request, state.propertyId, state.roomId);
+
+  const status = asString(url.searchParams.get("status")) === "failed" ? "failed" : "authorized";
+  const redirectUrl = new URL("/partnerslogin/home/pro/dashboard", url.origin);
+  redirectUrl.searchParams.set("family", state.propertyId);
+  redirectUrl.searchParams.set("section", "rooms-units");
+  redirectUrl.searchParams.set("roomId", state.roomId);
+  redirectUrl.searchParams.set("otaAuthProvider", "airbnb");
+  redirectUrl.searchParams.set("otaAuthStatus", status);
+
+  return {
+    redirectUrl: redirectUrl.toString(),
+    propertyId: state.propertyId,
+    roomId: state.roomId,
+    status,
+  };
+}
+
+export async function fetchAirbnbListingsPreview(input: {
+  request: Request;
+  propertyId: string;
+  roomId: string;
+  fields: PreviewFields;
+}) {
+  return createOtaPreview({
+    request: input.request,
+    propertyId: input.propertyId,
+    roomId: input.roomId,
+    otaId: "airbnb",
+    fields,
+  });
 }
 
 function buildChannelCreateBody(config: OtaConnectConfig, fields: PreviewFields, propertyId: string) {

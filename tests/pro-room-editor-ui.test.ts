@@ -29,12 +29,16 @@ const renderDashboardPath = path.join(repoRoot, "app/partnerslogin/home/pro/dash
 const cssPath = path.join(repoRoot, "components/partners/pro/pro-dashboard.module.css");
 const otaPreviewRoutePath = path.join(repoRoot, "app/api/partners/pro/channels/ota/preview/route.ts");
 const otaConfirmRoutePath = path.join(repoRoot, "app/api/partners/pro/channels/ota/confirm/route.ts");
+const otaAirbnbAuthorizeRoutePath = path.join(repoRoot, "app/api/partners/pro/channels/ota/airbnb/authorize/route.ts");
+const otaAirbnbCallbackRoutePath = path.join(repoRoot, "app/api/partners/pro/channels/ota/airbnb/callback/route.ts");
 const otaServicePath = path.join(repoRoot, "lib/channels/ota-connect-service.ts");
 const shellSource = readFileSync(shellPath, "utf8");
 const renderDashboardSource = readFileSync(renderDashboardPath, "utf8");
 const cssSource = readFileSync(cssPath, "utf8");
 const otaPreviewRouteSource = readFileSync(otaPreviewRoutePath, "utf8");
 const otaConfirmRouteSource = readFileSync(otaConfirmRoutePath, "utf8");
+const otaAirbnbAuthorizeRouteSource = readFileSync(otaAirbnbAuthorizeRoutePath, "utf8");
+const otaAirbnbCallbackRouteSource = readFileSync(otaAirbnbCallbackRoutePath, "utf8");
 const otaServiceSource = readFileSync(otaServicePath, "utf8");
 const roomChannelsSectionSource = shellSource.slice(shellSource.indexOf("Connect this room to OTA"), shellSource.indexOf("Advanced setup tools"));
 
@@ -61,11 +65,11 @@ test("room tabs inline reused content replaces old open-another-page CTAs", () =
   assert.match(shellSource, /Advanced sync logs/);
 });
 
-test("channels tab shows one main ota connection flow with exactly five cards", () => {
+test("channels tab shows one main ota connection flow with exactly five pill options", () => {
   assert.match(shellSource, /Connect this room to OTA/);
   assert.match(
     shellSource,
-    /Select the OTA where this room is already listed\. Paste the required details from your OTA account\. Famlo will find the property through Channex and show you a preview before sync starts\./
+    /Select the OTA where this room is already listed\. Add the required details and Famlo will show a preview before syncing\./
   );
   assert.deepEqual(
     OTA_CONNECT_CONFIGS.map((config) => config.id),
@@ -81,20 +85,20 @@ test("channels tab shows one main ota connection flow with exactly five cards", 
   assert.doesNotMatch(roomChannelsSectionSource, /Google Hotel/);
 });
 
-test("channels tab renders one main glass ota setup container with horizontal ota cards inside it", () => {
+test("channels tab renders one main glass ota setup container with selector bar and connect button", () => {
   assert.match(shellSource, /roomMainGlassPanel/);
-  assert.match(shellSource, /roomWizardStepRow/);
-  assert.match(shellSource, /roomOtaCardGrid/);
+  assert.match(shellSource, /roomOtaSelectorRow/);
+  assert.match(shellSource, /roomOtaSelectorBar/);
+  assert.match(shellSource, /roomOtaPill/);
   assert.match(cssSource, /\.roomMainGlassPanel/);
-  assert.match(cssSource, /\.roomOtaCardGrid\s*\{[\s\S]*overflow-x:\s*auto;/);
+  assert.match(cssSource, /\.roomOtaSelectorBar\s*\{[\s\S]*overflow-x:\s*auto;/);
+  assert.match(roomChannelsSectionSource, />\s*Connect\s*</);
 });
 
-test("unified ota wizard uses the requested stepper and setup stays inside the same container", () => {
-  assert.match(shellSource, /Step 1 Select OTA/);
-  assert.match(shellSource, /Step 2 Enter OTA details/);
-  assert.match(shellSource, /Step 3 Preview matched property\/rooms/);
-  assert.match(shellSource, /Step 4 Confirm and sync/);
-  assert.match(shellSource, /What to copy from/);
+test("selected ota opens the setup panel inside the same container", () => {
+  assert.match(shellSource, /setActiveChannelSetup\(provider\.key\)/);
+  assert.match(shellSource, /Only the selected OTA setup will open here/);
+  assert.match(shellSource, /roomChannelPanel/);
 });
 
 test("config exposes ota-specific setup fields and instructions", () => {
@@ -109,20 +113,19 @@ test("config exposes ota-specific setup fields and instructions", () => {
 });
 
 test("inline setup panel requires channel-manager confirmation and preview before final sync", () => {
-  assert.match(shellSource, /Preview connection/);
-  assert.match(shellSource, /Connect & start sync/);
+  assert.match(shellSource, /Preview/);
+  assert.match(shellSource, /Yes, connect and start sync/);
   assert.match(shellSource, /disabled=\{!selectedChannelConfirmationChecked \|\| !roomEditorPreviewAccepted/);
   assert.match(shellSource, /I confirm this is the correct OTA property and room\. Famlo can manage availability, rates, and inventory for this OTA room\./);
 });
 
-test("preview card shows matched ota property, rooms, rate plans, and sync outcome copy", () => {
-  assert.match(shellSource, /OTA property name/);
-  assert.match(shellSource, /OTA property ID \/ reference/);
-  assert.match(shellSource, /OTA room list/);
-  assert.match(shellSource, /OTA rate plans/);
-  assert.match(shellSource, /Famlo Pro will manage availability for this room\./);
-  assert.match(shellSource, /Matched OTA rate plans will use Famlo Pro pricing after sync\./);
-  assert.match(shellSource, /Sync will be queued safely through the existing Channex flow\./);
+test("preview card shows simple found property and room matching flow", () => {
+  assert.match(shellSource, /Found property/);
+  assert.match(shellSource, /Rooms found/);
+  assert.match(shellSource, /Suggested match/);
+  assert.match(shellSource, /Famlo room/);
+  assert.match(shellSource, /OTA room/);
+  assert.match(shellSource, /Advanced/);
 });
 
 test("connected OTA state only offers run sync when readiness allows it", () => {
@@ -166,6 +169,14 @@ test("room edit tabs use dark glass primitives instead of white summary cards", 
   assert.match(shellSource, /roomInlineFeedback/);
   assert.match(cssSource, /\.roomDarkCard/);
   assert.match(cssSource, /\.roomDarkEmptyState/);
+});
+
+test("channels tab removes bulky readiness cards and progress boxes from the host flow", () => {
+  assert.doesNotMatch(roomChannelsSectionSource, /Step 1 Select OTA/);
+  assert.doesNotMatch(roomChannelsSectionSource, /Ready to connect/);
+  assert.doesNotMatch(roomChannelsSectionSource, /roomOtaCardGrid/);
+  assert.doesNotMatch(roomChannelsSectionSource, /OTA room match/);
+  assert.doesNotMatch(roomChannelsSectionSource, /OTA rate plan/);
 });
 
 test("issues tab keeps a clean no-issues state and hides logs behind an advanced section", () => {
@@ -314,6 +325,16 @@ test("preview api validates ota ids and delegates to unified ota preview service
   assert.match(otaPreviewRouteSource, /isOtaConnectId/);
   assert.match(otaPreviewRouteSource, /createOtaPreview/);
   assert.match(otaPreviewRouteSource, /otaId is invalid/);
+});
+
+test("airbnb authorization routes and service placeholders are wired for the same flow", () => {
+  assert.match(otaAirbnbAuthorizeRouteSource, /createAirbnbAuthorizationUrl/);
+  assert.match(otaAirbnbCallbackRouteSource, /handleAirbnbAuthorizationCallback/);
+  assert.match(otaServiceSource, /createAirbnbAuthorizationUrl/);
+  assert.match(otaServiceSource, /handleAirbnbAuthorizationCallback/);
+  assert.match(otaServiceSource, /fetchAirbnbListingsPreview/);
+  assert.match(shellSource, /Connect Airbnb account/);
+  assert.match(shellSource, /handleStartAirbnbAuthorization/);
 });
 
 test("confirm api validates confirmation flow through unified ota confirm service", () => {

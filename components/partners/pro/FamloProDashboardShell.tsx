@@ -603,6 +603,7 @@ type HostChannelSetupDraft = {
   providerListingUrl: string;
   providerAccessToken: string;
   channexConfirmed: boolean;
+  airbnbAuthorized: boolean;
 };
 
 type HostChannelPreviewSuggestion = {
@@ -661,6 +662,9 @@ function buildHostChannelSetupDraft(providerKey: ChannelProviderKey, state: Chan
       providerKey === "booking"
         ? metadata?.booking_extranet_request_acknowledged === true || metadata?.connectivity_provider_requested === true
         : metadata?.provider_extranet_request_acknowledged === true,
+    airbnbAuthorized:
+      providerKey === "airbnb" &&
+      (metadata?.provider_structure_verified === true || metadata?.provider_channel_attached === true),
   };
 }
 
@@ -1948,7 +1952,7 @@ export default function FamloProDashboardShell({
   const [roomChannelSetupDrafts, setRoomChannelSetupDrafts] = useState<Partial<Record<ChannelProviderKey, HostChannelSetupDraft>>>({});
   const [roomChannelPreviewByKey, setRoomChannelPreviewByKey] = useState<Partial<Record<ChannelProviderKey, HostChannelPreviewState>>>({});
   const [roomChannelPanelViewByKey, setRoomChannelPanelViewByKey] = useState<Partial<Record<ChannelProviderKey, "setup" | "preview" | "summary">>>({});
-  const [roomChannelPendingByKey, setRoomChannelPendingByKey] = useState<Partial<Record<ChannelProviderKey, "preview" | "connect" | "sync" | null>>>({});
+  const [roomChannelPendingByKey, setRoomChannelPendingByKey] = useState<Partial<Record<ChannelProviderKey, "authorize" | "preview" | "connect" | "sync" | null>>>({});
   const [roomChannelFeedbackByKey, setRoomChannelFeedbackByKey] = useState<Partial<Record<ChannelProviderKey, { type: "success" | "error"; text: string }>>>({});
   const [roomChannelPreviewAcceptedByKey, setRoomChannelPreviewAcceptedByKey] = useState<Partial<Record<ChannelProviderKey, boolean>>>({});
   const [timeAnchor] = useState(() => Date.now());
@@ -4812,6 +4816,35 @@ export default function FamloProDashboardShell({
       }
     })();
   };
+  const handleStartAirbnbAuthorization = (): void => {
+    if (!roomEditorRoom) return;
+
+    void (async () => {
+      const providerKey: ChannelProviderKey = "airbnb";
+      setRoomChannelPendingByKey((current) => ({ ...current, [providerKey]: "authorize" }));
+      setRoomChannelFeedback(providerKey, null);
+
+      try {
+        const response = await fetch(
+          `/api/partners/pro/channels/ota/airbnb/authorize?propertyId=${encodeURIComponent(familyId)}&roomId=${encodeURIComponent(roomEditorRoom.id)}`
+        );
+        const payload = (await response.json()) as { ok?: boolean; authorizationUrl?: string; error?: string };
+        if (!response.ok || payload.ok === false || !payload.authorizationUrl) {
+          throw new Error(payload.error ?? "Unable to start Airbnb authorization.");
+        }
+
+        updateRoomChannelDraft(providerKey, { airbnbAuthorized: true });
+        window.location.assign(payload.authorizationUrl);
+      } catch (error) {
+        setRoomChannelFeedback(providerKey, {
+          type: "error",
+          text: error instanceof Error ? error.message : "Unable to start Airbnb authorization.",
+        });
+      } finally {
+        setRoomChannelPendingByKey((current) => ({ ...current, [providerKey]: null }));
+      }
+    })();
+  };
   const handleConnectRoomChannelAndSync = (providerKey: ChannelProviderKey): void => {
     if (!roomEditorRoom) return;
 
@@ -5618,50 +5651,37 @@ export default function FamloProDashboardShell({
                     <div className={styles.roomMainGlassPanelHeader}>
                       <div className={styles.placeholderTitle}>Connect this room to OTA</div>
                       <div className={styles.placeholderCopy}>
-                        Select the OTA where this room is already listed. Paste the required details from your OTA account. Famlo will find the property through Channex and show you a preview before sync starts.
+                        Select the OTA where this room is already listed. Add the required details and Famlo will show a preview before syncing.
                       </div>
                     </div>
 
-                    <div className={styles.roomWizardStepRow}>
-                      <div className={styles.roomWizardStep}>Step 1 Select OTA</div>
-                      <div className={styles.roomWizardStep}>Step 2 Enter OTA details</div>
-                      <div className={styles.roomWizardStep}>Step 3 Preview matched property/rooms</div>
-                      <div className={styles.roomWizardStep}>Step 4 Confirm and sync</div>
-                    </div>
-
-                    <div className={styles.roomOtaCardGrid}>
-                      {roomEditorHostChannelCards.map(({ provider, otaConfig, hostCardState }) => (
-                        <div key={`room-channel-card-${provider.key}`} className={`${styles.roomOtaCard} ${roomEditorActiveProviderKey === provider.key ? styles.roomOtaCardActive : ""}`}>
-                          <div className={styles.roomOtaCardHeader}>
-                            <div>
-                              <div className={styles.roomOtaCardTitle}>{otaConfig.displayName}</div>
-                              <div className={styles.roomOtaCardCopy}>{provider.description}</div>
-                            </div>
-                            <span
-                              className={`${styles.readinessPill} ${hostCardState.isConnected
-                                ? styles.readinessPillOk
-                                : styles.readinessPillReview
-                                }`}
-                            >
-                              {hostCardState.isConnected ? "Connected" : "Ready to connect"}
-                            </span>
-                          </div>
-                          <div className={styles.roomOtaCardMeta}>{hostCardState.helperText}</div>
+                    <div className={styles.roomOtaSelectorRow}>
+                      <div className={styles.roomOtaSelectorBar} role="tablist" aria-label="OTA selector">
+                        {roomEditorHostChannelCards.map(({ provider, otaConfig }) => (
                           <button
+                            key={`room-channel-pill-${provider.key}`}
                             type="button"
-                            className={roomEditorActiveProviderKey === provider.key ? styles.primaryActionButton : styles.secondaryActionButton}
-                            onClick={() => {
-                              setActiveChannelSetup(provider.key);
-                              setRoomChannelPanelViewByKey((current) => ({
-                                ...current,
-                                [provider.key]: hostCardState.isConnected ? "summary" : "setup",
-                              }));
-                            }}
+                            role="tab"
+                            aria-selected={roomEditorActiveProviderKey === provider.key}
+                            className={`${styles.roomOtaPill} ${roomEditorActiveProviderKey === provider.key ? styles.roomOtaPillActive : ""}`}
+                            onClick={() => setActiveChannelSetup(provider.key)}
                           >
-                            {hostCardState.isConnected ? "Connected" : "Connect"}
+                            {otaConfig.displayName}
                           </button>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.primaryActionButton}
+                        onClick={() =>
+                          setRoomChannelPanelViewByKey((current) => ({
+                            ...current,
+                            [roomEditorActiveProviderKey]: selectedRoomChannelConnected ? "summary" : "setup",
+                          }))
+                        }
+                      >
+                        Connect
+                      </button>
                     </div>
 
                     {roomEditorChannelFeedback ? (
@@ -5677,73 +5697,77 @@ export default function FamloProDashboardShell({
                             <div className={styles.listTitle}>{roomEditorActiveProvider.displayName}</div>
                             <div className={styles.placeholderCopy}>
                               {roomEditorActivePanelView === "summary"
-                                ? `${roomEditorActiveProvider.displayName} is connected for this room. Review readiness or queue a fresh sync when needed.`
+                                ? `${roomEditorActiveProvider.displayName} is connected for this room.`
                                 : roomEditorActivePanelView === "preview"
-                                  ? "Preview the matched OTA property, room, and rate plan before Famlo Pro starts channel sync for this OTA."
-                                  : "Paste the OTA details below, then preview the matched property, room, and rate plan before syncing this room."}
+                                  ? "Famlo found the OTA property and rooms below. Confirm the match before sync starts."
+                                  : "Add the required details for this OTA and preview the property before sync starts."}
                             </div>
-                          </div>
-                          <div className={styles.roomReadinessRow}>
-                            <span className={`${styles.readinessPill} ${selectedRoomChannelConnected ? styles.readinessPillOk : styles.readinessPillReview}`}>
-                              {selectedRoomChannelConnected ? `${roomEditorActiveProvider.displayName} connected` : "Setup in progress"}
-                            </span>
-                            <span className={`${styles.readinessPill} ${selectedRoomHasRoomMapping ? styles.readinessPillOk : styles.readinessPillReview}`}>
-                              Room match: {selectedRoomHasRoomMapping ? "Ready" : "Needed"}
-                            </span>
-                            <span className={`${styles.readinessPill} ${selectedRoomHasRateMapping ? styles.readinessPillOk : styles.readinessPillReview}`}>
-                              Price match: {selectedRoomHasRateMapping ? "Ready" : "Needed"}
-                            </span>
                           </div>
                         </div>
 
                         {roomEditorActivePanelView === "setup" ? (
                           <>
-                            <div className={styles.roomChannelStepLabel}>Step 2: Enter OTA details</div>
-                            {roomEditorActiveOtaConfig?.instructions.length ? (
+                            <div className={styles.roomChannelSetupHeader}>
+                              <div className={styles.roomChannelStepLabel}>{roomEditorActiveProvider.displayName}</div>
+                              {roomEditorActiveOtaConfig?.instructions[0] ? (
+                                <div className={styles.placeholderCopy}>{roomEditorActiveOtaConfig.instructions[0]}</div>
+                              ) : null}
+                            </div>
+                            {roomEditorActiveProviderKey === "airbnb" ? (
                               <div className={styles.roomDarkCard}>
-                                <div className={styles.feedTitle}>What to copy from {roomEditorActiveOtaConfig.displayName}</div>
-                                <div className={styles.stack}>
-                                  {roomEditorActiveOtaConfig.instructions.map((instruction) => (
-                                    <div key={instruction} className={styles.feedCopy}>{instruction}</div>
-                                  ))}
+                                <div className={styles.feedTitle}>Authorize Airbnb account</div>
+                                <div className={styles.feedCopy}>
+                                  Connect the Airbnb account that already lists this room, then Famlo will load the property and rooms for preview.
+                                </div>
+                                <div className={styles.inlineActionRow}>
+                                  <button
+                                    type="button"
+                                    className={styles.primaryActionButton}
+                                    onClick={handleStartAirbnbAuthorization}
+                                    disabled={roomEditorPendingState === "authorize"}
+                                  >
+                                    {roomEditorPendingState === "authorize" ? "Connecting..." : "Connect Airbnb account"}
+                                  </button>
                                 </div>
                               </div>
                             ) : null}
                             <div className={styles.roomChannelSetupGrid}>
-                              <label className={styles.fieldBlock}>
-                                <span className={styles.fieldLabel}>{roomEditorActiveFieldLabels.primaryLabel}</span>
-                                <input
-                                  className={styles.fieldInput}
-                                  value={roomEditorActiveProviderKey === "booking" ? roomEditorActiveProviderDraft.bookingHotelId : roomEditorActiveProviderDraft.providerListingId}
-                                  onChange={(event) =>
-                                    updateRoomChannelDraft(
-                                      roomEditorActiveProviderKey,
-                                      roomEditorActiveProviderKey === "booking"
-                                        ? { bookingHotelId: event.target.value }
-                                        : { providerListingId: event.target.value }
-                                    )
-                                  }
-                                  placeholder={roomEditorActiveFieldLabels.primaryLabel}
-                                  disabled={roomEditorActiveProviderCapabilities.mode === "feed_only"}
-                                />
-                              </label>
-                              <label className={styles.fieldBlock}>
-                                <span className={styles.fieldLabel}>{roomEditorActiveFieldLabels.secondaryLabel}</span>
-                                <input
-                                  className={styles.fieldInput}
-                                  value={roomEditorActiveProviderKey === "booking" ? roomEditorActiveProviderDraft.bookingPropertyCode : roomEditorActiveProviderDraft.providerPropertyCode}
-                                  onChange={(event) =>
-                                    updateRoomChannelDraft(
-                                      roomEditorActiveProviderKey,
-                                      roomEditorActiveProviderKey === "booking"
-                                        ? { bookingPropertyCode: event.target.value }
-                                        : { providerPropertyCode: event.target.value }
-                                    )
-                                  }
-                                  placeholder={roomEditorActiveFieldLabels.secondaryLabel}
-                                  disabled={roomEditorActiveProviderCapabilities.mode === "feed_only"}
-                                />
-                              </label>
+                              {roomEditorActiveProviderKey !== "airbnb" ? (
+                                <label className={styles.fieldBlock}>
+                                  <span className={styles.fieldLabel}>{roomEditorActiveFieldLabels.primaryLabel}</span>
+                                  <input
+                                    className={styles.fieldInput}
+                                    value={roomEditorActiveProviderKey === "booking" ? roomEditorActiveProviderDraft.bookingHotelId : roomEditorActiveProviderDraft.providerListingId}
+                                    onChange={(event) =>
+                                      updateRoomChannelDraft(
+                                        roomEditorActiveProviderKey,
+                                        roomEditorActiveProviderKey === "booking"
+                                          ? { bookingHotelId: event.target.value }
+                                          : { providerListingId: event.target.value }
+                                      )
+                                    }
+                                    placeholder={roomEditorActiveFieldLabels.primaryLabel}
+                                  />
+                                </label>
+                              ) : null}
+                              {roomEditorActiveProviderKey !== "airbnb" ? (
+                                <label className={styles.fieldBlock}>
+                                  <span className={styles.fieldLabel}>{roomEditorActiveFieldLabels.secondaryLabel}</span>
+                                  <input
+                                    className={styles.fieldInput}
+                                    value={roomEditorActiveProviderKey === "booking" ? roomEditorActiveProviderDraft.bookingPropertyCode : roomEditorActiveProviderDraft.providerPropertyCode}
+                                    onChange={(event) =>
+                                      updateRoomChannelDraft(
+                                        roomEditorActiveProviderKey,
+                                        roomEditorActiveProviderKey === "booking"
+                                          ? { bookingPropertyCode: event.target.value }
+                                          : { providerPropertyCode: event.target.value }
+                                      )
+                                    }
+                                    placeholder={roomEditorActiveFieldLabels.secondaryLabel}
+                                  />
+                                </label>
+                              ) : null}
                               {roomEditorActiveFieldLabels.tertiaryLabel ? (
                                 <label className={styles.fieldBlock}>
                                   <span className={styles.fieldLabel}>{roomEditorActiveFieldLabels.tertiaryLabel}</span>
@@ -5754,11 +5778,10 @@ export default function FamloProDashboardShell({
                                       updateRoomChannelDraft(roomEditorActiveProviderKey, { providerListingUrl: event.target.value })
                                     }
                                     placeholder={roomEditorActiveFieldLabels.tertiaryLabel}
-                                    disabled={roomEditorActiveProviderCapabilities.mode === "feed_only"}
                                   />
                                 </label>
                               ) : null}
-                              {roomEditorActiveFieldLabels.accessTokenLabel ? (
+                              {roomEditorActiveFieldLabels.accessTokenLabel && roomEditorActiveProviderKey !== "airbnb" ? (
                                 <label className={styles.fieldBlock}>
                                   <span className={styles.fieldLabel}>{roomEditorActiveFieldLabels.accessTokenLabel}</span>
                                   <input
@@ -5771,30 +5794,6 @@ export default function FamloProDashboardShell({
                                   />
                                 </label>
                               ) : null}
-                              <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>OTA room match</div>
-                                <div className={styles.placeholderValue}>
-                                  {selectedRoomMappingRow?.mapping?.externalRoomTypeId ? selectedRoomMappingRow.providerRoomType : "Not matched yet"}
-                                </div>
-                                <div className={styles.placeholderCopy}>Use the matching step below to confirm which OTA room should follow this Famlo room.</div>
-                              </div>
-                              <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>OTA rate plan</div>
-                                <div className={styles.placeholderValue}>
-                                  {selectedRoomRateMappingRow?.ratePlan?.externalRatePlanId ? selectedRoomRateMappingRow.providerRatePlan : "Not matched yet"}
-                                </div>
-                                <div className={styles.placeholderCopy}>Famlo Pro price will sync only to the matched OTA rate plan for this room.</div>
-                              </div>
-                            </div>
-
-                            <div className={styles.roomChannelStepLabel}>Confirm OTA setup</div>
-                            <div className={styles.roomReadinessRow}>
-                              <span className={`${styles.readinessPill} ${roomEditorCalendarReady ? styles.readinessPillOk : styles.readinessPillReview}`}>
-                                Calendar sync: {roomEditorCalendarReady ? "Ready" : "Needs review"}
-                              </span>
-                              <span className={`${styles.readinessPill} ${selectedRoomHasRateMapping ? styles.readinessPillOk : styles.readinessPillReview}`}>
-                                Price sync: {selectedRoomHasRateMapping ? "Ready" : "Needs review"}
-                              </span>
                             </div>
 
                             {selectedChannelConfirmationLabel ? (
@@ -5810,21 +5809,18 @@ export default function FamloProDashboardShell({
                               </label>
                             ) : null}
 
-                            {roomEditorActiveFieldLabels.assistedNote ? (
-                              <div className={styles.placeholderCopy}>{roomEditorActiveFieldLabels.assistedNote}</div>
-                            ) : null}
-
                             <div className={styles.inlineActionRow}>
                               <button
                                 type="button"
                                 className={styles.primaryActionButton}
-                                disabled={!selectedChannelConfirmationChecked || roomEditorPendingState === "preview"}
+                                disabled={
+                                  !selectedChannelConfirmationChecked ||
+                                  roomEditorPendingState === "preview" ||
+                                  (roomEditorActiveProviderKey === "airbnb" && !roomEditorActiveProviderDraft.airbnbAuthorized)
+                                }
                                 onClick={() => handlePreviewRoomChannelConnection(roomEditorActiveProviderKey)}
                               >
-                                Preview connection
-                              </button>
-                              <button type="button" className={styles.secondaryActionButton} onClick={() => setRoomEditorTab("mapping")}>
-                                Review matching
+                                Preview
                               </button>
                             </div>
                           </>
@@ -5832,65 +5828,76 @@ export default function FamloProDashboardShell({
 
                         {roomEditorActivePanelView === "preview" ? (
                           <div className={styles.roomChannelPreviewCard}>
-                            <div className={styles.roomChannelStepLabel}>Step 3: Preview matched property, rooms, and rate plans</div>
+                            <div className={styles.roomChannelStepLabel}>Preview found property and rooms</div>
                             <div className={styles.roomChannelPreviewGrid}>
                               <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>OTA property name</div>
+                                <div className={styles.placeholderLabel}>Found property</div>
                                 <div className={styles.placeholderValue}>{roomEditorActivePreview?.propertyName ?? "Awaiting property match"}</div>
                               </div>
                               <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>OTA property ID / reference</div>
-                                <div className={styles.placeholderValue}>{roomEditorActivePreview?.propertyReference ?? "Awaiting property reference"}</div>
-                              </div>
-                              <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>Famlo room name</div>
-                                <div className={styles.placeholderValue}>{roomEditorRoom?.name ?? "Save room first"}</div>
-                              </div>
-                              <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>OTA / channel</div>
+                                <div className={styles.placeholderLabel}>OTA</div>
                                 <div className={styles.placeholderValue}>{roomEditorActiveProvider.displayName}</div>
                               </div>
                               <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>OTA room match status</div>
-                                <div className={styles.placeholderValue}>
-                                  {roomEditorActivePreview?.selectedRoomSuggestion?.suggestedRoomTypeTitle ?? (selectedRoomHasRoomMapping ? "Matched" : "Needs review")}
-                                </div>
-                              </div>
-                              <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>OTA rate plan match status</div>
-                                <div className={styles.placeholderValue}>
-                                  {roomEditorActivePreview?.selectedRoomSuggestion?.suggestedRatePlanTitle ?? (selectedRoomHasRateMapping ? "Matched" : "Needs review")}
-                                </div>
-                              </div>
-                              <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>Current Famlo base price</div>
-                                <div className={styles.placeholderValue}>{roomEditorBasePriceLabel}</div>
-                              </div>
-                              <div className={styles.placeholderRow}>
-                                <div className={styles.placeholderLabel}>Sync readiness</div>
-                                <div className={styles.placeholderValue}>
-                                  Calendar: {roomEditorCalendarReady ? "Ready" : "Needs review"} · Pricing: {selectedRoomHasRateMapping ? "Ready" : "Needs review"}
-                                </div>
+                                <div className={styles.placeholderLabel}>Rooms found</div>
+                                <div className={styles.placeholderValue}>{(roomEditorActivePreview?.roomList ?? []).length || 0}</div>
                               </div>
                             </div>
-                            <div className={styles.roomChannelCatalogGrid}>
+                            <div className={styles.roomDarkCard}>
+                              <div className={styles.feedTitle}>Suggested match</div>
+                              <div className={styles.roomChannelPreviewGrid}>
+                                <div className={styles.placeholderRow}>
+                                  <div className={styles.placeholderLabel}>Famlo room</div>
+                                  <div className={styles.placeholderValue}>{roomEditorRoom?.name ?? "Save room first"}</div>
+                                </div>
+                                <label className={styles.fieldBlock}>
+                                  <span className={styles.fieldLabel}>OTA room</span>
+                                  <select
+                                    className={styles.fieldInput}
+                                    value={roomEditorActivePreview?.selectedRoomSuggestion?.suggestedRoomTypeTitle ?? ""}
+                                    onChange={(event) =>
+                                      setRoomChannelPreviewByKey((current) => ({
+                                        ...current,
+                                        [roomEditorActiveProviderKey]: current[roomEditorActiveProviderKey]
+                                          ? {
+                                            ...current[roomEditorActiveProviderKey]!,
+                                            selectedRoomSuggestion: current[roomEditorActiveProviderKey]?.selectedRoomSuggestion
+                                              ? {
+                                                ...current[roomEditorActiveProviderKey]!.selectedRoomSuggestion!,
+                                                suggestedRoomTypeTitle: event.target.value || null,
+                                              }
+                                              : {
+                                                roomId: roomEditorRoom?.id ?? "",
+                                                famloRoomName: roomEditorRoom?.name ?? "",
+                                                suggestedRoomTypeTitle: event.target.value || null,
+                                                suggestedRatePlanTitle: null,
+                                                autoApplicable: false,
+                                              },
+                                          }
+                                          : current[roomEditorActiveProviderKey],
+                                      }))
+                                    }
+                                  >
+                                    <option value="">Select OTA room</option>
+                                    {(roomEditorActivePreview?.roomList ?? []).map((room) => (
+                                      <option key={`${roomEditorActiveProviderKey}-${room.title}`} value={room.title}>
+                                        {room.title}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                            </div>
+                            {(roomEditorActivePreview?.roomList ?? []).length ? (
                               <div className={styles.roomDarkCard}>
-                                <div className={styles.feedTitle}>OTA room list</div>
+                                <div className={styles.feedTitle}>Rooms found</div>
                                 <div className={styles.stack}>
-                                  {(roomEditorActivePreview?.roomList ?? []).slice(0, 6).map((room) => (
+                                  {(roomEditorActivePreview?.roomList ?? []).slice(0, 8).map((room) => (
                                     <div key={`${roomEditorActiveProviderKey}-${room.title}`} className={styles.feedCopy}>{room.title}</div>
                                   ))}
                                 </div>
                               </div>
-                              <div className={styles.roomDarkCard}>
-                                <div className={styles.feedTitle}>OTA rate plans</div>
-                                <div className={styles.stack}>
-                                  {(roomEditorActivePreview?.ratePlans ?? []).slice(0, 6).map((ratePlan) => (
-                                    <div key={`${roomEditorActiveProviderKey}-${ratePlan.title}`} className={styles.feedCopy}>{ratePlan.title}</div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
+                            ) : null}
                             {roomEditorActivePreview?.warnings.length ? (
                               <div className={styles.roomDarkCard}>
                                 <div className={styles.feedTitle}>Warnings</div>
@@ -5901,14 +5908,19 @@ export default function FamloProDashboardShell({
                                 </div>
                               </div>
                             ) : null}
-                            <div className={styles.stack}>
-                              <div className={styles.roomDarkCard}>
-                                <div className={styles.feedTitle}>What will happen</div>
-                                <div className={styles.feedCopy}>Famlo Pro will manage availability for this room.</div>
-                                <div className={styles.feedCopy}>Matched OTA rate plans will use Famlo Pro pricing after sync.</div>
-                                <div className={styles.feedCopy}>Sync will be queued safely through the existing Channex flow.</div>
-                              </div>
-                            </div>
+                            {(roomEditorActivePreview?.ratePlans ?? []).length ? (
+                              <details className={styles.operatorDetails}>
+                                <summary className={styles.operatorSummary}>Advanced</summary>
+                                <div className={styles.roomDarkCard}>
+                                  <div className={styles.feedTitle}>Rate plans</div>
+                                  <div className={styles.stack}>
+                                    {(roomEditorActivePreview?.ratePlans ?? []).slice(0, 8).map((ratePlan) => (
+                                      <div key={`${roomEditorActiveProviderKey}-${ratePlan.title}`} className={styles.feedCopy}>{ratePlan.title}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </details>
+                            ) : null}
                             <label className={styles.roomChannelCheckboxRow}>
                               <input
                                 type="checkbox"
@@ -5940,7 +5952,7 @@ export default function FamloProDashboardShell({
                                 disabled={!selectedChannelConfirmationChecked || !roomEditorPreviewAccepted || roomEditorPendingState === "connect" || roomEditorPendingState === "sync"}
                                 onClick={() => handleConnectRoomChannelAndSync(roomEditorActiveProviderKey)}
                               >
-                                Connect & start sync
+                                Yes, connect and start sync
                               </button>
                             </div>
                           </div>
@@ -5948,19 +5960,15 @@ export default function FamloProDashboardShell({
 
                         {roomEditorActivePanelView === "summary" ? (
                           <div className={styles.roomChannelSummaryGrid}>
-                            <div className={styles.roomChannelStepLabel}>Step 4: Connected and syncing</div>
                             <div className={styles.roomDarkCard}>
-                              <div className={styles.summaryLabel}>{roomEditorActiveProvider.displayName}</div>
                               <div className={styles.summaryValue}>{roomEditorActiveProvider.displayName} connected</div>
-                              <div className={styles.summaryCopy}>
-                                Room match: {selectedRoomHasRoomMapping ? "Matched" : "Needs review"} · Price match: {selectedRoomHasRateMapping ? "Matched" : "Needs review"}
-                              </div>
+                              <div className={styles.summaryCopy}>This OTA is connected. Famlo is now syncing availability, rates, inventory, and bookings for this room.</div>
                             </div>
                             <div className={styles.roomDarkCard}>
-                              <div className={styles.summaryLabel}>Sync readiness</div>
-                              <div className={styles.summaryValue}>{roomEditorCalendarReady ? "Ready" : "Needs review"}</div>
+                              <div className={styles.summaryLabel}>Last sync</div>
+                              <div className={styles.summaryValue}>{roomEditorLastSyncLog ? formatDateTime(roomEditorLastSyncLog.createdAt) : "Queued"}</div>
                               <div className={styles.summaryCopy}>
-                                {roomEditorLastSyncLog ? `Last sync update: ${formatDateTime(roomEditorLastSyncLog.createdAt)}` : "No room-level sync summary yet."}
+                                {roomEditorCanRunSync ? "You can run a fresh sync anytime from here." : "Famlo will finish the first sync after connection."}
                               </div>
                             </div>
                             <div className={styles.inlineActionRow}>
@@ -5982,12 +5990,6 @@ export default function FamloProDashboardShell({
                                 }
                               >
                                 Review setup
-                              </button>
-                              <button type="button" className={styles.secondaryActionButton} onClick={() => setRoomEditorTab("mapping")}>
-                                Edit room match
-                              </button>
-                              <button type="button" className={styles.secondaryActionButton} onClick={() => setRoomEditorTab("mapping")}>
-                                Edit price match
                               </button>
                             </div>
                           </div>
@@ -6027,7 +6029,7 @@ export default function FamloProDashboardShell({
                       <div className={styles.roomDarkCard}>
                         <div className={styles.feedTitle}>Select an OTA and click Connect to continue.</div>
                         <div className={styles.feedCopy}>
-                          Famlo will open the OTA-specific setup form, preview the matched property and room through Channex, then ask for confirmation before sync starts.
+                          Only the selected OTA setup will open here. After you add the required details, Famlo will preview the property and rooms before sync starts.
                         </div>
                       </div>
                     ) : null}

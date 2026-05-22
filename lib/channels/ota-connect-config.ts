@@ -23,6 +23,7 @@ export type OtaConnectConfig = {
   instructions: string[];
   channexChannelCode: string;
   placeholderExamples: Record<string, string>;
+  authorizationMode?: "oauth";
 };
 
 export const OTA_CONNECT_CONFIGS: readonly OtaConnectConfig[] = [
@@ -114,19 +115,18 @@ export const OTA_CONNECT_CONFIGS: readonly OtaConnectConfig[] = [
     providerKey: "airbnb",
     displayName: "Airbnb",
     channexChannelCode: "ABB",
+    authorizationMode: "oauth",
     requiredFields: [
       { key: "providerListingId", label: "Airbnb listing ID", inputType: "text", required: false, placeholderExample: "Example: 54278124" },
-      { key: "providerPropertyCode", label: "Owner host account reference", inputType: "text", required: true, placeholderExample: "Example: owner@email.com" },
       { key: "providerListingUrl", label: "Airbnb listing URL", inputType: "url", required: false, placeholderExample: "https://www.airbnb.com/rooms/..." },
     ],
     instructions: [
-      "Open the owner Airbnb account for the property that already lists this room.",
-      "Copy the owner-host reference and the listing URL or listing ID.",
-      "Return to Famlo Pro and preview the Channex match before sync starts.",
+      "Authorize the Airbnb account that already lists this room.",
+      "After authorization, Famlo will fetch the Airbnb listings available through Channex.",
+      "Review the found property and room before you start sync.",
     ],
     placeholderExamples: {
       providerListingId: "54278124",
-      providerPropertyCode: "owner@email.com",
       providerListingUrl: "https://www.airbnb.com/rooms/54278124",
     },
   },

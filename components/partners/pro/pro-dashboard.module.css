@@ -925,64 +925,65 @@
   gap: 8px;
 }
 
-.roomWizardStepRow {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.roomWizardStep {
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 12px 14px;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.6;
-  color: rgba(226, 232, 240, 0.88);
-}
-
-.roomOtaCardGrid,
+.roomOtaSelectorRow,
 .roomMappingCardGrid,
 .roomIssueCardGrid {
   display: grid;
   gap: 14px;
+}
+
+.roomMappingCardGrid,
+.roomIssueCardGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.roomOtaCardGrid {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 280px);
+.roomOtaSelectorRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.roomOtaSelectorRow .primaryActionButton {
+  min-height: 42px;
+}
+
+.roomOtaSelectorBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   overflow-x: auto;
-  padding-bottom: 6px;
+  padding: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.04);
   scrollbar-width: thin;
 }
 
-.roomOtaCard {
-  display: grid;
-  gap: 12px;
-  text-align: left;
-  padding: 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  color: white;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+.roomOtaPill {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.78);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.roomOtaCard:hover {
-  transform: translateY(-1px);
-  border-color: rgba(96, 165, 250, 0.32);
-  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.18);
+.roomOtaPill:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.roomOtaCardActive {
-  border-color: rgba(59, 130, 246, 0.38);
-  background: linear-gradient(180deg, rgba(37, 99, 235, 0.18), rgba(255, 255, 255, 0.05));
+.roomOtaPillActive {
+  color: #eff6ff;
+  border-color: rgba(96, 165, 250, 0.36);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.28), rgba(30, 41, 59, 0.3));
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.14);
 }
 
-.roomOtaCardHeader,
 .roomIssueCardHeader,
 .roomChannelPanelHeader {
   display: flex;
@@ -1062,6 +1063,12 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #93c5fd;
+}
+
+.roomChannelSetupHeader {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
 }
 
 .roomInlineFeedback {
@@ -2823,9 +2830,8 @@
   .twoCol,
   .checkGrid,
   .summaryGrid,
-  .roomWizardStepRow,
   .roomGrid,
-  .roomOtaCardGrid,
+  .roomOtaSelectorRow,
   .roomMappingCardGrid,
   .roomIssueCardGrid,
   .roomMetaGrid,
