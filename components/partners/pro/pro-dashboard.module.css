@@ -950,6 +950,15 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.roomOtaCardGrid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 280px);
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+
 .roomOtaCard {
   display: grid;
   gap: 12px;
@@ -1022,13 +1031,15 @@
 
 .roomChannelSetupGrid,
 .roomChannelPreviewGrid,
-.roomChannelSummaryGrid {
+.roomChannelSummaryGrid,
+.roomChannelCatalogGrid {
   display: grid;
   gap: 14px;
 }
 
 .roomChannelSetupGrid,
-.roomChannelPreviewGrid {
+.roomChannelPreviewGrid,
+.roomChannelCatalogGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -2820,6 +2831,7 @@
   .roomMetaGrid,
   .roomChannelSetupGrid,
   .roomChannelPreviewGrid,
+  .roomChannelCatalogGrid,
   .mappingPreviewGrid,
   .contentReadinessGrid,
   .placeholderGrid,

@@ -37,6 +37,12 @@ import {
 import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
 import type { ChannelSetupWizardSummary } from "@/components/partners/pro/ChannelSetupWizard";
 import {
+  OTA_CONNECT_CONFIGS,
+  getOtaConnectConfig,
+  mapProviderKeyToOtaConnectId,
+  type OtaConnectId,
+} from "@/lib/channels/ota-connect-config";
+import {
   CHANNEL_PROVIDER_REGISTRY,
   getChannelProviderDefinition,
   type ChannelProviderKey,
@@ -608,11 +614,17 @@ type HostChannelPreviewSuggestion = {
 };
 
 type HostChannelPreviewState = {
-  mode: "preview" | "assisted";
+  previewId: string | null;
+  mode: "preview";
   message: string;
   refreshedAt: string | null;
   autoApplicableCount: number;
+  propertyName: string | null;
+  propertyReference: string | null;
+  roomList: Array<{ title: string }>;
+  ratePlans: Array<{ title: string }>;
   selectedRoomSuggestion: HostChannelPreviewSuggestion | null;
+  warnings: string[];
 };
 
 type ChannelTestSyncSnapshot = ChannelTestSyncReadinessModel;
@@ -709,11 +721,11 @@ function resolveHostChannelFieldLabels(providerKey: ChannelProviderKey): {
     };
   }
   return {
-    primaryLabel: "Google Hotel feed or property reference",
-    secondaryLabel: "Booking link or profile reference",
-    tertiaryLabel: "Landing page URL",
+    primaryLabel: "OTA property reference",
+    secondaryLabel: "OTA room or listing reference",
+    tertiaryLabel: "OTA listing URL",
     accessTokenLabel: null,
-    assistedNote: "Google Hotel remains assisted and feed-led. Famlo will keep this honest until the feed readiness path is fully available here.",
+    assistedNote: null,
   };
 }
 
@@ -1938,6 +1950,7 @@ export default function FamloProDashboardShell({
   const [roomChannelPanelViewByKey, setRoomChannelPanelViewByKey] = useState<Partial<Record<ChannelProviderKey, "setup" | "preview" | "summary">>>({});
   const [roomChannelPendingByKey, setRoomChannelPendingByKey] = useState<Partial<Record<ChannelProviderKey, "preview" | "connect" | "sync" | null>>>({});
   const [roomChannelFeedbackByKey, setRoomChannelFeedbackByKey] = useState<Partial<Record<ChannelProviderKey, { type: "success" | "error"; text: string }>>>({});
+  const [roomChannelPreviewAcceptedByKey, setRoomChannelPreviewAcceptedByKey] = useState<Partial<Record<ChannelProviderKey, boolean>>>({});
   const [timeAnchor] = useState(() => Date.now());
   const bookingFeedLastAttemptAtRef = useRef(0);
   const bookingFeedRefreshInFlightRef = useRef(false);
@@ -1967,6 +1980,7 @@ export default function FamloProDashboardShell({
     setRoomChannelPanelViewByKey({});
     setRoomChannelPendingByKey({});
     setRoomChannelFeedbackByKey({});
+    setRoomChannelPreviewAcceptedByKey({});
   }, [familyId]);
   useEffect(() => {
     const nextDate = new Date(`${calendarWindow.startDate}T12:00:00+05:30`);
@@ -4584,13 +4598,14 @@ export default function FamloProDashboardShell({
     calendarReady: roomEditorCalendarReady,
     supportsSelectedPropertySyncTest: roomEditorActiveProviderCapabilities.supportsSelectedPropertySyncTest,
   });
-  const roomEditorHostChannelCards = CHANNEL_PROVIDER_REGISTRY.map((provider) => {
-    const state = channelSetupStatesByKey[provider.key];
-    const capabilities = getChannelProviderCapabilities(provider.key);
+  const roomEditorHostChannelCards = OTA_CONNECT_CONFIGS.map((otaConfig) => {
+    const provider = getChannelProviderDefinition(otaConfig.providerKey);
+    const state = channelSetupStatesByKey[otaConfig.providerKey];
+    const capabilities = getChannelProviderCapabilities(otaConfig.providerKey);
     const setupStarted = state.status !== "not_started";
-    const connected = readHostChannelConnected(provider.key, state, currentChannelAttached);
+    const connected = readHostChannelConnected(otaConfig.providerKey, state, currentChannelAttached);
     const hostCardState = resolveHostChannelCardState({
-      providerKey: provider.key,
+      providerKey: otaConfig.providerKey,
       setupStarted,
       connected,
       roomMatched: selectedRoomHasRoomMapping,
@@ -4599,6 +4614,7 @@ export default function FamloProDashboardShell({
       providerMode: capabilities.mode,
     });
     return {
+      otaConfig,
       provider,
       state,
       capabilities,
@@ -4623,8 +4639,11 @@ export default function FamloProDashboardShell({
     (selectedRoomChannelConnected ? "summary" : roomEditorActivePreview ? "preview" : "setup");
   const roomEditorPendingState = roomChannelPendingByKey[roomEditorActiveProviderKey] ?? null;
   const roomEditorChannelFeedback = roomChannelFeedbackByKey[roomEditorActiveProviderKey] ?? null;
+  const roomEditorPreviewAccepted = roomChannelPreviewAcceptedByKey[roomEditorActiveProviderKey] === true;
   const roomEditorLastSyncLog = selectedRoomSyncLogs[0] ?? null;
   const roomEditorActiveFieldLabels = resolveHostChannelFieldLabels(roomEditorActiveProviderKey);
+  const roomEditorActiveOtaId = mapProviderKeyToOtaConnectId(roomEditorActiveProviderKey);
+  const roomEditorActiveOtaConfig = roomEditorActiveOtaId ? getOtaConnectConfig(roomEditorActiveOtaId) : null;
   const roomEditorIssueCards = buildHostRoomIssueCards({
     roomInactive: Boolean(roomEditorRoom && !roomEditorRoom.isActive),
     photosMissing: Boolean(roomEditorRoom && roomEditorRoom.photosCount <= 0),
@@ -4705,6 +4724,8 @@ export default function FamloProDashboardShell({
     if (!roomEditorRoom) return;
 
     void (async () => {
+      const otaId = mapProviderKeyToOtaConnectId(providerKey);
+      if (!otaId) return;
       const draft = roomChannelSetupDrafts[providerKey] ?? buildHostChannelSetupDraft(providerKey, channelSetupStatesByKey[providerKey]);
       setRoomChannelPendingByKey((current) => ({ ...current, [providerKey]: "preview" }));
       setRoomChannelPanelViewByKey((current) => ({ ...current, [providerKey]: "setup" }));
@@ -4713,101 +4734,73 @@ export default function FamloProDashboardShell({
       try {
         await persistRoomChannelConfirmation(providerKey, draft.channexConfirmed);
 
-        if (!getChannelProviderCapabilities(providerKey).supportsSelectedPropertySyncTest) {
-          setRoomChannelPreviewByKey((current) => ({
-            ...current,
-            [providerKey]: {
-              mode: "assisted",
-              message: "This OTA still needs assisted setup. Famlo will keep the connection honest and wait for provider readiness before enabling sync here.",
-              refreshedAt: null,
-              autoApplicableCount: 0,
-              selectedRoomSuggestion: null,
-            },
-          }));
-          setRoomChannelPanelViewByKey((current) => ({ ...current, [providerKey]: "preview" }));
-          setRoomChannelFeedback(providerKey, {
-            type: "success",
-            text: "Assisted setup recorded. Review the setup notes before continuing.",
-          });
-          return;
-        }
-
-        const response = await fetch("/api/host/pro/channel/create", {
+        const response = await fetch("/api/partners/pro/channels/ota/preview", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            familyId,
-            providerKey,
-            bookingHotelId: draft.bookingHotelId,
-            bookingPropertyCode: draft.bookingPropertyCode,
-            bookingExtranetRequested: providerKey === "booking" ? draft.channexConfirmed : undefined,
-            providerListingId: draft.providerListingId,
-            providerPropertyCode: draft.providerPropertyCode,
-            providerListingUrl: draft.providerListingUrl,
-            providerExtranetRequested: providerKey === "booking" ? undefined : draft.channexConfirmed,
-            providerAccessToken: draft.providerAccessToken || undefined,
+            propertyId: familyId,
+            roomId: roomEditorRoom.id,
+            otaId,
+            fields: {
+              bookingHotelId: draft.bookingHotelId,
+              bookingPropertyCode: draft.bookingPropertyCode,
+              providerListingId: draft.providerListingId,
+              providerPropertyCode: draft.providerPropertyCode,
+              providerListingUrl: draft.providerListingUrl,
+              providerAccessToken: draft.providerAccessToken,
+              channelManagerConfirmed: draft.channexConfirmed ? "yes" : "",
+            },
           }),
         });
 
         const payload = (await response.json()) as {
           ok?: boolean;
           error?: string;
-          message?: string;
-          fallbackRequired?: boolean;
-          state?: ChannelSetupState | null;
+          previewId?: string | null;
           preview?: {
-            refreshedAt?: string | null;
-            autoApplicableCount?: number | null;
-            suggestions?: Array<{
-              roomId?: string;
-              famloRoomName?: string;
-              suggestedRoomTypeTitle?: string | null;
-              suggestedRatePlanTitle?: string | null;
-              autoApplicable?: boolean;
-            }>;
+            propertyName?: string | null;
+            propertyReference?: string | null;
+            roomList?: Array<{ title?: string }>;
+            ratePlans?: Array<{ title?: string }>;
+            suggestedFamloRoomMapping?: string | null;
+            suggestedOtaRoomMapping?: string | null;
+            suggestedOtaRatePlanMapping?: string | null;
+            warnings?: string[];
           } | null;
         };
 
         if (!response.ok || payload.ok === false) {
           throw new Error(payload.error ?? "Unable to preview the OTA connection.");
         }
-
-        if (payload.state) {
-          setChannelSetupOverrides((current) => ({
-            ...current,
-            [providerKey]: payload.state,
-          }));
-        }
-
-        const selectedSuggestion = payload.preview?.suggestions?.find((row) => row.roomId === roomEditorRoom.id) ?? null;
         setRoomChannelPreviewByKey((current) => ({
           ...current,
           [providerKey]: {
-            mode: payload.fallbackRequired ? "assisted" : "preview",
-            message:
-              payload.message ??
-              (payload.fallbackRequired
-                ? "Assisted setup saved. Famlo will wait for provider visibility before matching this room."
-                : "Preview ready. Review the room and price match before connecting."),
-            refreshedAt: payload.preview?.refreshedAt ?? null,
-            autoApplicableCount: payload.preview?.autoApplicableCount ?? 0,
-            selectedRoomSuggestion: selectedSuggestion
-              ? {
-                roomId: selectedSuggestion.roomId ?? roomEditorRoom.id,
-                famloRoomName: selectedSuggestion.famloRoomName ?? roomEditorRoom.name,
-                suggestedRoomTypeTitle: selectedSuggestion.suggestedRoomTypeTitle ?? null,
-                suggestedRatePlanTitle: selectedSuggestion.suggestedRatePlanTitle ?? null,
-                autoApplicable: selectedSuggestion.autoApplicable === true,
-              }
-              : null,
+            previewId: payload.previewId ?? null,
+            mode: "preview",
+            message: "Preview ready. Review the OTA property, room, and rate plan before sync starts.",
+            refreshedAt: null,
+            autoApplicableCount: payload.preview?.roomList?.length ?? 0,
+            propertyName: payload.preview?.propertyName ?? null,
+            propertyReference: payload.preview?.propertyReference ?? null,
+            roomList: (payload.preview?.roomList ?? []).map((room) => ({ title: room.title ?? "Unnamed OTA room" })),
+            ratePlans: (payload.preview?.ratePlans ?? []).map((ratePlan) => ({ title: ratePlan.title ?? "Unnamed OTA rate plan" })),
+            selectedRoomSuggestion: {
+              roomId: roomEditorRoom.id,
+              famloRoomName: payload.preview?.suggestedFamloRoomMapping ?? roomEditorRoom.name,
+              suggestedRoomTypeTitle: payload.preview?.suggestedOtaRoomMapping ?? null,
+              suggestedRatePlanTitle: payload.preview?.suggestedOtaRatePlanMapping ?? null,
+              autoApplicable: Boolean(payload.preview?.suggestedOtaRoomMapping || payload.preview?.suggestedOtaRatePlanMapping),
+            },
+            warnings: payload.preview?.warnings ?? [],
           },
         }));
+        setRoomChannelPreviewAcceptedByKey((current) => ({ ...current, [providerKey]: false }));
         setRoomChannelPanelViewByKey((current) => ({ ...current, [providerKey]: "preview" }));
         setRoomChannelFeedback(providerKey, {
           type: "success",
-          text: payload.message ?? "Preview connection is ready.",
+          text: "Preview connection is ready.",
         });
       } catch (error) {
         setRoomChannelFeedback(providerKey, {
@@ -4823,58 +4816,50 @@ export default function FamloProDashboardShell({
     if (!roomEditorRoom) return;
 
     void (async () => {
+      const otaId = mapProviderKeyToOtaConnectId(providerKey);
+      if (!otaId) return;
       setRoomChannelPendingByKey((current) => ({ ...current, [providerKey]: "connect" }));
       setRoomChannelFeedback(providerKey, null);
 
       try {
         const preview = roomChannelPreviewByKey[providerKey] ?? null;
-        if (preview?.selectedRoomSuggestion?.autoApplicable && (!selectedRoomHasRoomMapping || !selectedRoomHasRateMapping)) {
-          const confirmResponse = await fetch("/api/host/pro/channel/confirm-mapping", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              familyId,
-              providerKey,
-              mode: "preview",
-              roomIds: [roomEditorRoom.id],
-            }),
-          });
-          const confirmPayload = (await confirmResponse.json()) as { ok?: boolean; error?: string; state?: ChannelSetupState | null };
-          if (!confirmResponse.ok || confirmPayload.ok === false) {
-            throw new Error(confirmPayload.error ?? "Unable to confirm the room preview mapping.");
-          }
-          if (confirmPayload.state) {
-            setChannelSetupOverrides((current) => ({
-              ...current,
-              [providerKey]: confirmPayload.state,
-            }));
-          }
-        }
+        if (!preview?.previewId) throw new Error("Preview this OTA connection first.");
 
         setRoomChannelPendingByKey((current) => ({ ...current, [providerKey]: "sync" }));
 
-        const syncResponse = await fetch("/api/host/pro/channel/sync", {
+        const syncResponse = await fetch("/api/partners/pro/channels/ota/confirm", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            familyId,
-            providerKey,
-            windowDays: 7,
+            propertyId: familyId,
+            roomId: roomEditorRoom.id,
+            otaId,
+            previewId: preview.previewId,
+            mappings: {
+              externalRoomTypeId: preview.selectedRoomSuggestion?.suggestedRoomTypeTitle ? undefined : undefined,
+              externalRatePlanId: preview.selectedRoomSuggestion?.suggestedRatePlanTitle ? undefined : undefined,
+            },
+            confirmationAccepted: true,
           }),
         });
-        const syncPayload = (await syncResponse.json()) as { ok?: boolean; error?: string; message?: string };
+        const syncPayload = (await syncResponse.json()) as { ok?: boolean; error?: string; message?: string; state?: ChannelSetupState | null };
         if (!syncResponse.ok || syncPayload.ok === false) {
           throw new Error(syncPayload.error ?? "Unable to queue the sync.");
+        }
+
+        if (syncPayload.state) {
+          setChannelSetupOverrides((current) => ({
+            ...current,
+            [providerKey]: syncPayload.state as never,
+          }));
         }
 
         setRoomChannelPanelViewByKey((current) => ({ ...current, [providerKey]: "summary" }));
         setRoomChannelFeedback(providerKey, {
           type: "success",
-          text: syncPayload.message ?? "Sync queued. Famlo will keep the result in the safe channel sync flow.",
+          text: syncPayload.message ?? "This OTA is connected. Famlo is now syncing availability, rates, inventory, and bookings for this room.",
         });
         window.setTimeout(() => {
           router.refresh();
@@ -5631,36 +5616,34 @@ export default function FamloProDashboardShell({
                 {roomEditorTab === "channels" ? (
                   <article className={`${styles.roomControlPlaceholder} ${styles.roomMainGlassPanel}`}>
                     <div className={styles.roomMainGlassPanelHeader}>
-                      <div className={styles.placeholderTitle}>Connect OTAs for this room</div>
+                      <div className={styles.placeholderTitle}>Connect this room to OTA</div>
                       <div className={styles.placeholderCopy}>
-                        Select an OTA, confirm channel-manager setup, preview the room and rate mapping, then start sync from Famlo Pro.
+                        Select the OTA where this room is already listed. Paste the required details from your OTA account. Famlo will find the property through Channex and show you a preview before sync starts.
                       </div>
                     </div>
 
                     <div className={styles.roomWizardStepRow}>
-                      <div className={styles.roomWizardStep}>1. Confirm OTA setup</div>
-                      <div className={styles.roomWizardStep}>2. Match room and rate plan</div>
-                      <div className={styles.roomWizardStep}>3. Preview connection</div>
-                      <div className={styles.roomWizardStep}>4. Connect &amp; start sync</div>
+                      <div className={styles.roomWizardStep}>Step 1 Select OTA</div>
+                      <div className={styles.roomWizardStep}>Step 2 Enter OTA details</div>
+                      <div className={styles.roomWizardStep}>Step 3 Preview matched property/rooms</div>
+                      <div className={styles.roomWizardStep}>Step 4 Confirm and sync</div>
                     </div>
 
                     <div className={styles.roomOtaCardGrid}>
-                      {roomEditorHostChannelCards.map(({ provider, hostCardState }) => (
+                      {roomEditorHostChannelCards.map(({ provider, otaConfig, hostCardState }) => (
                         <div key={`room-channel-card-${provider.key}`} className={`${styles.roomOtaCard} ${roomEditorActiveProviderKey === provider.key ? styles.roomOtaCardActive : ""}`}>
                           <div className={styles.roomOtaCardHeader}>
                             <div>
-                              <div className={styles.roomOtaCardTitle}>{provider.displayName}</div>
+                              <div className={styles.roomOtaCardTitle}>{otaConfig.displayName}</div>
                               <div className={styles.roomOtaCardCopy}>{provider.description}</div>
                             </div>
                             <span
-                              className={`${styles.readinessPill} ${hostCardState.status === "Connected"
+                              className={`${styles.readinessPill} ${hostCardState.isConnected
                                 ? styles.readinessPillOk
-                                : hostCardState.status === "Coming soon"
-                                  ? styles.readinessPillMissing
-                                  : styles.readinessPillReview
+                                : styles.readinessPillReview
                                 }`}
                             >
-                              {hostCardState.status}
+                              {hostCardState.isConnected ? "Connected" : "Ready to connect"}
                             </span>
                           </div>
                           <div className={styles.roomOtaCardMeta}>{hostCardState.helperText}</div>
@@ -5674,9 +5657,8 @@ export default function FamloProDashboardShell({
                                 [provider.key]: hostCardState.isConnected ? "summary" : "setup",
                               }));
                             }}
-                            disabled={hostCardState.cta === "Coming soon"}
                           >
-                            {hostCardState.cta}
+                            {hostCardState.isConnected ? "Connected" : "Connect"}
                           </button>
                         </div>
                       ))}
@@ -5688,7 +5670,7 @@ export default function FamloProDashboardShell({
                       </div>
                     ) : null}
 
-                    {roomEditorMode === "edit" ? (
+                    {roomEditorMode === "edit" && activeChannelSetup ? (
                       <div className={styles.roomChannelPanel}>
                         <div className={styles.roomChannelPanelHeader}>
                           <div>
@@ -5697,8 +5679,8 @@ export default function FamloProDashboardShell({
                               {roomEditorActivePanelView === "summary"
                                 ? `${roomEditorActiveProvider.displayName} is connected for this room. Review readiness or queue a fresh sync when needed.`
                                 : roomEditorActivePanelView === "preview"
-                                  ? "Preview the room and price match before Famlo Pro starts channel sync for this OTA."
-                                  : "Complete the safe setup details below, then preview the connection before syncing this room."}
+                                  ? "Preview the matched OTA property, room, and rate plan before Famlo Pro starts channel sync for this OTA."
+                                  : "Paste the OTA details below, then preview the matched property, room, and rate plan before syncing this room."}
                             </div>
                           </div>
                           <div className={styles.roomReadinessRow}>
@@ -5716,7 +5698,17 @@ export default function FamloProDashboardShell({
 
                         {roomEditorActivePanelView === "setup" ? (
                           <>
-                            <div className={styles.roomChannelStepLabel}>Step 1: Confirm OTA setup</div>
+                            <div className={styles.roomChannelStepLabel}>Step 2: Enter OTA details</div>
+                            {roomEditorActiveOtaConfig?.instructions.length ? (
+                              <div className={styles.roomDarkCard}>
+                                <div className={styles.feedTitle}>What to copy from {roomEditorActiveOtaConfig.displayName}</div>
+                                <div className={styles.stack}>
+                                  {roomEditorActiveOtaConfig.instructions.map((instruction) => (
+                                    <div key={instruction} className={styles.feedCopy}>{instruction}</div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                             <div className={styles.roomChannelSetupGrid}>
                               <label className={styles.fieldBlock}>
                                 <span className={styles.fieldLabel}>{roomEditorActiveFieldLabels.primaryLabel}</span>
@@ -5795,7 +5787,7 @@ export default function FamloProDashboardShell({
                               </div>
                             </div>
 
-                            <div className={styles.roomChannelStepLabel}>Step 2: Match room and rate plan</div>
+                            <div className={styles.roomChannelStepLabel}>Confirm OTA setup</div>
                             <div className={styles.roomReadinessRow}>
                               <span className={`${styles.readinessPill} ${roomEditorCalendarReady ? styles.readinessPillOk : styles.readinessPillReview}`}>
                                 Calendar sync: {roomEditorCalendarReady ? "Ready" : "Needs review"}
@@ -5840,8 +5832,16 @@ export default function FamloProDashboardShell({
 
                         {roomEditorActivePanelView === "preview" ? (
                           <div className={styles.roomChannelPreviewCard}>
-                            <div className={styles.roomChannelStepLabel}>Step 3: Preview connection</div>
+                            <div className={styles.roomChannelStepLabel}>Step 3: Preview matched property, rooms, and rate plans</div>
                             <div className={styles.roomChannelPreviewGrid}>
+                              <div className={styles.placeholderRow}>
+                                <div className={styles.placeholderLabel}>OTA property name</div>
+                                <div className={styles.placeholderValue}>{roomEditorActivePreview?.propertyName ?? "Awaiting property match"}</div>
+                              </div>
+                              <div className={styles.placeholderRow}>
+                                <div className={styles.placeholderLabel}>OTA property ID / reference</div>
+                                <div className={styles.placeholderValue}>{roomEditorActivePreview?.propertyReference ?? "Awaiting property reference"}</div>
+                              </div>
                               <div className={styles.placeholderRow}>
                                 <div className={styles.placeholderLabel}>Famlo room name</div>
                                 <div className={styles.placeholderValue}>{roomEditorRoom?.name ?? "Save room first"}</div>
@@ -5873,6 +5873,34 @@ export default function FamloProDashboardShell({
                                 </div>
                               </div>
                             </div>
+                            <div className={styles.roomChannelCatalogGrid}>
+                              <div className={styles.roomDarkCard}>
+                                <div className={styles.feedTitle}>OTA room list</div>
+                                <div className={styles.stack}>
+                                  {(roomEditorActivePreview?.roomList ?? []).slice(0, 6).map((room) => (
+                                    <div key={`${roomEditorActiveProviderKey}-${room.title}`} className={styles.feedCopy}>{room.title}</div>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className={styles.roomDarkCard}>
+                                <div className={styles.feedTitle}>OTA rate plans</div>
+                                <div className={styles.stack}>
+                                  {(roomEditorActivePreview?.ratePlans ?? []).slice(0, 6).map((ratePlan) => (
+                                    <div key={`${roomEditorActiveProviderKey}-${ratePlan.title}`} className={styles.feedCopy}>{ratePlan.title}</div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                            {roomEditorActivePreview?.warnings.length ? (
+                              <div className={styles.roomDarkCard}>
+                                <div className={styles.feedTitle}>Warnings</div>
+                                <div className={styles.stack}>
+                                  {roomEditorActivePreview.warnings.map((warning) => (
+                                    <div key={warning} className={styles.feedCopy}>{warning}</div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                             <div className={styles.stack}>
                               <div className={styles.roomDarkCard}>
                                 <div className={styles.feedTitle}>What will happen</div>
@@ -5881,6 +5909,21 @@ export default function FamloProDashboardShell({
                                 <div className={styles.feedCopy}>Sync will be queued safely through the existing Channex flow.</div>
                               </div>
                             </div>
+                            <label className={styles.roomChannelCheckboxRow}>
+                              <input
+                                type="checkbox"
+                                checked={roomEditorPreviewAccepted}
+                                onChange={(event) =>
+                                  setRoomChannelPreviewAcceptedByKey((current) => ({
+                                    ...current,
+                                    [roomEditorActiveProviderKey]: event.target.checked,
+                                  }))
+                                }
+                              />
+                              <span>
+                                I confirm this is the correct OTA property and room. Famlo can manage availability, rates, and inventory for this OTA room.
+                              </span>
+                            </label>
                             <div className={styles.inlineActionRow}>
                               <button
                                 type="button"
@@ -5894,7 +5937,7 @@ export default function FamloProDashboardShell({
                               <button
                                 type="button"
                                 className={styles.primaryActionButton}
-                                disabled={!selectedChannelConfirmationChecked || roomEditorActivePreview?.mode === "assisted" || roomEditorPendingState === "connect" || roomEditorPendingState === "sync"}
+                                disabled={!selectedChannelConfirmationChecked || !roomEditorPreviewAccepted || roomEditorPendingState === "connect" || roomEditorPendingState === "sync"}
                                 onClick={() => handleConnectRoomChannelAndSync(roomEditorActiveProviderKey)}
                               >
                                 Connect & start sync
@@ -5905,6 +5948,7 @@ export default function FamloProDashboardShell({
 
                         {roomEditorActivePanelView === "summary" ? (
                           <div className={styles.roomChannelSummaryGrid}>
+                            <div className={styles.roomChannelStepLabel}>Step 4: Connected and syncing</div>
                             <div className={styles.roomDarkCard}>
                               <div className={styles.summaryLabel}>{roomEditorActiveProvider.displayName}</div>
                               <div className={styles.summaryValue}>{roomEditorActiveProvider.displayName} connected</div>
@@ -5978,6 +6022,13 @@ export default function FamloProDashboardShell({
                             onClose={() => setActiveChannelSetup(null)}
                           />
                         </details>
+                      </div>
+                    ) : roomEditorMode === "edit" ? (
+                      <div className={styles.roomDarkCard}>
+                        <div className={styles.feedTitle}>Select an OTA and click Connect to continue.</div>
+                        <div className={styles.feedCopy}>
+                          Famlo will open the OTA-specific setup form, preview the matched property and room through Channex, then ask for confirmation before sync starts.
+                        </div>
                       </div>
                     ) : null}
                   </article>
