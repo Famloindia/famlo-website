@@ -10,6 +10,7 @@ import {
   fetchChannexRestrictionsSnapshot,
   getChannexConfigSummary,
 } from "@/lib/channel-providers/channex/client";
+import { resolveOtaPaymentCollectMode, type OtaPaymentCollectMode } from "@/lib/channel-booking-normalization";
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { loadCanonicalCalendar } from "@/lib/calendar";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
@@ -177,6 +178,10 @@ function asNumber(value: unknown): number {
   return 0;
 }
 
+function normalizeToken(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
 function asObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
@@ -188,6 +193,30 @@ function resolveLatestPayoutRow(rows: Array<Record<string, unknown>>): Record<st
     const rightAnchor = asString(right.processed_at) ?? asString(right.created_at) ?? "";
     return rightAnchor.localeCompare(leftAnchor);
   })[0] ?? null;
+}
+
+function maskPayoutDestination(account: Record<string, unknown> | null): string | null {
+  if (!account) return null;
+  const vpa = asString(account.vpa);
+  if (vpa) return `UPI ${vpa}`;
+  const masked = asString(account.account_number_masked);
+  if (masked) return masked.startsWith("Bank") ? masked : `Bank ${masked}`;
+  return null;
+}
+
+function isPaidPayoutStatus(value: unknown): boolean {
+  const normalized = normalizeToken(value);
+  return normalized === "paid" || normalized === "processed" || normalized === "completed";
+}
+
+function isCompletedRevenueStatus(value: unknown): boolean {
+  const normalized = normalizeToken(value);
+  return (
+    normalized === "checked_out" ||
+    normalized === "completed" ||
+    normalized === "checkout_done" ||
+    normalized === "revenue_recognized"
+  );
 }
 
 function formatTimestampLabel(value: string | null | undefined): string {
@@ -299,16 +328,23 @@ type ProBookingSummary = {
   roomName: string;
   startDate: string;
   endDate: string;
+  checkoutDate: string;
+  revenueDate: string | null;
   createdAt: string | null;
   guestDisplayName: string;
   status: string;
+  reservationStatus: string | null;
   paymentStatus: string | null;
   amount: string | null;
   amountValue: number | null;
   currency: string;
   netPayoutAmount: number | null;
+  payoutAmountValue: number | null;
+  paidPayoutAmount: number | null;
   sourceLabel: string;
   sourceCategory: "famlo" | "direct" | "ota";
+  paymentCollectMode: OtaPaymentCollectMode;
+  famloPayoutEligible: boolean;
   payoutStatus: string | null;
   payoutPaidAt: string | null;
   estimatedPayoutDate: string | null;
@@ -323,6 +359,13 @@ type ProBookingSummary = {
   ackStatus: string | null;
   linkedBookingId: string | null;
   isOta: boolean;
+};
+
+type HostPayoutSummaryRow = {
+  amount: number;
+  status: string;
+  processedAt: string | null;
+  destinationMasked: string | null;
 };
 
 type CalendarWindowSummary = {
@@ -976,12 +1019,20 @@ export async function renderFamloProDashboardPage({
     .map((row) => asString(row.id))
     .filter((value): value is string => Boolean(value));
   const payoutRowsByBookingId = new Map<string, Array<Record<string, unknown>>>();
+  const reservationsByBookingId = new Map<string, Record<string, unknown>>();
+  const hostPayoutRows: HostPayoutSummaryRow[] = [];
 
   if (bookingWorkspaceIds.length > 0) {
-    const payoutRowsResult = await supabase
-      .from("payouts_v2")
-      .select("booking_id,amount,status,processed_at,created_at")
-      .in("booking_id", bookingWorkspaceIds);
+    const [payoutRowsResult, reservationRowsResult] = await Promise.all([
+      supabase
+        .from("payouts_v2")
+        .select("booking_id,amount,status,processed_at,created_at")
+        .in("booking_id", bookingWorkspaceIds),
+      supabase
+        .from("reservations_v2")
+        .select("booking_id,operational_status,check_out_date")
+        .in("booking_id", bookingWorkspaceIds),
+    ]);
 
     if (!payoutRowsResult.error) {
       for (const row of (payoutRowsResult.data ?? []) as Array<Record<string, unknown>>) {
@@ -989,6 +1040,42 @@ export async function renderFamloProDashboardPage({
         if (!bookingId) continue;
         payoutRowsByBookingId.set(bookingId, [...(payoutRowsByBookingId.get(bookingId) ?? []), row]);
       }
+    }
+
+    if (!reservationRowsResult.error) {
+      for (const row of (reservationRowsResult.data ?? []) as Array<Record<string, unknown>>) {
+        const bookingId = asString(row.booking_id);
+        if (!bookingId || reservationsByBookingId.has(bookingId)) continue;
+        reservationsByBookingId.set(bookingId, row);
+      }
+    }
+  }
+
+  if (host?.id && preloadBookingWorkspace) {
+    const [{ data: payoutExecutions }, { data: payoutAccount }] = await Promise.all([
+      supabase
+        .from("host_payout_executions")
+        .select("amount,status,processed_at,created_at")
+        .eq("host_id", host.id)
+        .order("created_at", { ascending: false })
+        .limit(40),
+      supabase
+        .from("host_payout_accounts")
+        .select("account_number_masked,vpa")
+        .eq("host_id", host.id)
+        .eq("is_active", true)
+        .order("updated_at", { ascending: false })
+        .maybeSingle(),
+    ]);
+
+    const destinationMasked = maskPayoutDestination((payoutAccount as Record<string, unknown> | null) ?? null);
+    for (const row of ((payoutExecutions ?? []) as Array<Record<string, unknown>>)) {
+      hostPayoutRows.push({
+        amount: asNumber(row.amount),
+        status: asString(row.status) ?? "",
+        processedAt: asString(row.processed_at) ?? asString(row.created_at) ?? null,
+        destinationMasked,
+      });
     }
   }
 
@@ -1146,6 +1233,9 @@ export async function renderFamloProDashboardPage({
       const bookingCurrency = asString(pricingSnapshot.currency) ?? matchedRevision?.currency ?? "INR";
       const totalPrice = asNumber(row.total_price);
       const amountValue = totalPrice > 0 ? totalPrice : matchedRevision?.amount ?? null;
+      const reservation = reservationsByBookingId.get(bookingId) ?? null;
+      const reservationStatus = asString(reservation?.operational_status) ?? null;
+      const checkoutDate = asString(reservation?.check_out_date) ?? endDate;
       const sourceCategory: ProBookingSummary["sourceCategory"] = isOta
         ? "ota"
         : sourceChannel === "pms_manual"
@@ -1155,6 +1245,7 @@ export async function renderFamloProDashboardPage({
       const financeContract = asObject(financeSnapshot.contract_v1) ?? {};
       const payoutBreakdown = asObject(financeSnapshot.payout_breakdown) ?? {};
       const latestPayout = resolveLatestPayoutRow(payoutRowsByBookingId.get(bookingId) ?? []);
+      const payoutAmountValue = asNumber(latestPayout?.amount) || null;
       const platformFeeAmount =
         asNumber(pricingSnapshot.platform_fee) ||
         asNumber(financeContract.platform_fee) ||
@@ -1184,12 +1275,30 @@ export async function renderFamloProDashboardPage({
           : null;
       const payoutStatus = asString(latestPayout?.status) ?? null;
       const payoutPaidAt = asString(latestPayout?.processed_at) ?? asString(latestPayout?.created_at) ?? null;
+      const paymentCollectMode =
+        sourceCategory === "famlo"
+          ? "FAMLO_COLLECT"
+          : resolveOtaPaymentCollectMode(
+              asString(pricingSnapshot.payment_collect_mode) ??
+                asString(pricingSnapshot.payment_collect) ??
+                null
+            );
+      const famloPayoutEligible =
+        sourceCategory === "famlo" || paymentCollectMode === "FAMLO_COLLECT";
+      const revenueDate =
+        isCompletedRevenueStatus(reservationStatus) || isCompletedRevenueStatus(row.status)
+          ? checkoutDate
+          : checkoutDate < getTodayInIndia()
+            ? checkoutDate
+            : null;
       return [{
         bookingId,
         roomId: stayUnitId,
         roomName: stayUnitId ? roomNameById.get(stayUnitId) ?? "Room" : "Room",
         startDate,
         endDate,
+        checkoutDate,
+        revenueDate,
         createdAt: asString(row.created_at),
         guestDisplayName:
           asString(pricingSnapshot.channel_guest_display_name) ??
@@ -1198,6 +1307,7 @@ export async function renderFamloProDashboardPage({
           asString(userRecord.name) ??
           (isOta ? "OTA Guest" : "Famlo Guest"),
         status: String(row.status ?? "unknown"),
+        reservationStatus,
         paymentStatus: asString(row.payment_status),
         amount:
           totalPrice > 0
@@ -1208,8 +1318,12 @@ export async function renderFamloProDashboardPage({
         amountValue,
         currency: bookingCurrency,
         netPayoutAmount,
+        payoutAmountValue: payoutAmountValue ?? netPayoutAmount,
+        paidPayoutAmount: isPaidPayoutStatus(payoutStatus) ? (payoutAmountValue ?? netPayoutAmount) : null,
         sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : sourceChannel === "pms_manual" ? "Famlo PMS" : "Famlo Direct",
         sourceCategory,
+        paymentCollectMode,
+        famloPayoutEligible,
         payoutStatus,
         payoutPaidAt,
         estimatedPayoutDate: payoutStatus === "paid" ? payoutPaidAt : endDate,
@@ -1485,6 +1599,7 @@ export async function renderFamloProDashboardPage({
       channexConfig={channexConfig}
       globalCommission={globalCommission}
       proBookings={proBookings}
+      hostPayoutRows={hostPayoutRows}
       calendarColumns={calendarColumns}
       calendarRows={calendarRows}
       calendarWindow={calendarWindow}

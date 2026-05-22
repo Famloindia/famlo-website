@@ -164,16 +164,23 @@ type ProBookingSummary = {
   roomName: string;
   startDate: string;
   endDate: string;
+  checkoutDate: string;
+  revenueDate: string | null;
   createdAt: string | null;
   guestDisplayName: string;
   status: string;
+  reservationStatus: string | null;
   paymentStatus: string | null;
   amount: string | null;
   amountValue: number | null;
   currency: string;
   netPayoutAmount: number | null;
+  payoutAmountValue: number | null;
+  paidPayoutAmount: number | null;
   sourceLabel: string;
   sourceCategory: "famlo" | "direct" | "ota";
+  paymentCollectMode: "FAMLO_COLLECT" | "OTA_COLLECT" | "PROPERTY_COLLECT" | "UNKNOWN";
+  famloPayoutEligible: boolean;
   payoutStatus: string | null;
   payoutPaidAt: string | null;
   estimatedPayoutDate: string | null;
@@ -188,6 +195,13 @@ type ProBookingSummary = {
   ackStatus: string | null;
   linkedBookingId: string | null;
   isOta: boolean;
+};
+
+type HostPayoutSummaryRow = {
+  amount: number;
+  status: string;
+  processedAt: string | null;
+  destinationMasked: string | null;
 };
 
 type OtaEditDraft = {
@@ -449,6 +463,7 @@ interface FamloProDashboardShellProps {
   channexConfig: ChannexSummary;
   globalCommission: number;
   proBookings: ProBookingSummary[];
+  hostPayoutRows: HostPayoutSummaryRow[];
   calendarColumns: CalendarColumn[];
   calendarRows: CalendarRow[];
   calendarWindow: {
@@ -945,16 +960,20 @@ function bookingNextAction(booking: ProBookingSummary): string {
 
 function hostRevenueStatusLabel(booking: ProBookingSummary): string {
   if (isCancelledBooking(booking)) return "Cancelled";
-  if (normalizeToken(booking.payoutStatus) === "paid") return "Paid to you";
+  if (booking.sourceCategory === "ota" && !booking.famloPayoutEligible) return "Paid by OTA";
+  if (booking.sourceCategory === "direct" && !booking.famloPayoutEligible) return "Paid outside Famlo";
+  if (booking.sourceCategory === "famlo" && !booking.famloPayoutEligible) return "Outside Famlo";
+  if (normalizeToken(booking.payoutStatus) === "paid" || normalizeToken(booking.payoutStatus) === "processed") return "Paid by Famlo";
   if (hasPaymentAttention(booking)) return "Awaiting guest payment";
   if (isPendingApprovalBooking(booking)) return "Awaiting confirmation";
-  if (normalizeToken(booking.paymentStatus) === "paid" || isConfirmedBooking(booking)) return "Pending payout";
+  if (booking.famloPayoutEligible) return "Pending";
   return "In progress";
 }
 
 function hostRevenueStatusTone(booking: ProBookingSummary): string {
   if (isCancelledBooking(booking)) return styles.readinessPillMissing;
-  if (normalizeToken(booking.payoutStatus) === "paid") return styles.readinessPillOk;
+  if (normalizeToken(booking.payoutStatus) === "paid" || normalizeToken(booking.payoutStatus) === "processed") return styles.readinessPillOk;
+  if (!booking.famloPayoutEligible) return styles.readinessPill;
   if (hasPaymentAttention(booking) || isPendingApprovalBooking(booking)) return styles.readinessPillReview;
   return styles.readinessPillOk;
 }
@@ -966,9 +985,18 @@ function revenueSourceLabel(booking: ProBookingSummary): string {
 }
 
 function revenueSourceHint(booking: ProBookingSummary): string {
-  if (booking.sourceCategory === "ota") return "OTA booking";
-  if (booking.sourceCategory === "direct") return "Manual or property direct";
-  return "Famlo generated";
+  if (booking.sourceCategory === "ota") {
+    return booking.famloPayoutEligible ? "Payment handled by Famlo" : "May be paid by OTA/outside Famlo";
+  }
+  if (booking.sourceCategory === "direct") {
+    return booking.famloPayoutEligible ? "Payment handled by Famlo" : "Paid outside Famlo";
+  }
+  return "Payment handled by Famlo";
+}
+
+function bookingFamloPayoutDisplay(booking: ProBookingSummary): string {
+  if (!booking.famloPayoutEligible) return "Outside Famlo";
+  return booking.payoutAmountValue != null ? formatCurrency(booking.payoutAmountValue) : "—";
 }
 
 function countCalendarCellsByStatus(
@@ -1667,6 +1695,7 @@ export default function FamloProDashboardShell({
   channexConfig,
   globalCommission,
   proBookings,
+  hostPayoutRows,
   calendarColumns,
   calendarRows,
   calendarWindow,
@@ -2406,14 +2435,6 @@ export default function FamloProDashboardShell({
   const bookingsWithNetPayout = proBookings.filter(
     (booking): booking is ProBookingSummary & { netPayoutAmount: number } => booking.netPayoutAmount != null
   );
-  const revenueEligibleBookings = bookingsWithNetPayout.filter(
-    (booking) =>
-      isHostBookingVisibleToPartner(booking.status, booking.paymentStatus) &&
-      (
-        normalizeToken(booking.paymentStatus) === "paid" ||
-        isConfirmedBooking(booking)
-      )
-  );
   const todayDate = new Date();
   const todayIsoDate = isoDateFromLocalDate(todayDate);
   const weekStartDate = new Date(todayDate);
@@ -2427,28 +2448,45 @@ export default function FamloProDashboardShell({
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   })();
   const totalBookingValue = bookingsWithValue.reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const revenueTodayBookings = revenueEligibleBookings.filter((booking) => booking.startDate === todayIsoDate);
-  const revenueThisWeekBookings = revenueEligibleBookings.filter(
-    (booking) => booking.startDate >= weekStartIsoDate && booking.startDate <= weekEndIsoDate
+  const completedRevenueBookings = bookingsWithNetPayout.filter((booking) => {
+    const paymentStatus = normalizeToken(booking.paymentStatus);
+    const bookingStatus = normalizeToken(booking.status);
+    const reservationStatus = normalizeToken(booking.reservationStatus);
+    if (!booking.revenueDate) return false;
+    if (
+      bookingStatus === "cancelled" ||
+      bookingStatus === "cancelled_by_user" ||
+      bookingStatus === "cancelled_by_partner" ||
+      reservationStatus === "cancelled"
+    ) {
+      return false;
+    }
+    if (paymentStatus === "failed" || paymentStatus === "failed_payment" || paymentStatus === "pending") {
+      return false;
+    }
+    return true;
+  });
+  const revenueTodayBookings = completedRevenueBookings.filter((booking) => booking.revenueDate === todayIsoDate);
+  const revenueThisWeekBookings = completedRevenueBookings.filter(
+    (booking) => Boolean(booking.revenueDate) && booking.revenueDate! >= weekStartIsoDate && booking.revenueDate! <= weekEndIsoDate
   );
-  const revenueBookingsByWindow: Record<RevenueWindowFilter, typeof revenueEligibleBookings> = {
+  const revenueBookingsByWindow: Record<RevenueWindowFilter, typeof completedRevenueBookings> = {
     Today: revenueTodayBookings,
     "This week": revenueThisWeekBookings,
-    "This month": revenueEligibleBookings.filter((booking) => booking.startDate.startsWith(currentMonthPrefix)),
-    "All time": revenueEligibleBookings,
+    "This month": completedRevenueBookings.filter((booking) => Boolean(booking.revenueDate) && booking.revenueDate!.startsWith(currentMonthPrefix)),
+    "All time": completedRevenueBookings,
   };
   const selectedRevenueBookings = revenueBookingsByWindow[revenueWindow];
-  const selectedRevenueNetPayout = selectedRevenueBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const famloPayoutBookings = selectedRevenueBookings.filter((booking) => booking.famloPayoutEligible);
+  const selectedRevenueNetPayout = famloPayoutBookings.reduce((sum, booking) => sum + (booking.payoutAmountValue ?? booking.netPayoutAmount), 0);
   const selectedRevenueGrossValue = selectedRevenueBookings.reduce(
     (sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0),
     0
   );
-  const selectedRevenuePaidToYou = selectedRevenueBookings
-    .filter((booking) => normalizeToken(booking.payoutStatus) === "paid")
-    .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
-  const selectedRevenuePendingPayout = selectedRevenueBookings
-    .filter((booking) => normalizeToken(booking.payoutStatus) !== "paid")
-    .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const selectedRevenuePaidToYou = famloPayoutBookings.reduce((sum, booking) => sum + (booking.paidPayoutAmount ?? 0), 0);
+  const selectedRevenuePendingPayout = famloPayoutBookings
+    .filter((booking) => (booking.paidPayoutAmount ?? 0) <= 0)
+    .reduce((sum, booking) => sum + (booking.payoutAmountValue ?? booking.netPayoutAmount), 0);
   const famloGeneratedBookings = selectedRevenueBookings.filter((booking) => booking.sourceCategory === "famlo");
   const famloGeneratedRevenue = famloGeneratedBookings.reduce(
     (sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0),
@@ -2477,32 +2515,103 @@ export default function FamloProDashboardShell({
       count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "ota").length,
     },
   };
-  const nextPayoutCandidate = [...selectedRevenueBookings]
-    .filter((booking) => normalizeToken(booking.payoutStatus) !== "paid")
-    .sort((left, right) => {
-      const leftDate = left.estimatedPayoutDate ?? left.endDate;
-      const rightDate = right.estimatedPayoutDate ?? right.endDate;
-      if (leftDate !== rightDate) return leftDate.localeCompare(rightDate);
-      return (left.createdAt ?? "").localeCompare(right.createdAt ?? "");
-    })[0] ?? null;
-  const nextPayoutDate = nextPayoutCandidate?.estimatedPayoutDate ?? nextPayoutCandidate?.endDate ?? null;
-  const nextPayoutAmount = nextPayoutDate
-    ? selectedRevenueBookings
-        .filter(
-          (booking) =>
-            normalizeToken(booking.payoutStatus) !== "paid" &&
-            (booking.estimatedPayoutDate ?? booking.endDate) === nextPayoutDate
-        )
-        .reduce((sum, booking) => sum + booking.netPayoutAmount, 0)
-    : 0;
+  const selectedPayoutRows = hostPayoutRows.filter((row) => {
+    const date = row.processedAt?.slice(0, 10);
+    if (!date) return false;
+    if (revenueWindow === "Today") return date === todayIsoDate;
+    if (revenueWindow === "This week") return date >= weekStartIsoDate && date <= weekEndIsoDate;
+    if (revenueWindow === "This month") return date.startsWith(currentMonthPrefix);
+    return true;
+  });
+  const payoutReceivedAmount = selectedPayoutRows
+    .filter((row) => normalizeToken(row.status) === "processed" || normalizeToken(row.status) === "paid")
+    .reduce((sum, row) => sum + row.amount, 0);
+  const lastPayoutRow = [...hostPayoutRows]
+    .filter((row) => Boolean(row.processedAt))
+    .sort((left, right) => String(right.processedAt ?? "").localeCompare(String(left.processedAt ?? "")))[0] ?? null;
   const selectedRevenueWindowHint =
     revenueWindow === "Today"
-      ? `Payout view for bookings starting on ${formatShortDate(todayIsoDate)}.`
+      ? `Completed earnings recognized on ${formatShortDate(todayIsoDate)}.`
       : revenueWindow === "This week"
-        ? `Payout view from ${formatShortDate(weekStartIsoDate)} to ${formatShortDate(weekEndIsoDate)}.`
+        ? `Completed earnings from ${formatShortDate(weekStartIsoDate)} to ${formatShortDate(weekEndIsoDate)}.`
         : revenueWindow === "This month"
-          ? "Payout view for the current month."
-          : "Payout view across all eligible visible bookings.";
+          ? "Completed earnings for the current month."
+          : "Completed earnings across all eligible visible bookings.";
+  const shouldUseRevenueDemo = process.env.NODE_ENV !== "production" && selectedRevenueBookings.length === 0;
+  const demoRevenueRows = [
+    {
+      bookingId: "demo-rohan",
+      guestDisplayName: "Rohan Sharma",
+      roomName: "2 nights",
+      startDate: "2026-05-12",
+      endDate: "2026-05-14",
+      checkoutDate: "2026-05-14",
+      sourceCategory: "famlo" as const,
+      amount: formatCurrency(6200),
+      payout: formatCurrency(5580),
+      status: "Pending",
+    },
+    {
+      bookingId: "demo-priya",
+      guestDisplayName: "Priya Mehta",
+      roomName: "1 night",
+      startDate: "2026-05-10",
+      endDate: "2026-05-11",
+      checkoutDate: "2026-05-11",
+      sourceCategory: "famlo" as const,
+      amount: formatCurrency(3800),
+      payout: formatCurrency(3420),
+      status: "Paid by Famlo",
+    },
+    {
+      bookingId: "demo-aman",
+      guestDisplayName: "Aman Jain",
+      roomName: "2 nights",
+      startDate: "2026-05-08",
+      endDate: "2026-05-10",
+      checkoutDate: "2026-05-10",
+      sourceCategory: "ota" as const,
+      amount: formatCurrency(7500),
+      payout: "Outside Famlo",
+      status: "Paid by OTA",
+    },
+    {
+      bookingId: "demo-kavya",
+      guestDisplayName: "Kavya Singh",
+      roomName: "1 night",
+      startDate: "2026-05-06",
+      endDate: "2026-05-07",
+      checkoutDate: "2026-05-07",
+      sourceCategory: "direct" as const,
+      amount: formatCurrency(2500),
+      payout: "Outside Famlo",
+      status: "Paid outside Famlo",
+    },
+  ];
+  const effectiveRevenueGrossValue = shouldUseRevenueDemo ? 48100 : selectedRevenueGrossValue;
+  const effectiveRevenueNetPayout = shouldUseRevenueDemo ? 21850 : selectedRevenueNetPayout;
+  const effectiveRevenuePaidToYou = shouldUseRevenueDemo ? 13450 : selectedRevenuePaidToYou;
+  const effectiveRevenuePendingPayout = shouldUseRevenueDemo ? 8400 : selectedRevenuePendingPayout;
+  const effectiveFamloGeneratedRevenue = shouldUseRevenueDemo ? 24500 : famloGeneratedRevenue;
+  const effectiveFamloGeneratedCount = shouldUseRevenueDemo ? 6 : famloGeneratedBookings.length;
+  const effectiveFamloGeneratedContribution = shouldUseRevenueDemo
+    ? (24500 / 48100) * 100
+    : famloGeneratedContribution;
+  const effectiveRevenueBySource = shouldUseRevenueDemo
+    ? {
+        famlo: { label: "Famlo", amount: 24500, count: 6 },
+        direct: { label: "Direct", amount: 8000, count: 3 },
+        ota: { label: "OTA", amount: 15600, count: 3 },
+      }
+    : revenueBySource;
+  const effectivePayoutReceivedAmount = shouldUseRevenueDemo ? 13450 : payoutReceivedAmount;
+  const effectiveLastPayout = shouldUseRevenueDemo
+    ? {
+        amount: 8400,
+        processedAt: "2026-05-18",
+        destinationMasked: "Bank •••• 4821",
+      }
+    : lastPayoutRow;
   const averageBookingValue = bookingsWithValue.length > 0 ? totalBookingValue / bookingsWithValue.length : null;
   const directAverageBookingValue = (() => {
     const directValues = bookingsWithValue.filter((entry) => !entry.booking.isOta);
@@ -8102,25 +8211,25 @@ export default function FamloProDashboardShell({
                 <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Total booking value</div>
-                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueGrossValue)}</div>
+                    <div className={styles.metricValue}>{formatCurrency(effectiveRevenueGrossValue)}</div>
                     <div className={styles.metricHint}>
-                      {selectedRevenueBookings.length} booking{selectedRevenueBookings.length === 1 ? "" : "s"} in {revenueWindow.toLowerCase()}.
+                      {(shouldUseRevenueDemo ? 12 : selectedRevenueBookings.length)} completed booking{(shouldUseRevenueDemo ? 12 : selectedRevenueBookings.length) === 1 ? "" : "s"} in {revenueWindow.toLowerCase()}.
                     </div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Expected payout</div>
-                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueNetPayout)}</div>
-                    <div className={styles.metricHint}>What you are expected to receive from the selected bookings.</div>
+                    <div className={styles.miniLabel}>Famlo payout to you</div>
+                    <div className={styles.metricValue}>{formatCurrency(effectiveRevenueNetPayout)}</div>
+                    <div className={styles.metricHint}>Only bookings where payment collection and payout are handled by Famlo are included here.</div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Paid to you</div>
-                    <div className={styles.metricValue}>{formatCurrency(selectedRevenuePaidToYou)}</div>
-                    <div className={styles.metricHint}>Bookings in this period that have already been paid out to you.</div>
+                    <div className={styles.miniLabel}>Paid by Famlo</div>
+                    <div className={styles.metricValue}>{formatCurrency(effectiveRevenuePaidToYou)}</div>
+                    <div className={styles.metricHint}>Completed payout records already processed by Famlo for this period.</div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Pending payout</div>
-                    <div className={styles.metricValue}>{formatCurrency(selectedRevenuePendingPayout)}</div>
-                    <div className={styles.metricHint}>Payout still waiting to be released or completed.</div>
+                    <div className={styles.miniLabel}>Pending Famlo payout</div>
+                    <div className={styles.metricValue}>{formatCurrency(effectiveRevenuePendingPayout)}</div>
+                    <div className={styles.metricHint}>Eligible Famlo-collected bookings that are not fully paid out yet.</div>
                   </article>
                 </div>
 
@@ -8134,16 +8243,18 @@ export default function FamloProDashboardShell({
                     }}
                   >
                     <div className={styles.miniLabel}>Famlo helped you earn</div>
-                    <div className={styles.metricValue}>{formatCurrency(famloGeneratedRevenue)}</div>
+                    <div className={styles.metricValue}>{formatCurrency(effectiveFamloGeneratedRevenue)}</div>
                     <div className={styles.metricHint}>
-                      {famloGeneratedBookings.length} Famlo booking{famloGeneratedBookings.length === 1 ? "" : "s"} contributed{" "}
-                      {famloGeneratedContribution.toFixed(1)}% of your total booking value in this period.
+                      {effectiveFamloGeneratedCount} Famlo booking{effectiveFamloGeneratedCount === 1 ? "" : "s"} contributed{" "}
+                      {effectiveFamloGeneratedContribution.toFixed(1)}% of your total booking value in this period.
                     </div>
                     <div className={styles.inlineBadgeRow}>
                       <span className={styles.readinessPill}>{revenueWindow}</span>
                       <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
                         {formatCurrency(
-                          famloGeneratedBookings.reduce((sum, booking) => sum + (booking.famloRevenueAmount ?? 0), 0)
+                          shouldUseRevenueDemo
+                            ? 24500
+                            : famloGeneratedBookings.reduce((sum, booking) => sum + (booking.famloRevenueAmount ?? 0), 0)
                         )} Famlo revenue
                       </span>
                     </div>
@@ -8152,12 +8263,16 @@ export default function FamloProDashboardShell({
                   <article className={styles.listCard}>
                     <div className={styles.listTitle}>Revenue by source</div>
                     <div className={styles.placeholderGrid}>
-                      {Object.values(revenueBySource).map((source) => (
+                      {Object.values(effectiveRevenueBySource).map((source) => (
                         <div key={source.label} className={styles.placeholderRow}>
                           <div className={styles.placeholderTitle}>{source.label}</div>
                           <div className={styles.placeholderValue}>{formatCurrency(source.amount)}</div>
                           <div className={styles.placeholderCopy}>
-                            {source.count} booking{source.count === 1 ? "" : "s"}
+                            {source.count} booking{source.count === 1 ? "" : "s"} · {source.label === "Famlo"
+                              ? "Payment handled by Famlo"
+                              : source.label === "Direct"
+                                ? "Paid outside Famlo"
+                                : "May be paid by OTA/outside Famlo"}
                           </div>
                         </div>
                       ))}
@@ -8165,128 +8280,180 @@ export default function FamloProDashboardShell({
                   </article>
 
                   <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Next payout</div>
+                    <div className={styles.listTitle}>Payout received</div>
                     <div className={styles.placeholderGrid}>
                       <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderTitle}>Expected payout amount</div>
-                        <div className={styles.placeholderValue}>
-                          {nextPayoutAmount > 0 ? formatCurrency(nextPayoutAmount) : formatCurrency(0)}
-                        </div>
-                        <div className={styles.placeholderCopy}>
-                          {nextPayoutCandidate
-                            ? "Based on the earliest unpaid booking checkout in this period."
-                            : "No pending payout is visible for this filter."}
-                        </div>
+                        <div className={styles.placeholderTitle}>Total paid by Famlo</div>
+                        <div className={styles.placeholderValue}>{formatCurrency(effectivePayoutReceivedAmount)}</div>
+                        <div className={styles.placeholderCopy}>Processed payout executions in the selected period.</div>
                       </div>
                       <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderTitle}>Estimated payout date</div>
+                        <div className={styles.placeholderTitle}>Last payout</div>
                         <div className={styles.placeholderValue}>
-                          {nextPayoutDate ? formatShortDate(nextPayoutDate) : "No payout scheduled"}
+                          {effectiveLastPayout ? formatCurrency(effectiveLastPayout.amount) : "No payout yet"}
                         </div>
                         <div className={styles.placeholderCopy}>
-                          {nextPayoutDate ? selectedRevenueWindowHint : "Payout timing will appear here once a payout is pending."}
+                          {effectiveLastPayout?.processedAt
+                            ? `${formatShortDate(effectiveLastPayout.processedAt.slice(0, 10))} · ${effectiveLastPayout.destinationMasked ?? "Destination pending"}`
+                            : "Completed payout details will appear here once Famlo processes one."}
                         </div>
+                      </div>
+                      <div className={styles.inlineActionRow} style={{ marginTop: "4px" }}>
+                        <Link href="/host/finance/payouts" className={styles.secondaryActionLink}>
+                          View payout history
+                        </Link>
                       </div>
                     </div>
                   </article>
                 </div>
 
-                {selectedRevenueBookings.length > 0 ? (
+                {selectedRevenueBookings.length > 0 || shouldUseRevenueDemo ? (
                   <article className={styles.listCard} style={{ display: "grid", gap: "18px" }}>
                     <div>
                       <div className={styles.listTitle}>Booking-wise revenue</div>
                       <div className={styles.feedCopy}>
-                        Guest payment, your payout, and a simple source-wise payout view for each booking.
+                        Only completed stays appear here, filtered by checkout or revenue recognition date.
                       </div>
                     </div>
-                    <div className={styles.mappingTable} style={{ gridTemplateColumns: "minmax(220px, 1.35fr) minmax(150px, 1fr) minmax(140px, 0.9fr) minmax(140px, 0.9fr) minmax(140px, 0.9fr) minmax(160px, 1fr)" }}>
+                    <div className={styles.mappingTable} style={{ gridTemplateColumns: "minmax(220px, 1.2fr) minmax(160px, 1fr) minmax(130px, 0.85fr) minmax(140px, 0.85fr) minmax(140px, 0.85fr) minmax(140px, 0.85fr) minmax(160px, 1fr)" }}>
                       <div className={styles.mappingHeader}>Booking / guest</div>
                       <div className={styles.mappingHeader}>Stay dates</div>
+                      <div className={styles.mappingHeader}>Checkout date</div>
                       <div className={styles.mappingHeader}>Source</div>
                       <div className={styles.mappingHeader}>Guest paid</div>
-                      <div className={styles.mappingHeader}>Host payout</div>
-                      <div className={styles.mappingHeader}>Status</div>
-                      {selectedRevenueBookings.map((booking) => (
-                        <Fragment key={`revenue-${booking.bookingId}`}>
-                          <div className={styles.mappingCell}>
-                            <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
-                            <div className={styles.mappingSubcopy}>
-                              {booking.roomName} · {booking.bookingId.slice(0, 8)}
-                            </div>
-                          </div>
-                          <div className={styles.mappingCell}>
-                            <div className={styles.mappingTitle}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
-                            <div className={styles.mappingSubcopy}>Created {booking.createdAt ? formatShortDate(booking.createdAt.slice(0, 10)) : "recently"}</div>
-                          </div>
-                          <div className={styles.mappingCell}>
-                            <div className={styles.mappingTitle}>{revenueSourceLabel(booking)}</div>
-                            <div className={styles.mappingSubcopy}>{revenueSourceHint(booking)}</div>
-                          </div>
-                          <div className={styles.mappingCell}>
-                            <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
-                            <div className={styles.mappingSubcopy}>What the guest paid</div>
-                          </div>
-                          <div className={styles.mappingCell}>
-                            <div className={styles.mappingTitle}>
-                              {booking.netPayoutAmount != null ? formatCurrency(booking.netPayoutAmount) : "Not available"}
-                            </div>
-                            <div className={styles.mappingSubcopy}>Expected host payout</div>
-                          </div>
-                          <div className={styles.mappingCell}>
-                            <span className={`${styles.readinessPill} ${hostRevenueStatusTone(booking)}`}>
-                              {hostRevenueStatusLabel(booking)}
-                            </span>
-                            <div className={styles.mappingSubcopy} style={{ marginTop: "8px" }}>
-                              {booking.estimatedPayoutDate ? `Estimated ${formatShortDate(booking.estimatedPayoutDate)}` : "Payout date pending"}
-                            </div>
-                          </div>
-                          <div className={styles.mappingCell} style={{ gridColumn: "1 / -1" }}>
-                            <details className={styles.operatorDetails} style={{ margin: 0 }}>
-                              <summary className={styles.operatorSummary}>Payout breakdown</summary>
-                              <div
-                                style={{
-                                  display: "grid",
-                                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                                  gap: "12px",
-                                  marginTop: "14px",
-                                }}
-                              >
-                                <div className={styles.placeholderRow}>
-                                  <div className={styles.placeholderTitle}>Platform fee</div>
-                                  <div className={styles.placeholderValue}>
-                                    {booking.platformFeeAmount != null ? formatCurrency(booking.platformFeeAmount) : "—"}
-                                  </div>
-                                </div>
-                                <div className={styles.placeholderRow}>
-                                  <div className={styles.placeholderTitle}>OTA commission</div>
-                                  <div className={styles.placeholderValue}>
-                                    {booking.otaCommissionAmount != null ? formatCurrency(booking.otaCommissionAmount) : "—"}
-                                  </div>
-                                </div>
-                                <div className={styles.placeholderRow}>
-                                  <div className={styles.placeholderTitle}>Refund adjustment</div>
-                                  <div className={styles.placeholderValue}>
-                                    {booking.refundAdjustmentAmount != null ? formatCurrency(booking.refundAdjustmentAmount) : "—"}
-                                  </div>
-                                </div>
-                                <div className={styles.placeholderRow}>
-                                  <div className={styles.placeholderTitle}>Tax / GST</div>
-                                  <div className={styles.placeholderValue}>
-                                    {booking.taxAmount != null ? formatCurrency(booking.taxAmount) : "—"}
-                                  </div>
+                      <div className={styles.mappingHeader}>Famlo payout</div>
+                      <div className={styles.mappingHeader}>Payment status</div>
+                      {shouldUseRevenueDemo
+                        ? demoRevenueRows.map((booking) => (
+                            <Fragment key={`revenue-${booking.bookingId}`}>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
+                                <div className={styles.mappingSubcopy}>
+                                  {booking.roomName} · {booking.bookingId.slice(0, 8)}
                                 </div>
                               </div>
-                            </details>
-                          </div>
-                        </Fragment>
-                      ))}
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
+                                <div className={styles.mappingSubcopy}>{booking.roomName}</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{formatShortDate(booking.checkoutDate)}</div>
+                                <div className={styles.mappingSubcopy}>{selectedRevenueWindowHint}</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>
+                                  {booking.sourceCategory === "ota" ? "Booking.com" : booking.sourceCategory === "direct" ? "Direct" : "Famlo"}
+                                </div>
+                                <div className={styles.mappingSubcopy}>
+                                  {booking.sourceCategory === "ota"
+                                    ? "May be paid by OTA/outside Famlo"
+                                    : booking.sourceCategory === "direct"
+                                      ? "Paid outside Famlo"
+                                      : "Payment handled by Famlo"}
+                                </div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{booking.amount}</div>
+                                <div className={styles.mappingSubcopy}>What the guest paid</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{booking.payout}</div>
+                                <div className={styles.mappingSubcopy}>Outside-Famlo payouts stay separate</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <span className={`${styles.readinessPill} ${booking.status === "Pending" ? styles.readinessPillReview : styles.readinessPillOk}`}>
+                                  {booking.status}
+                                </span>
+                              </div>
+                            </Fragment>
+                          ))
+                        : selectedRevenueBookings.map((booking) => (
+                            <Fragment key={`revenue-${booking.bookingId}`}>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
+                                <div className={styles.mappingSubcopy}>
+                                  {booking.roomName} · {booking.bookingId.slice(0, 8)}
+                                </div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
+                                <div className={styles.mappingSubcopy}>Completed stay</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{formatShortDate(booking.checkoutDate)}</div>
+                                <div className={styles.mappingSubcopy}>{selectedRevenueWindowHint}</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{revenueSourceLabel(booking)}</div>
+                                <div className={styles.mappingSubcopy}>{revenueSourceHint(booking)}</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
+                                <div className={styles.mappingSubcopy}>What the guest paid</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <div className={styles.mappingTitle}>{bookingFamloPayoutDisplay(booking)}</div>
+                                <div className={styles.mappingSubcopy}>{!booking.famloPayoutEligible ? "Outside-Famlo payouts stay separate" : "Famlo-managed payout amount"}</div>
+                              </div>
+                              <div className={styles.mappingCell}>
+                                <span className={`${styles.readinessPill} ${hostRevenueStatusTone(booking)}`}>
+                                  {hostRevenueStatusLabel(booking)}
+                                </span>
+                                <div className={styles.mappingSubcopy} style={{ marginTop: "8px" }}>
+                                  {booking.famloPayoutEligible
+                                    ? booking.payoutPaidAt
+                                      ? `Paid ${formatShortDate(booking.payoutPaidAt.slice(0, 10))}`
+                                      : "Awaiting Famlo payout release"
+                                    : "Outside Famlo payout flow"}
+                                </div>
+                              </div>
+                              <div className={styles.mappingCell} style={{ gridColumn: "1 / -1" }}>
+                                <details className={styles.operatorDetails} style={{ margin: 0 }}>
+                                  <summary className={styles.operatorSummary}>Payout breakdown</summary>
+                                  <div
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                                      gap: "12px",
+                                      marginTop: "14px",
+                                    }}
+                                  >
+                                    <div className={styles.placeholderRow}>
+                                      <div className={styles.placeholderTitle}>Platform fee</div>
+                                      <div className={styles.placeholderValue}>
+                                        {booking.platformFeeAmount != null ? formatCurrency(booking.platformFeeAmount) : "—"}
+                                      </div>
+                                    </div>
+                                    <div className={styles.placeholderRow}>
+                                      <div className={styles.placeholderTitle}>OTA commission</div>
+                                      <div className={styles.placeholderValue}>
+                                        {booking.otaCommissionAmount != null ? formatCurrency(booking.otaCommissionAmount) : "—"}
+                                      </div>
+                                    </div>
+                                    <div className={styles.placeholderRow}>
+                                      <div className={styles.placeholderTitle}>Refund adjustment</div>
+                                      <div className={styles.placeholderValue}>
+                                        {booking.refundAdjustmentAmount != null ? formatCurrency(booking.refundAdjustmentAmount) : "—"}
+                                      </div>
+                                    </div>
+                                    <div className={styles.placeholderRow}>
+                                      <div className={styles.placeholderTitle}>Tax / GST</div>
+                                      <div className={styles.placeholderValue}>
+                                        {booking.taxAmount != null ? formatCurrency(booking.taxAmount) : "—"}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </details>
+                              </div>
+                            </Fragment>
+                          ))}
                     </div>
                   </article>
                 ) : (
                   <div className={styles.emptyState}>
-                    <div className={styles.emptyTitle}>No earnings in this period yet</div>
+                    <div className={styles.emptyTitle}>No completed earnings in this period yet</div>
                     <div className={styles.emptyCopy}>
-                      When you receive Famlo, direct, or OTA bookings, your revenue will appear here.
+                      Completed Famlo, direct, and OTA bookings will appear here after guest checkout.
                     </div>
                   </div>
                 )}
