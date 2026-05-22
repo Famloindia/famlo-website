@@ -12,7 +12,6 @@ import {
 } from "@/lib/channel-providers/channex/client";
 import { resolveOtaPaymentCollectMode, type OtaPaymentCollectMode } from "@/lib/channel-booking-normalization";
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
-import { toMaskedHostRevenueDestination } from "@/lib/finance/pro-revenue";
 import { loadCanonicalCalendar } from "@/lib/calendar";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
@@ -356,13 +355,6 @@ type ProBookingSummary = {
   ackStatus: string | null;
   linkedBookingId: string | null;
   isOta: boolean;
-};
-
-type HostPayoutSummaryRow = {
-  amount: number;
-  status: string;
-  processedAt: string | null;
-  destinationMasked: string | null;
 };
 
 type HostRevenueCompliance = {
@@ -1036,7 +1028,6 @@ export async function renderFamloProDashboardPage({
     .filter((value): value is string => Boolean(value));
   const payoutRowsByBookingId = new Map<string, Array<Record<string, unknown>>>();
   const reservationsByBookingId = new Map<string, Record<string, unknown>>();
-  const hostPayoutRows: HostPayoutSummaryRow[] = [];
   const foliosByBookingId = new Map<string, Record<string, unknown>>();
   const settlementLineByBookingId = new Map<string, Record<string, unknown>>();
   const settlementsById = new Map<string, Record<string, unknown>>();
@@ -1186,11 +1177,6 @@ export async function renderFamloProDashboardPage({
         : Promise.resolve({ data: null, error: null }),
     ]);
 
-    const destinationMasked = toMaskedHostRevenueDestination({
-      accountNumberMasked: asString((payoutAccount as Record<string, unknown> | null)?.account_number_masked),
-      vpa: asString((payoutAccount as Record<string, unknown> | null)?.vpa),
-    });
-
     hostRevenueCompliance = {
       panVerified:
         ((hostTaxDetails as Record<string, unknown> | null)?.is_verified === true) ||
@@ -1198,16 +1184,6 @@ export async function renderFamloProDashboardPage({
         normalizeToken((hostTaxDetails as Record<string, unknown> | null)?.verification_status) === "approved",
       payoutAccountActive: (payoutAccount as Record<string, unknown> | null)?.is_active === true,
     };
-
-    for (const [settlementId, row] of payoutExecutionBySettlementId.entries()) {
-      if (!settlementsById.has(settlementId)) continue;
-      hostPayoutRows.push({
-        amount: asNumber(row.amount),
-        status: asString(row.status) ?? "",
-        processedAt: asString(row.processed_at) ?? asString(row.created_at) ?? null,
-        destinationMasked,
-      });
-    }
   }
 
   const roomManualBlockDates = new Map<string, Set<string>>();
@@ -1768,7 +1744,6 @@ export async function renderFamloProDashboardPage({
       channexConfig={channexConfig}
       globalCommission={globalCommission}
       proBookings={proBookings}
-      hostPayoutRows={hostPayoutRows}
       hostRevenueCompliance={hostRevenueCompliance}
       calendarColumns={calendarColumns}
       calendarRows={calendarRows}

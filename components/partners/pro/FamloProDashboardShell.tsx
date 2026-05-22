@@ -69,12 +69,12 @@ import {
 } from "@/lib/channel-providers/channex/client";
 import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
 import {
+  buildHostPayoutHistoryUrl,
   deriveRevenuePaymentStatusLabel,
   isCompletedRevenueBooking,
   isFinanceBackedPaidStatus,
   matchesRevenueWindowDate,
   shouldIncludeFamloPayoutInTotals,
-  toMaskedHostRevenueDestination,
 } from "@/lib/finance/pro-revenue";
 import styles from "./pro-dashboard.module.css";
 
@@ -208,13 +208,6 @@ type ProBookingSummary = {
   ackStatus: string | null;
   linkedBookingId: string | null;
   isOta: boolean;
-};
-
-type HostPayoutSummaryRow = {
-  amount: number;
-  status: string;
-  processedAt: string | null;
-  destinationMasked: string | null;
 };
 
 type HostRevenueCompliance = {
@@ -481,7 +474,6 @@ interface FamloProDashboardShellProps {
   channexConfig: ChannexSummary;
   globalCommission: number;
   proBookings: ProBookingSummary[];
-  hostPayoutRows: HostPayoutSummaryRow[];
   hostRevenueCompliance: HostRevenueCompliance;
   calendarColumns: CalendarColumn[];
   calendarRows: CalendarRow[];
@@ -1013,6 +1005,13 @@ function bookingFamloPayoutDisplay(booking: ProBookingSummary): string {
   if (booking.paymentCollectMode !== "FAMLO_COLLECT") return "Outside Famlo";
   if (!booking.famloPayoutEligible) return "Pending settlement";
   return booking.payoutAmountValue != null ? formatCurrency(booking.payoutAmountValue) : "—";
+}
+
+function bookingFamloPayoutHint(booking: ProBookingSummary): string {
+  if (booking.paymentCollectMode !== "FAMLO_COLLECT") return "Outside-Famlo payouts stay separate";
+  if (!booking.famloPayoutEligible) return "Waiting for a finance-backed settlement line";
+  if (booking.complianceBlocked) return "Payout is blocked until compliance is cleared";
+  return "Famlo-managed payout amount";
 }
 
 function countCalendarCellsByStatus(
@@ -1711,7 +1710,6 @@ export default function FamloProDashboardShell({
   channexConfig,
   globalCommission,
   proBookings,
-  hostPayoutRows,
   hostRevenueCompliance,
   calendarColumns,
   calendarRows,
@@ -2519,13 +2517,6 @@ export default function FamloProDashboardShell({
       count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "ota").length,
     },
   };
-  const selectedPayoutRows = hostPayoutRows.filter((row) => matchesRevenueWindowDate(row.processedAt?.slice(0, 10) ?? null, revenueWindow, revenueWindowAnchors));
-  const payoutReceivedAmount = selectedPayoutRows
-    .filter((row) => isFinanceBackedPaidStatus(row.status))
-    .reduce((sum, row) => sum + row.amount, 0);
-  const lastPayoutRow = [...selectedPayoutRows]
-    .filter((row) => Boolean(row.processedAt))
-    .sort((left, right) => String(right.processedAt ?? "").localeCompare(String(left.processedAt ?? "")))[0] ?? null;
   const selectedRevenueWindowHint =
     revenueWindow === "Today"
       ? `Completed earnings recognized on ${formatShortDate(todayIsoDate)}.`
@@ -2640,14 +2631,11 @@ export default function FamloProDashboardShell({
   const effectiveFamloGeneratedCount = shouldUseRevenueDemo ? demoFamloGeneratedCount : famloGeneratedBookings.length;
   const effectiveFamloGeneratedContribution = shouldUseRevenueDemo ? demoFamloGeneratedContribution : famloGeneratedContribution;
   const effectiveRevenueBySource = shouldUseRevenueDemo ? demoRevenueBySource ?? revenueBySource : revenueBySource;
-  const effectivePayoutReceivedAmount = shouldUseRevenueDemo ? demoRevenuePaidToYou : payoutReceivedAmount;
-  const effectiveLastPayout = shouldUseRevenueDemo
-    ? {
-        amount: 8400,
-        processedAt: "2026-05-18",
-        destinationMasked: toMaskedHostRevenueDestination({ accountNumberMasked: "•••• 4821" }),
-      }
-    : lastPayoutRow;
+  const orderedRevenueSources = [
+    effectiveRevenueBySource.famlo,
+    effectiveRevenueBySource.ota,
+    effectiveRevenueBySource.direct,
+  ];
   const averageBookingValue = bookingsWithValue.length > 0 ? totalBookingValue / bookingsWithValue.length : null;
   const directAverageBookingValue = (() => {
     const directValues = bookingsWithValue.filter((entry) => !entry.booking.isOta);
@@ -8231,7 +8219,7 @@ export default function FamloProDashboardShell({
                 </p>
               </div>
               <div className={styles.cardBody}>
-                <div className={styles.filterRow} style={{ marginBottom: "24px" }}>
+                <div className={styles.revenueFilterGroup}>
                   {REVENUE_WINDOWS.map((window) => (
                     <button
                       key={window}
@@ -8244,6 +8232,28 @@ export default function FamloProDashboardShell({
                   ))}
                 </div>
 
+                <article
+                  className={`${styles.listCard} ${styles.revenueHighlightCard}`}
+                  style={{ marginBottom: "24px" }}
+                >
+                  <div className={styles.miniLabel}>Famlo helped you earn</div>
+                  <div className={styles.metricValue}>{formatCurrency(effectiveFamloGeneratedRevenue)}</div>
+                  <div className={styles.metricHint}>
+                    {effectiveFamloGeneratedCount} Famlo booking{effectiveFamloGeneratedCount === 1 ? "" : "s"} contributed{" "}
+                    {effectiveFamloGeneratedContribution.toFixed(1)}% of your total booking value in this period.
+                  </div>
+                  <div className={styles.inlineBadgeRow}>
+                    <span className={styles.readinessPill}>{revenueWindow}</span>
+                    <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
+                      {formatCurrency(
+                        shouldUseRevenueDemo
+                          ? 24500
+                          : famloGeneratedBookings.reduce((sum, booking) => sum + (booking.famloRevenueAmount ?? 0), 0)
+                      )} Famlo revenue
+                    </span>
+                  </div>
+                </article>
+
                 <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Total booking value</div>
@@ -8252,7 +8262,7 @@ export default function FamloProDashboardShell({
                       {(shouldUseRevenueDemo ? 12 : selectedRevenueBookings.length)} completed booking{(shouldUseRevenueDemo ? 12 : selectedRevenueBookings.length) === 1 ? "" : "s"} in {revenueWindow.toLowerCase()}.
                     </div>
                   </article>
-                  <article className={styles.summaryCard}>
+                  <Link href={buildHostPayoutHistoryUrl(familyId)} className={`${styles.summaryCard} ${styles.summaryCardLink}`}>
                     <div className={styles.miniLabel}>Famlo payout to you</div>
                     <div className={styles.metricValue}>{formatCurrency(effectiveRevenueNetPayout)}</div>
                     <div className={styles.metricHint}>
@@ -8260,7 +8270,10 @@ export default function FamloProDashboardShell({
                         ? "Only bookings where payment collection and payout are handled by Famlo are included here."
                         : "Payout release is blocked until PAN/KYC and an active payout account are in place."}
                     </div>
-                  </article>
+                    <div className={styles.metricHint} style={{ color: "rgba(147, 197, 253, 0.92)" }}>
+                      Open payout history
+                    </div>
+                  </Link>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Paid by Famlo</div>
                     <div className={styles.metricValue}>{formatCurrency(effectiveRevenuePaidToYou)}</div>
@@ -8277,78 +8290,28 @@ export default function FamloProDashboardShell({
                   </article>
                 </div>
 
-                <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
-                  <article
-                    className={styles.listCard}
-                    style={{
-                      gridColumn: "span 2",
-                      background: "linear-gradient(135deg, rgba(16, 185, 129, 0.18) 0%, rgba(15, 23, 42, 0.92) 100%)",
-                      border: "1px solid rgba(16, 185, 129, 0.22)",
-                    }}
-                  >
-                    <div className={styles.miniLabel}>Famlo helped you earn</div>
-                    <div className={styles.metricValue}>{formatCurrency(effectiveFamloGeneratedRevenue)}</div>
-                    <div className={styles.metricHint}>
-                      {effectiveFamloGeneratedCount} Famlo booking{effectiveFamloGeneratedCount === 1 ? "" : "s"} contributed{" "}
-                      {effectiveFamloGeneratedContribution.toFixed(1)}% of your total booking value in this period.
-                    </div>
-                    <div className={styles.inlineBadgeRow}>
-                      <span className={styles.readinessPill}>{revenueWindow}</span>
-                      <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
-                        {formatCurrency(
-                          shouldUseRevenueDemo
-                            ? 24500
-                            : famloGeneratedBookings.reduce((sum, booking) => sum + (booking.famloRevenueAmount ?? 0), 0)
-                        )} Famlo revenue
-                      </span>
-                    </div>
-                  </article>
-
-                  <article className={styles.listCard}>
+                <div style={{ display: "grid", gap: "16px", marginBottom: "24px" }}>
+                  <div>
                     <div className={styles.listTitle}>Revenue by source</div>
-                    <div className={styles.placeholderGrid}>
-                      {Object.values(effectiveRevenueBySource).map((source) => (
-                        <div key={source.label} className={styles.placeholderRow}>
-                          <div className={styles.placeholderTitle}>{source.label}</div>
-                          <div className={styles.placeholderValue}>{formatCurrency(source.amount)}</div>
-                          <div className={styles.placeholderCopy}>
-                            {source.count} booking{source.count === 1 ? "" : "s"} · {source.label === "Famlo"
-                              ? "Payment handled by Famlo"
-                              : source.label === "Direct"
-                                ? "Paid outside Famlo"
-                                : "May be paid by OTA/outside Famlo"}
-                          </div>
-                        </div>
-                      ))}
+                    <div className={styles.feedCopy}>
+                      Completed booking value split by where the revenue came from in this period.
                     </div>
-                  </article>
-
-                  <article className={styles.listCard}>
-                    <div className={styles.listTitle}>Payout received</div>
-                    <div className={styles.placeholderGrid}>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderTitle}>Total paid by Famlo</div>
-                        <div className={styles.placeholderValue}>{formatCurrency(effectivePayoutReceivedAmount)}</div>
-                        <div className={styles.placeholderCopy}>Completed payout executions for this property in the selected period.</div>
-                      </div>
-                      <div className={styles.placeholderRow}>
-                        <div className={styles.placeholderTitle}>Last payout</div>
-                        <div className={styles.placeholderValue}>
-                          {effectiveLastPayout ? formatCurrency(effectiveLastPayout.amount) : "No payout yet"}
-                        </div>
+                  </div>
+                  <div className={styles.revenueSourceRow}>
+                    {orderedRevenueSources.map((source) => (
+                      <article key={source.label} className={styles.listCard}>
+                        <div className={styles.placeholderTitle}>{source.label}</div>
+                        <div className={styles.metricValue}>{formatCurrency(source.amount)}</div>
                         <div className={styles.placeholderCopy}>
-                          {effectiveLastPayout?.processedAt
-                            ? `${formatShortDate(effectiveLastPayout.processedAt.slice(0, 10))} · ${effectiveLastPayout.destinationMasked ?? "Destination pending"}`
-                            : "The most recent completed Famlo payout will appear here once one is processed."}
+                          {source.count} booking{source.count === 1 ? "" : "s"} · {source.label === "Famlo"
+                            ? "Payment handled by Famlo"
+                            : source.label === "Direct"
+                              ? "Paid outside Famlo"
+                              : "May be paid by OTA/outside Famlo"}
                         </div>
-                      </div>
-                      <div className={styles.inlineActionRow} style={{ marginTop: "4px" }}>
-                        <Link href="/host/finance/payouts" className={styles.secondaryActionLink}>
-                          View payout history
-                        </Link>
-                      </div>
-                    </div>
-                  </article>
+                      </article>
+                    ))}
+                  </div>
                 </div>
 
                 {selectedRevenueBookings.length > 0 || shouldUseRevenueDemo ? (
@@ -8441,18 +8404,20 @@ export default function FamloProDashboardShell({
                               </div>
                               <div className={styles.mappingCell}>
                                 <div className={styles.mappingTitle}>{bookingFamloPayoutDisplay(booking)}</div>
-                                <div className={styles.mappingSubcopy}>{!booking.famloPayoutEligible ? "Outside-Famlo payouts stay separate" : "Famlo-managed payout amount"}</div>
+                                <div className={styles.mappingSubcopy}>{bookingFamloPayoutHint(booking)}</div>
                               </div>
                               <div className={styles.mappingCell}>
                                 <span className={`${styles.readinessPill} ${hostRevenueStatusTone(booking)}`}>
                                   {hostRevenueStatusLabel(booking)}
                                 </span>
                                 <div className={styles.mappingSubcopy} style={{ marginTop: "8px" }}>
-                                  {booking.famloPayoutEligible
+                                  {booking.paymentCollectMode !== "FAMLO_COLLECT"
+                                    ? "Outside Famlo payout flow"
+                                    : booking.famloPayoutEligible
                                     ? booking.payoutPaidAt
                                       ? `Paid ${formatShortDate(booking.payoutPaidAt.slice(0, 10))}`
                                       : "Awaiting Famlo payout release"
-                                    : "Outside Famlo payout flow"}
+                                    : "Awaiting settlement creation"}
                                 </div>
                               </div>
                               <div className={styles.mappingCell} style={{ gridColumn: "1 / -1" }}>
@@ -8501,7 +8466,7 @@ export default function FamloProDashboardShell({
                   <div className={styles.emptyState}>
                     <div className={styles.emptyTitle}>No completed earnings in this period yet</div>
                     <div className={styles.emptyCopy}>
-                      Completed Famlo, direct, and OTA bookings will appear here after guest checkout.
+                      Completed Famlo, OTA, and direct bookings will appear here after guest checkout.
                     </div>
                   </div>
                 )}

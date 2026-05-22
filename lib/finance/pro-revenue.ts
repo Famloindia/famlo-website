@@ -145,3 +145,11 @@ export function toMaskedHostRevenueDestination(input: {
 
   return null;
 }
+
+export function buildHostPayoutHistoryUrl(familyId: string): string {
+  return `/partnerslogin/home/pro/payouts?family=${encodeURIComponent(familyId)}`;
+}
+
+export function buildHostRevenueUrl(familyId: string): string {
+  return `/partnerslogin/home/pro/dashboard?family=${encodeURIComponent(familyId)}&section=revenue`;
+}

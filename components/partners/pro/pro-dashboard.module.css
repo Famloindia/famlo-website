@@ -1046,6 +1046,18 @@
   box-shadow: 0 0 15px rgba(22, 93, 204, 0.18);
 }
 
+.revenueFilterGroup {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  margin-bottom: 24px;
+}
+
 .propertyTabLinkIcon {
   width: 16px;
   height: 16px;
@@ -1422,6 +1434,30 @@
   border: 1px solid rgba(15, 23, 42, 0.08);
   background: #f8fbff;
   padding: 16px;
+}
+
+.summaryCardLink {
+  text-decoration: none;
+  color: inherit;
+  display: grid;
+  gap: 10px;
+}
+
+.summaryCardLink:hover {
+  border-color: rgba(96, 165, 250, 0.28);
+  box-shadow: 0 18px 32px rgba(8, 15, 32, 0.18);
+  transform: translateY(-1px);
+}
+
+.revenueHighlightCard {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.18) 0%, rgba(15, 23, 42, 0.92) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+}
+
+.revenueSourceRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .summaryLabel {
@@ -2648,6 +2684,10 @@
 
   .propertiesRoomShowcaseGrid,
   .roomControlTabRow {
+    grid-template-columns: 1fr;
+  }
+
+  .revenueSourceRow {
     grid-template-columns: 1fr;
   }
 

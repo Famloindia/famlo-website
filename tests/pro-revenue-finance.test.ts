@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildHostPayoutHistoryUrl,
+  buildHostRevenueUrl,
   deriveRevenuePaymentStatusLabel,
   isCompletedRevenueBooking,
   isFinanceBackedPaidStatus,
@@ -190,4 +192,15 @@ test("Host-facing payout destination stays masked and does not expose raw intern
   );
   assert.equal(isFinanceBackedPaidStatus("processed"), true);
   assert.equal(isFinanceBackedPaidStatus("created"), false);
+});
+
+test("Famlo payout card and payout history back button use the dedicated host-safe routes", () => {
+  assert.equal(
+    buildHostPayoutHistoryUrl("fam-123"),
+    "/partnerslogin/home/pro/payouts?family=fam-123"
+  );
+  assert.equal(
+    buildHostRevenueUrl("fam-123"),
+    "/partnerslogin/home/pro/dashboard?family=fam-123&section=revenue"
+  );
 });
