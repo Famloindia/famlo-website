@@ -177,6 +177,19 @@ function asNumber(value: unknown): number {
   return 0;
 }
 
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function resolveLatestPayoutRow(rows: Array<Record<string, unknown>>): Record<string, unknown> | null {
+  if (rows.length === 0) return null;
+  return [...rows].sort((left, right) => {
+    const leftAnchor = asString(left.processed_at) ?? asString(left.created_at) ?? "";
+    const rightAnchor = asString(right.processed_at) ?? asString(right.created_at) ?? "";
+    return rightAnchor.localeCompare(leftAnchor);
+  })[0] ?? null;
+}
+
 function formatTimestampLabel(value: string | null | undefined): string {
   if (!value) return "No active end date";
   const date = new Date(value);
@@ -291,8 +304,19 @@ type ProBookingSummary = {
   status: string;
   paymentStatus: string | null;
   amount: string | null;
+  amountValue: number | null;
+  currency: string;
   netPayoutAmount: number | null;
   sourceLabel: string;
+  sourceCategory: "famlo" | "direct" | "ota";
+  payoutStatus: string | null;
+  payoutPaidAt: string | null;
+  estimatedPayoutDate: string | null;
+  famloRevenueAmount: number | null;
+  platformFeeAmount: number | null;
+  otaCommissionAmount: number | null;
+  refundAdjustmentAmount: number | null;
+  taxAmount: number | null;
   externalBookingId: string | null;
   externalRevisionId: string | null;
   importStatus: string | null;
@@ -948,6 +972,26 @@ export async function renderFamloProDashboardPage({
     }
   }
 
+  const bookingWorkspaceIds = bookingRowsForWorkspace
+    .map((row) => asString(row.id))
+    .filter((value): value is string => Boolean(value));
+  const payoutRowsByBookingId = new Map<string, Array<Record<string, unknown>>>();
+
+  if (bookingWorkspaceIds.length > 0) {
+    const payoutRowsResult = await supabase
+      .from("payouts_v2")
+      .select("booking_id,amount,status,processed_at,created_at")
+      .in("booking_id", bookingWorkspaceIds);
+
+    if (!payoutRowsResult.error) {
+      for (const row of (payoutRowsResult.data ?? []) as Array<Record<string, unknown>>) {
+        const bookingId = asString(row.booking_id);
+        if (!bookingId) continue;
+        payoutRowsByBookingId.set(bookingId, [...(payoutRowsByBookingId.get(bookingId) ?? []), row]);
+      }
+    }
+  }
+
   const roomManualBlockDates = new Map<string, Set<string>>();
   const roomDailyRateOverrides = new Map<string, Map<string, number>>();
   const roomProjectedRates = new Map<string, Map<string, number>>();
@@ -1101,6 +1145,45 @@ export async function renderFamloProDashboardPage({
       const isOta = channelProvider === "channex";
       const bookingCurrency = asString(pricingSnapshot.currency) ?? matchedRevision?.currency ?? "INR";
       const totalPrice = asNumber(row.total_price);
+      const amountValue = totalPrice > 0 ? totalPrice : matchedRevision?.amount ?? null;
+      const sourceCategory: ProBookingSummary["sourceCategory"] = isOta
+        ? "ota"
+        : sourceChannel === "pms_manual"
+          ? "direct"
+          : "famlo";
+      const financeSnapshot = asObject(pricingSnapshot.finance_snapshot) ?? {};
+      const financeContract = asObject(financeSnapshot.contract_v1) ?? {};
+      const payoutBreakdown = asObject(financeSnapshot.payout_breakdown) ?? {};
+      const latestPayout = resolveLatestPayoutRow(payoutRowsByBookingId.get(bookingId) ?? []);
+      const platformFeeAmount =
+        asNumber(pricingSnapshot.platform_fee) ||
+        asNumber(financeContract.platform_fee) ||
+        asNumber(pricingSnapshot.famlo_platform_fee_incl_gst) ||
+        0;
+      const taxAmount =
+        asNumber(pricingSnapshot.platform_fee_tax) ||
+        asNumber(financeContract.gst_on_platform_fee) ||
+        asNumber(pricingSnapshot.famlo_platform_fee_gst) ||
+        asNumber(pricingSnapshot.tax_amount) ||
+        0;
+      const refundAdjustmentAmount =
+        asNumber(financeSnapshot.refund_adjustments) ||
+        asNumber(pricingSnapshot.refund_adjustment) ||
+        0;
+      const netPayoutAmount = (() => {
+        const payout = asNumber(row.partner_payout_amount);
+        if (payout > 0) return payout;
+        const snapshotPayout = asNumber(payoutBreakdown.host_net_payout);
+        if (snapshotPayout > 0) return snapshotPayout;
+        if (totalPrice <= 0) return null;
+        return totalPrice * ((100 - globalCommission) / 100);
+      })();
+      const otaCommissionAmount =
+        isOta && amountValue != null && netPayoutAmount != null
+          ? Math.max(0, amountValue - netPayoutAmount - platformFeeAmount - taxAmount + refundAdjustmentAmount)
+          : null;
+      const payoutStatus = asString(latestPayout?.status) ?? null;
+      const payoutPaidAt = asString(latestPayout?.processed_at) ?? asString(latestPayout?.created_at) ?? null;
       return [{
         bookingId,
         roomId: stayUnitId,
@@ -1122,13 +1205,22 @@ export async function renderFamloProDashboardPage({
             : matchedRevision?.amount != null
               ? formatCalendarAmount(matchedRevision.amount, matchedRevision.currency ?? bookingCurrency)
               : null,
-        netPayoutAmount: (() => {
-          const payout = asNumber(row.partner_payout_amount);
-          if (payout > 0) return payout;
-          if (totalPrice <= 0) return null;
-          return totalPrice * ((100 - globalCommission) / 100);
-        })(),
+        amountValue,
+        currency: bookingCurrency,
+        netPayoutAmount,
         sourceLabel: isOta ? `${otaName ?? "OTA"} / Channex` : sourceChannel === "pms_manual" ? "Famlo PMS" : "Famlo Direct",
+        sourceCategory,
+        payoutStatus,
+        payoutPaidAt,
+        estimatedPayoutDate: payoutStatus === "paid" ? payoutPaidAt : endDate,
+        famloRevenueAmount:
+          asNumber(financeContract.famlo_net_revenue) ||
+          asNumber(pricingSnapshot.famlo_platform_fee_taxable) ||
+          null,
+        platformFeeAmount: platformFeeAmount > 0 ? platformFeeAmount : null,
+        otaCommissionAmount: otaCommissionAmount && otaCommissionAmount > 0 ? otaCommissionAmount : null,
+        refundAdjustmentAmount: refundAdjustmentAmount > 0 ? refundAdjustmentAmount : null,
+        taxAmount: taxAmount > 0 ? taxAmount : null,
         externalBookingId: externalBookingId ?? matchedRevision?.externalBookingId ?? null,
         externalRevisionId:
           asString(pricingSnapshot.channel_external_revision_id) ?? matchedRevision?.externalRevisionId ?? null,

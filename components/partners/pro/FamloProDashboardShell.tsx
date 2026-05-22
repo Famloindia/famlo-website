@@ -169,8 +169,19 @@ type ProBookingSummary = {
   status: string;
   paymentStatus: string | null;
   amount: string | null;
+  amountValue: number | null;
+  currency: string;
   netPayoutAmount: number | null;
   sourceLabel: string;
+  sourceCategory: "famlo" | "direct" | "ota";
+  payoutStatus: string | null;
+  payoutPaidAt: string | null;
+  estimatedPayoutDate: string | null;
+  famloRevenueAmount: number | null;
+  platformFeeAmount: number | null;
+  otaCommissionAmount: number | null;
+  refundAdjustmentAmount: number | null;
+  taxAmount: number | null;
   externalBookingId: string | null;
   externalRevisionId: string | null;
   importStatus: string | null;
@@ -930,6 +941,34 @@ function bookingNextAction(booking: ProBookingSummary): string {
     return "No immediate OTA action needed.";
   }
   return "No immediate action needed.";
+}
+
+function hostRevenueStatusLabel(booking: ProBookingSummary): string {
+  if (isCancelledBooking(booking)) return "Cancelled";
+  if (normalizeToken(booking.payoutStatus) === "paid") return "Paid to you";
+  if (hasPaymentAttention(booking)) return "Awaiting guest payment";
+  if (isPendingApprovalBooking(booking)) return "Awaiting confirmation";
+  if (normalizeToken(booking.paymentStatus) === "paid" || isConfirmedBooking(booking)) return "Pending payout";
+  return "In progress";
+}
+
+function hostRevenueStatusTone(booking: ProBookingSummary): string {
+  if (isCancelledBooking(booking)) return styles.readinessPillMissing;
+  if (normalizeToken(booking.payoutStatus) === "paid") return styles.readinessPillOk;
+  if (hasPaymentAttention(booking) || isPendingApprovalBooking(booking)) return styles.readinessPillReview;
+  return styles.readinessPillOk;
+}
+
+function revenueSourceLabel(booking: ProBookingSummary): string {
+  if (booking.sourceCategory === "ota") return "OTA";
+  if (booking.sourceCategory === "direct") return "Direct";
+  return "Famlo";
+}
+
+function revenueSourceHint(booking: ProBookingSummary): string {
+  if (booking.sourceCategory === "ota") return "OTA booking";
+  if (booking.sourceCategory === "direct") return "Manual or property direct";
+  return "Famlo generated";
 }
 
 function countCalendarCellsByStatus(
@@ -2388,36 +2427,10 @@ export default function FamloProDashboardShell({
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   })();
   const totalBookingValue = bookingsWithValue.reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const famloDirectBookingValue = bookingsWithValue
-    .filter((entry) => !entry.booking.isOta)
-    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const otaBookingValue = bookingsWithValue
-    .filter((entry) => entry.booking.isOta)
-    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const confirmedBookingValue = bookingsWithValue
-    .filter((entry) => isConfirmedBooking(entry.booking))
-    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const pendingBookingValue = bookingsWithValue
-    .filter((entry) => isPendingApprovalBooking(entry.booking) || normalizeToken(entry.booking.paymentStatus) === "awaiting_payment")
-    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const cancelledBookingValue = bookingsWithValue
-    .filter((entry) => isCancelledBooking(entry.booking))
-    .reduce((sum, entry) => sum + entry.parsedAmount, 0);
-  const revenueThisMonthNetPayout = bookingsWithNetPayout
-    .filter(
-      (booking) =>
-        isHostBookingVisibleToPartner(booking.status, booking.paymentStatus) &&
-        isConfirmedBooking(booking) &&
-        booking.startDate.startsWith(currentMonthPrefix)
-    )
-    .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
   const revenueTodayBookings = revenueEligibleBookings.filter((booking) => booking.startDate === todayIsoDate);
   const revenueThisWeekBookings = revenueEligibleBookings.filter(
     (booking) => booking.startDate >= weekStartIsoDate && booking.startDate <= weekEndIsoDate
   );
-  const revenueTodayNetPayout = revenueTodayBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
-  const revenueThisWeekNetPayout = revenueThisWeekBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
-  const totalNetPayout = revenueEligibleBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
   const revenueBookingsByWindow: Record<RevenueWindowFilter, typeof revenueEligibleBookings> = {
     Today: revenueTodayBookings,
     "This week": revenueThisWeekBookings,
@@ -2427,9 +2440,61 @@ export default function FamloProDashboardShell({
   const selectedRevenueBookings = revenueBookingsByWindow[revenueWindow];
   const selectedRevenueNetPayout = selectedRevenueBookings.reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
   const selectedRevenueGrossValue = selectedRevenueBookings.reduce(
-    (sum, booking) => sum + (parseBookingAmount(booking.amount) ?? 0),
+    (sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0),
     0
   );
+  const selectedRevenuePaidToYou = selectedRevenueBookings
+    .filter((booking) => normalizeToken(booking.payoutStatus) === "paid")
+    .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const selectedRevenuePendingPayout = selectedRevenueBookings
+    .filter((booking) => normalizeToken(booking.payoutStatus) !== "paid")
+    .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
+  const famloGeneratedBookings = selectedRevenueBookings.filter((booking) => booking.sourceCategory === "famlo");
+  const famloGeneratedRevenue = famloGeneratedBookings.reduce(
+    (sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0),
+    0
+  );
+  const famloGeneratedContribution =
+    selectedRevenueGrossValue > 0 ? (famloGeneratedRevenue / selectedRevenueGrossValue) * 100 : 0;
+  const revenueBySource = {
+    famlo: {
+      label: "Famlo",
+      amount: famloGeneratedRevenue,
+      count: famloGeneratedBookings.length,
+    },
+    direct: {
+      label: "Direct",
+      amount: selectedRevenueBookings
+        .filter((booking) => booking.sourceCategory === "direct")
+        .reduce((sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0), 0),
+      count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "direct").length,
+    },
+    ota: {
+      label: "OTA",
+      amount: selectedRevenueBookings
+        .filter((booking) => booking.sourceCategory === "ota")
+        .reduce((sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0), 0),
+      count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "ota").length,
+    },
+  };
+  const nextPayoutCandidate = [...selectedRevenueBookings]
+    .filter((booking) => normalizeToken(booking.payoutStatus) !== "paid")
+    .sort((left, right) => {
+      const leftDate = left.estimatedPayoutDate ?? left.endDate;
+      const rightDate = right.estimatedPayoutDate ?? right.endDate;
+      if (leftDate !== rightDate) return leftDate.localeCompare(rightDate);
+      return (left.createdAt ?? "").localeCompare(right.createdAt ?? "");
+    })[0] ?? null;
+  const nextPayoutDate = nextPayoutCandidate?.estimatedPayoutDate ?? nextPayoutCandidate?.endDate ?? null;
+  const nextPayoutAmount = nextPayoutDate
+    ? selectedRevenueBookings
+        .filter(
+          (booking) =>
+            normalizeToken(booking.payoutStatus) !== "paid" &&
+            (booking.estimatedPayoutDate ?? booking.endDate) === nextPayoutDate
+        )
+        .reduce((sum, booking) => sum + booking.netPayoutAmount, 0)
+    : 0;
   const selectedRevenueWindowHint =
     revenueWindow === "Today"
       ? `Payout view for bookings starting on ${formatShortDate(todayIsoDate)}.`
@@ -2438,12 +2503,6 @@ export default function FamloProDashboardShell({
         : revenueWindow === "This month"
           ? "Payout view for the current month."
           : "Payout view across all eligible visible bookings.";
-  const confirmedNetPayout = bookingsWithNetPayout
-    .filter((booking) => isConfirmedBooking(booking))
-    .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
-  const pendingNetPayout = bookingsWithNetPayout
-    .filter((booking) => isPendingApprovalBooking(booking) || normalizeToken(booking.paymentStatus) === "awaiting_payment")
-    .reduce((sum, booking) => sum + booking.netPayoutAmount, 0);
   const averageBookingValue = bookingsWithValue.length > 0 ? totalBookingValue / bookingsWithValue.length : null;
   const directAverageBookingValue = (() => {
     const directValues = bookingsWithValue.filter((entry) => !entry.booking.isOta);
@@ -8023,7 +8082,7 @@ export default function FamloProDashboardShell({
                 <div className={styles.sectionEyebrow}>Revenue</div>
                 <h3 className={styles.propertyCenterTitle}>Revenue</h3>
                 <p className={styles.heroText}>
-                  Keep one active time lens in focus while the important PMS numbers stay fixed underneath.
+                  See what guests paid, what payout you can expect, and which sources helped your property earn in this period.
                 </p>
               </div>
               <div className={styles.cardBody}>
@@ -8039,95 +8098,195 @@ export default function FamloProDashboardShell({
                     </button>
                   ))}
                 </div>
-                <div className={styles.listGrid}>
+
+                <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>{revenueWindow}</div>
-                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueNetPayout)}</div>
+                    <div className={styles.miniLabel}>Total booking value</div>
+                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueGrossValue)}</div>
                     <div className={styles.metricHint}>
-                      {selectedRevenueBookings.length} booking{selectedRevenueBookings.length === 1 ? "" : "s"} · {selectedRevenueWindowHint}
+                      {selectedRevenueBookings.length} booking{selectedRevenueBookings.length === 1 ? "" : "s"} in {revenueWindow.toLowerCase()}.
                     </div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>{revenueWindow} gross value</div>
-                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueGrossValue)}</div>
-                    <div className={styles.metricHint}>What guests paid in the selected time window before payout split.</div>
+                    <div className={styles.miniLabel}>Expected payout</div>
+                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueNetPayout)}</div>
+                    <div className={styles.metricHint}>What you are expected to receive from the selected bookings.</div>
                   </article>
                   <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>All time</div>
-                    <div className={styles.metricValue}>{formatCurrency(totalNetPayout)}</div>
-                    <div className={styles.metricHint}>Static net payout anchor across all eligible visible bookings.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>This month</div>
-                    <div className={styles.metricValue}>{formatCurrency(revenueThisMonthNetPayout)}</div>
-                    <div className={styles.metricHint}>Static monthly payout reference for the current month.</div>
+                    <div className={styles.miniLabel}>Paid to you</div>
+                    <div className={styles.metricValue}>{formatCurrency(selectedRevenuePaidToYou)}</div>
+                    <div className={styles.metricHint}>Bookings in this period that have already been paid out to you.</div>
                   </article>
                   <article className={styles.summaryCard}>
                     <div className={styles.miniLabel}>Pending payout</div>
-                    <div className={styles.metricValue}>{formatCurrency(pendingNetPayout)}</div>
-                    <div className={styles.metricHint}>Expected payout still waiting on approval or payment.</div>
-                  </article>
-                  <article className={styles.summaryCard}>
-                    <div className={styles.miniLabel}>Direct / OTA</div>
-                    <div className={styles.metricValue}>
-                      {formatCurrency(famloDirectBookingValue)} / {formatCurrency(otaBookingValue)}
-                    </div>
-                    <div className={styles.metricHint}>Gross booking split by source for quick comparison.</div>
+                    <div className={styles.metricValue}>{formatCurrency(selectedRevenuePendingPayout)}</div>
+                    <div className={styles.metricHint}>Payout still waiting to be released or completed.</div>
                   </article>
                 </div>
 
-                <hr style={{ border: 0, height: "1px", background: "rgba(255, 255, 255, 0.1)", margin: "32px 0" }} />
+                <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
+                  <article
+                    className={styles.listCard}
+                    style={{
+                      gridColumn: "span 2",
+                      background: "linear-gradient(135deg, rgba(16, 185, 129, 0.18) 0%, rgba(15, 23, 42, 0.92) 100%)",
+                      border: "1px solid rgba(16, 185, 129, 0.22)",
+                    }}
+                  >
+                    <div className={styles.miniLabel}>Famlo helped you earn</div>
+                    <div className={styles.metricValue}>{formatCurrency(famloGeneratedRevenue)}</div>
+                    <div className={styles.metricHint}>
+                      {famloGeneratedBookings.length} Famlo booking{famloGeneratedBookings.length === 1 ? "" : "s"} contributed{" "}
+                      {famloGeneratedContribution.toFixed(1)}% of your total booking value in this period.
+                    </div>
+                    <div className={styles.inlineBadgeRow}>
+                      <span className={styles.readinessPill}>{revenueWindow}</span>
+                      <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
+                        {formatCurrency(
+                          famloGeneratedBookings.reduce((sum, booking) => sum + (booking.famloRevenueAmount ?? 0), 0)
+                        )} Famlo revenue
+                      </span>
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Revenue by source</div>
+                    <div className={styles.placeholderGrid}>
+                      {Object.values(revenueBySource).map((source) => (
+                        <div key={source.label} className={styles.placeholderRow}>
+                          <div className={styles.placeholderTitle}>{source.label}</div>
+                          <div className={styles.placeholderValue}>{formatCurrency(source.amount)}</div>
+                          <div className={styles.placeholderCopy}>
+                            {source.count} booking{source.count === 1 ? "" : "s"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className={styles.listCard}>
+                    <div className={styles.listTitle}>Next payout</div>
+                    <div className={styles.placeholderGrid}>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Expected payout amount</div>
+                        <div className={styles.placeholderValue}>
+                          {nextPayoutAmount > 0 ? formatCurrency(nextPayoutAmount) : formatCurrency(0)}
+                        </div>
+                        <div className={styles.placeholderCopy}>
+                          {nextPayoutCandidate
+                            ? "Based on the earliest unpaid booking checkout in this period."
+                            : "No pending payout is visible for this filter."}
+                        </div>
+                      </div>
+                      <div className={styles.placeholderRow}>
+                        <div className={styles.placeholderTitle}>Estimated payout date</div>
+                        <div className={styles.placeholderValue}>
+                          {nextPayoutDate ? formatShortDate(nextPayoutDate) : "No payout scheduled"}
+                        </div>
+                        <div className={styles.placeholderCopy}>
+                          {nextPayoutDate ? selectedRevenueWindowHint : "Payout timing will appear here once a payout is pending."}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
 
                 {selectedRevenueBookings.length > 0 ? (
-                  <div className={styles.listGrid}>
-                    {selectedRevenueBookings.map((booking) => (
-                      <article key={`revenue-${booking.bookingId}`} className={styles.listCard} style={{ padding: "20px", display: "grid", gap: "16px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", flexWrap: "wrap" }}>
-                          <div>
-                            <div className={styles.listTitle}>{booking.guestDisplayName}</div>
-                            <div className={styles.feedCopy}>{booking.roomName}</div>
-                          </div>
-                          <div>
-                            <div className={styles.listTitle}>{booking.amount ?? "Not available"}</div>
-                            <div className={styles.feedCopy}>
-                              {booking.netPayoutAmount != null ? `Net payout ${formatCurrency(booking.netPayoutAmount)}` : "Net payout not available"}
+                  <article className={styles.listCard} style={{ display: "grid", gap: "18px" }}>
+                    <div>
+                      <div className={styles.listTitle}>Booking-wise revenue</div>
+                      <div className={styles.feedCopy}>
+                        Guest payment, your payout, and a simple source-wise payout view for each booking.
+                      </div>
+                    </div>
+                    <div className={styles.mappingTable} style={{ gridTemplateColumns: "minmax(220px, 1.35fr) minmax(150px, 1fr) minmax(140px, 0.9fr) minmax(140px, 0.9fr) minmax(140px, 0.9fr) minmax(160px, 1fr)" }}>
+                      <div className={styles.mappingHeader}>Booking / guest</div>
+                      <div className={styles.mappingHeader}>Stay dates</div>
+                      <div className={styles.mappingHeader}>Source</div>
+                      <div className={styles.mappingHeader}>Guest paid</div>
+                      <div className={styles.mappingHeader}>Host payout</div>
+                      <div className={styles.mappingHeader}>Status</div>
+                      {selectedRevenueBookings.map((booking) => (
+                        <Fragment key={`revenue-${booking.bookingId}`}>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
+                            <div className={styles.mappingSubcopy}>
+                              {booking.roomName} · {booking.bookingId.slice(0, 8)}
                             </div>
                           </div>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px" }}>
-                          <div>
-                            <div className={styles.miniLabel}>Guest</div>
-                            <div className={styles.feedCopy}>{booking.guestDisplayName}</div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
+                            <div className={styles.mappingSubcopy}>Created {booking.createdAt ? formatShortDate(booking.createdAt.slice(0, 10)) : "recently"}</div>
                           </div>
-                          <div>
-                            <div className={styles.miniLabel}>Source</div>
-                            <div className={styles.feedCopy}>{booking.sourceLabel}</div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{revenueSourceLabel(booking)}</div>
+                            <div className={styles.mappingSubcopy}>{revenueSourceHint(booking)}</div>
                           </div>
-                          <div>
-                            <div className={styles.miniLabel}>Dates</div>
-                            <div className={styles.feedCopy}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
+                            <div className={styles.mappingSubcopy}>What the guest paid</div>
                           </div>
-                          <div>
-                            <div className={styles.miniLabel}>Paid amount</div>
-                            <div className={styles.feedCopy}>{booking.amount ?? "Not available"}</div>
+                          <div className={styles.mappingCell}>
+                            <div className={styles.mappingTitle}>
+                              {booking.netPayoutAmount != null ? formatCurrency(booking.netPayoutAmount) : "Not available"}
+                            </div>
+                            <div className={styles.mappingSubcopy}>Expected host payout</div>
                           </div>
-                          <div>
-                            <div className={styles.miniLabel}>Payment</div>
-                            <div className={styles.feedCopy}>{labelizeToken(booking.paymentStatus, "unknown")}</div>
+                          <div className={styles.mappingCell}>
+                            <span className={`${styles.readinessPill} ${hostRevenueStatusTone(booking)}`}>
+                              {hostRevenueStatusLabel(booking)}
+                            </span>
+                            <div className={styles.mappingSubcopy} style={{ marginTop: "8px" }}>
+                              {booking.estimatedPayoutDate ? `Estimated ${formatShortDate(booking.estimatedPayoutDate)}` : "Payout date pending"}
+                            </div>
                           </div>
-                          <div>
-                            <div className={styles.miniLabel}>Status</div>
-                            <div className={styles.feedCopy}>{labelizeToken(booking.status, "unknown")}</div>
+                          <div className={styles.mappingCell} style={{ gridColumn: "1 / -1" }}>
+                            <details className={styles.operatorDetails} style={{ margin: 0 }}>
+                              <summary className={styles.operatorSummary}>Payout breakdown</summary>
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                                  gap: "12px",
+                                  marginTop: "14px",
+                                }}
+                              >
+                                <div className={styles.placeholderRow}>
+                                  <div className={styles.placeholderTitle}>Platform fee</div>
+                                  <div className={styles.placeholderValue}>
+                                    {booking.platformFeeAmount != null ? formatCurrency(booking.platformFeeAmount) : "—"}
+                                  </div>
+                                </div>
+                                <div className={styles.placeholderRow}>
+                                  <div className={styles.placeholderTitle}>OTA commission</div>
+                                  <div className={styles.placeholderValue}>
+                                    {booking.otaCommissionAmount != null ? formatCurrency(booking.otaCommissionAmount) : "—"}
+                                  </div>
+                                </div>
+                                <div className={styles.placeholderRow}>
+                                  <div className={styles.placeholderTitle}>Refund adjustment</div>
+                                  <div className={styles.placeholderValue}>
+                                    {booking.refundAdjustmentAmount != null ? formatCurrency(booking.refundAdjustmentAmount) : "—"}
+                                  </div>
+                                </div>
+                                <div className={styles.placeholderRow}>
+                                  <div className={styles.placeholderTitle}>Tax / GST</div>
+                                  <div className={styles.placeholderValue}>
+                                    {booking.taxAmount != null ? formatCurrency(booking.taxAmount) : "—"}
+                                  </div>
+                                </div>
+                              </div>
+                            </details>
                           </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
+                        </Fragment>
+                      ))}
+                    </div>
+                  </article>
                 ) : (
                   <div className={styles.emptyState}>
-                    <div className={styles.emptyTitle}>No revenue bookings in this view yet</div>
+                    <div className={styles.emptyTitle}>No earnings in this period yet</div>
                     <div className={styles.emptyCopy}>
-                      Switch the revenue filter above to another time window, or wait for direct and OTA bookings to land in this selected range.
+                      When you receive Famlo, direct, or OTA bookings, your revenue will appear here.
                     </div>
                   </div>
                 )}
