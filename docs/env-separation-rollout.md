@@ -270,3 +270,83 @@ PGPASSWORD="$STAGING_DB_PASSWORD" psql \
 - `prod-backup-before-clean.sql` must stay local and must not be committed.
 - The generated dump files are ignored in `.gitignore` and should remain uncommitted.
 - Production cleanup is a separate later step and should use a dry-run-only script first.
+
+## Production Cleanup
+
+Use the production cleanup scripts only after reviewing the dry-run output. Do not run the real cleanup until you intentionally want to erase old testing/demo data from the live production website.
+
+### Temporary Shell Setup
+
+```bash
+export PROD_PROJECT_REF='wokjtntnbkwdsxbkotcr'
+read -rsp 'Production DB password: ' PROD_DB_PASSWORD && export PROD_DB_PASSWORD && echo
+```
+
+### Dry-Run Command
+
+```bash
+bash scripts/db/prod-cleanup-dry-run.sh
+```
+
+This is read-only. It prints the row counts for reviewed public app/demo tables that would be cleared, plus the preserved reference/config tables that stay in place.
+
+### Real Cleanup Command
+
+```bash
+bash scripts/db/prod-cleanup-real.sh
+```
+
+The real cleanup script:
+
+1. runs the dry-run report again
+2. requires the exact confirmation text `CLEAN_PRODUCTION_DATA`
+3. truncates only the reviewed public app/demo tables with `RESTART IDENTITY CASCADE`
+
+It does not:
+
+- drop schema
+- delete migrations
+- touch Supabase internal schemas
+- touch production env vars
+- touch R2/storage objects
+
+### Reviewed Cleanup Tables
+
+- user/profile app data: `users`, `user_profiles_v2`
+- onboarding/property data: `host_onboarding_drafts`, `family_applications`, `families`, `family_photos`, `hosts`, `host_media`, `gallery_posts_v2`, `stay_units_v2`
+- availability/inventory operational data: `availability_rules_v2`, `availability_exceptions_v2`, `seasonal_pricing_rules`, `inventory_rules_v2`, `inventory_event_log`, `inventory_rule_sets`, `inventory_day_projection`, `inventory_projection_runs`, `inventory_parity_checks`
+- messaging/demo operations: `conversations`, `messages`, `booking_action_jobs`, `booking_whatsapp_actions`, `whatsapp_action_tokens`, `notification_queue`
+- bookings and payments: `bookings_v2`, `booking_status_history_v2`, `booking_checkin_attempts_v2`, `guest_feedback_v2`, `booking_modifications_v2`, `payments_v2`, `payment_intents`, `payment_events`, `booking_financial_snapshots`
+- refunds/payouts/settlements: `refunds_v2`, `refund_allocations_v2`, `refund_requests`, `refund_attempts`, `payouts_v2`, `payout_transfers_v2`, `host_payout_accounts`, `host_settlements_v2`, `settlement_line_items_v2`, `host_payout_executions`
+- invoice/document artifacts: `guest_tax_invoices`, `platform_fee_invoices`, `credit_notes`, `credit_notes_v2`, `invoices_v2`, `finance_document_files`, `finance_email_deliveries`, `document_exports`
+- channel/calendar operational data: `calendar_connections`, `calendar_sync_logs`, `calendar_events`, `calendar_conflicts`, `channel_properties`, `channel_room_mappings`, `channel_sync_jobs`, `channel_sync_logs`, `channel_booking_revisions`, `channel_provider_accounts`, `channel_operation_ledger`, `channel_provider_diagnostics`, `channel_reconciliation_runs`
+- subscriptions/other demo content: `host_pro_subscriptions`, `host_pro_settings`, `activities_v2`, `stories_v2`, `reviews_v2`, `recent_views_v2`, `host_applications_v2`, `hommie_applications_v2`, `hommie_profiles_v2`, `hommie_media_v2`, `ads_v2`
+- reservation-layer operational data: `reservations_v2`, `reservation_segments_v2`, `reservation_guests_v2`, `reservation_assignment_history_v2`, `reservation_lifecycle_events_v2`, `reservation_folios_v2`, `folio_line_items_v2`
+- finance override/audit operational data: `finance_overrides`, `finance_audit_logs`
+
+### Preserved Reference/Config Tables
+
+- `channel_providers`
+- `finance_rule_sets`
+- `tax_rules`
+- `commission_rules`
+- `payout_rules`
+- `finance_settings`
+- `cancellation_policies`
+- `platform_settings`
+- `admin_platform_settings`
+
+### Rollback Command
+
+Use the existing local backup file only if you intentionally want to restore the pre-cleanup production state:
+
+```bash
+PGPASSWORD="$PROD_DB_PASSWORD" psql \
+  -h aws-1-ap-south-1.pooler.supabase.com \
+  -p 5432 \
+  -U "postgres.${PROD_PROJECT_REF}" \
+  -d postgres \
+  -f prod-backup-before-clean.sql
+```
+
+Review the backup contents and target carefully before using rollback on production.
