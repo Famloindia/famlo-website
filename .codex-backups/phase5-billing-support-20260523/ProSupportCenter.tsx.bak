@@ -1,0 +1,532 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  HelpCircle,
+  Loader2,
+  Search,
+  Send,
+  X,
+} from "lucide-react";
+
+import { createBrowserSupabaseClient } from "@/lib/supabase";
+import {
+  createSupportTicket,
+  fetchSupportTickets,
+  type SupportTicket,
+} from "@/lib/support-ticket-client";
+
+import styles from "./pro-dashboard.module.css";
+
+type ProSupportTheme = "dark" | "light";
+
+type PropertyOption = {
+  familyId: string;
+  name: string;
+  locality?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+};
+
+type RoomOption = {
+  id: string;
+  name: string;
+};
+
+const SUPPORT_CATEGORIES = [
+  "Booking issue",
+  "Payout issue",
+  "OTA / Channel sync issue",
+  "Calendar / inventory issue",
+  "Property / host profile issue",
+  "Famlo Pro setup help",
+  "Other",
+] as const;
+
+const GUIDE_SECTIONS = [
+  {
+    id: "dashboard",
+    title: "Dashboard overview",
+    content:
+      "Use the dashboard to see your property status, upcoming bookings, pending actions, and quick links.",
+  },
+  {
+    id: "bookings",
+    title: "How to manage bookings",
+    content:
+      "Use Bookings to view Famlo, OTA, and direct reservations in one place. Check guest details, booking status, payment status, and action-needed items.",
+  },
+  {
+    id: "calendar",
+    title: "How to use Famlo Pro PMS",
+    content:
+      "Use the calendar to manage room availability, blocked dates, and reservations. When you block dates or receive bookings, Famlo Pro keeps the room inventory updated.",
+  },
+  {
+    id: "ota",
+    title: "How to connect rooms to OTAs",
+    content:
+      "Go to Channels, choose your room, select the OTA, enter the required OTA details, review the matched property or room, and confirm the connection. After connection, availability and bookings can sync through Famlo Pro.",
+  },
+  {
+    id: "revenue",
+    title: "How revenue works",
+    content:
+      "Revenue shows booking value by source: Famlo Direct, OTA, and Direct/Manual. Payout values depend on payment status, checkout, compliance, and payout account readiness.",
+  },
+  {
+    id: "reports",
+    title: "How to read reports",
+    content:
+      "Reports show booking trends, revenue trends, source mix, active rooms, cancelled bookings, and action-needed bookings.",
+  },
+  {
+    id: "property",
+    title: "How property works",
+    content:
+      "A property represents a physical homestay or stay location. You can manage rooms, details, and OTA/channel setup from the property workspace.",
+  },
+  {
+    id: "host-profile",
+    title: "How host profile works",
+    content:
+      "Famlo is people-first. A host profile explains the local host experience for a property/location. If you add a new property in a different place, Famlo can create a separate host profile so the guest experience stays relevant.",
+  },
+  {
+    id: "payouts",
+    title: "How payouts work",
+    content:
+      "Payouts are released only when booking/payment/compliance requirements are clear. Complete PAN/KYC and payout account setup to receive payouts.",
+  },
+  {
+    id: "support",
+    title: "How to get help",
+    content:
+      "Use Support & Resolution to contact Team Famlo for booking, payout, OTA connection, or setup issues.",
+  },
+] as const;
+
+function buildPropertyContextLabel(option: PropertyOption | null): string {
+  if (!option) return "Current property";
+  const location = [option.locality, option.city, option.state, option.country].filter(Boolean).join(", ");
+  return location ? `${option.name} · ${location}` : option.name;
+}
+
+export default function ProSupportCenter({
+  familyId,
+  hostCode,
+  hostName,
+  propertyName,
+  propertyOptions,
+  rooms,
+  themeMode,
+}: Readonly<{
+  familyId: string;
+  hostCode: string | null;
+  hostName: string;
+  propertyName: string;
+  propertyOptions: PropertyOption[];
+  rooms: RoomOption[];
+  themeMode: ProSupportTheme;
+}>): React.JSX.Element {
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
+  const [guideSearch, setGuideSearch] = useState("");
+  const [expandedGuideId, setExpandedGuideId] = useState<string | null>("dashboard");
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    category: SUPPORT_CATEGORIES[0],
+    relatedPropertyId: familyId,
+    relatedRoomId: "",
+    relatedBooking: "",
+    message: "",
+  });
+
+  const supabase = createBrowserSupabaseClient();
+  const currentProperty =
+    propertyOptions.find((option) => option.familyId === form.relatedPropertyId) ??
+    propertyOptions.find((option) => option.familyId === familyId) ??
+    null;
+
+  const fetchTicketsForHost = useCallback(async () => {
+    if (!hostCode) {
+      setTickets([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const nextTickets = await fetchSupportTickets(supabase, hostCode);
+      setTickets(nextTickets);
+    } catch {
+      setErrorText("We could not load support queries right now.");
+    } finally {
+      setLoading(false);
+    }
+  }, [hostCode, supabase]);
+
+  useEffect(() => {
+    void fetchTicketsForHost();
+  }, [fetchTicketsForHost]);
+
+  const filteredGuideSections = useMemo(() => {
+    const query = guideSearch.trim().toLowerCase();
+    if (!query) return GUIDE_SECTIONS;
+    return GUIDE_SECTIONS.filter((section) =>
+      `${section.title} ${section.content}`.toLowerCase().includes(query)
+    );
+  }, [guideSearch]);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!hostCode || !form.message.trim()) return;
+
+    const relatedRoom = rooms.find((room) => room.id === form.relatedRoomId) ?? null;
+    const subject = `Famlo Pro · ${form.category} · ${currentProperty?.name ?? propertyName}`;
+    const message = [
+      `Category: ${form.category}`,
+      `Property: ${buildPropertyContextLabel(currentProperty)}`,
+      relatedRoom ? `Room: ${relatedRoom.name}` : null,
+      form.relatedBooking.trim() ? `Booking: ${form.relatedBooking.trim()}` : null,
+      `Family ID: ${form.relatedPropertyId}`,
+      "",
+      form.message.trim(),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    setSubmitting(true);
+    setFeedback(null);
+    setErrorText(null);
+
+    try {
+      await createSupportTicket(supabase, {
+        hostCode,
+        hostName,
+        subject,
+        message,
+      });
+
+      setFeedback("Your query has been sent to Team Famlo.");
+      setForm((current) => ({
+        ...current,
+        relatedRoomId: "",
+        relatedBooking: "",
+        message: "",
+      }));
+      void fetchTicketsForHost();
+      window.setTimeout(() => {
+        setFeedback(null);
+        setShowForm(false);
+      }, 2200);
+    } catch (error) {
+      setErrorText(
+        error instanceof Error ? error.message : "We could not send your support query right now."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={styles.supportCenterShell} data-theme={themeMode}>
+      <section className={styles.supportHero}>
+        <div className={styles.supportHeroCopy}>
+          <div className={styles.sectionEyebrow}>Support</div>
+          <h3 className={styles.propertyCenterTitle}>Support &amp; Resolution</h3>
+          <p className={styles.heroText}>
+            Need help with a booking, payout, OTA connection, or Famlo Pro setup? Message Team Famlo directly.
+          </p>
+        </div>
+        <div className={styles.supportHeroActions}>
+          <button
+            type="button"
+            className={styles.secondaryActionButton}
+            onClick={() => setShowGuide(true)}
+          >
+            <BookOpen size={16} />
+            Famlo Pro Guide
+          </button>
+          <button
+            type="button"
+            className={styles.primaryActionButton}
+            onClick={() => setShowForm((current) => !current)}
+          >
+            {showForm ? "Close query form" : "Raise New Query"}
+          </button>
+        </div>
+      </section>
+
+      {showForm ? (
+        <section className={styles.cardInset}>
+          <div className={styles.listTitle}>Raise New Query</div>
+          <div className={styles.feedCopy}>
+            Share the issue clearly and Team Famlo will review it from the same support workflow already used in the host dashboard.
+          </div>
+
+          {!hostCode ? (
+            <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>
+              We could not safely resolve this host account for support submission in the current Pro session.
+            </div>
+          ) : (
+            <form className={styles.supportFormGrid} onSubmit={handleSubmit}>
+              <label className={styles.fieldBlock}>
+                <span className={styles.fieldLabel}>Category</span>
+                <select
+                  className={styles.fieldInput}
+                  value={form.category}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, category: event.target.value as (typeof SUPPORT_CATEGORIES)[number] }))
+                  }
+                >
+                  {SUPPORT_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className={styles.fieldBlock}>
+                <span className={styles.fieldLabel}>Related property</span>
+                <select
+                  className={styles.fieldInput}
+                  value={form.relatedPropertyId}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, relatedPropertyId: event.target.value }))
+                  }
+                >
+                  {propertyOptions.length > 0 ? (
+                    propertyOptions.map((option) => (
+                      <option key={option.familyId} value={option.familyId}>
+                        {buildPropertyContextLabel(option)}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={familyId}>{propertyName}</option>
+                  )}
+                </select>
+              </label>
+
+              <label className={styles.fieldBlock}>
+                <span className={styles.fieldLabel}>Related room</span>
+                <select
+                  className={styles.fieldInput}
+                  value={form.relatedRoomId}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, relatedRoomId: event.target.value }))
+                  }
+                >
+                  <option value="">No room selected</option>
+                  {rooms.map((room) => (
+                    <option key={room.id} value={room.id}>
+                      {room.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className={styles.fieldBlock}>
+                <span className={styles.fieldLabel}>Related booking</span>
+                <input
+                  className={styles.fieldInput}
+                  value={form.relatedBooking}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, relatedBooking: event.target.value }))
+                  }
+                  placeholder="Optional booking ID"
+                />
+              </label>
+
+              <label className={`${styles.fieldBlock} ${styles.supportMessageField}`}>
+                <span className={styles.fieldLabel}>Message</span>
+                <textarea
+                  className={styles.fieldTextarea}
+                  value={form.message}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, message: event.target.value }))
+                  }
+                  placeholder="Tell Team Famlo what happened, what you expected, and what needs attention."
+                />
+              </label>
+
+              <div className={styles.supportFormActions}>
+                <button
+                  type="submit"
+                  className={styles.primaryActionButton}
+                  disabled={submitting || !form.message.trim()}
+                >
+                  {submitting ? <Loader2 className={styles.spinningIcon} size={16} /> : <Send size={16} />}
+                  {submitting ? "Sending..." : "Submit to Team Famlo"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {feedback ? (
+            <div className={`${styles.feedbackBox} ${styles.feedbackSuccess}`}>{feedback}</div>
+          ) : null}
+          {errorText ? (
+            <div className={`${styles.feedbackBox} ${styles.feedbackError}`}>{errorText}</div>
+          ) : null}
+        </section>
+      ) : null}
+
+      <section className={styles.cardInset}>
+        <div className={styles.supportListHeader}>
+          <div>
+            <div className={styles.listTitle}>Past queries</div>
+            <div className={styles.feedCopy}>
+              Past host support tickets for this account remain visible here.
+            </div>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className={styles.supportEmptyState}>
+            <Loader2 className={styles.spinningIcon} size={22} />
+            <span>Loading support queries...</span>
+          </div>
+        ) : tickets.length === 0 ? (
+          <div className={styles.supportEmptyState}>
+            <HelpCircle size={22} />
+            <div>
+              <div className={styles.emptyTitle}>No support queries yet.</div>
+              <div className={styles.emptyCopy}>
+                Use Raise New Query whenever you need help with bookings, payouts, OTA setup, or property issues.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className={styles.supportTicketList}>
+            {tickets.map((ticket) => (
+              <article key={ticket.id} className={styles.supportTicketCard}>
+                <div className={styles.supportTicketHeader}>
+                  <div>
+                    <div className={styles.supportTicketTitle}>{ticket.subject}</div>
+                    <div className={styles.supportTicketMeta}>
+                      Sent on {new Date(ticket.created_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <span
+                    className={`${styles.readinessPill} ${
+                      ticket.status === "resolved"
+                        ? styles.readinessPillOk
+                        : ticket.status === "in_progress"
+                          ? styles.readinessPillReview
+                          : styles.readinessPillMissing
+                    }`}
+                  >
+                    {ticket.status.replaceAll("_", " ")}
+                  </span>
+                </div>
+                <div className={styles.supportTicketMessage}>{ticket.message}</div>
+                {ticket.admin_reply ? (
+                  <div className={styles.supportReplyBox}>
+                    <CheckCircle2 size={16} />
+                    <div>
+                      <div className={styles.supportReplyLabel}>Team Famlo reply</div>
+                      <div className={styles.feedCopy}>{ticket.admin_reply}</div>
+                    </div>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className={styles.cardInset}>
+        <div className={styles.listTitle}>Guide</div>
+        <div className={styles.feedCopy}>
+          Open the Famlo Pro Guide for quick help on bookings, calendar, payouts, property setup, and support workflows.
+        </div>
+        <div className={styles.inlineActionRow}>
+          <button
+            type="button"
+            className={styles.secondaryActionButton}
+            onClick={() => setShowGuide(true)}
+          >
+            <BookOpen size={16} />
+            Famlo Pro Guide
+          </button>
+        </div>
+      </section>
+
+      {showGuide ? (
+        <div className={styles.guideModalOverlay} role="dialog" aria-modal="true" aria-labelledby="famlo-pro-guide-title">
+          <div className={styles.guideModal}>
+            <div className={styles.guideModalHeader}>
+              <div>
+                <div className={styles.sectionEyebrow}>Guide</div>
+                <h4 id="famlo-pro-guide-title" className={styles.guideModalTitle}>
+                  How to use Famlo Pro
+                </h4>
+              </div>
+              <button
+                type="button"
+                className={styles.drawerCloseButton}
+                onClick={() => setShowGuide(false)}
+              >
+                <X className={styles.drawerCloseIcon} />
+              </button>
+            </div>
+
+            <label className={styles.guideSearchField}>
+              <span className={styles.srOnly}>Search the Famlo Pro Guide</span>
+              <Search size={16} />
+              <input
+                value={guideSearch}
+                onChange={(event) => setGuideSearch(event.target.value)}
+                className={styles.guideSearchInput}
+                placeholder="Search booking, calendar, OTA, payout, property…"
+                aria-label="Search Famlo Pro guide"
+              />
+            </label>
+
+            <div className={styles.guideSectionList}>
+              {filteredGuideSections.length === 0 ? (
+                <div className={styles.supportEmptyState}>
+                  <CircleAlert size={18} />
+                  <span>No guide sections match this search yet.</span>
+                </div>
+              ) : (
+                filteredGuideSections.map((section) => {
+                  const expanded = expandedGuideId === section.id;
+                  return (
+                    <article key={section.id} className={styles.guideSectionCard}>
+                      <button
+                        type="button"
+                        className={styles.guideSectionButton}
+                        onClick={() => setExpandedGuideId(expanded ? null : section.id)}
+                      >
+                        <span>{section.title}</span>
+                        <ChevronDown
+                          size={16}
+                          className={expanded ? styles.guideChevronExpanded : styles.guideChevron}
+                        />
+                      </button>
+                      {expanded ? (
+                        <div className={styles.guideSectionContent}>{section.content}</div>
+                      ) : null}
+                    </article>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

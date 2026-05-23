@@ -74,11 +74,6 @@ export function getAppEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
   if (explicit === "staging" || explicit === "preview") return "staging";
   if (explicit === "local" || explicit === "development" || explicit === "dev") return "local";
 
-  const publicExplicit = String(env.NEXT_PUBLIC_APP_ENV ?? "").trim().toLowerCase();
-  if (publicExplicit === "production") return "production";
-  if (publicExplicit === "staging" || publicExplicit === "preview") return "staging";
-  if (publicExplicit === "local" || publicExplicit === "development" || publicExplicit === "dev") return "local";
-
   const vercelEnv = String(env.VERCEL_ENV ?? "").trim().toLowerCase();
   if (vercelEnv === "production") return "production";
   if (vercelEnv === "preview") return "staging";

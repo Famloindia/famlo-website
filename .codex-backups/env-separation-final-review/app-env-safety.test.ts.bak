@@ -51,16 +51,6 @@ test("production with test Razorpay key fails", () => {
   assert.equal(result.code, "test_key_not_allowed_in_production");
 });
 
-test("NEXT_PUBLIC_APP_ENV is used as an app environment fallback", () => {
-  const result = evaluateRuntimeSafety("supabase", {
-    NEXT_PUBLIC_APP_ENV: "production",
-    NEXT_PUBLIC_SUPABASE_URL: "https://famlo-production.supabase.co",
-    SUPABASE_ENVIRONMENT: "production",
-  } as unknown as NodeJS.ProcessEnv);
-
-  assert.equal(result.ok, true);
-});
-
 test("local with Channex production URL fails", () => {
   assert.throws(
     () =>

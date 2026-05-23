@@ -8,7 +8,7 @@ if (!connectionString) {
 }
 
 const sql = fs.readFileSync(
-  "supabase/migrations/20260429_000003_stay_units_v2_location_and_public_rooms.sql",
+  "supabase/migrations/20260429000003_stay_units_v2_location_and_public_rooms.sql",
   "utf8"
 );
 

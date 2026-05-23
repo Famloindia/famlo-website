@@ -4,6 +4,7 @@
 
 ### Local
 - `APP_ENV=local`
+- `NEXT_PUBLIC_APP_ENV=local`
 - App runs on `localhost`
 - Supabase: staging project
 - R2 bucket: `famlo-images-staging`
@@ -15,6 +16,7 @@
 
 ### Staging
 - `APP_ENV=staging`
+- `NEXT_PUBLIC_APP_ENV=staging`
 - App runs on `staging.famlo.in` or Vercel Preview
 - Supabase: staging project
 - R2 bucket: `famlo-images-staging`
@@ -27,6 +29,7 @@
 
 ### Production
 - `APP_ENV=production`
+- `NEXT_PUBLIC_APP_ENV=production`
 - App runs on `famlo.in`
 - Supabase: production project
 - R2 bucket: `famlo-images`
@@ -57,39 +60,89 @@
 
 ## Vercel Setup
 
-### Production Environment Values
-- `APP_ENV=production`
-- `SUPABASE_ENVIRONMENT=production`
-- production Supabase URL and keys
-- `R2_BUCKET_NAME=famlo-images`
-- production R2 credentials
-- Razorpay live keys
-- `CHANNEX_ENV=production`
-- production Channex credentials
-- `EMAIL_EXECUTION_ENABLED=false` by default
-- `REFUND_PROVIDER_EXECUTION_ENABLED=false` by default
-- `SETTLEMENT_PAYOUT_EXECUTION_ENABLED=false` by default
-- `CHANNEX_SYNC_EXECUTION_ENABLED=false` by default
+### Vercel Development
 
-### Preview/Staging Environment Values
-- `APP_ENV=staging`
-- `SUPABASE_ENVIRONMENT=staging`
-- staging Supabase URL and keys
-- `R2_BUCKET_NAME=famlo-images-staging`
-- staging R2 credentials
-- Razorpay test keys
-- `CHANNEX_ENVIRONMENT=staging`
-- staging Channex credentials
-- `EMAIL_EXECUTION_ENABLED=false`
-- `FAMLO_ENABLE_WHATSAPP_NOTIFICATIONS=false`
-- `REFUND_PROVIDER_EXECUTION_ENABLED=false`
-- `SETTLEMENT_PAYOUT_EXECUTION_ENABLED=false`
-- `CHANNEX_SYNC_EXECUTION_ENABLED=false`
-- `PRO_BILLING_PAYMENT_EXECUTION_ENABLED=false`
+| Variable | Value / Category |
+| --- | --- |
+| `APP_ENV` | `local` |
+| `NEXT_PUBLIC_APP_ENV` | `local` |
+| `SUPABASE_ENVIRONMENT` | `staging` |
+| `NEXT_PUBLIC_SUPABASE_URL` | staging Supabase URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | staging anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | staging service role key |
+| `R2_BUCKET_NAME` | `famlo-images-staging` |
+| `R2_ACCOUNT_ID` | staging R2 account |
+| `R2_ACCESS_KEY_ID` | staging R2 access key |
+| `R2_SECRET_ACCESS_KEY` | staging R2 secret |
+| `RAZORPAY_KEY_ID` | test key |
+| `RAZORPAY_KEY_SECRET` | test secret |
+| `CHANNEX_ENV` | `staging` |
+| `CHANNEX_STAGING_BASE_URL` | staging base URL |
+| `CHANNEX_STAGING_API_KEY` | staging API key |
+| `EMAIL_EXECUTION_ENABLED` | `false` |
+| `FAMLO_ENABLE_WHATSAPP_NOTIFICATIONS` | `false` |
+| `REFUND_PROVIDER_EXECUTION_ENABLED` | `false` |
+| `SETTLEMENT_PAYOUT_EXECUTION_ENABLED` | `false` |
+| `CHANNEX_SYNC_EXECUTION_ENABLED` | `false` |
+| `PRO_BILLING_PAYMENT_EXECUTION_ENABLED` | `false` |
+| `FAMLO_TEMP_ALLOW_LOCAL_PRODUCTION_SUPABASE` | `false` |
+
+### Vercel Preview / Staging
+
+| Variable | Value / Category |
+| --- | --- |
+| `APP_ENV` | `staging` |
+| `NEXT_PUBLIC_APP_ENV` | `staging` |
+| `SUPABASE_ENVIRONMENT` | `staging` |
+| `NEXT_PUBLIC_SUPABASE_URL` | staging Supabase URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | staging anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | staging service role key |
+| `R2_BUCKET_NAME` | `famlo-images-staging` |
+| `R2_ACCOUNT_ID` | staging R2 account |
+| `R2_ACCESS_KEY_ID` | staging R2 access key |
+| `R2_SECRET_ACCESS_KEY` | staging R2 secret |
+| `RAZORPAY_KEY_ID` | test key |
+| `RAZORPAY_KEY_SECRET` | test secret |
+| `CHANNEX_ENV` | `staging` |
+| `CHANNEX_STAGING_BASE_URL` | staging base URL |
+| `CHANNEX_STAGING_API_KEY` | staging API key |
+| `EMAIL_EXECUTION_ENABLED` | `false` |
+| `FAMLO_ENABLE_WHATSAPP_NOTIFICATIONS` | `false` |
+| `REFUND_PROVIDER_EXECUTION_ENABLED` | `false` |
+| `SETTLEMENT_PAYOUT_EXECUTION_ENABLED` | `false` |
+| `CHANNEX_SYNC_EXECUTION_ENABLED` | `false` |
+| `PRO_BILLING_PAYMENT_EXECUTION_ENABLED` | `false` |
+
+### Vercel Production
+
+| Variable | Value / Category |
+| --- | --- |
+| `APP_ENV` | `production` |
+| `NEXT_PUBLIC_APP_ENV` | `production` |
+| `SUPABASE_ENVIRONMENT` | `production` |
+| `NEXT_PUBLIC_SUPABASE_URL` | production Supabase URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | production anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | production service role key |
+| `R2_BUCKET_NAME` | `famlo-images` |
+| `R2_ACCOUNT_ID` | production R2 account |
+| `R2_ACCESS_KEY_ID` | production R2 access key |
+| `R2_SECRET_ACCESS_KEY` | production R2 secret |
+| `RAZORPAY_KEY_ID` | live key |
+| `RAZORPAY_KEY_SECRET` | live secret |
+| `CHANNEX_ENV` | `production` |
+| `CHANNEX_PRODUCTION_BASE_URL` | production base URL |
+| `CHANNEX_PRODUCTION_API_KEY` | production API key |
+| `EMAIL_EXECUTION_ENABLED` | `false` by default |
+| `FAMLO_ENABLE_WHATSAPP_NOTIFICATIONS` | `false` by default |
+| `REFUND_PROVIDER_EXECUTION_ENABLED` | `false` by default |
+| `SETTLEMENT_PAYOUT_EXECUTION_ENABLED` | `false` by default |
+| `CHANNEX_SYNC_EXECUTION_ENABLED` | `false` by default |
+| `PRO_BILLING_PAYMENT_EXECUTION_ENABLED` | `false` by default |
 
 ## Local .env.local Setup
 
 - `APP_ENV=local`
+- `NEXT_PUBLIC_APP_ENV=local`
 - `SUPABASE_ENVIRONMENT=staging`
 - point `NEXT_PUBLIC_SUPABASE_URL` to the staging Supabase project
 - `R2_BUCKET_NAME=famlo-images-staging`
@@ -117,3 +170,4 @@
 10. WhatsApp execution is blocked outside production.
 11. Refund and payout execution are blocked outside production.
 12. Channex production sync is blocked outside production.
+13. Browser-side runtime checks respect `NEXT_PUBLIC_APP_ENV` when `APP_ENV` is not exposed client-side.

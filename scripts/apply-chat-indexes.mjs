@@ -2,8 +2,8 @@ import fs from "node:fs";
 import { Client } from "pg";
 
 const sql = [
-  fs.readFileSync("supabase/migrations/20260415_000002_chat_message_enhancements.sql", "utf8"),
-  fs.readFileSync("supabase/migrations/20260425_000001_chat_performance_indexes.sql", "utf8"),
+  fs.readFileSync("supabase/migrations/20260415000002_chat_message_enhancements.sql", "utf8"),
+  fs.readFileSync("supabase/migrations/20260425000001_chat_performance_indexes.sql", "utf8"),
 ].join("\n\n");
 
 const expectedIndexes = [

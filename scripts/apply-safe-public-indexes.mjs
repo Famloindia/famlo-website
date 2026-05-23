@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { Client } from 'pg';
 
-const sql = fs.readFileSync('supabase/migrations/20260429_000001_safe_public_path_indexes.sql', 'utf8');
+const sql = fs.readFileSync('supabase/migrations/20260429000001_safe_public_path_indexes.sql', 'utf8');
 const expectedIndexes = [
   'family_photos_family_id_primary_idx',
   'conversations_family_id_last_message_at_idx',

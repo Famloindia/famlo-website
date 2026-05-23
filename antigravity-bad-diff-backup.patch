@@ -1,0 +1,4359 @@
+diff --git a/.generated/finance-documents/guest_tax_invoice/invoice-1/GTI-001.pdf b/.generated/finance-documents/guest_tax_invoice/invoice-1/GTI-001.pdf
+index 5fa4f22b..3c1e1af4 100644
+--- a/.generated/finance-documents/guest_tax_invoice/invoice-1/GTI-001.pdf
++++ b/.generated/finance-documents/guest_tax_invoice/invoice-1/GTI-001.pdf
+@@ -37,7 +37,7 @@ endobj
+ endobj
+ 7 0 obj
+ <<
+-/Author (\(anonymous\)) /CreationDate (D:20260521172632+05'00') /Creator (\(unspecified\)) /Keywords () /ModDate (D:20260521172632+05'00') /Producer (ReportLab PDF Library - \(opensource\)) 
++/Author (\(anonymous\)) /CreationDate (D:20260523124101+05'00') /Creator (\(unspecified\)) /Keywords () /ModDate (D:20260523124101+05'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+   /Subject (\(unspecified\)) /Title (\(anonymous\)) /Trapped /False
+ >>
+ endobj
+@@ -68,7 +68,7 @@ xref
+ trailer
+ <<
+ /ID 
+-[<037bd22e0f7df72f96e308eb96df831c><037bd22e0f7df72f96e308eb96df831c>]
++[<c51bdf8091bd265d1771220fd0deb9cf><c51bdf8091bd265d1771220fd0deb9cf>]
+ % ReportLab generated PDF document -- digest (opensource)
+ 
+ /Info 7 0 R
+diff --git a/app/partnerslogin/home/pro/dashboard/render-dashboard.tsx b/app/partnerslogin/home/pro/dashboard/render-dashboard.tsx
+index 84ac4055..8f21f112 100644
+--- a/app/partnerslogin/home/pro/dashboard/render-dashboard.tsx
++++ b/app/partnerslogin/home/pro/dashboard/render-dashboard.tsx
+@@ -25,6 +25,13 @@ import {
+   buildProfileFromFamily,
+   buildScheduleFromFamily,
+ } from "@/lib/family-profile-editor";
++import {
++  defaultProPricingPlan,
++  loadProBillingEstimate,
++  type ProBillingEstimate,
++} from "@/lib/pro-billing/billing-estimator";
++import { getProAccessLifecycleState, type ProAccessLifecycleState } from "@/lib/pro-billing/pro-access-lifecycle";
++import { getHostProBillingState } from "@/lib/pro-billing/entitlement-service";
+ import { ensureProjectedInventory } from "@/lib/inventory";
+ import { resolveAuthenticatedUser } from "@/lib/request-user";
+ import { loadStayUnitsForSelector } from "@/lib/stay-units";
+@@ -236,6 +243,33 @@ function formatCalendarAmount(value: number | null, currency: string | null): st
+   }).format(value);
+ }
+ 
++function buildBillingEstimateFallback(message: string): ProBillingEstimate {
++  const plan = defaultProPricingPlan();
++  return {
++    planLabel: plan.name,
++    planCode: plan.code,
++    currency: plan.currency,
++    propertyFeePerProperty: Math.round(plan.propertyMonthlyFeePaise / 100),
++    roomSyncFeePerRoom: Math.round(plan.roomMonthlyFeePaise / 100),
++    gstRatePercent: plan.gstRateBps / 100,
++    activeProProperties: 0,
++    activeSyncedRooms: 0,
++    propertyFeeAmount: 0,
++    roomSyncFeeAmount: 0,
++    subtotalAmount: 0,
++    gstAmount: 0,
++    totalAmount: 0,
++    billingActive: false,
++    note: "Billing is not active yet. This is an estimate.",
++    warnings: [
++      {
++        code: "workspace_scope_limited",
++        message,
++      },
++    ],
++  };
++}
++
+ function formatAccessReason(reason: string): string {
+   if (reason === "active_period") return "Active access";
+   if (reason === "grace_period") return "Grace access";
+@@ -555,6 +589,63 @@ export async function renderFamloProDashboardPage({
+     );
+   }
+ 
++  let billingEstimate: ProBillingEstimate;
++  try {
++    billingEstimate = await loadProBillingEstimate(supabase, {
++      hostUserId: effectiveHostUserId,
++      familyId,
++    });
++  } catch {
++    billingEstimate = buildBillingEstimateFallback(
++      "We could not load the latest Famlo Pro billing estimate right now, so a safe fallback is being shown."
++    );
++  }
++
++  let billingStateSummary: {
++    subscriptionStatus: string | null;
++    subscriptionCurrentPeriodEnd: string | null;
++    activePlanName: string | null;
++    activePropertyEntitlements: number;
++    activeRoomEntitlements: number;
++    warnings: string[];
++    lifecycleState: ProAccessLifecycleState;
++  } | null = null;
++
++  try {
++    if (effectiveHostUserId) {
++      const billingState = await getHostProBillingState(supabase, {
++        hostUserId: effectiveHostUserId,
++      });
++      billingStateSummary = {
++        subscriptionStatus: billingState.displaySubscription?.status ?? null,
++        subscriptionCurrentPeriodEnd: billingState.displaySubscription?.currentPeriodEnd ?? null,
++        activePlanName: billingState.activePlan?.name ?? null,
++        activePropertyEntitlements: billingState.activePropertyEntitlements.length,
++        activeRoomEntitlements: billingState.activeRoomEntitlements.length,
++        warnings: billingState.warnings.map((warning) => warning.message),
++        lifecycleState: getProAccessLifecycleState({
++          subscriptionStatus: billingState.displaySubscription?.status ?? access.status ?? null,
++          currentDate: new Date(),
++          currentPeriodEnd: billingState.displaySubscription?.currentPeriodEnd ?? access.current_period_end ?? null,
++        }),
++      };
++    }
++  } catch {
++    billingStateSummary = {
++      subscriptionStatus: null,
++      subscriptionCurrentPeriodEnd: null,
++      activePlanName: null,
++      activePropertyEntitlements: 0,
++      activeRoomEntitlements: 0,
++      warnings: ["We could not load the latest Famlo Pro billing state right now."],
++      lifecycleState: getProAccessLifecycleState({
++        subscriptionStatus: access.status,
++        currentDate: new Date(),
++        currentPeriodEnd: access.current_period_end ?? null,
++      }),
++    };
++  }
++
+   const familyRecordResult = await supabase
+     .from("families")
+     .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type,host_phone,host_photo_url,street_address,about,description,famlo_experience,family_composition,languages,languages_spoken,id_document_type,id_document_url,live_selfie_url,max_guests,active_quarters,blocked_dates,booking_requires_host_approval,price_morning,price_afternoon,price_evening,price_fullday,village")
+@@ -1777,6 +1868,8 @@ export async function renderFamloProDashboardPage({
+       initialSection={initialSection}
+       rooms={roomSummaries}
+       metrics={metrics}
++      billingEstimate={billingEstimate}
++      billingStateSummary={billingStateSummary}
+       setupItems={setupItems}
+       feedItems={feedItems}
+       basicDashboardUrl={basicDashboardUrl}
+diff --git a/app/payments/checkout/page.tsx b/app/payments/checkout/page.tsx
+index cf0989b6..546bf862 100644
+--- a/app/payments/checkout/page.tsx
++++ b/app/payments/checkout/page.tsx
+@@ -4,15 +4,6 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+ import Script from "next/script";
+ import { useSearchParams } from "next/navigation";
+ 
+-declare global {
+-  interface Window {
+-    Razorpay?: new (options: Record<string, unknown>) => {
+-      open: () => void;
+-      on: (event: "payment.failed", handler: (response: { error?: { description?: string; reason?: string } }) => void) => void;
+-    };
+-  }
+-}
+-
+ type CheckoutBreakdown = {
+   roomBaseAmount: number;
+   accommodationGstAmount: number;
+diff --git a/components/admin/AdminLayout.tsx b/components/admin/AdminLayout.tsx
+index 64977be9..dae57073 100644
+--- a/components/admin/AdminLayout.tsx
++++ b/components/admin/AdminLayout.tsx
+@@ -25,6 +25,7 @@ const tabs = [
+   { id: "coupons", label: "Coupons", icon: TicketPercent, group: "Financial" },
+   { id: "commission", label: "Commission Control", icon: Percent, group: "Financial" },
+   { id: "finance", label: "Finance Control", icon: Landmark, group: "Financial", href: "/admin/finance" },
++  { id: "pro-billing", label: "Pro Billing", icon: ReceiptIndianRupee, group: "Financial", href: "/admin/pro-billing" },
+   { id: "refunds", label: "Refunds", icon: ReceiptIndianRupee, group: "Financial", href: "/admin/refunds" },
+   { id: "payouts", label: "Payout Overrides", icon: Banknote, group: "Financial" },
+   { id: "channel-manager", label: "Channel Manager", icon: CalendarDaysIconShim, group: "Operations" },
+diff --git a/components/partners/pro/FamloProDashboardShell.tsx b/components/partners/pro/FamloProDashboardShell.tsx
+index c704980b..622fe1ad 100644
+--- a/components/partners/pro/FamloProDashboardShell.tsx
++++ b/components/partners/pro/FamloProDashboardShell.tsx
+@@ -15,6 +15,8 @@ import {
+   CalendarDays,
+   Check,
+   CheckCircle2,
++  ChevronLeft,
++  ChevronRight,
+   ClipboardList,
+   Clock3,
+   FileBarChart2,
+@@ -36,6 +38,7 @@ import {
+ 
+ import type { PhotoItem } from "@/components/partners/HostDashboardEditor";
+ import ProHostProfileCenter from "@/components/partners/pro/ProHostProfileCenter";
++import ProSupportCenter from "@/components/partners/pro/ProSupportCenter";
+ import type { ChannelSetupWizardSummary } from "@/components/partners/pro/ChannelSetupWizard";
+ import type {
+   FamilyComplianceDraft,
+@@ -89,6 +92,8 @@ import {
+   matchesRevenueWindowDate,
+   shouldIncludeFamloPayoutInTotals,
+ } from "@/lib/finance/pro-revenue";
++import type { ProBillingEstimate } from "@/lib/pro-billing/billing-estimator";
++import type { ProAccessLifecycleState } from "@/lib/pro-billing/pro-access-lifecycle";
+ import {
+   applyRoomCalendarAvailabilityOverride,
+   buildHostRoomIssueCards,
+@@ -263,6 +268,10 @@ type BookingDateFilter = "Check-in" | "Check-out" | "Booking Dates" | "Staying T
+ 
+ type RevenueWindowFilter = "Today" | "This week" | "This month" | "All time";
+ type ReportWindowFilter = "This week" | "This month" | "This year";
++type ReportGraphMode = "bookings" | "revenue";
++type FamloProTheme = "dark" | "light";
++
++const FAMLO_PRO_THEME_STORAGE_KEY = "famlo-pro-theme";
+ 
+ type RoomEditorTabId =
+   | "details"
+@@ -459,6 +468,16 @@ interface FamloProDashboardShellProps {
+   initialSection: ProSectionId;
+   rooms: RoomSummary[];
+   metrics: DashboardMetric[];
++  billingEstimate: ProBillingEstimate;
++  billingStateSummary: {
++    subscriptionStatus: string | null;
++    subscriptionCurrentPeriodEnd: string | null;
++    activePlanName: string | null;
++    activePropertyEntitlements: number;
++    activeRoomEntitlements: number;
++    warnings: string[];
++    lifecycleState: ProAccessLifecycleState;
++  } | null;
+   setupItems: SetupItem[];
+   feedItems: FeedItem[];
+   basicDashboardUrl: string;
+@@ -723,7 +742,7 @@ const TOP_LEVEL_NAV_ITEMS: NavItem[] = [
+   { id: "messages", title: "Messages", hint: "Guest conversations", icon: MessageSquareMore },
+   { id: "revenue", title: "Revenue", hint: "Performance snapshot", icon: WalletCards },
+   { id: "reports", title: "Reports", hint: "Exports and summaries", icon: FileBarChart2 },
+-  { id: "support", title: "Support", hint: "Pilot help", icon: BellRing },
++  { id: "support", title: "Billing & Support", hint: "Billing, queries, and guide", icon: BellRing },
+   { id: "settings", title: "Settings", hint: "Workspace controls", icon: Settings2 },
+ ];
+ 
+@@ -1784,10 +1803,10 @@ function buildSectionDescriptor(
+ 
+   if (section === "support") {
+     return {
+-      eyebrow: "Admin",
+-      title: "Support",
+-      copy: "Pilot support shell for early Pro launches before live provider connectivity is introduced.",
+-      status: "Pilot support",
++      eyebrow: "Billing & Support",
++      title: "Billing & Support",
++      copy: "Review current Famlo Pro billing visibility, raise support queries, and check the guide for property, OTA, and room-counting help.",
++      status: "Founding host phase",
+     };
+   }
+ 
+@@ -1817,6 +1836,8 @@ export default function FamloProDashboardShell({
+   initialSection,
+   rooms,
+   metrics,
++  billingEstimate,
++  billingStateSummary,
+   setupItems,
+   feedItems,
+   basicDashboardUrl,
+@@ -1839,10 +1860,19 @@ export default function FamloProDashboardShell({
+ }: Readonly<FamloProDashboardShellProps>): React.JSX.Element {
+   const getCalendarRateOverrideKey = (roomId: string, date: string): string => `${roomId}:${date}`;
+   const router = useRouter();
++  const [themeMode, setThemeMode] = useState<FamloProTheme>("dark");
+   const [activeSection, setActiveSection] = useState<ProSectionId>(initialSection);
++  const [reportGraphMode, setReportGraphMode] = useState<ReportGraphMode>("bookings");
+   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(roomRouteState?.roomId ?? rooms[0]?.id ?? null);
+   const [roomEditorTab, setRoomEditorTab] = useState<RoomEditorTabId>("details");
+   const [propertyContent, setPropertyContent] = useState<PropertyContentDraft>(initialPropertyContent);
++  const proAccessLifecycleState = billingStateSummary?.lifecycleState ?? null;
++  const showLifecycleBanner =
++    proAccessLifecycleState !== null &&
++    proAccessLifecycleState.bannerSeverity !== "none" &&
++    Boolean(proAccessLifecycleState.message);
++  const isProLockedForBilling =
++    proAccessLifecycleState !== null && proAccessLifecycleState.shouldAllowProReadOnly === false;
+   const [propertyGallery, setPropertyGallery] = useState<PhotoItem[]>(propertyPhotos);
+   const [propertyContentSaving, startPropertyContentSaving] = useTransition();
+   const [isPropertySwitchPending, setIsPropertySwitchPending] = useState(false);
+@@ -2410,6 +2440,25 @@ export default function FamloProDashboardShell({
+     });
+   };
+ 
++  useEffect(() => {
++    try {
++      const storedTheme = window.localStorage.getItem(FAMLO_PRO_THEME_STORAGE_KEY);
++      if (storedTheme === "light" || storedTheme === "dark") {
++        setThemeMode(storedTheme);
++      }
++    } catch {
++      // Keep dark mode as the safe default when localStorage is unavailable.
++    }
++  }, []);
++
++  useEffect(() => {
++    try {
++      window.localStorage.setItem(FAMLO_PRO_THEME_STORAGE_KEY, themeMode);
++    } catch {
++      // Keep the UI usable even if persistence is unavailable.
++    }
++  }, [themeMode]);
++
+   useEffect(() => {
+     setActiveSection(initialSection);
+     setPropertyContent(initialPropertyContent);
+@@ -2636,25 +2685,14 @@ export default function FamloProDashboardShell({
+   const selectedRevenuePendingPayout = famloPayoutBookings
+     .filter((booking) => !isFinanceBackedPaidStatus(booking.payoutExecutionStatus) && !isFinanceBackedPaidStatus(booking.payoutStatus))
+     .reduce((sum, booking) => sum + (booking.payoutAmountValue ?? 0), 0);
+-  const famloGeneratedBookings = selectedRevenueBookings.filter((booking) => booking.sourceCategory === "famlo");
+-  const famloGeneratedRevenue = famloGeneratedBookings.reduce(
+-    (sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0),
+-    0
+-  );
+-  const famloGeneratedContribution =
+-    selectedRevenueGrossValue > 0 ? (famloGeneratedRevenue / selectedRevenueGrossValue) * 100 : 0;
+   const revenueBySource = {
+     famlo: {
+-      label: "Famlo",
+-      amount: famloGeneratedRevenue,
+-      count: famloGeneratedBookings.length,
+-    },
+-    direct: {
+-      label: "Direct",
++      label: "Famlo Direct",
+       amount: selectedRevenueBookings
+-        .filter((booking) => booking.sourceCategory === "direct")
++        .filter((booking) => booking.sourceCategory === "famlo")
+         .reduce((sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0), 0),
+-      count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "direct").length,
++      count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "famlo").length,
++      helperText: "Bookings and payments handled through Famlo.",
+     },
+     ota: {
+       label: "OTA",
+@@ -2662,6 +2700,15 @@ export default function FamloProDashboardShell({
+         .filter((booking) => booking.sourceCategory === "ota")
+         .reduce((sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0), 0),
+       count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "ota").length,
++      helperText: "Bookings received from connected OTA channels.",
++    },
++    direct: {
++      label: "Direct / Manual",
++      amount: selectedRevenueBookings
++        .filter((booking) => booking.sourceCategory === "direct")
++        .reduce((sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0), 0),
++      count: selectedRevenueBookings.filter((booking) => booking.sourceCategory === "direct").length,
++      helperText: "Bookings added directly by you or your team.",
+     },
+   };
+   const selectedRevenueWindowHint =
+@@ -2672,130 +2719,15 @@ export default function FamloProDashboardShell({
+         : revenueWindow === "This month"
+           ? "Completed earnings for the current month."
+           : "Completed earnings across all eligible visible bookings.";
+-  const shouldUseRevenueDemo =
+-    process.env.NODE_ENV !== "production" &&
+-    process.env.NEXT_PUBLIC_FAMLO_PRO_REVENUE_DEMO === "1" &&
+-    completedRevenueBookings.length === 0;
+-  const demoRevenueRowsAll = [
+-    {
+-      bookingId: "demo-rohan",
+-      guestDisplayName: "Rohan Sharma",
+-      roomName: "2 nights",
+-      startDate: "2026-05-19",
+-      endDate: "2026-05-21",
+-      checkoutDate: "2026-05-21",
+-      sourceCategory: "famlo" as const,
+-      amountValue: 6200,
+-      payoutValue: 5580,
+-      status: "Pending",
+-    },
+-    {
+-      bookingId: "demo-priya",
+-      guestDisplayName: "Priya Mehta",
+-      roomName: "1 night",
+-      startDate: "2026-05-21",
+-      endDate: "2026-05-22",
+-      checkoutDate: "2026-05-22",
+-      sourceCategory: "famlo" as const,
+-      amountValue: 3800,
+-      payoutValue: 3420,
+-      status: "Paid by Famlo",
+-    },
+-    {
+-      bookingId: "demo-aman",
+-      guestDisplayName: "Aman Jain",
+-      roomName: "2 nights",
+-      startDate: "2026-05-08",
+-      endDate: "2026-05-10",
+-      checkoutDate: "2026-05-10",
+-      sourceCategory: "ota" as const,
+-      amountValue: 7500,
+-      payoutValue: null,
+-      status: "Paid by OTA",
+-    },
+-    {
+-      bookingId: "demo-kavya",
+-      guestDisplayName: "Kavya Singh",
+-      roomName: "1 night",
+-      startDate: "2026-04-06",
+-      endDate: "2026-04-07",
+-      checkoutDate: "2026-04-07",
+-      sourceCategory: "direct" as const,
+-      amountValue: 2500,
+-      payoutValue: null,
+-      status: "Paid outside Famlo",
+-    },
+-  ];
+-  const demoRevenueRows = shouldUseRevenueDemo
+-    ? demoRevenueRowsAll.filter((booking) => {
+-        if (revenueWindow === "Today") return booking.checkoutDate === todayIsoDate;
+-        if (revenueWindow === "This week") return booking.checkoutDate >= weekStartIsoDate && booking.checkoutDate <= weekEndIsoDate;
+-        if (revenueWindow === "This month") return booking.checkoutDate.startsWith(currentMonthPrefix);
+-        return true;
+-      })
+-    : [];
+-  const demoRevenueBySource = shouldUseRevenueDemo
+-    ? {
+-        famlo: {
+-          label: "Famlo",
+-          amount: demoRevenueRows.filter((booking) => booking.sourceCategory === "famlo").reduce((sum, booking) => sum + booking.amountValue, 0),
+-          count: demoRevenueRows.filter((booking) => booking.sourceCategory === "famlo").length,
+-        },
+-        direct: {
+-          label: "Direct",
+-          amount: demoRevenueRows.filter((booking) => booking.sourceCategory === "direct").reduce((sum, booking) => sum + booking.amountValue, 0),
+-          count: demoRevenueRows.filter((booking) => booking.sourceCategory === "direct").length,
+-        },
+-        ota: {
+-          label: "OTA",
+-          amount: demoRevenueRows.filter((booking) => booking.sourceCategory === "ota").reduce((sum, booking) => sum + booking.amountValue, 0),
+-          count: demoRevenueRows.filter((booking) => booking.sourceCategory === "ota").length,
+-        },
+-      }
+-    : null;
+-  const demoRevenueGrossValue = shouldUseRevenueDemo
+-    ? demoRevenueRows.reduce((sum, booking) => sum + booking.amountValue, 0)
+-    : 0;
+-  const demoRevenueNetPayout = shouldUseRevenueDemo
+-    ? demoRevenueRows
+-        .filter((booking) => booking.sourceCategory === "famlo" && booking.payoutValue != null)
+-        .reduce((sum, booking) => sum + (booking.payoutValue ?? 0), 0)
+-    : 0;
+-  const demoRevenuePaidToYou = shouldUseRevenueDemo
+-    ? demoRevenueRows
+-        .filter((booking) => booking.status === "Paid by Famlo")
+-        .reduce((sum, booking) => sum + (booking.payoutValue ?? 0), 0)
+-    : 0;
+-  const demoRevenuePendingPayout = shouldUseRevenueDemo ? Math.max(0, demoRevenueNetPayout - demoRevenuePaidToYou) : 0;
+-  const demoFamloGeneratedRevenue = shouldUseRevenueDemo ? demoRevenueBySource?.famlo.amount ?? 0 : 0;
+-  const demoFamloGeneratedCount = shouldUseRevenueDemo ? demoRevenueBySource?.famlo.count ?? 0 : 0;
+-  const demoFamloGeneratedContribution = shouldUseRevenueDemo && demoRevenueGrossValue > 0 ? (demoFamloGeneratedRevenue / demoRevenueGrossValue) * 100 : 0;
+-  const effectiveRevenueGrossValue = shouldUseRevenueDemo ? demoRevenueGrossValue : selectedRevenueGrossValue;
+-  const effectiveRevenueNetPayout = shouldUseRevenueDemo ? demoRevenueNetPayout : selectedRevenueNetPayout;
+-  const effectiveRevenuePaidToYou = shouldUseRevenueDemo ? demoRevenuePaidToYou : selectedRevenuePaidToYou;
+-  const effectiveRevenuePendingPayout = shouldUseRevenueDemo ? demoRevenuePendingPayout : selectedRevenuePendingPayout;
+-  const effectiveFamloGeneratedRevenue = shouldUseRevenueDemo ? demoFamloGeneratedRevenue : famloGeneratedRevenue;
+-  const effectiveFamloGeneratedCount = shouldUseRevenueDemo ? demoFamloGeneratedCount : famloGeneratedBookings.length;
+-  const effectiveFamloGeneratedContribution = shouldUseRevenueDemo ? demoFamloGeneratedContribution : famloGeneratedContribution;
+-  const effectiveRevenueBySource = shouldUseRevenueDemo ? demoRevenueBySource ?? revenueBySource : revenueBySource;
+   const orderedRevenueSources = [
+-    effectiveRevenueBySource.famlo,
+-    effectiveRevenueBySource.ota,
+-    effectiveRevenueBySource.direct,
++    revenueBySource.famlo,
++    revenueBySource.ota,
++    revenueBySource.direct,
+   ];
++  const hasCompletedRevenue = selectedRevenueBookings.length > 0;
++  const payoutSetupBlocked = !hostRevenueCompliance.panVerified || !hostRevenueCompliance.payoutAccountActive;
++  const payoutSetupHref = "/host/finance/payout-account";
+   const averageBookingValue = bookingsWithValue.length > 0 ? totalBookingValue / bookingsWithValue.length : null;
+-  const directAverageBookingValue = (() => {
+-    const directValues = bookingsWithValue.filter((entry) => !entry.booking.isOta);
+-    return directValues.length > 0
+-      ? directValues.reduce((sum, entry) => sum + entry.parsedAmount, 0) / directValues.length
+-      : null;
+-  })();
+-  const otaAverageBookingValue = (() => {
+-    const otaValues = bookingsWithValue.filter((entry) => entry.booking.isOta);
+-    return otaValues.length > 0
+-      ? otaValues.reduce((sum, entry) => sum + entry.parsedAmount, 0) / otaValues.length
+-      : null;
+-  })();
+   const sourceCountEntries = Object.entries(
+     proBookings.reduce<Record<string, number>>((acc, booking) => {
+       const key = booking.sourceLabel || (booking.isOta ? "OTA" : "Famlo Direct");
+@@ -2842,39 +2774,119 @@ export default function FamloProDashboardShell({
+     });
+   })();
+   const reportTrendRows = reportWindowAnchors.map((anchor) => {
+-    const directCount = proBookings.filter((booking) => {
+-      if (booking.isOta) return false;
++    const famloDirectCount = proBookings.filter((booking) => {
++      if (booking.sourceCategory !== "famlo") return false;
+       return reportWindow === "This year"
+         ? booking.startDate.startsWith(anchor.key)
+         : booking.startDate === anchor.key;
+     }).length;
+     const otaCount = proBookings.filter((booking) => {
+-      if (!booking.isOta) return false;
++      if (booking.sourceCategory !== "ota") return false;
+       return reportWindow === "This year"
+         ? booking.startDate.startsWith(anchor.key)
+         : booking.startDate === anchor.key;
+     }).length;
++    const manualCount = proBookings.filter((booking) => {
++      if (booking.sourceCategory !== "direct") return false;
++      return reportWindow === "This year"
++        ? booking.startDate.startsWith(anchor.key)
++        : booking.startDate === anchor.key;
++    }).length;
++    const famloRevenue = completedRevenueBookings
++      .filter((booking) => booking.sourceCategory === "famlo")
++      .filter((booking) =>
++        reportWindow === "This year"
++          ? (booking.revenueDate ?? booking.checkoutDate).startsWith(anchor.key)
++          : (booking.revenueDate ?? booking.checkoutDate) === anchor.key
++      )
++      .reduce((sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0), 0);
++    const otaRevenue = completedRevenueBookings
++      .filter((booking) => booking.sourceCategory === "ota")
++      .filter((booking) =>
++        reportWindow === "This year"
++          ? (booking.revenueDate ?? booking.checkoutDate).startsWith(anchor.key)
++          : (booking.revenueDate ?? booking.checkoutDate) === anchor.key
++      )
++      .reduce((sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0), 0);
++    const manualRevenue = completedRevenueBookings
++      .filter((booking) => booking.sourceCategory === "direct")
++      .filter((booking) =>
++        reportWindow === "This year"
++          ? (booking.revenueDate ?? booking.checkoutDate).startsWith(anchor.key)
++          : (booking.revenueDate ?? booking.checkoutDate) === anchor.key
++      )
++      .reduce((sum, booking) => sum + (booking.amountValue ?? parseBookingAmount(booking.amount) ?? 0), 0);
+     return {
+       ...anchor,
+-      directCount,
++      famloDirectCount,
+       otaCount,
+-      totalCount: directCount + otaCount,
++      manualCount,
++      famloRevenue,
++      otaRevenue,
++      manualRevenue,
++      totalCount: famloDirectCount + otaCount + manualCount,
++      totalRevenue: famloRevenue + otaRevenue + manualRevenue,
+     };
+   });
+-  const reportMaxCount = reportTrendRows.reduce((max, row) => Math.max(max, row.directCount, row.otaCount, row.totalCount), 0);
++  const reportMaxCount = reportTrendRows.reduce(
++    (max, row) => Math.max(max, row.famloDirectCount, row.otaCount, row.manualCount, row.totalCount),
++    0
++  );
++  const reportMaxRevenue = reportTrendRows.reduce(
++    (max, row) => Math.max(max, row.famloRevenue, row.otaRevenue, row.manualRevenue, row.totalRevenue),
++    0
++  );
+   const chartWidth = 640;
+   const chartHeight = 220;
+-  const directTrendPath = buildSvgLinePath(reportTrendRows.map((row) => row.directCount), chartWidth, chartHeight, reportMaxCount);
+-  const otaTrendPath = buildSvgLinePath(reportTrendRows.map((row) => row.otaCount), chartWidth, chartHeight, reportMaxCount);
+-  const topRoomByBookingCount =
+-    Object.entries(
+-      proBookings.reduce<Record<string, number>>((acc, booking) => {
+-        const roomName = booking.roomName || "Room";
+-        acc[roomName] = (acc[roomName] ?? 0) + 1;
+-        return acc;
+-      }, {})
+-    )
+-      .sort((left, right) => right[1] - left[1])[0] ?? null;
++  const bookingTrendSeries = [
++    {
++      key: "famlo",
++      label: "Famlo Direct",
++      color: "#3b82f6",
++      values: reportTrendRows.map((row) => row.famloDirectCount),
++      alwaysShow: true,
++    },
++    {
++      key: "ota",
++      label: "OTA",
++      color: "#10b981",
++      values: reportTrendRows.map((row) => row.otaCount),
++      alwaysShow: true,
++    },
++    {
++      key: "manual",
++      label: "Direct / Manual",
++      color: "#f59e0b",
++      values: reportTrendRows.map((row) => row.manualCount),
++      alwaysShow: false,
++    },
++  ].filter((series) => series.alwaysShow || series.values.some((value) => value > 0));
++  const revenueTrendSeries = [
++    {
++      key: "famlo",
++      label: "Famlo Direct",
++      color: "#3b82f6",
++      values: reportTrendRows.map((row) => row.famloRevenue),
++      alwaysShow: true,
++    },
++    {
++      key: "ota",
++      label: "OTA",
++      color: "#10b981",
++      values: reportTrendRows.map((row) => row.otaRevenue),
++      alwaysShow: true,
++    },
++    {
++      key: "manual",
++      label: "Direct / Manual",
++      color: "#f59e0b",
++      values: reportTrendRows.map((row) => row.manualRevenue),
++      alwaysShow: false,
++    },
++  ].filter((series) => series.alwaysShow || series.values.some((value) => value > 0));
++  const activeReportSeries = reportGraphMode === "bookings" ? bookingTrendSeries : revenueTrendSeries;
++  const activeReportMaxValue = reportGraphMode === "bookings" ? reportMaxCount : reportMaxRevenue;
++  const reportHasRevenue = reportTrendRows.some((row) => row.totalRevenue > 0);
+   const propertyContentChecks = [
+     { label: "OTA title", ready: Boolean(initialSettings.otaTitle) && initialSettings.exists },
+     { label: "Property description", ready: Boolean(initialSettings.propertyDescription) },
+@@ -5143,7 +5155,7 @@ export default function FamloProDashboardShell({
+   );
+ 
+   return (
+-    <div className={styles.shell}>
++    <div className={`${styles.shell} ${themeMode === "light" ? styles.famloProThemeLight : styles.famloProThemeDark}`}>
+       <aside className={styles.sidebar}>
+         <div className={styles.brandBlock}>
+           <div className={styles.brandLogoWrap}>
+@@ -5214,7 +5226,39 @@ export default function FamloProDashboardShell({
+           </div>
+         </header>
+ 
++        {showLifecycleBanner ? (
++          <section
++            className={`${styles.lifecycleBanner} ${
++              proAccessLifecycleState?.bannerSeverity === "locked"
++                ? styles.lifecycleBannerLocked
++                : proAccessLifecycleState?.bannerSeverity === "warning"
++                  ? styles.lifecycleBannerWarning
++                  : styles.lifecycleBannerInfo
++            }`.trim()}
++          >
++            <div className={styles.lifecycleBannerTitle}>
++              {proAccessLifecycleState?.accessState === "locked" ? "Famlo Pro locked" : "Famlo Pro billing update"}
++            </div>
++            <div className={styles.lifecycleBannerCopy}>{proAccessLifecycleState?.message}</div>
++          </section>
++        ) : null}
++
+         <div className={`${styles.content} ${isPropertiesHomeView ? styles.propertiesHomeContent : ""}`}>
++          {isProLockedForBilling ? (
++            <section className={styles.proLockedStateCard}>
++              <div className={styles.sectionEyebrow}>Famlo Pro locked</div>
++              <h2 className={styles.propertyCenterTitle}>Famlo Pro is currently locked</h2>
++              <p className={styles.propertyCenterCopy}>
++                {proAccessLifecycleState?.message}
++              </p>
++              <div className={styles.lockedStateActions}>
++                <Link href={basicDashboardUrl} className={`${styles.headerLink} ${styles.headerSecondaryLink}`}>
++                  Back to Basic Dashboard
++                </Link>
++              </div>
++            </section>
++          ) : (
++            <>
+           {activeTopLevel === "properties" && !roomRouteState && (
+             <section
+               className={`${styles.propertyCenterShell} ${isPropertiesHomeView ? styles.propertyCenterShellLuxury : ""}`}
+@@ -6207,6 +6251,66 @@ export default function FamloProDashboardShell({
+                 ))}
+               </section>
+ 
++              <section className={styles.card}>
++                <div className={styles.cardHeader}>
++                  <div>
++                    <h3 className={styles.cardTitle}>Famlo Pro billing estimate</h3>
++                    <p className={styles.cardCopy}>
++                      Read-only visibility for the current workspace using the existing Pro access, room, and sync data already stored in Famlo.
++                    </p>
++                  </div>
++                  <span className={styles.badge}>{billingEstimate.planLabel}</span>
++                </div>
++                <div className={styles.cardBody}>
++                  <div className={styles.heroPanelList}>
++                    <div className={styles.heroPanelItem}>
++                      <span>Current plan</span>
++                      <strong>{billingEstimate.planLabel}</strong>
++                    </div>
++                    <div className={styles.heroPanelItem}>
++                      <span>Active Pro properties</span>
++                      <strong>{billingEstimate.activeProProperties}</strong>
++                    </div>
++                    <div className={styles.heroPanelItem}>
++                      <span>Active synced rooms</span>
++                      <strong>{billingEstimate.activeSyncedRooms}</strong>
++                    </div>
++                    <div className={styles.heroPanelItem}>
++                      <span>Property fee</span>
++                      <strong>{formatCurrency(billingEstimate.propertyFeeAmount)}</strong>
++                    </div>
++                    <div className={styles.heroPanelItem}>
++                      <span>Room sync fee</span>
++                      <strong>{formatCurrency(billingEstimate.roomSyncFeeAmount)}</strong>
++                    </div>
++                    <div className={styles.heroPanelItem}>
++                      <span>GST ({billingEstimate.gstRatePercent}%)</span>
++                      <strong>{formatCurrency(billingEstimate.gstAmount)}</strong>
++                    </div>
++                    <div className={styles.heroPanelItem}>
++                      <span>Estimated monthly subtotal</span>
++                      <strong>{formatCurrency(billingEstimate.subtotalAmount)}</strong>
++                    </div>
++                    <div className={styles.heroPanelItem}>
++                      <span>Estimated monthly total</span>
++                      <strong>{formatCurrency(billingEstimate.totalAmount)}</strong>
++                    </div>
++                  </div>
++                  <div className={styles.feedbackBox} style={{ marginTop: 18 }}>
++                    {billingEstimate.note}
++                  </div>
++                  {billingEstimate.warnings.length > 0 ? (
++                    <div className={styles.stack} style={{ marginTop: 18 }}>
++                      {billingEstimate.warnings.map((warning) => (
++                        <div key={warning.code} className={`${styles.feedbackBox} ${styles.feedbackError}`}>
++                          {warning.message}
++                        </div>
++                      ))}
++                    </div>
++                  ) : null}
++                </div>
++              </section>
++
+               <section className={styles.twoCol}>
+                 <article className={styles.card}>
+                   <div className={styles.cardHeader}>
+@@ -9023,89 +9127,75 @@ export default function FamloProDashboardShell({
+                   ))}
+                 </div>
+ 
+-                <article
+-                  className={`${styles.listCard} ${styles.revenueHighlightCard}`}
+-                  style={{ marginBottom: "24px" }}
+-                >
+-                  <div className={styles.miniLabel}>Famlo helped you earn</div>
+-                  <div className={styles.metricValue}>{formatCurrency(effectiveFamloGeneratedRevenue)}</div>
+-                  <div className={styles.metricHint}>
+-                    {effectiveFamloGeneratedCount} Famlo booking{effectiveFamloGeneratedCount === 1 ? "" : "s"} contributed{" "}
+-                    {effectiveFamloGeneratedContribution.toFixed(1)}% of your total booking value in this period.
+-                  </div>
+-                  <div className={styles.inlineBadgeRow}>
++                <section className={`${styles.listCard} ${styles.revenueHighlightCard}`} style={{ marginBottom: "24px" }}>
++                  <div className={styles.revenueHighlightHeader}>
++                    <div>
++                      <div className={styles.listTitle}>Revenue by source</div>
++                      <div className={styles.feedCopy}>{selectedRevenueWindowHint}</div>
++                    </div>
+                     <span className={styles.readinessPill}>{revenueWindow}</span>
+-                    <span className={`${styles.readinessPill} ${styles.readinessPillOk}`}>
+-                      {formatCurrency(
+-                        shouldUseRevenueDemo
+-                          ? 24500
+-                          : famloGeneratedBookings.reduce((sum, booking) => sum + (booking.famloRevenueAmount ?? 0), 0)
+-                      )} Famlo revenue
+-                    </span>
+                   </div>
+-                </article>
++                  <div className={styles.revenueSourceRow}>
++                    {orderedRevenueSources.map((source) => (
++                      <article key={source.label} className={styles.revenueSourceCard}>
++                        <div className={styles.miniLabel}>{source.label}</div>
++                        <div className={styles.metricValue}>{formatCurrency(source.amount)}</div>
++                        <div className={styles.metricHint}>
++                          {source.count} booking{source.count === 1 ? "" : "s"}
++                        </div>
++                        <div className={styles.feedCopy}>{source.helperText}</div>
++                      </article>
++                    ))}
++                  </div>
++                </section>
+ 
+                 <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
+                   <article className={styles.summaryCard}>
+                     <div className={styles.miniLabel}>Total booking value</div>
+-                    <div className={styles.metricValue}>{formatCurrency(effectiveRevenueGrossValue)}</div>
++                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueGrossValue)}</div>
+                     <div className={styles.metricHint}>
+-                      {(shouldUseRevenueDemo ? 12 : selectedRevenueBookings.length)} completed booking{(shouldUseRevenueDemo ? 12 : selectedRevenueBookings.length) === 1 ? "" : "s"} in {revenueWindow.toLowerCase()}.
++                      {selectedRevenueBookings.length} completed booking{selectedRevenueBookings.length === 1 ? "" : "s"} in {revenueWindow.toLowerCase()}.
+                     </div>
+                   </article>
+-                  <Link href={buildHostPayoutHistoryUrl(familyId)} className={`${styles.summaryCard} ${styles.summaryCardLink}`}>
++                  <Link
++                    href={payoutSetupBlocked ? payoutSetupHref : buildHostPayoutHistoryUrl(familyId)}
++                    className={`${styles.summaryCard} ${styles.summaryCardLink}`}
++                  >
+                     <div className={styles.miniLabel}>Famlo payout to you</div>
+-                    <div className={styles.metricValue}>{formatCurrency(effectiveRevenueNetPayout)}</div>
++                    <div className={styles.metricValue}>{formatCurrency(selectedRevenueNetPayout)}</div>
+                     <div className={styles.metricHint}>
+-                      {hostRevenueCompliance.panVerified && hostRevenueCompliance.payoutAccountActive
+-                        ? "Only bookings where payment collection and payout are handled by Famlo are included here."
+-                        : "Payout release is blocked until PAN/KYC and an active payout account are in place."}
++                      {payoutSetupBlocked
++                        ? "Payout release stays blocked until host compliance and payout account setup are complete."
++                        : "Only bookings where payment collection and payout are handled by Famlo are included here."}
+                     </div>
++                    {payoutSetupBlocked ? (
++                      <div className={styles.inlineBadgeRow}>
++                        <span className={`${styles.readinessPill} ${styles.readinessPillReview}`}>
++                          Action needed: Complete PAN/KYC and payout account
++                        </span>
++                      </div>
++                    ) : null}
+                     <div className={styles.metricHint} style={{ color: "rgba(147, 197, 253, 0.92)" }}>
+-                      Open payout history
++                      {payoutSetupBlocked ? "Complete payout setup" : "Open payout history"}
+                     </div>
+                   </Link>
+                   <article className={styles.summaryCard}>
+                     <div className={styles.miniLabel}>Paid by Famlo</div>
+-                    <div className={styles.metricValue}>{formatCurrency(effectiveRevenuePaidToYou)}</div>
++                    <div className={styles.metricValue}>{formatCurrency(selectedRevenuePaidToYou)}</div>
+                     <div className={styles.metricHint}>Completed payout records already processed by Famlo for this period.</div>
+                   </article>
+                   <article className={styles.summaryCard}>
+                     <div className={styles.miniLabel}>Pending Famlo payout</div>
+-                    <div className={styles.metricValue}>{formatCurrency(effectiveRevenuePendingPayout)}</div>
++                    <div className={styles.metricValue}>{formatCurrency(selectedRevenuePendingPayout)}</div>
+                     <div className={styles.metricHint}>
+-                      {hostRevenueCompliance.panVerified && hostRevenueCompliance.payoutAccountActive
+-                        ? "Eligible Famlo-collected bookings that are not fully paid out yet."
+-                        : "Pending payout stays locked until compliance and payout account requirements are cleared."}
++                      {payoutSetupBlocked
++                        ? "Pending payout stays locked until compliance and payout account requirements are cleared."
++                        : "Eligible Famlo-collected bookings that are not fully paid out yet."}
+                     </div>
+                   </article>
+                 </div>
+ 
+-                <div style={{ display: "grid", gap: "16px", marginBottom: "24px" }}>
+-                  <div>
+-                    <div className={styles.listTitle}>Revenue by source</div>
+-                    <div className={styles.feedCopy}>
+-                      Completed booking value split by where the revenue came from in this period.
+-                    </div>
+-                  </div>
+-                  <div className={styles.revenueSourceRow}>
+-                    {orderedRevenueSources.map((source) => (
+-                      <article key={source.label} className={styles.listCard}>
+-                        <div className={styles.placeholderTitle}>{source.label}</div>
+-                        <div className={styles.metricValue}>{formatCurrency(source.amount)}</div>
+-                        <div className={styles.placeholderCopy}>
+-                          {source.count} booking{source.count === 1 ? "" : "s"} · {source.label === "Famlo"
+-                            ? "Payment handled by Famlo"
+-                            : source.label === "Direct"
+-                              ? "Paid outside Famlo"
+-                              : "May be paid by OTA/outside Famlo"}
+-                        </div>
+-                      </article>
+-                    ))}
+-                  </div>
+-                </div>
+-
+-                {selectedRevenueBookings.length > 0 || shouldUseRevenueDemo ? (
++                {hasCompletedRevenue ? (
+                   <article className={styles.listCard} style={{ display: "grid", gap: "18px" }}>
+                     <div>
+                       <div className={styles.listTitle}>Booking-wise revenue</div>
+@@ -9121,143 +9211,95 @@ export default function FamloProDashboardShell({
+                       <div className={styles.mappingHeader}>Guest paid</div>
+                       <div className={styles.mappingHeader}>Famlo payout</div>
+                       <div className={styles.mappingHeader}>Payment status</div>
+-                      {shouldUseRevenueDemo
+-                        ? demoRevenueRows.map((booking) => (
+-                            <Fragment key={`revenue-${booking.bookingId}`}>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
+-                                <div className={styles.mappingSubcopy}>
+-                                  {booking.roomName} · {booking.bookingId.slice(0, 8)}
+-                                </div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
+-                                <div className={styles.mappingSubcopy}>{booking.roomName}</div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{formatShortDate(booking.checkoutDate)}</div>
+-                                <div className={styles.mappingSubcopy}>{selectedRevenueWindowHint}</div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>
+-                                  {booking.sourceCategory === "ota" ? "Booking.com" : booking.sourceCategory === "direct" ? "Direct" : "Famlo"}
+-                                </div>
+-                                <div className={styles.mappingSubcopy}>
+-                                  {booking.sourceCategory === "ota"
+-                                    ? "May be paid by OTA/outside Famlo"
+-                                    : booking.sourceCategory === "direct"
+-                                      ? "Paid outside Famlo"
+-                                      : "Payment handled by Famlo"}
+-                                </div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{formatCurrency(booking.amountValue)}</div>
+-                                <div className={styles.mappingSubcopy}>What the guest paid</div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>
+-                                  {booking.payoutValue != null ? formatCurrency(booking.payoutValue) : "Outside Famlo"}
+-                                </div>
+-                                <div className={styles.mappingSubcopy}>
+-                                  {booking.payoutValue != null ? "Famlo-managed payout amount" : "Outside-Famlo payouts stay separate"}
++                      {selectedRevenueBookings.map((booking) => (
++                        <Fragment key={`revenue-${booking.bookingId}`}>
++                          <div className={styles.mappingCell}>
++                            <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
++                            <div className={styles.mappingSubcopy}>
++                              {booking.roomName} · {booking.bookingId.slice(0, 8)}
++                            </div>
++                          </div>
++                          <div className={styles.mappingCell}>
++                            <div className={styles.mappingTitle}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
++                            <div className={styles.mappingSubcopy}>Completed stay</div>
++                          </div>
++                          <div className={styles.mappingCell}>
++                            <div className={styles.mappingTitle}>{formatShortDate(booking.checkoutDate)}</div>
++                            <div className={styles.mappingSubcopy}>{selectedRevenueWindowHint}</div>
++                          </div>
++                          <div className={styles.mappingCell}>
++                            <div className={styles.mappingTitle}>{revenueSourceLabel(booking)}</div>
++                            <div className={styles.mappingSubcopy}>{revenueSourceHint(booking)}</div>
++                          </div>
++                          <div className={styles.mappingCell}>
++                            <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
++                            <div className={styles.mappingSubcopy}>What the guest paid</div>
++                          </div>
++                          <div className={styles.mappingCell}>
++                            <div className={styles.mappingTitle}>{bookingFamloPayoutDisplay(booking)}</div>
++                            <div className={styles.mappingSubcopy}>{bookingFamloPayoutHint(booking)}</div>
++                          </div>
++                          <div className={styles.mappingCell}>
++                            <span className={`${styles.readinessPill} ${hostRevenueStatusTone(booking)}`}>
++                              {hostRevenueStatusLabel(booking)}
++                            </span>
++                            <div className={styles.mappingSubcopy} style={{ marginTop: "8px" }}>
++                              {booking.paymentCollectMode !== "FAMLO_COLLECT"
++                                ? "Outside Famlo payout flow"
++                                : booking.famloPayoutEligible
++                                  ? booking.payoutPaidAt
++                                    ? `Paid ${formatShortDate(booking.payoutPaidAt.slice(0, 10))}`
++                                    : "Awaiting Famlo payout release"
++                                  : "Awaiting settlement creation"}
++                            </div>
++                          </div>
++                          <div className={styles.mappingCell} style={{ gridColumn: "1 / -1" }}>
++                            <details className={styles.operatorDetails} style={{ margin: 0 }}>
++                              <summary className={styles.operatorSummary}>Payout breakdown</summary>
++                              <div
++                                style={{
++                                  display: "grid",
++                                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
++                                  gap: "12px",
++                                  marginTop: "14px",
++                                }}
++                              >
++                                <div className={styles.placeholderRow}>
++                                  <div className={styles.placeholderTitle}>Platform fee</div>
++                                  <div className={styles.placeholderValue}>
++                                    {booking.platformFeeAmount != null ? formatCurrency(booking.platformFeeAmount) : "—"}
++                                  </div>
+                                 </div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <span className={`${styles.readinessPill} ${booking.status === "Pending" ? styles.readinessPillReview : styles.readinessPillOk}`}>
+-                                  {booking.status}
+-                                </span>
+-                              </div>
+-                            </Fragment>
+-                          ))
+-                        : selectedRevenueBookings.map((booking) => (
+-                            <Fragment key={`revenue-${booking.bookingId}`}>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{booking.guestDisplayName}</div>
+-                                <div className={styles.mappingSubcopy}>
+-                                  {booking.roomName} · {booking.bookingId.slice(0, 8)}
++                                <div className={styles.placeholderRow}>
++                                  <div className={styles.placeholderTitle}>OTA commission</div>
++                                  <div className={styles.placeholderValue}>
++                                    {booking.otaCommissionAmount != null ? formatCurrency(booking.otaCommissionAmount) : "—"}
++                                  </div>
+                                 </div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{formatCalendarDetailDateRange(booking.startDate, booking.endDate)}</div>
+-                                <div className={styles.mappingSubcopy}>Completed stay</div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{formatShortDate(booking.checkoutDate)}</div>
+-                                <div className={styles.mappingSubcopy}>{selectedRevenueWindowHint}</div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{revenueSourceLabel(booking)}</div>
+-                                <div className={styles.mappingSubcopy}>{revenueSourceHint(booking)}</div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{booking.amount ?? "Not available"}</div>
+-                                <div className={styles.mappingSubcopy}>What the guest paid</div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <div className={styles.mappingTitle}>{bookingFamloPayoutDisplay(booking)}</div>
+-                                <div className={styles.mappingSubcopy}>{bookingFamloPayoutHint(booking)}</div>
+-                              </div>
+-                              <div className={styles.mappingCell}>
+-                                <span className={`${styles.readinessPill} ${hostRevenueStatusTone(booking)}`}>
+-                                  {hostRevenueStatusLabel(booking)}
+-                                </span>
+-                                <div className={styles.mappingSubcopy} style={{ marginTop: "8px" }}>
+-                                  {booking.paymentCollectMode !== "FAMLO_COLLECT"
+-                                    ? "Outside Famlo payout flow"
+-                                    : booking.famloPayoutEligible
+-                                    ? booking.payoutPaidAt
+-                                      ? `Paid ${formatShortDate(booking.payoutPaidAt.slice(0, 10))}`
+-                                      : "Awaiting Famlo payout release"
+-                                    : "Awaiting settlement creation"}
++                                <div className={styles.placeholderRow}>
++                                  <div className={styles.placeholderTitle}>Refund adjustment</div>
++                                  <div className={styles.placeholderValue}>
++                                    {booking.refundAdjustmentAmount != null ? formatCurrency(booking.refundAdjustmentAmount) : "—"}
++                                  </div>
+                                 </div>
+-                              </div>
+-                              <div className={styles.mappingCell} style={{ gridColumn: "1 / -1" }}>
+-                                <details className={styles.operatorDetails} style={{ margin: 0 }}>
+-                                  <summary className={styles.operatorSummary}>Payout breakdown</summary>
+-                                  <div
+-                                    style={{
+-                                      display: "grid",
+-                                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+-                                      gap: "12px",
+-                                      marginTop: "14px",
+-                                    }}
+-                                  >
+-                                    <div className={styles.placeholderRow}>
+-                                      <div className={styles.placeholderTitle}>Platform fee</div>
+-                                      <div className={styles.placeholderValue}>
+-                                        {booking.platformFeeAmount != null ? formatCurrency(booking.platformFeeAmount) : "—"}
+-                                      </div>
+-                                    </div>
+-                                    <div className={styles.placeholderRow}>
+-                                      <div className={styles.placeholderTitle}>OTA commission</div>
+-                                      <div className={styles.placeholderValue}>
+-                                        {booking.otaCommissionAmount != null ? formatCurrency(booking.otaCommissionAmount) : "—"}
+-                                      </div>
+-                                    </div>
+-                                    <div className={styles.placeholderRow}>
+-                                      <div className={styles.placeholderTitle}>Refund adjustment</div>
+-                                      <div className={styles.placeholderValue}>
+-                                        {booking.refundAdjustmentAmount != null ? formatCurrency(booking.refundAdjustmentAmount) : "—"}
+-                                      </div>
+-                                    </div>
+-                                    <div className={styles.placeholderRow}>
+-                                      <div className={styles.placeholderTitle}>Tax / GST</div>
+-                                      <div className={styles.placeholderValue}>
+-                                        {booking.taxAmount != null ? formatCurrency(booking.taxAmount) : "—"}
+-                                      </div>
+-                                    </div>
++                                <div className={styles.placeholderRow}>
++                                  <div className={styles.placeholderTitle}>Tax / GST</div>
++                                  <div className={styles.placeholderValue}>
++                                    {booking.taxAmount != null ? formatCurrency(booking.taxAmount) : "—"}
+                                   </div>
+-                                </details>
++                                </div>
+                               </div>
+-                            </Fragment>
+-                          ))}
++                            </details>
++                          </div>
++                        </Fragment>
++                      ))}
+                     </div>
+                   </article>
+                 ) : (
+                   <div className={styles.emptyState}>
+                     <div className={styles.emptyTitle}>No completed earnings in this period yet</div>
+                     <div className={styles.emptyCopy}>
+-                      Completed Famlo, OTA, and direct bookings will appear here after guest checkout.
++                      Completed Famlo, OTA, and direct bookings will appear here after checkout or confirmation.
+                     </div>
+                   </div>
+                 )}
+@@ -9286,24 +9328,78 @@ export default function FamloProDashboardShell({
+ 
+                 <div className={styles.listGrid} style={{ marginBottom: "24px" }}>
+                   <article className={styles.listCard} style={{ gridColumn: "1 / -1", display: "grid", gap: "18px" }}>
+-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
++                    <div className={styles.reportHeaderBar}>
+                       <div>
+-                        <div className={styles.listTitle}>Booking trend</div>
++                        <div className={styles.listTitle}>
++                          {reportGraphMode === "bookings" ? "Booking trend" : "Revenue generated"}
++                        </div>
+                         <div className={styles.feedCopy}>
+-                          Blue shows Famlo Direct. Green shows OTA bookings. The selected filter changes the timeline.
++                          {reportGraphMode === "bookings"
++                            ? "Compare Famlo Direct, OTA, and direct/manual booking activity for the selected period."
++                            : "Compare completed revenue by source using only safe booking values already surfaced in Famlo Pro."}
+                         </div>
+                       </div>
+-                      <div className={styles.inlineBadgeRow} style={{ marginTop: 0 }}>
+-                        <span className={styles.readinessPill} style={{ background: "rgba(37, 99, 235, 0.16)", color: "#93c5fd", borderColor: "rgba(59, 130, 246, 0.35)" }}>
+-                          Famlo Direct
+-                        </span>
+-                        <span className={styles.readinessPill} style={{ background: "rgba(16, 185, 129, 0.14)", color: "#6ee7b7", borderColor: "rgba(16, 185, 129, 0.35)" }}>
+-                          OTA
+-                        </span>
++                      <div className={styles.reportControls}>
++                        <div className={styles.reportTogglePills}>
++                          <button
++                            type="button"
++                            className={`${styles.reportTogglePill} ${reportGraphMode === "bookings" ? styles.reportTogglePillActive : ""}`}
++                            onClick={() => setReportGraphMode("bookings")}
++                          >
++                            Bookings
++                          </button>
++                          <button
++                            type="button"
++                            className={`${styles.reportTogglePill} ${reportGraphMode === "revenue" ? styles.reportTogglePillActive : ""}`}
++                            onClick={() => setReportGraphMode("revenue")}
++                          >
++                            Revenue
++                          </button>
++                        </div>
++                        <div className={styles.reportArrowRow}>
++                          <button
++                            type="button"
++                            className={styles.reportArrowButton}
++                            onClick={() => setReportGraphMode("bookings")}
++                            disabled={reportGraphMode === "bookings"}
++                            aria-label="Show booking graph"
++                          >
++                            <ChevronLeft size={16} />
++                          </button>
++                          <button
++                            type="button"
++                            className={styles.reportArrowButton}
++                            onClick={() => setReportGraphMode("revenue")}
++                            disabled={reportGraphMode === "revenue"}
++                            aria-label="Show revenue graph"
++                          >
++                            <ChevronRight size={16} />
++                          </button>
++                        </div>
+                       </div>
+                     </div>
+-                    <div style={{ position: "relative", borderRadius: "20px", border: "1px solid rgba(255, 255, 255, 0.08)", background: "linear-gradient(180deg, rgba(15, 23, 42, 0.88) 0%, rgba(11, 18, 32, 0.98) 100%)", padding: "18px" }}>
+-                      <svg viewBox={`0 0 ${chartWidth} ${chartHeight + 36}`} style={{ width: "100%", height: "280px", display: "block" }} role="img" aria-label="Booking trend chart">
++                    <div className={styles.inlineBadgeRow} style={{ marginTop: 0 }}>
++                      {activeReportSeries.map((series) => (
++                        <span
++                          key={series.key}
++                          className={styles.readinessPill}
++                          style={{
++                            background: `${series.color}22`,
++                            color: series.color,
++                            borderColor: `${series.color}55`,
++                          }}
++                        >
++                          {series.label}
++                        </span>
++                      ))}
++                    </div>
++                    <div className={styles.proChartShell}>
++                      <svg
++                        viewBox={`0 0 ${chartWidth} ${chartHeight + 44}`}
++                        className={styles.proChartSvg}
++                        role="img"
++                        aria-label={reportGraphMode === "bookings" ? "Booking trend chart" : "Revenue generated chart"}
++                      >
+                         {[0, 1, 2, 3].map((step) => {
+                           const y = (chartHeight / 3) * step;
+                           return (
+@@ -9313,7 +9409,7 @@ export default function FamloProDashboardShell({
+                               y1={y}
+                               x2={chartWidth}
+                               y2={y}
+-                              stroke="rgba(148, 163, 184, 0.18)"
++                              stroke="var(--pro-chart-grid)"
+                               strokeWidth="1"
+                             />
+                           );
+@@ -9327,15 +9423,15 @@ export default function FamloProDashboardShell({
+                                 y1="0"
+                                 x2={x}
+                                 y2={chartHeight}
+-                                stroke="rgba(148, 163, 184, 0.08)"
++                                stroke="var(--pro-chart-grid-soft)"
+                                 strokeWidth="1"
+                               />
+                               <text
+                                 x={x}
+-                                y={chartHeight + 22}
++                                y={chartHeight + 24}
+                                 textAnchor="middle"
+-                                fill="rgba(226, 232, 240, 0.72)"
+-                                fontSize="11"
++                                fill="var(--pro-chart-axis)"
++                                fontSize="12"
+                                 fontWeight="700"
+                               >
+                                 {row.label}
+@@ -9343,39 +9439,46 @@ export default function FamloProDashboardShell({
+                             </g>
+                           );
+                         })}
+-                        {directTrendPath ? (
+-                          <path
+-                            d={directTrendPath}
+-                            fill="none"
+-                            stroke="#3b82f6"
+-                            strokeWidth="4"
+-                            strokeLinecap="round"
+-                            strokeLinejoin="round"
+-                          />
+-                        ) : null}
+-                        {otaTrendPath ? (
+-                          <path
+-                            d={otaTrendPath}
+-                            fill="none"
+-                            stroke="#10b981"
+-                            strokeWidth="4"
+-                            strokeLinecap="round"
+-                            strokeLinejoin="round"
+-                          />
+-                        ) : null}
+-                        {reportTrendRows.map((row, index) => {
+-                          const x = reportTrendRows.length === 1 ? chartWidth / 2 : (index / (reportTrendRows.length - 1)) * chartWidth;
+-                          const directY = chartHeight - (row.directCount / Math.max(reportMaxCount, 1)) * chartHeight;
+-                          const otaY = chartHeight - (row.otaCount / Math.max(reportMaxCount, 1)) * chartHeight;
+-                          return (
+-                            <g key={`dots-${row.key}`}>
+-                              <circle cx={x} cy={directY} r="5" fill="#3b82f6" />
+-                              <circle cx={x} cy={otaY} r="5" fill="#10b981" />
+-                            </g>
+-                          );
++                        {activeReportSeries.map((series) => {
++                          const path = buildSvgLinePath(series.values, chartWidth, chartHeight, activeReportMaxValue);
++                          return path ? (
++                            <path
++                              key={`${series.key}-path`}
++                              d={path}
++                              fill="none"
++                              stroke={series.color}
++                              strokeWidth="4"
++                              strokeLinecap="round"
++                              strokeLinejoin="round"
++                            />
++                          ) : null;
+                         })}
++                        {activeReportSeries.flatMap((series) =>
++                          reportTrendRows.map((row, index) => {
++                            const x = reportTrendRows.length === 1 ? chartWidth / 2 : (index / (reportTrendRows.length - 1)) * chartWidth;
++                            const value =
++                              reportGraphMode === "bookings"
++                                ? series.key === "famlo"
++                                  ? row.famloDirectCount
++                                  : series.key === "ota"
++                                    ? row.otaCount
++                                    : row.manualCount
++                                : series.key === "famlo"
++                                  ? row.famloRevenue
++                                  : series.key === "ota"
++                                    ? row.otaRevenue
++                                    : row.manualRevenue;
++                            const y = chartHeight - (value / Math.max(activeReportMaxValue, 1)) * chartHeight;
++                            return <circle key={`${series.key}-${row.key}`} cx={x} cy={y} r="4.5" fill={series.color} />;
++                          })
++                        )}
+                       </svg>
+                     </div>
++                    {reportGraphMode === "revenue" && !reportHasRevenue ? (
++                      <div className={styles.emptyState}>
++                        <div className={styles.emptyTitle}>No revenue generated in this period yet.</div>
++                      </div>
++                    ) : null}
+                   </article>
+                 </div>
+ 
+@@ -9425,38 +9528,6 @@ export default function FamloProDashboardShell({
+                     </div>
+                   </article>
+                 </div>
+-
+-                <div className={styles.listGrid}>
+-                  <article className={styles.listCard}>
+-                    <div className={styles.listTitle}>Pilot performance snapshot</div>
+-                    <div className={styles.placeholderGrid}>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderTitle}>Average booking value</div>
+-                        <div className={styles.placeholderValue}>{averageBookingValue != null ? formatCurrency(averageBookingValue) : "Not available"}</div>
+-                        <div className={styles.placeholderCopy}>Calculated only from bookings where a safe booking-value amount is already visible.</div>
+-                      </div>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderTitle}>Top room by booking count</div>
+-                        <div className={styles.placeholderValue}>{topRoomByBookingCount ? topRoomByBookingCount[0] : "Not available"}</div>
+-                        <div className={styles.placeholderCopy}>
+-                          {topRoomByBookingCount
+-                            ? `${topRoomByBookingCount[1]} booking${topRoomByBookingCount[1] === 1 ? "" : "s"} currently surfaced for this room.`
+-                            : "No booking mix is available yet for room ranking."}
+-                        </div>
+-                      </div>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderTitle}>Famlo Direct average</div>
+-                        <div className={styles.placeholderValue}>{directAverageBookingValue != null ? formatCurrency(directAverageBookingValue) : "Not available"}</div>
+-                        <div className={styles.placeholderCopy}>Average booking value for direct Famlo reservations only.</div>
+-                      </div>
+-                      <div className={styles.placeholderRow}>
+-                        <div className={styles.placeholderTitle}>OTA average</div>
+-                        <div className={styles.placeholderValue}>{otaAverageBookingValue != null ? formatCurrency(otaAverageBookingValue) : "Not available"}</div>
+-                        <div className={styles.placeholderCopy}>Average booking value for OTA-connected reservations only.</div>
+-                      </div>
+-                    </div>
+-                  </article>
+-                </div>
+               </div>
+             </section>
+           )}
+@@ -9785,6 +9856,8 @@ export default function FamloProDashboardShell({
+                   key={`${familyId}:${initialSettings.updatedAt ?? "new"}:${initialSettings.exists ? "saved" : "draft"}`}
+                   familyId={familyId}
+                   initialSettings={initialSettings}
++                  themeMode={themeMode}
++                  onThemeChange={setThemeMode}
+                   onOpenSetupGuide={() => setActiveSection("setup-guide")}
+                 />
+ 
+@@ -9808,27 +9881,23 @@ export default function FamloProDashboardShell({
+ 
+           {activeSection === "support" && (
+             <section className={`${styles.propertyCenterShell} ${styles.propertyCenterShellLuxury} ${styles.proLuxurySection}`}>
+-              <div>
+-                <div className={styles.sectionEyebrow}>Support</div>
+-                <h3 className={styles.propertyCenterTitle}>Support that matches the rest of Famlo Pro</h3>
+-                <p className={styles.heroText}>
+-                  Keep support, launch guidance, and provider escalation notes inside the same glass-style workspace.
+-                </p>
+-              </div>
+               <div className={styles.cardBody}>
+-                <div className={styles.feedGrid}>
+-                  <div className={styles.placeholderRow}>
+-                    <div className={styles.placeholderTitle}>Go-live Support</div>
+-                    <div className={styles.placeholderCopy}>Famlo team can review setup readiness, mapping assumptions, and launch sequence here.</div>
+-                  </div>
+-                  <div className={styles.placeholderRow}>
+-                    <div className={styles.placeholderTitle}>Provider Escalations</div>
+-                    <div className={styles.placeholderCopy}>Future staging credentials, webhook health, and sync escalation workflows will appear here.</div>
+-                  </div>
+-                </div>
++                <ProSupportCenter
++                  familyId={familyId}
++                  hostCode={hostCode}
++                  hostName={initialProfile.hostDisplayName.trim() || propertyName}
++                  propertyName={propertyName}
++                  propertyOptions={propertyOptions}
++                  rooms={rooms.map((room) => ({ id: room.id, name: room.name, isActive: room.isActive }))}
++                  themeMode={themeMode}
++                  billingEstimate={billingEstimate}
++                  billingStateSummary={billingStateSummary}
++                />
+               </div>
+             </section>
+           )}
++            </>
++          )}
+         </div>
+       </main>
+     </div>
+@@ -9906,10 +9975,14 @@ function PropertySwitcherControl({
+ function ProSettingsForm({
+   familyId,
+   initialSettings,
++  themeMode,
++  onThemeChange,
+   onOpenSetupGuide,
+ }: Readonly<{
+   familyId: string;
+   initialSettings: HostProSettings;
++  themeMode: FamloProTheme;
++  onThemeChange: (nextTheme: FamloProTheme) => void;
+   onOpenSetupGuide: () => void;
+ }>): React.JSX.Element {
+   const router = useRouter();
+@@ -9977,6 +10050,31 @@ function ProSettingsForm({
+ 
+   return (
+     <>
++      <section className={styles.cardInset}>
++        <div className={styles.listTitle}>Appearance</div>
++        <div className={styles.feedCopy}>
++          Choose how Famlo Pro looks for this workspace. Dark mode stays the default premium glass experience.
++        </div>
++        <div className={styles.appearanceOptionGrid}>
++          <button
++            type="button"
++            className={`${styles.appearanceOptionCard} ${themeMode === "dark" ? styles.appearanceOptionCardActive : ""}`}
++            onClick={() => onThemeChange("dark")}
++          >
++            <div className={styles.appearanceOptionTitle}>Dark mode</div>
++            <div className={styles.appearanceOptionCopy}>Glass-style dark Famlo Pro workspace.</div>
++          </button>
++          <button
++            type="button"
++            className={`${styles.appearanceOptionCard} ${themeMode === "light" ? styles.appearanceOptionCardActive : ""}`}
++            onClick={() => onThemeChange("light")}
++          >
++            <div className={styles.appearanceOptionTitle}>Light mode</div>
++            <div className={styles.appearanceOptionCopy}>Clean white workspace for brighter screens.</div>
++          </button>
++        </div>
++      </section>
++
+       <div className={styles.settingsGrid}>
+         <label className={styles.fieldBlock}>
+           <span className={styles.fieldLabel}>Business Model</span>
+diff --git a/components/partners/pro/pro-dashboard.module.css b/components/partners/pro/pro-dashboard.module.css
+index 063ed0f2..7029682a 100644
+--- a/components/partners/pro/pro-dashboard.module.css
++++ b/components/partners/pro/pro-dashboard.module.css
+@@ -1,17 +1,56 @@
+ .shell {
++  --pro-shell-bg: #030712;
++  --pro-shell-text: #ffffff;
++  --pro-shell-muted: rgba(255, 255, 255, 0.64);
++  --pro-border-soft: rgba(255, 255, 255, 0.1);
++  --pro-sidebar-bg: rgba(11, 18, 32, 0.96);
++  --pro-panel-bg: rgba(255, 255, 255, 0.05);
++  --pro-panel-bg-strong: rgba(255, 255, 255, 0.07);
++  --pro-panel-border: rgba(255, 255, 255, 0.14);
++  --pro-card-bg: rgba(255, 255, 255, 0.06);
++  --pro-card-border: rgba(255, 255, 255, 0.12);
++  --pro-input-bg: rgba(255, 255, 255, 0.08);
++  --pro-input-border: rgba(255, 255, 255, 0.18);
++  --pro-chart-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.88) 0%, rgba(11, 18, 32, 0.98) 100%);
++  --pro-chart-grid: rgba(148, 163, 184, 0.18);
++  --pro-chart-grid-soft: rgba(148, 163, 184, 0.08);
++  --pro-chart-axis: rgba(226, 232, 240, 0.82);
++  --pro-light-text: #0f172a;
++  --pro-light-muted: rgba(15, 23, 42, 0.68);
+   min-height: 100vh;
+   display: flex;
+-  background: #030712;
+-  color: white;
++  background: var(--pro-shell-bg);
++  color: var(--pro-shell-text);
+   font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+ }
+ 
++.famloProThemeDark {}
++
++.famloProThemeLight {
++  --pro-shell-bg: linear-gradient(180deg, #f7fbff 0%, #eef4fb 100%);
++  --pro-shell-text: #0f172a;
++  --pro-shell-muted: rgba(15, 23, 42, 0.68);
++  --pro-border-soft: rgba(15, 23, 42, 0.1);
++  --pro-sidebar-bg: rgba(255, 255, 255, 0.96);
++  --pro-panel-bg: rgba(255, 255, 255, 0.94);
++  --pro-panel-bg-strong: rgba(255, 255, 255, 0.98);
++  --pro-panel-border: rgba(15, 23, 42, 0.08);
++  --pro-card-bg: rgba(255, 255, 255, 0.96);
++  --pro-card-border: rgba(15, 23, 42, 0.08);
++  --pro-input-bg: rgba(255, 255, 255, 0.96);
++  --pro-input-border: rgba(15, 23, 42, 0.12);
++  --pro-chart-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 249, 255, 1) 100%);
++  --pro-chart-grid: rgba(148, 163, 184, 0.28);
++  --pro-chart-grid-soft: rgba(148, 163, 184, 0.16);
++  --pro-chart-axis: rgba(15, 23, 42, 0.78);
++}
++
+ .sidebar {
+   width: 300px;
+-  background: rgba(11, 18, 32, 0.96);
++  background: var(--pro-sidebar-bg);
+   backdrop-filter: blur(16px);
+-  color: #dbeafe;
+-  border-right: 1px solid rgba(255, 255, 255, 0.06);
++  color: var(--pro-shell-text);
++  border-right: 1px solid var(--pro-border-soft);
+   padding: 28px 20px;
+   display: flex;
+   flex-direction: column;
+@@ -27,7 +66,7 @@
+   display: grid;
+   gap: 8px;
+   padding: 10px 10px 18px;
+-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
++  border-bottom: 1px solid var(--pro-border-soft);
+ }
+ 
+ .brandLogoWrap {
+@@ -46,7 +85,7 @@
+ .brandLogoFallback {
+   font-size: 24px;
+   font-weight: 900;
+-  color: white;
++  color: var(--pro-shell-text);
+   letter-spacing: -0.03em;
+ }
+ 
+@@ -61,7 +100,7 @@
+ .brandTitle {
+   font-size: 24px;
+   font-weight: 900;
+-  color: white;
++  color: var(--pro-shell-text);
+   letter-spacing: -0.03em;
+ }
+ 
+@@ -69,7 +108,7 @@
+   margin: 0;
+   font-size: 13px;
+   line-height: 1.7;
+-  color: rgba(219, 234, 254, 0.68);
++  color: var(--pro-shell-muted);
+ }
+ 
+ .navGroup {
+@@ -83,7 +122,7 @@
+   font-weight: 900;
+   letter-spacing: 0.14em;
+   text-transform: uppercase;
+-  color: rgba(191, 219, 254, 0.42);
++  color: var(--pro-shell-muted);
+ }
+ 
+ .navButton {
+@@ -94,7 +133,7 @@
+   border: 1px solid transparent;
+   border-radius: 16px;
+   background: transparent;
+-  color: rgba(219, 234, 254, 0.65);
++  color: var(--pro-shell-muted);
+   padding: 12px 16px;
+   cursor: pointer;
+   font: inherit;
+@@ -103,9 +142,9 @@
+ }
+ 
+ .navButton:hover {
+-  background: rgba(255, 255, 255, 0.05);
+-  color: white;
+-  border-color: rgba(255, 255, 255, 0.08);
++  background: var(--pro-panel-bg);
++  color: var(--pro-shell-text);
++  border-color: var(--pro-border-soft);
+   transform: translateX(4px);
+ }
+ 
+@@ -135,7 +174,7 @@
+ 
+ .navHint {
+   font-size: 11px;
+-  color: rgba(219, 234, 254, 0.5);
++  color: var(--pro-shell-muted);
+ }
+ 
+ .navChild {
+@@ -146,7 +185,7 @@
+   margin-top: auto;
+   padding: 14px;
+   border-radius: 18px;
+-  background: rgba(15, 23, 42, 0.8);
++  background: var(--pro-panel-bg);
+   border: 1px solid rgba(96, 165, 250, 0.16);
+   display: grid;
+   gap: 8px;
+@@ -169,8 +208,8 @@
+   align-items: center;
+   padding: 20px 32px;
+   backdrop-filter: blur(20px) saturate(180%);
+-  background: rgba(3, 7, 18, 0.8);
+-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
++  background: color-mix(in srgb, var(--pro-shell-bg) 88%, transparent);
++  border-bottom: 1px solid var(--pro-border-soft);
+   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+ }
+ 
+@@ -178,13 +217,13 @@
+   font-size: 30px;
+   font-weight: 900;
+   letter-spacing: -0.04em;
+-  color: white;
++  color: var(--pro-shell-text);
+   margin: 0;
+ }
+ 
+ .headerCopy {
+   margin: 4px 0 0;
+-  color: rgba(255, 255, 255, 0.64);
++  color: var(--pro-shell-muted);
+   font-size: 14px;
+ }
+ 
+@@ -195,6 +234,60 @@
+   justify-content: flex-end;
+ }
+ 
++.lifecycleBanner {
++  margin: 18px 32px 0;
++  border-radius: 20px;
++  padding: 16px 18px;
++  border: 1px solid transparent;
++  display: grid;
++  gap: 6px;
++}
++
++.lifecycleBannerInfo {
++  background: rgba(37, 99, 235, 0.12);
++  border-color: rgba(37, 99, 235, 0.22);
++}
++
++.lifecycleBannerWarning {
++  background: rgba(245, 158, 11, 0.14);
++  border-color: rgba(217, 119, 6, 0.26);
++}
++
++.lifecycleBannerLocked {
++  background: rgba(239, 68, 68, 0.14);
++  border-color: rgba(239, 68, 68, 0.26);
++}
++
++.lifecycleBannerTitle {
++  font-size: 12px;
++  font-weight: 900;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--pro-shell-text);
++}
++
++.lifecycleBannerCopy {
++  font-size: 14px;
++  line-height: 1.7;
++  color: var(--pro-shell-text);
++}
++
++.proLockedStateCard {
++  border-radius: 24px;
++  border: 1px solid rgba(239, 68, 68, 0.22);
++  background: color-mix(in srgb, var(--pro-panel-bg-strong) 92%, rgba(239, 68, 68, 0.1));
++  padding: 28px;
++  display: grid;
++  gap: 12px;
++}
++
++.lockedStateActions {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 12px;
++  align-items: center;
++}
++
+ .chip {
+   display: inline-flex;
+   align-items: center;
+@@ -565,7 +658,7 @@
+ }
+ 
+ .propertiesHomeContent {
+-  background: #030712;
++  background: transparent;
+   border-radius: 28px 0 0 0;
+ }
+ 
+@@ -621,8 +714,8 @@
+   gap: 24px;
+   padding: 28px;
+   border-radius: 32px;
+-  border: 1px solid rgba(255, 255, 255, 0.1);
+-  background: rgba(255, 255, 255, 0.05);
++  border: 1px solid var(--pro-border-soft);
++  background: var(--pro-panel-bg);
+   backdrop-filter: blur(12px);
+   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+ }
+@@ -631,10 +724,17 @@
+   background:
+     radial-gradient(circle at top right, rgba(37, 99, 235, 0.16), transparent 28%),
+     linear-gradient(180deg, rgba(6, 15, 30, 0.78), rgba(3, 9, 20, 0.94));
+-  border-color: rgba(148, 163, 184, 0.14);
++  border-color: var(--pro-border-soft);
+   box-shadow: 0 28px 60px rgba(2, 6, 23, 0.34);
+ }
+ 
++.famloProThemeLight .propertyCenterShellLuxury {
++  background:
++    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 28%),
++    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 247, 255, 0.98));
++  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
++}
++
+ .propertyCenterShellLuxury .propertyCenterHeader,
+ .propertyCenterShellLuxury .propertyCenterHintCard,
+ .propertyCenterShellLuxury .propertySubSectionBar,
+@@ -655,7 +755,7 @@
+   line-height: 1.05;
+   font-weight: 900;
+   letter-spacing: -0.04em;
+-  color: white;
++  color: var(--pro-shell-text);
+ }
+ 
+ .propertyCenterCopy {
+@@ -663,7 +763,7 @@
+   max-width: 760px;
+   font-size: 14px;
+   line-height: 1.7;
+-  color: rgba(255, 255, 255, 0.6);
++  color: var(--pro-shell-muted);
+ }
+ 
+ .propertyHeaderMeta {
+@@ -2543,9 +2643,9 @@
+ .fieldInput {
+   width: 100%;
+   border-radius: 14px;
+-  border: 1px solid rgba(15, 23, 42, 0.12);
+-  background: white;
+-  color: #0f172a;
++  border: 1px solid var(--pro-input-border);
++  background: var(--pro-input-bg);
++  color: var(--pro-light-text);
+   padding: 12px 14px;
+   font: inherit;
+   box-sizing: border-box;
+@@ -2556,9 +2656,9 @@
+   min-height: 110px;
+   resize: vertical;
+   border-radius: 14px;
+-  border: 1px solid rgba(15, 23, 42, 0.12);
+-  background: white;
+-  color: #0f172a;
++  border: 1px solid var(--pro-input-border);
++  background: var(--pro-input-bg);
++  color: var(--pro-light-text);
+   padding: 12px 14px;
+   font: inherit;
+   box-sizing: border-box;
+@@ -2788,15 +2888,15 @@
+ .proLuxurySection .roleCard,
+ .proLuxurySection .feedbackBox,
+ .proLuxurySection .propertySwitcherCard {
+-  background: rgba(255, 255, 255, 0.06);
+-  border-color: rgba(255, 255, 255, 0.12);
++  background: var(--pro-card-bg);
++  border-color: var(--pro-card-border);
+   backdrop-filter: blur(20px);
+   -webkit-backdrop-filter: blur(20px);
+ }
+ 
+ .proLuxurySection .listCard {
+-  background: rgba(255, 255, 255, 0.07);
+-  border: 1px solid rgba(255, 255, 255, 0.14);
++  background: var(--pro-panel-bg-strong);
++  border: 1px solid var(--pro-panel-border);
+   backdrop-filter: blur(24px);
+   -webkit-backdrop-filter: blur(24px);
+   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+@@ -2814,7 +2914,7 @@
+ .proLuxurySection .summaryValue,
+ .proLuxurySection .summaryLabel,
+ .proLuxurySection .summaryTitle {
+-  color: white;
++  color: var(--pro-shell-text);
+ }
+ 
+ .proLuxurySection .metricHint,
+@@ -2828,7 +2928,7 @@
+ .proLuxurySection .summaryCopy,
+ .proLuxurySection .placeholderLabel,
+ .proLuxurySection .fieldHelp {
+-  color: rgba(255, 255, 255, 0.82);
++  color: var(--pro-shell-muted);
+ }
+ 
+ .proLuxurySection .miniLabel,
+@@ -2865,9 +2965,9 @@
+ 
+ .proLuxurySection .fieldInput,
+ .proLuxurySection .fieldTextarea {
+-  background: rgba(255, 255, 255, 0.08);
+-  border-color: rgba(255, 255, 255, 0.18);
+-  color: white;
++  background: var(--pro-input-bg);
++  border-color: var(--pro-input-border);
++  color: var(--pro-shell-text);
+   backdrop-filter: blur(8px);
+ }
+ 
+@@ -2881,7 +2981,7 @@
+ 
+ .proLuxurySection .fieldInput::placeholder,
+ .proLuxurySection .fieldTextarea::placeholder {
+-  color: rgba(255, 255, 255, 0.38);
++  color: color-mix(in srgb, var(--pro-shell-text) 40%, transparent);
+ }
+ 
+ /* Native select options need a dark background so text is readable in OS dropdown */
+@@ -2890,6 +2990,11 @@
+   color: white;
+ }
+ 
++.famloProThemeLight .proLuxurySection .fieldInput option {
++  background: white;
++  color: #0f172a;
++}
++
+ .proLuxurySection .propertySwitcherLabel,
+ .proLuxurySection .propertySwitcherFieldLabel {
+   color: rgba(191, 219, 254, 0.58);
+@@ -2897,13 +3002,13 @@
+ 
+ .proLuxurySection .propertySwitcherCopy,
+ .proLuxurySection .propertySwitcherStatusPill {
+-  color: rgba(255, 255, 255, 0.7);
++  color: var(--pro-shell-muted);
+ }
+ 
+ .proLuxurySection .propertySwitcherSelect {
+-  background: rgba(255, 255, 255, 0.05);
+-  border-color: rgba(255, 255, 255, 0.12);
+-  color: white;
++  background: var(--pro-input-bg);
++  border-color: var(--pro-input-border);
++  color: var(--pro-shell-text);
+ }
+ 
+ .calendarGrid {
+@@ -3129,6 +3234,449 @@
+   grid-template-columns: repeat(2, minmax(0, 1fr));
+ }
+ 
++.revenueHighlightHeader,
++.reportHeaderBar,
++.supportHero,
++.supportTicketHeader,
++.supportListHeader,
++.guideModalHeader {
++  display: flex;
++  justify-content: space-between;
++  gap: 16px;
++  align-items: flex-start;
++  flex-wrap: wrap;
++}
++
++.revenueSourceCard {
++  display: grid;
++  gap: 8px;
++  padding: 18px;
++  border-radius: 18px;
++  border: 1px solid var(--pro-card-border);
++  background: color-mix(in srgb, var(--pro-panel-bg-strong) 90%, transparent);
++}
++
++.reportControls,
++.reportArrowRow,
++.supportHeroActions,
++.supportFormActions {
++  display: flex;
++  gap: 10px;
++  flex-wrap: wrap;
++  align-items: center;
++}
++
++.reportControls {
++  justify-content: flex-end;
++}
++
++.reportTogglePills {
++  display: inline-flex;
++  gap: 8px;
++  padding: 4px;
++  border-radius: 999px;
++  background: var(--pro-panel-bg);
++  border: 1px solid var(--pro-border-soft);
++}
++
++.reportTogglePill {
++  border: none;
++  border-radius: 999px;
++  padding: 10px 14px;
++  background: transparent;
++  color: var(--pro-shell-muted);
++  font-size: 12px;
++  font-weight: 900;
++  cursor: pointer;
++}
++
++.reportTogglePillActive {
++  background: rgba(37, 99, 235, 0.16);
++  color: #93c5fd;
++}
++
++.famloProThemeLight .reportTogglePillActive {
++  color: #165dcc;
++}
++
++.reportArrowButton {
++  width: 40px;
++  height: 40px;
++  border-radius: 999px;
++  border: 1px solid var(--pro-border-soft);
++  background: var(--pro-panel-bg);
++  color: var(--pro-shell-text);
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  cursor: pointer;
++}
++
++.reportArrowButton:disabled {
++  opacity: 0.45;
++  cursor: not-allowed;
++}
++
++.proChartShell {
++  position: relative;
++  border-radius: 20px;
++  border: 1px solid var(--pro-border-soft);
++  background: var(--pro-chart-bg);
++  padding: 18px;
++}
++
++.proChartSvg {
++  width: 100%;
++  height: 280px;
++  display: block;
++}
++
++.appearanceOptionGrid,
++.supportFormGrid {
++  display: grid;
++  gap: 14px;
++}
++
++.appearanceOptionGrid {
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  margin-top: 16px;
++}
++
++.appearanceOptionCard {
++  border-radius: 18px;
++  border: 1px solid var(--pro-border-soft);
++  background: var(--pro-panel-bg);
++  color: var(--pro-shell-text);
++  padding: 18px;
++  text-align: left;
++  cursor: pointer;
++  display: grid;
++  gap: 8px;
++}
++
++.appearanceOptionCardActive {
++  border-color: rgba(59, 130, 246, 0.4);
++  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.22), 0 14px 30px rgba(37, 99, 235, 0.18);
++}
++
++.appearanceOptionTitle {
++  font-size: 15px;
++  font-weight: 900;
++}
++
++.appearanceOptionCopy {
++  font-size: 13px;
++  line-height: 1.7;
++  color: var(--pro-shell-muted);
++}
++
++.supportCenterShell,
++.supportTicketList,
++.guideSectionList {
++  display: grid;
++  gap: 16px;
++}
++
++.supportTabRow {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 10px;
++}
++
++.supportTabButton {
++  border: 1px solid var(--pro-border-soft);
++  background: var(--pro-panel-bg);
++  color: var(--pro-shell-muted);
++  border-radius: 999px;
++  padding: 10px 16px;
++  font-size: 12px;
++  font-weight: 900;
++  cursor: pointer;
++}
++
++.supportTabButtonActive {
++  background: rgba(37, 99, 235, 0.16);
++  border-color: rgba(59, 130, 246, 0.32);
++  color: #93c5fd;
++}
++
++.famloProThemeLight .supportTabButtonActive {
++  color: #165dcc;
++}
++
++.supportBillingGrid {
++  display: grid;
++  gap: 14px;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++}
++
++.supportBillingCard {
++  border-radius: 18px;
++  border: 1px solid var(--pro-card-border);
++  background: var(--pro-panel-bg);
++  padding: 18px;
++  display: grid;
++  gap: 8px;
++}
++
++.supportBillingNote {
++  border-radius: 18px;
++  border: 1px solid var(--pro-card-border);
++  background: color-mix(in srgb, var(--pro-panel-bg-strong) 88%, transparent);
++  padding: 18px;
++  display: grid;
++  gap: 10px;
++}
++
++.supportBillingNotes {
++  display: grid;
++  gap: 10px;
++  margin-top: 8px;
++}
++
++.supportBillingNotesTitle {
++  font-size: 12px;
++  font-weight: 900;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--pro-shell-muted);
++}
++
++.supportBillingHint {
++  font-size: 13px;
++  line-height: 1.7;
++  color: var(--pro-shell-muted);
++}
++
++.supportWarningStack {
++  display: grid;
++  gap: 10px;
++}
++
++.supportBillingAlert {
++  border-radius: 14px;
++  color: var(--pro-shell-text);
++  padding: 12px 14px;
++  font-size: 13px;
++  line-height: 1.6;
++}
++
++.supportBillingInfo {
++  border: 1px solid rgba(37, 99, 235, 0.22);
++  background: rgba(37, 99, 235, 0.12);
++}
++
++.supportBillingWarning {
++  border: 1px solid rgba(217, 119, 6, 0.22);
++  background: rgba(217, 119, 6, 0.12);
++}
++
++.supportBillingError {
++  border: 1px solid rgba(239, 68, 68, 0.24);
++  background: rgba(239, 68, 68, 0.12);
++}
++
++.famloProThemeLight .supportBillingInfo {
++  background: rgba(37, 99, 235, 0.08);
++  border-color: rgba(37, 99, 235, 0.18);
++}
++
++.famloProThemeLight .supportBillingWarning {
++  background: rgba(245, 158, 11, 0.12);
++  border-color: rgba(217, 119, 6, 0.24);
++}
++
++.famloProThemeLight .supportBillingError {
++  background: rgba(239, 68, 68, 0.1);
++  border-color: rgba(239, 68, 68, 0.22);
++}
++
++.supportQuickActionRow {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 10px;
++}
++
++.supportQuickActionButton {
++  border: 1px solid var(--pro-border-soft);
++  background: var(--pro-panel-bg);
++  color: var(--pro-shell-text);
++  border-radius: 14px;
++  padding: 10px 14px;
++  font-size: 12px;
++  font-weight: 900;
++  cursor: pointer;
++}
++
++.supportFormGrid {
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  margin-top: 18px;
++}
++
++.supportMessageField {
++  grid-column: 1 / -1;
++}
++
++.supportEmptyState {
++  display: flex;
++  gap: 12px;
++  align-items: center;
++  padding: 18px;
++  border-radius: 18px;
++  border: 1px dashed var(--pro-border-soft);
++  background: var(--pro-panel-bg);
++  color: var(--pro-shell-muted);
++}
++
++.supportTicketCard,
++.supportReplyBox,
++.guideSectionCard {
++  border-radius: 18px;
++  border: 1px solid var(--pro-card-border);
++  background: var(--pro-panel-bg);
++}
++
++.supportTicketCard {
++  padding: 18px;
++  display: grid;
++  gap: 12px;
++}
++
++.supportTicketTitle,
++.guideModalTitle {
++  font-size: 18px;
++  font-weight: 900;
++  color: var(--pro-shell-text);
++}
++
++.supportTicketMeta,
++.supportReplyLabel {
++  font-size: 12px;
++  font-weight: 800;
++  color: var(--pro-shell-muted);
++}
++
++.supportTicketMessage,
++.guideSectionContent {
++  white-space: pre-wrap;
++  font-size: 14px;
++  line-height: 1.7;
++  color: var(--pro-shell-muted);
++}
++
++.supportReplyBox {
++  padding: 14px 16px;
++  display: flex;
++  gap: 10px;
++  align-items: flex-start;
++}
++
++.guideModalOverlay {
++  position: fixed;
++  inset: 0;
++  z-index: 70;
++  background: rgba(3, 7, 18, 0.68);
++  padding: 20px;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++}
++
++.guideModal {
++  width: min(760px, 100%);
++  max-height: min(90vh, 820px);
++  overflow: auto;
++  border-radius: 28px;
++  border: 1px solid var(--pro-panel-border);
++  background: var(--pro-panel-bg-strong);
++  backdrop-filter: blur(20px);
++  padding: 22px;
++  display: grid;
++  gap: 18px;
++}
++
++.guideSearchField {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  border-radius: 16px;
++  border: 1px solid var(--pro-input-border);
++  background: var(--pro-input-bg);
++  padding: 0 14px;
++  color: var(--pro-shell-muted);
++}
++
++.guideSearchInput {
++  width: 100%;
++  border: none;
++  background: transparent;
++  color: var(--pro-shell-text);
++  font: inherit;
++  padding: 14px 0;
++}
++
++.guideSearchInput:focus {
++  outline: none;
++}
++
++.guideSectionCard {
++  overflow: hidden;
++}
++
++.guideSectionButton {
++  width: 100%;
++  border: none;
++  background: transparent;
++  color: var(--pro-shell-text);
++  padding: 16px 18px;
++  display: flex;
++  justify-content: space-between;
++  gap: 12px;
++  align-items: center;
++  cursor: pointer;
++  font-size: 14px;
++  font-weight: 900;
++  text-align: left;
++}
++
++.guideSectionContent {
++  padding: 0 18px 18px;
++}
++
++.guideChevron {
++  transition: transform 0.2s ease;
++}
++
++.guideChevronExpanded {
++  transform: rotate(180deg);
++  transition: transform 0.2s ease;
++}
++
++.spinningIcon {
++  animation: spin 1s linear infinite;
++}
++
++.srOnly {
++  position: absolute;
++  width: 1px;
++  height: 1px;
++  padding: 0;
++  margin: -1px;
++  overflow: hidden;
++  clip: rect(0, 0, 0, 0);
++  white-space: nowrap;
++  border: 0;
++}
++
++@keyframes spin {
++  from {
++    transform: rotate(0deg);
++  }
++  to {
++    transform: rotate(360deg);
++  }
++}
++
+ @media (max-width: 1200px) {
+   .statGrid {
+     grid-template-columns: repeat(3, minmax(0, 1fr));
+@@ -3170,7 +3718,10 @@
+   .feedGrid,
+   .listGrid,
+   .calendarJumpForm,
+-  .settingsGrid {
++  .settingsGrid,
++  .appearanceOptionGrid,
++  .supportFormGrid,
++  .supportBillingGrid {
+     grid-template-columns: 1fr;
+   }
+ }
+@@ -3261,6 +3812,19 @@
+     grid-template-columns: 1fr;
+   }
+ 
++  .reportHeaderBar,
++  .supportHero {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .reportControls,
++  .supportHeroActions,
++  .supportFormActions {
++    width: 100%;
++    justify-content: flex-start;
++  }
++
+   .propertyRoomShowcaseFooter {
+     flex-direction: column;
+     align-items: flex-start;
+@@ -3305,6 +3869,16 @@
+     padding: 10px;
+   }
+ 
++  .guideModalOverlay {
++    padding: 10px;
++    align-items: flex-end;
++  }
++
++  .guideModal {
++    max-height: 94vh;
++    border-radius: 24px 24px 0 0;
++  }
++
+   .calendarDrawer {
+     padding: 18px;
+     border-radius: 18px;
+@@ -3363,12 +3937,21 @@
+   color: white;
+   backdrop-filter: blur(8px);
+ }
++.famloProThemeLight .proLuxurySection .secondaryActionButton {
++  background: rgba(255, 255, 255, 0.94);
++  border: 1px solid rgba(15, 23, 42, 0.08);
++  color: #0f172a;
++}
+ .proLuxurySection .secondaryActionButton:hover {
+   background: rgba(255, 255, 255, 0.18);
+   border-color: rgba(255, 255, 255, 0.3);
+   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+   transform: translateY(-1px);
+ }
++.famloProThemeLight .proLuxurySection .secondaryActionButton:hover {
++  background: white;
++  border-color: rgba(15, 23, 42, 0.14);
++}
+ .proLuxurySection .secondaryActionButton:disabled {
+   opacity: 0.4;
+   cursor: not-allowed;
+@@ -3377,7 +3960,7 @@
+ 
+ /* Ensure listTitle is bright white in luxury section */
+ .proLuxurySection .listTitle {
+-  color: white;
++  color: var(--pro-shell-text);
+   font-size: 15px;
+   font-weight: 800;
+   letter-spacing: -0.01em;
+diff --git a/components/partners/tabs/FamloPlusTab.tsx b/components/partners/tabs/FamloPlusTab.tsx
+index 14b7225c..c532fa6a 100644
+--- a/components/partners/tabs/FamloPlusTab.tsx
++++ b/components/partners/tabs/FamloPlusTab.tsx
+@@ -1,25 +1,63 @@
+ "use client";
+ 
+-import type { CSSProperties } from "react";
+-import { ArrowRight, BadgeIndianRupee, BarChart3, CalendarRange, ChartNoAxesCombined, Lock, RefreshCcw, Settings2, Users } from "lucide-react";
++import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
++import {
++  ArrowRight,
++  BadgeIndianRupee,
++  BarChart3,
++  CalendarRange,
++  ChartNoAxesCombined,
++  CheckCircle2,
++  Clock3,
++  Lock,
++  RefreshCcw,
++  Settings2,
++  Sparkles,
++  Users,
++  WalletCards,
++  XCircle,
++} from "lucide-react";
++
+ import styles from "../dashboard.module.css";
++import {
++  buildProCheckoutReviewModel,
++  createInitialProCheckoutUiState,
++  createProCheckoutDraftRequest,
++  haveSelectedFamiliesActivated,
++  loadProBillingWorkspace,
++  reduceProCheckoutUiState,
++  startProCheckoutPaymentRequest,
++  type ProAccessSnapshot,
++  type ProBillingWorkspaceFamily,
++  type ProBillingWorkspacePayload,
++  type ProBillingWorkspaceRoom,
++  type ProCheckoutDraftPayload,
++  type ProCheckoutRetryReason,
++} from "@/lib/pro-billing/pro-checkout-ui";
+ 
+ type FamloPlusTabProps = {
+   familyId: string;
+   familyName: string;
+   famloPlusEnabled: boolean;
+   proDashboardEnabled: boolean;
+-  access: {
+-    allowed: boolean;
+-    status: string;
+-    current_period_end: string | null;
+-    grace_until: string | null;
+-    reason: string;
+-  };
++  access: ProAccessSnapshot;
+   proDashboardUrl: string;
+   onNavigate: (tab: string) => void;
+ };
+ 
++type RazorpaySuccessResponse = {
++  razorpay_payment_id: string;
++  razorpay_order_id: string;
++  razorpay_signature: string;
++};
++
++type RazorpayFailureResponse = {
++  error?: {
++    description?: string;
++    reason?: string;
++  };
++};
++
+ const FEATURE_CARDS = [
+   { title: "OTA Channel Manager", description: "Manage connected OTA availability and updates from one Famlo workspace.", icon: RefreshCcw },
+   { title: "Rooms & Rates", description: "Organize room inventory, rate structures, and future pricing controls.", icon: BadgeIndianRupee },
+@@ -28,35 +66,94 @@ const FEATURE_CARDS = [
+   { title: "Booking Source Tracking", description: "Understand where bookings originated and compare direct versus OTA demand.", icon: BarChart3 },
+   { title: "Revenue Reports", description: "Review operational reporting designed for serious homestay businesses.", icon: ArrowRight },
+   { title: "Team & Groups", description: "Prepare for staff roles, collaboration, and future access controls.", icon: Users },
+-];
+-
+-const PLAN_CARDS = [
+-  {
+-    title: "Monthly Plan",
+-    price: "Pricing placeholder",
+-    note: "Best for pilot activation and early Famlo Pro testing.",
+-  },
+-  {
+-    title: "Yearly Plan",
+-    price: "Pricing placeholder",
+-    note: "Best for long-term professional homestays and operations teams.",
+-  },
+-];
++] as const;
++
++const DEFAULT_ACCESS: ProAccessSnapshot = {
++  allowed: false,
++  status: "inactive",
++  current_period_end: null,
++  grace_until: null,
++  reason: "no_subscription",
++};
+ 
+ function formatDate(value: string | null): string | null {
+   if (!value) return null;
+-
+   const parsed = new Date(value);
+   if (Number.isNaN(parsed.getTime())) return value;
+-
+   return new Intl.DateTimeFormat("en-IN", {
+     day: "numeric",
+     month: "short",
+     year: "numeric",
++    hour: "numeric",
++    minute: "2-digit",
+   }).format(parsed);
+ }
+ 
++function formatCurrencyFromPaise(value: number, currency: string): string {
++  return new Intl.NumberFormat("en-IN", {
++    style: "currency",
++    currency,
++    minimumFractionDigits: 0,
++    maximumFractionDigits: 0,
++  }).format(Math.round(value / 100));
++}
++
++function describeRetryReason(reason: ProCheckoutRetryReason | null): string {
++  switch (reason) {
++    case "expired":
++      return "This Pro checkout draft expired before payment could be started. Create a fresh draft to try again.";
++    case "cancelled":
++      return "This Pro checkout draft is no longer payable. Create a fresh draft to continue.";
++    case "failed":
++      return "Payment was cancelled or verification is still pending. You can retry from the same selection.";
++    default:
++      return "You can retry the Famlo Pro checkout from this selection.";
++  }
++}
++
++async function ensureRazorpayCheckout(): Promise<void> {
++  if (typeof window === "undefined") return;
++  if (window.Razorpay) return;
++
++  await new Promise<void>((resolve, reject) => {
++    const existing = document.querySelector<HTMLScriptElement>('script[data-razorpay-checkout="true"]');
++    if (existing) {
++      existing.addEventListener("load", () => resolve(), { once: true });
++      existing.addEventListener("error", () => reject(new Error("Failed to load Razorpay Checkout.")), { once: true });
++      return;
++    }
++
++    const script = document.createElement("script");
++    script.src = "https://checkout.razorpay.com/v1/checkout.js";
++    script.async = true;
++    script.dataset.razorpayCheckout = "true";
++    script.onload = () => resolve();
++    script.onerror = () => reject(new Error("Failed to load Razorpay Checkout."));
++    document.head.appendChild(script);
++  });
++}
++
++function buildInitialWorkspace(familyId: string, familyName: string, access: ProAccessSnapshot): ProBillingWorkspacePayload {
++  return {
++    families: [
++      {
++        familyId,
++        name: familyName,
++        city: null,
++        state: null,
++        isActive: true,
++        access,
++      },
++    ],
++    rooms: [],
++    accessByFamilyId: {
++      [familyId]: access,
++    },
++  };
++}
++
+ export default function FamloPlusTab({
++  familyId,
+   familyName,
+   famloPlusEnabled,
+   proDashboardEnabled,
+@@ -64,9 +161,253 @@ export default function FamloPlusTab({
+   proDashboardUrl,
+   onNavigate,
+ }: Readonly<FamloPlusTabProps>): React.JSX.Element {
+-  const periodEndLabel = formatDate(access.current_period_end);
+-  const graceUntilLabel = formatDate(access.grace_until);
+-  const canOpenPro = famloPlusEnabled && proDashboardEnabled && access.allowed;
++  const [workspace, setWorkspace] = useState<ProBillingWorkspacePayload>(() =>
++    buildInitialWorkspace(familyId, familyName, access)
++  );
++  const [workspaceLoading, setWorkspaceLoading] = useState(true);
++  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
++  const [selectedFamilyIds, setSelectedFamilyIds] = useState<string[]>([]);
++  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
++  const [draft, setDraft] = useState<ProCheckoutDraftPayload | null>(null);
++  const [uiState, dispatchUi] = useReducer(reduceProCheckoutUiState, undefined, createInitialProCheckoutUiState);
++  const [creatingDraft, setCreatingDraft] = useState(false);
++  const [paymentError, setPaymentError] = useState<string | null>(null);
++  const [verifyingNote, setVerifyingNote] = useState<string | null>(null);
++  const pollingRef = useRef(false);
++  const selectionInitializedRef = useRef(false);
++
++  const refreshWorkspace = async (): Promise<ProBillingWorkspacePayload> => {
++    const nextWorkspace = await loadProBillingWorkspace();
++    setWorkspace(nextWorkspace);
++    setWorkspaceError(null);
++    return nextWorkspace;
++  };
++
++  useEffect(() => {
++    let cancelled = false;
++
++    const loadWorkspace = async () => {
++      setWorkspaceLoading(true);
++      try {
++        const nextWorkspace = await refreshWorkspace();
++        if (cancelled) return;
++        setWorkspace(nextWorkspace);
++      } catch (error) {
++        if (cancelled) return;
++        setWorkspaceError(
++          error instanceof Error ? error.message : "We could not load the Famlo Pro billing workspace."
++        );
++      } finally {
++        if (!cancelled) {
++          setWorkspaceLoading(false);
++        }
++      }
++    };
++
++    void loadWorkspace();
++    return () => {
++      cancelled = true;
++    };
++  }, []);
++
++  const eligibleFamilies = useMemo(
++    () =>
++      workspace.families.filter((family) => family.isActive && family.access.allowed !== true),
++    [workspace.families]
++  );
++
++  useEffect(() => {
++    if (selectionInitializedRef.current) return;
++    if (workspaceLoading) return;
++
++    const currentFamilyEligible = eligibleFamilies.find((family) => family.familyId === familyId);
++    if (currentFamilyEligible) {
++      setSelectedFamilyIds([familyId]);
++      setSelectedRoomIds(
++        workspace.rooms
++          .filter((room) => room.familyId === familyId && room.isActive)
++          .map((room) => room.roomId)
++      );
++    }
++    selectionInitializedRef.current = true;
++  }, [eligibleFamilies, familyId, workspace.rooms, workspaceLoading]);
++
++  const roomsByFamilyId = useMemo(() => {
++    const nextMap = new Map<string, ProBillingWorkspaceRoom[]>();
++    for (const room of workspace.rooms) {
++      nextMap.set(room.familyId, [...(nextMap.get(room.familyId) ?? []), room]);
++    }
++    return nextMap;
++  }, [workspace.rooms]);
++
++  const selectedFamilyIdSet = useMemo(() => new Set(selectedFamilyIds), [selectedFamilyIds]);
++  const reviewModel = useMemo(
++    () => (draft ? buildProCheckoutReviewModel(draft, workspace) : null),
++    [draft, workspace]
++  );
++
++  const activeAccess = workspace.accessByFamilyId[familyId] ?? access ?? DEFAULT_ACCESS;
++  const canOpenPro = famloPlusEnabled && proDashboardEnabled && activeAccess.allowed;
++  const allEligibleFamiliesAlreadyActive = eligibleFamilies.length === 0;
++
++  const resetFlow = (): void => {
++    setDraft(null);
++    setPaymentError(null);
++    setVerifyingNote(null);
++    dispatchUi({ type: "reset" });
++  };
++
++  const toggleFamilySelection = (nextFamilyId: string): void => {
++    resetFlow();
++    setSelectedFamilyIds((current) => {
++      const nextSet = new Set(current);
++      if (nextSet.has(nextFamilyId)) {
++        nextSet.delete(nextFamilyId);
++        setSelectedRoomIds((currentRoomIds) =>
++          currentRoomIds.filter((roomId) => !roomsByFamilyId.get(nextFamilyId)?.some((room) => room.roomId === roomId))
++        );
++      } else {
++        nextSet.add(nextFamilyId);
++        const roomIds = (roomsByFamilyId.get(nextFamilyId) ?? [])
++          .filter((room) => room.isActive)
++          .map((room) => room.roomId);
++        setSelectedRoomIds((currentRoomIds) => [...new Set([...currentRoomIds, ...roomIds])]);
++      }
++      return [...nextSet];
++    });
++  };
++
++  const toggleRoomSelection = (roomId: string): void => {
++    resetFlow();
++    setSelectedRoomIds((current) =>
++      current.includes(roomId) ? current.filter((item) => item !== roomId) : [...current, roomId]
++    );
++  };
++
++  const handleCreateDraft = async (): Promise<void> => {
++    setCreatingDraft(true);
++    setPaymentError(null);
++    try {
++      const nextDraft = await createProCheckoutDraftRequest({
++        familyIdsToActivate: selectedFamilyIds,
++        stayUnitIdsToActivate: selectedRoomIds,
++        reason: "host_unlock_famlo_pro",
++      });
++      setDraft(nextDraft);
++      dispatchUi({ type: "draft_ready" });
++    } catch (error) {
++      const code = (error as Error & { code?: string }).code;
++      if (code === "invoice_expired") {
++        dispatchUi({ type: "retry_expired" });
++      } else if (code === "invoice_cancelled" || code === "invoice_superseded") {
++        dispatchUi({ type: "retry_cancelled" });
++      } else {
++        setPaymentError(error instanceof Error ? error.message : "Failed to create the Famlo Pro checkout draft.");
++      }
++    } finally {
++      setCreatingDraft(false);
++    }
++  };
++
++  const pollForVerifiedAccess = async (familyIdsToWatch: string[]): Promise<void> => {
++    pollingRef.current = true;
++    setVerifyingNote("Verifying payment...");
++
++    for (let attempt = 0; attempt < 20; attempt += 1) {
++      try {
++        const nextWorkspace = await refreshWorkspace();
++        if (haveSelectedFamiliesActivated(nextWorkspace.accessByFamilyId, familyIdsToWatch)) {
++          dispatchUi({ type: "entitlement_active" });
++          setVerifyingNote(null);
++          pollingRef.current = false;
++          return;
++        }
++      } catch {
++        // keep showing the verifying state and let the next attempt retry
++      }
++
++      await new Promise((resolve) => window.setTimeout(resolve, 3000));
++    }
++
++    pollingRef.current = false;
++    setVerifyingNote("Verifying payment...");
++  };
++
++  const handlePayNow = async (): Promise<void> => {
++    if (!draft) return;
++
++    setPaymentError(null);
++    dispatchUi({ type: "payment_start_requested" });
++
++    try {
++      const paymentStart = await startProCheckoutPaymentRequest(draft.invoice.id);
++      const nextDraft = {
++        ...draft,
++        subscription: paymentStart.subscription ?? draft.subscription,
++        invoice: paymentStart.invoice,
++        lineItems: paymentStart.lineItems,
++        paymentAttempt: paymentStart.paymentAttempt,
++      };
++      setDraft(nextDraft);
++
++      await ensureRazorpayCheckout();
++      const RazorpayCheckout = window.Razorpay as
++        | (new (options: Record<string, unknown>) => {
++            open: () => void;
++            on: (event: "payment.failed", handler: (response: RazorpayFailureResponse) => void) => void;
++          })
++        | undefined;
++      if (!RazorpayCheckout || !paymentStart.publicKey || !paymentStart.paymentAttempt.providerOrderId) {
++        throw new Error("Razorpay Checkout is unavailable for this Famlo Pro payment.");
++      }
++
++      const checkout = new RazorpayCheckout({
++        key: paymentStart.publicKey,
++        order_id: paymentStart.paymentAttempt.providerOrderId,
++        amount: paymentStart.invoice.totalPaise,
++        currency: paymentStart.invoice.currency,
++        name: "Famlo Pro",
++        description: "Famlo Pro host activation",
++        modal: {
++          ondismiss: () => {
++            if (pollingRef.current) return;
++            dispatchUi({ type: "retry_failed" });
++            setPaymentError("Payment was cancelled before confirmation. You can retry the same selection.");
++          },
++        },
++        handler: (_response: RazorpaySuccessResponse) => {
++          dispatchUi({ type: "provider_success" });
++          setPaymentError(null);
++          void pollForVerifiedAccess(selectedFamilyIds);
++        },
++      });
++
++      checkout.on("payment.failed", (response: RazorpayFailureResponse) => {
++        dispatchUi({ type: "retry_failed" });
++        setPaymentError(
++          response.error?.description?.trim() || "Payment failed before Famlo Pro activation could be verified."
++        );
++      });
++
++      checkout.open();
++    } catch (error) {
++      const code = (error as Error & { code?: string }).code;
++      if (code === "invoice_expired") {
++        dispatchUi({ type: "retry_expired" });
++      } else if (
++        code === "invoice_cancelled" ||
++        code === "invoice_superseded" ||
++        code === "invoice_not_payable"
++      ) {
++        dispatchUi({ type: "retry_cancelled" });
++      } else {
++        dispatchUi({ type: "retry_failed" });
++        setPaymentError(error instanceof Error ? error.message : "We could not start the Famlo Pro payment.");
++      }
++    }
++  };
++
++  const currentSelectionCount = selectedFamilyIds.length + selectedRoomIds.length;
+ 
+   return (
+     <div className={`${styles.flexCol} ${styles.animateIn}`} style={{ gap: "24px" }}>
+@@ -81,34 +422,38 @@ export default function FamloPlusTab({
+           <div style={eyebrowStyle}>Famlo+ Upgrade</div>
+           <h2 style={headingStyle}>Unlock Famlo Pro</h2>
+           <p style={heroCopyStyle}>
+-            Famlo Pro is the upcoming advanced dashboard for PMS + Channel Manager workflows. It is built for serious
+-            homestays that need stronger inventory, channel, and reporting controls without replacing the current
+-            Basic Dashboard.
++            Create a Famlo Pro checkout draft, review the invoice, and pay securely through Razorpay. Pro access unlocks only after backend verification confirms your entitlement.
+           </p>
+           <p style={heroSubtleStyle}>
+-            Property: <strong>{familyName}</strong>
++            Current property: <strong>{familyName}</strong>
+           </p>
+         </div>
+ 
+         <div style={heroActionRowStyle}>
+-          <button
+-            type="button"
+-            className={styles.primaryBtn}
+-            onClick={() => {
+-              if (canOpenPro) {
++          {canOpenPro ? (
++            <button
++              type="button"
++              className={styles.primaryBtn}
++              onClick={() => {
+                 window.location.href = proDashboardUrl;
+-              }
+-            }}
+-            disabled={!canOpenPro}
+-            style={{
+-              width: "auto",
+-              minWidth: "220px",
+-              opacity: canOpenPro ? 1 : 0.68,
+-              cursor: canOpenPro ? "pointer" : "not-allowed",
+-            }}
+-          >
+-            Open Famlo Pro
+-          </button>
++              }}
++              style={{ width: "auto", minWidth: "220px" }}
++            >
++              Open Famlo Pro
++            </button>
++          ) : (
++            <button
++              type="button"
++              className={styles.primaryBtn}
++              onClick={() => {
++                const checkoutSection = document.getElementById("famlo-pro-checkout-flow");
++                checkoutSection?.scrollIntoView({ behavior: "smooth", block: "start" });
++              }}
++              style={{ width: "auto", minWidth: "220px" }}
++            >
++              Unlock Famlo Pro
++            </button>
++          )}
+           <button
+             type="button"
+             className={styles.primaryBtn}
+@@ -117,42 +462,275 @@ export default function FamloPlusTab({
+           >
+             Contact Famlo
+           </button>
+-          <button
+-            type="button"
+-            className={styles.primaryBtn}
+-            style={secondaryButtonStyle}
+-            onClick={() => onNavigate("support")}
+-          >
+-            Request activation
+-          </button>
+         </div>
+ 
+         <div style={statusWrapStyle}>
+           <div style={statusCardStyle}>
+-            <div style={statusLabelStyle}>Famlo+ Status</div>
+-            <div style={statusValueStyle}>{access.status}</div>
++            <div style={statusLabelStyle}>Current access</div>
++            <div style={statusValueStyle}>{canOpenPro ? "Active" : "Locked"}</div>
+             <div style={statusHintStyle}>
+-              {access.allowed
+-                ? access.status === "grace"
+-                  ? `Grace access active${graceUntilLabel ? ` until ${graceUntilLabel}` : ""}.`
+-                  : `Famlo Pro is unlocked${periodEndLabel ? ` until ${periodEndLabel}` : ""}.`
+-                : "Pilot activation available through Famlo team."}
++              {canOpenPro
++                ? `Famlo Pro is active${formatDate(activeAccess.current_period_end) ? ` until ${formatDate(activeAccess.current_period_end)}` : ""}.`
++                : "Checkout starts a draft only. Access remains locked until the verified backend payment confirmation activates Pro."}
+             </div>
+           </div>
+           <div style={statusCardStyle}>
+-            <div style={statusLabelStyle}>Activation Note</div>
+-            <div style={statusValueStyle}>Coming soon</div>
++            <div style={statusLabelStyle}>Payment verification</div>
++            <div style={statusValueStyle}>Webhook only</div>
+             <div style={statusHintStyle}>
+-              Payment integration coming soon. Pilot activation is currently available through Famlo support.
++              Frontend success never activates Pro. Famlo waits for the verified Razorpay backend confirmation before unlocking access.
+             </div>
+           </div>
+-          {!famloPlusEnabled ? (
+-            <div style={statusCardStyle}>
+-              <div style={statusLabelStyle}>Environment</div>
+-              <div style={statusValueStyle}>Disabled</div>
+-              <div style={statusHintStyle}>`FAMLO_ENABLE_FAMLO_PLUS_PAGE` is off, so this page is in safe-preview mode.</div>
++          <div style={statusCardStyle}>
++            <div style={statusLabelStyle}>Selection</div>
++            <div style={statusValueStyle}>{currentSelectionCount}</div>
++            <div style={statusHintStyle}>
++              {currentSelectionCount > 0
++                ? `${selectedFamilyIds.length} propert${selectedFamilyIds.length === 1 ? "y" : "ies"} and ${selectedRoomIds.length} room${selectedRoomIds.length === 1 ? "" : "s"} selected for this draft.`
++                : "Select the properties and rooms you want to unlock in this Pro checkout."}
+             </div>
+-          ) : null}
++          </div>
++        </div>
++      </section>
++
++      <section id="famlo-pro-checkout-flow" className={styles.glassCard} style={{ display: "grid", gap: "22px" }}>
++        <div style={sectionHeaderStyle}>
++          <div>
++            <div style={eyebrowStyle}>Checkout Flow</div>
++            <h3 style={sectionTitleStyle}>Select properties, review the invoice, then pay</h3>
++          </div>
++          <div style={sectionCopyStyle}>
++            The draft is created or reused safely. Payment opens Razorpay only after the existing Pro billing backend returns a valid order and public key.
++          </div>
++        </div>
++
++        {workspaceError ? (
++          <div style={errorBoxStyle}>{workspaceError}</div>
++        ) : null}
++
++        {paymentError ? (
++          <div style={errorBoxStyle}>{paymentError}</div>
++        ) : null}
++
++        {uiState.phase === "verifying" ? (
++          <div style={verifyingBoxStyle}>
++            <Clock3 size={18} />
++            <div style={{ display: "grid", gap: "4px" }}>
++              <strong>Verifying payment...</strong>
++              <span>{verifyingNote ?? "Verifying payment..."}</span>
++            </div>
++            <button
++              type="button"
++              className={styles.primaryBtn}
++              style={secondaryButtonStyle}
++              onClick={() => void pollForVerifiedAccess(selectedFamilyIds)}
++            >
++              Refresh status
++            </button>
++          </div>
++        ) : null}
++
++        {uiState.phase === "success" ? (
++          <div style={successBoxStyle}>
++            <CheckCircle2 size={18} />
++            <div style={{ display: "grid", gap: "4px" }}>
++              <strong>Famlo Pro is now active.</strong>
++              <span>The backend verified your payment and the selected Pro entitlement is active.</span>
++            </div>
++            <button
++              type="button"
++              className={styles.primaryBtn}
++              onClick={() => {
++                window.location.href = proDashboardUrl;
++              }}
++              style={{ width: "auto", minWidth: "180px" }}
++            >
++              Open Famlo Pro
++            </button>
++          </div>
++        ) : null}
++
++        {uiState.phase === "retry" ? (
++          <div style={retryBoxStyle}>
++            <XCircle size={18} />
++            <div style={{ display: "grid", gap: "4px" }}>
++              <strong>Retry the Famlo Pro checkout</strong>
++              <span>{describeRetryReason(uiState.retryReason)}</span>
++            </div>
++            <button
++              type="button"
++              className={styles.primaryBtn}
++              onClick={() => void handleCreateDraft()}
++              disabled={creatingDraft || selectedFamilyIds.length === 0}
++              style={{ width: "auto", minWidth: "180px" }}
++            >
++              {creatingDraft ? "Creating draft..." : "Create new draft"}
++            </button>
++          </div>
++        ) : null}
++
++        <div style={checkoutGridStyle}>
++          <div style={selectorColumnStyle}>
++            <div style={listTitleStyle}>1. Select properties</div>
++            <div style={selectorListStyle}>
++              {workspaceLoading ? (
++                <div style={mutedCopyStyle}>Loading Famlo Pro properties...</div>
++              ) : eligibleFamilies.length === 0 ? (
++                <div style={mutedCopyStyle}>
++                  {allEligibleFamiliesAlreadyActive
++                    ? "Every available workspace property already has Famlo Pro access."
++                    : "No eligible properties are available for Pro checkout right now."}
++                </div>
++              ) : (
++                eligibleFamilies.map((family) => {
++                  const checked = selectedFamilyIdSet.has(family.familyId);
++                  return (
++                    <label key={family.familyId} style={selectorCardStyle}>
++                      <input
++                        type="checkbox"
++                        checked={checked}
++                        onChange={() => toggleFamilySelection(family.familyId)}
++                      />
++                      <div style={{ display: "grid", gap: "6px" }}>
++                        <strong style={{ color: "#0e2b57" }}>{family.name}</strong>
++                        <span style={mutedCopyStyle}>
++                          {[family.city, family.state].filter(Boolean).join(", ") || "Famlo workspace property"}
++                        </span>
++                      </div>
++                    </label>
++                  );
++                })
++              )}
++            </div>
++
++            <div style={listTitleStyle}>2. Select rooms</div>
++            <div style={selectorHintStyle}>Only rooms connected to OTA sync are counted for billing.</div>
++            <div style={selectorListStyle}>
++              {selectedFamilyIds.length === 0 ? (
++                <div style={mutedCopyStyle}>Choose a property first to review the active rooms attached to this draft.</div>
++              ) : (
++                selectedFamilyIds.map((selectedFamilyId) => {
++                  const family = workspace.families.find((item) => item.familyId === selectedFamilyId);
++                  const familyRooms = (roomsByFamilyId.get(selectedFamilyId) ?? []).filter((room) => room.isActive);
++                  return (
++                    <div key={selectedFamilyId} style={roomGroupStyle}>
++                      <strong style={{ color: "#0e2b57" }}>{family?.name ?? "Selected property"}</strong>
++                      {familyRooms.length === 0 ? (
++                        <div style={mutedCopyStyle}>No active rooms were found for this property.</div>
++                      ) : (
++                        familyRooms.map((room) => (
++                          <label key={room.roomId} style={selectorCardStyle}>
++                            <input
++                              type="checkbox"
++                              checked={selectedRoomIds.includes(room.roomId)}
++                              onChange={() => toggleRoomSelection(room.roomId)}
++                            />
++                            <span style={{ color: "#0e2b57", fontWeight: 700 }}>{room.name}</span>
++                          </label>
++                        ))
++                      )}
++                    </div>
++                  );
++                })
++              )}
++            </div>
++
++            <button
++              type="button"
++              className={styles.primaryBtn}
++              onClick={() => void handleCreateDraft()}
++              disabled={creatingDraft || selectedFamilyIds.length === 0}
++            >
++              {creatingDraft ? "Preparing invoice..." : "Review invoice"}
++            </button>
++          </div>
++
++          <div style={reviewColumnStyle}>
++            <div style={listTitleStyle}>3. Invoice review</div>
++            {!draft || !reviewModel ? (
++              <div style={reviewPlaceholderStyle}>
++                Select the properties and rooms you want to unlock, then create the draft to review the Famlo Pro invoice.
++              </div>
++            ) : (
++              <div style={reviewCardStyle}>
++                <div style={reviewHeaderStyle}>
++                  <div>
++                    <div style={statusLabelStyle}>Draft status</div>
++                    <strong style={{ color: "#0e2b57", fontSize: "18px" }}>
++                      {draft.invoice.status.replaceAll("_", " ")}
++                    </strong>
++                  </div>
++                  <div style={{ textAlign: "right" }}>
++                    <div style={statusLabelStyle}>Expires at</div>
++                    <strong style={{ color: "#165dcc" }}>{formatDate(reviewModel.expiresAt) ?? "Not available"}</strong>
++                  </div>
++                </div>
++
++                <div style={chargeGridStyle}>
++                  <div style={chargeCardStyle}>
++                    <span>Property charge</span>
++                    <strong>{formatCurrencyFromPaise(reviewModel.propertyChargePaise, reviewModel.currency)}</strong>
++                  </div>
++                  <div style={chargeCardStyle}>
++                    <span>Room charge</span>
++                    <strong>{formatCurrencyFromPaise(reviewModel.roomChargePaise, reviewModel.currency)}</strong>
++                  </div>
++                  {reviewModel.minimumAdjustmentPaise > 0 ? (
++                    <div style={chargeCardStyle}>
++                      <span>Founding plan minimum adjustment</span>
++                      <strong>{formatCurrencyFromPaise(reviewModel.minimumAdjustmentPaise, reviewModel.currency)}</strong>
++                    </div>
++                  ) : null}
++                  <div style={chargeCardStyle}>
++                    <span>GST</span>
++                    <strong>{formatCurrencyFromPaise(reviewModel.gstPaise, reviewModel.currency)}</strong>
++                  </div>
++                  <div style={chargeCardStyle}>
++                    <span>Total</span>
++                    <strong>{formatCurrencyFromPaise(reviewModel.totalPaise, reviewModel.currency)}</strong>
++                  </div>
++                </div>
++
++                <div style={selectedListWrapStyle}>
++                  <div>
++                    <div style={statusLabelStyle}>Selected properties</div>
++                    <ul style={selectedListStyle}>
++                      {reviewModel.selectedProperties.map((propertyName) => (
++                        <li key={propertyName}>{propertyName}</li>
++                      ))}
++                    </ul>
++                  </div>
++                  <div>
++                    <div style={statusLabelStyle}>Selected rooms</div>
++                    <ul style={selectedListStyle}>
++                      {reviewModel.selectedRooms.length > 0 ? (
++                        reviewModel.selectedRooms.map((roomName) => <li key={roomName}>{roomName}</li>)
++                      ) : (
++                        <li>No room charges selected</li>
++                      )}
++                    </ul>
++                  </div>
++                </div>
++
++                <div style={reviewFooterStyle}>
++                  <div style={statusHintStyle}>
++                    Only rooms connected to OTA sync are counted for billing.
++                    <br />
++                    Pay Now only starts the provider order and opens Razorpay. Famlo Pro remains locked until backend verification marks the entitlement active.
++                  </div>
++                  <button
++                    type="button"
++                    className={styles.primaryBtn}
++                    onClick={() => void handlePayNow()}
++                    disabled={uiState.phase === "starting_payment" || uiState.phase === "verifying"}
++                    style={{ width: "auto", minWidth: "180px" }}
++                  >
++                    {uiState.phase === "starting_payment" ? "Starting payment..." : "Pay Now"}
++                  </button>
++                </div>
++              </div>
++            )}
++          </div>
+         </div>
+       </section>
+ 
+@@ -186,33 +764,13 @@ export default function FamloPlusTab({
+         </div>
+       </section>
+ 
+-      <section style={planGridStyle}>
+-        {PLAN_CARDS.map((plan) => (
+-          <article key={plan.title} className={styles.glassCard} style={{ display: "grid", gap: "16px" }}>
+-            <div style={eyebrowStyle}>Plan placeholder</div>
+-            <div>
+-              <h3 style={{ margin: 0, fontSize: "24px", fontWeight: 900, color: "#0e2b57" }}>{plan.title}</h3>
+-              <div style={{ marginTop: "10px", fontSize: "18px", fontWeight: 800, color: "#165dcc" }}>{plan.price}</div>
+-            </div>
+-            <p style={{ margin: 0, color: "rgba(14,43,87,0.72)", lineHeight: 1.7 }}>{plan.note}</p>
+-            <div style={planFooterStyle}>
+-              <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+-                <Lock size={14} />
+-                Payment integration coming soon
+-              </span>
+-              <span>Pilot activation available through Famlo team.</span>
+-            </div>
+-          </article>
+-        ))}
+-      </section>
+-
+       <section className={styles.glassCard} style={footerCalloutStyle}>
+         <Settings2 size={20} />
+         <div style={{ display: "grid", gap: "6px" }}>
+           <strong style={{ color: "#0e2b57" }}>Basic dashboard stays available</strong>
+           <span style={{ color: "rgba(14,43,87,0.72)", lineHeight: 1.6 }}>
+-            Famlo Pro will unlock a separate workspace. Your current Basic Dashboard, direct booking tools, and basic
+-            calendar flow remain available either way.
++            Famlo Pro unlocks a separate workspace after verified payment confirmation. Your current Basic Dashboard
++            and existing host tools remain available throughout the checkout flow.
+           </span>
+         </div>
+       </section>
+@@ -245,146 +803,297 @@ const statusCardStyle: CSSProperties = {
+   background: "rgba(255,255,255,0.12)",
+   borderRadius: "18px",
+   padding: "18px",
+-  border: "1px solid rgba(255,255,255,0.18)",
+   display: "grid",
+   gap: "8px",
+ };
+ 
+-const sectionHeaderStyle: CSSProperties = {
+-  display: "grid",
+-  gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
+-  gap: "20px",
+-  alignItems: "start",
+-  marginBottom: "20px",
++const statusLabelStyle: CSSProperties = {
++  fontSize: "11px",
++  textTransform: "uppercase",
++  letterSpacing: "0.08em",
++  fontWeight: 800,
++  color: "rgba(14,43,87,0.6)",
+ };
+ 
+-const sectionTitleStyle: CSSProperties = {
+-  margin: "8px 0 0",
+-  fontSize: "28px",
++const statusValueStyle: CSSProperties = {
++  fontSize: "18px",
+   fontWeight: 900,
+-  color: "#0e2b57",
++  color: "white",
+ };
+ 
+-const sectionCopyStyle: CSSProperties = {
++const statusHintStyle: CSSProperties = {
++  color: "rgba(255,255,255,0.82)",
++  lineHeight: 1.6,
++  fontSize: "14px",
++};
++
++const selectorHintStyle: CSSProperties = {
+   color: "rgba(14,43,87,0.72)",
+-  lineHeight: 1.7,
+-  fontWeight: 600,
++  fontSize: "13px",
++  lineHeight: 1.6,
++  marginBottom: "10px",
+ };
+ 
+-const featureGridStyle: CSSProperties = {
+-  display: "grid",
+-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
++const reviewFooterStyle: CSSProperties = {
++  display: "flex",
+   gap: "16px",
++  justifyContent: "space-between",
++  alignItems: "center",
++  flexWrap: "wrap",
+ };
+ 
+-const featureCardStyle: CSSProperties = {
++const retryBoxStyle: CSSProperties = {
++  display: "flex",
++  gap: "14px",
++  alignItems: "center",
++  justifyContent: "space-between",
++  flexWrap: "wrap",
++  padding: "16px 18px",
+   borderRadius: "18px",
+-  border: "1px solid rgba(14,43,87,0.08)",
+-  background: "#f8fafc",
+-  padding: "18px",
+-  display: "grid",
++  background: "rgba(255, 244, 229, 0.9)",
++  color: "#7a3900",
++  border: "1px solid rgba(245, 158, 11, 0.24)",
++};
++
++const successBoxStyle: CSSProperties = {
++  display: "flex",
+   gap: "14px",
++  alignItems: "center",
++  justifyContent: "space-between",
++  flexWrap: "wrap",
++  padding: "16px 18px",
++  borderRadius: "18px",
++  background: "rgba(236, 253, 245, 0.96)",
++  color: "#065f46",
++  border: "1px solid rgba(16, 185, 129, 0.2)",
+ };
+ 
+-const featureIconWrapStyle: CSSProperties = {
+-  width: "40px",
+-  height: "40px",
+-  borderRadius: "12px",
+-  background: "#e0ebff",
+-  color: "#165dcc",
++const verifyingBoxStyle: CSSProperties = {
+   display: "flex",
++  gap: "14px",
+   alignItems: "center",
+-  justifyContent: "center",
++  justifyContent: "space-between",
++  flexWrap: "wrap",
++  padding: "16px 18px",
++  borderRadius: "18px",
++  background: "rgba(239, 246, 255, 0.96)",
++  color: "#0e2b57",
++  border: "1px solid rgba(22, 93, 204, 0.18)",
+ };
+ 
+-const planGridStyle: CSSProperties = {
++const errorBoxStyle: CSSProperties = {
++  padding: "14px 16px",
++  borderRadius: "16px",
++  background: "rgba(254, 242, 242, 0.94)",
++  color: "#991b1b",
++  border: "1px solid rgba(239, 68, 68, 0.18)",
++};
++
++const chargeGridStyle: CSSProperties = {
+   display: "grid",
+-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
++  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
++  gap: "12px",
++};
++
++const chargeCardStyle: CSSProperties = {
++  display: "grid",
++  gap: "6px",
++  padding: "14px 16px",
++  borderRadius: "16px",
++  background: "rgba(248, 250, 252, 0.94)",
++  border: "1px solid rgba(14, 43, 87, 0.08)",
++  color: "#0e2b57",
++};
++
++const selectedListWrapStyle: CSSProperties = {
++  display: "grid",
++  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
++  gap: "18px",
++};
++
++const selectedListStyle: CSSProperties = {
++  margin: "8px 0 0",
++  paddingLeft: "18px",
++  color: "#0e2b57",
++  lineHeight: 1.7,
++};
++
++const reviewCardStyle: CSSProperties = {
++  display: "grid",
++  gap: "18px",
++  padding: "18px",
++  borderRadius: "22px",
++  background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.94))",
++  border: "1px solid rgba(22, 93, 204, 0.12)",
++};
++
++const reviewHeaderStyle: CSSProperties = {
++  display: "flex",
++  alignItems: "center",
++  justifyContent: "space-between",
+   gap: "16px",
++  flexWrap: "wrap",
+ };
+ 
+-const planFooterStyle: CSSProperties = {
++const selectorListStyle: CSSProperties = {
+   display: "grid",
+   gap: "10px",
+-  color: "rgba(14,43,87,0.72)",
+-  fontSize: "13px",
+-  fontWeight: 700,
+ };
+ 
+-const footerCalloutStyle: CSSProperties = {
++const selectorCardStyle: CSSProperties = {
+   display: "flex",
+-  gap: "14px",
++  gap: "12px",
+   alignItems: "flex-start",
+-  background: "#f8fafc",
++  padding: "14px 16px",
++  borderRadius: "16px",
++  background: "rgba(248, 250, 252, 0.94)",
++  border: "1px solid rgba(14, 43, 87, 0.08)",
+ };
+ 
+-const secondaryButtonStyle: CSSProperties = {
+-  width: "auto",
+-  minWidth: "180px",
+-  background: "white",
++const roomGroupStyle: CSSProperties = {
++  display: "grid",
++  gap: "10px",
++  padding: "14px 0 4px",
++};
++
++const listTitleStyle: CSSProperties = {
++  fontSize: "14px",
++  fontWeight: 900,
++  color: "#0e2b57",
++  textTransform: "uppercase",
++  letterSpacing: "0.08em",
++};
++
++const selectorColumnStyle: CSSProperties = {
++  display: "grid",
++  gap: "16px",
++  alignContent: "start",
++};
++
++const reviewColumnStyle: CSSProperties = {
++  display: "grid",
++  gap: "16px",
++  alignContent: "start",
++};
++
++const checkoutGridStyle: CSSProperties = {
++  display: "grid",
++  gridTemplateColumns: "minmax(280px, 1fr) minmax(320px, 1.1fr)",
++  gap: "22px",
++};
++
++const reviewPlaceholderStyle: CSSProperties = {
++  minHeight: "240px",
++  display: "grid",
++  placeItems: "center",
++  padding: "24px",
++  borderRadius: "22px",
++  background: "rgba(248, 250, 252, 0.8)",
++  border: "1px dashed rgba(14, 43, 87, 0.16)",
++  color: "rgba(14,43,87,0.66)",
++  textAlign: "center",
++  lineHeight: 1.7,
++};
++
++const sectionHeaderStyle: CSSProperties = {
++  display: "grid",
++  gap: "12px",
++};
++
++const sectionCopyStyle: CSSProperties = {
++  color: "rgba(14,43,87,0.72)",
++  lineHeight: 1.7,
++};
++
++const sectionTitleStyle: CSSProperties = {
++  margin: 0,
+   color: "#0e2b57",
++  fontSize: "28px",
++  fontWeight: 900,
+ };
+ 
+ const eyebrowStyle: CSSProperties = {
+   fontSize: "11px",
+-  fontWeight: 900,
+-  letterSpacing: "0.14em",
+   textTransform: "uppercase",
++  letterSpacing: "0.12em",
++  fontWeight: 900,
+   color: "rgba(255,255,255,0.76)",
+ };
+ 
+ const headingStyle: CSSProperties = {
+   margin: 0,
+-  fontSize: "36px",
+-  lineHeight: 1.05,
++  fontSize: "34px",
+   fontWeight: 900,
+ };
+ 
+ const heroCopyStyle: CSSProperties = {
+   margin: 0,
+-  maxWidth: "800px",
+-  lineHeight: 1.8,
+-  color: "rgba(255,255,255,0.9)",
+-  fontWeight: 600,
++  color: "rgba(255,255,255,0.84)",
++  lineHeight: 1.75,
++  fontSize: "15px",
++  maxWidth: "760px",
+ };
+ 
+ const heroSubtleStyle: CSSProperties = {
+   margin: 0,
+-  color: "rgba(255,255,255,0.72)",
+-  fontSize: "13px",
+-  fontWeight: 700,
++  color: "rgba(255,255,255,0.9)",
++  lineHeight: 1.6,
+ };
+ 
+-const statusLabelStyle: CSSProperties = {
+-  fontSize: "11px",
+-  fontWeight: 900,
+-  letterSpacing: "0.12em",
+-  textTransform: "uppercase",
+-  color: "rgba(255,255,255,0.72)",
++const secondaryButtonStyle: CSSProperties = {
++  width: "auto",
++  background: "rgba(255,255,255,0.18)",
++  color: "white",
++  border: "1px solid rgba(255,255,255,0.22)",
+ };
+ 
+-const statusValueStyle: CSSProperties = {
+-  fontSize: "24px",
+-  fontWeight: 900,
+-  textTransform: "capitalize",
++const featureGridStyle: CSSProperties = {
++  display: "grid",
++  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
++  gap: "14px",
+ };
+ 
+-const statusHintStyle: CSSProperties = {
+-  color: "rgba(255,255,255,0.84)",
+-  lineHeight: 1.6,
+-  fontSize: "13px",
++const featureCardStyle: CSSProperties = {
++  display: "grid",
++  gap: "14px",
++  padding: "18px",
++  borderRadius: "20px",
++  background: "rgba(248, 250, 252, 0.88)",
++  border: "1px solid rgba(14, 43, 87, 0.06)",
++};
++
++const featureIconWrapStyle: CSSProperties = {
++  width: "38px",
++  height: "38px",
++  borderRadius: "14px",
++  display: "grid",
++  placeItems: "center",
++  background: "rgba(22, 93, 204, 0.12)",
++  color: "#165dcc",
+ };
+ 
+ const featureTitleStyle: CSSProperties = {
+   margin: 0,
+   fontSize: "16px",
+-  fontWeight: 900,
++  fontWeight: 800,
+   color: "#0e2b57",
+ };
+ 
+ const featureCopyStyle: CSSProperties = {
+   margin: 0,
+   color: "rgba(14,43,87,0.72)",
+-  lineHeight: 1.65,
++  lineHeight: 1.6,
++  fontSize: "14px",
++};
++
++const footerCalloutStyle: CSSProperties = {
++  display: "flex",
++  alignItems: "flex-start",
++  gap: "14px",
++};
++
++const mutedCopyStyle: CSSProperties = {
++  color: "rgba(14,43,87,0.66)",
++  lineHeight: 1.6,
+   fontSize: "14px",
+ };
+diff --git a/components/partners/tabs/SupportTab.tsx b/components/partners/tabs/SupportTab.tsx
+index b363c32f..b609002f 100644
+--- a/components/partners/tabs/SupportTab.tsx
++++ b/components/partners/tabs/SupportTab.tsx
+@@ -13,17 +13,13 @@ import {
+   ShieldCheck
+ } from "lucide-react";
+ import styles from "../dashboard.module.css";
++import {
++  createSupportTicket,
++  fetchSupportTickets,
++  type SupportTicket,
++} from "@/lib/support-ticket-client";
+ import { createBrowserSupabaseClient } from "@/lib/supabase";
+ 
+-interface SupportTicket {
+-  id: string;
+-  subject: string;
+-  message: string;
+-  status: "open" | "in_progress" | "resolved";
+-  admin_reply: string | null;
+-  created_at: string;
+-}
+-
+ interface SupportTabProps {
+   familyId: string;
+   hostCode: string;
+@@ -43,14 +39,12 @@ export default function SupportTab({ hostCode, hostName }: SupportTabProps) {
+ 
+   const fetchTickets = useCallback(async () => {
+     setLoading(true);
+-    const { data, error } = await supabase
+-      .from("support_tickets")
+-      .select("*")
+-      .eq("host_id", hostCode)
+-      .order("created_at", { ascending: false });
+-
+-    if (!error && data) setTickets(data);
+-    setLoading(false);
++    try {
++      const nextTickets = await fetchSupportTickets(supabase, hostCode);
++      setTickets(nextTickets);
++    } finally {
++      setLoading(false);
++    }
+   }, [hostCode, supabase]);
+ 
+   useEffect(() => {
+@@ -63,15 +57,13 @@ export default function SupportTab({ hostCode, hostName }: SupportTabProps) {
+     if (!subject || !message) return;
+     setSubmitting(true);
+ 
+-    const { error } = await supabase.from("support_tickets").insert({
+-      host_id: hostCode,
+-      host_name: hostName,
+-      subject,
+-      message,
+-      status: "open"
+-    });
+-
+-    if (!error) {
++    try {
++      await createSupportTicket(supabase, {
++        hostCode,
++        hostName,
++        subject,
++        message,
++      });
+       setSuccess(true);
+       setSubject("");
+       setMessage("");
+@@ -80,8 +72,9 @@ export default function SupportTab({ hostCode, hostName }: SupportTabProps) {
+         setSuccess(false);
+         setShowForm(false);
+       }, 2000);
++    } finally {
++      setSubmitting(false);
+     }
+-    setSubmitting(false);
+   };
+ 
+   return (
+diff --git a/components/public/HomeBookingFlow.tsx b/components/public/HomeBookingFlow.tsx
+index e12e8b2a..6deb7a53 100644
+--- a/components/public/HomeBookingFlow.tsx
++++ b/components/public/HomeBookingFlow.tsx
+@@ -98,15 +98,6 @@ type RazorpayFailureResponse = {
+   };
+ };
+ 
+-declare global {
+-  interface Window {
+-    Razorpay?: new (options: Record<string, unknown>) => {
+-      open: () => void;
+-      on: (event: "payment.failed", handler: (response: RazorpayFailureResponse) => void) => void;
+-    };
+-  }
+-}
+-
+ type QuoteState = {
+   subtotal: number;
+   discountAmount: number;
+diff --git a/components/public/HomeBookingPreview.tsx b/components/public/HomeBookingPreview.tsx
+index 53329999..051b667c 100644
+--- a/components/public/HomeBookingPreview.tsx
++++ b/components/public/HomeBookingPreview.tsx
+@@ -64,15 +64,6 @@ type RazorpayFailureResponse = {
+   };
+ };
+ 
+-declare global {
+-  interface Window {
+-    Razorpay?: new (options: Record<string, unknown>) => {
+-      open: () => void;
+-      on: (event: "payment.failed", handler: (response: RazorpayFailureResponse) => void) => void;
+-    };
+-  }
+-}
+-
+ async function ensureRazorpayCheckout(): Promise<void> {
+   if (typeof window === "undefined") return;
+   if (window.Razorpay) return;
+diff --git a/components/public/RoomBookingPanel.tsx b/components/public/RoomBookingPanel.tsx
+index 4b36d362..a1d6aec8 100644
+--- a/components/public/RoomBookingPanel.tsx
++++ b/components/public/RoomBookingPanel.tsx
+@@ -12,15 +12,6 @@ import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
+ import { createBrowserSupabaseClient } from "@/lib/supabase";
+ import type { StayUnitRecord } from "@/lib/stay-units";
+ 
+-declare global {
+-  interface Window {
+-    Razorpay?: new (options: Record<string, unknown>) => {
+-      open: () => void;
+-      on: (event: "payment.failed", handler: (response: { error?: { description?: string; reason?: string } }) => void) => void;
+-    };
+-  }
+-}
+-
+ type RoomBookingPanelProps = {
+   home: {
+     id: string;
+diff --git a/lib/channel-providers/channex/client.ts b/lib/channel-providers/channex/client.ts
+index 44fb801b..ae7131eb 100644
+--- a/lib/channel-providers/channex/client.ts
++++ b/lib/channel-providers/channex/client.ts
+@@ -1,3 +1,5 @@
++import { assertRuntimeSafety } from "@/lib/app-env";
++
+ export type ChannexEnvironment = "staging" | "production";
+ 
+ export type ChannexConfigSummary = {
+@@ -430,6 +432,7 @@ function buildHeaders(apiKey: string): HeadersInit {
+ }
+ 
+ export function getChannexConfigSummary(): ChannexConfigSummary {
++  assertRuntimeSafety("channex");
+   const environment = loadEnvironment();
+   const apiKeyConfigured = Boolean(loadApiKey(environment));
+   const baseUrlConfigured = Boolean(resolveBaseUrl(environment));
+@@ -1204,6 +1207,22 @@ async function postChannexJson(
+   body: Record<string, unknown>
+ ): Promise<ChannexAriPushResult> {
+   const environment = loadEnvironment();
++  try {
++    assertRuntimeSafety("channex_sync_execution");
++  } catch (error) {
++    return {
++      ok: false,
++      environment,
++      endpoint: endpointPath,
++      httpStatus: null,
++      retryAfterSeconds: null,
++      message: error instanceof Error ? error.message : "Channex sync execution is blocked.",
++      meta: null,
++      warnings: [],
++      rawValidation: null,
++      data: null,
++    };
++  }
+   const summary = getChannexConfigSummary();
+   const endpoint = `${resolveBaseUrl(environment)}${endpointPath}`;
+   const apiKey = loadApiKey(environment);
+diff --git a/lib/finance/feature-flags.ts b/lib/finance/feature-flags.ts
+index a00490cc..67989162 100644
+--- a/lib/finance/feature-flags.ts
++++ b/lib/finance/feature-flags.ts
+@@ -1,9 +1,18 @@
++import { isRuntimeSafetySatisfied } from "@/lib/app-env";
++
+ function isEnabled(value: string | undefined, fallback: boolean): boolean {
+   if (typeof value !== "string" || value.trim().length === 0) return fallback;
+   const normalized = value.trim().toLowerCase();
+   return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+ }
+ 
++function isGuardedExecutionEnabled(
++  value: string | undefined,
++  scope: Parameters<typeof isRuntimeSafetySatisfied>[0]
++): boolean {
++  return isEnabled(value, false) && isRuntimeSafetySatisfied(scope);
++}
++
+ export function isFinanceEventPipelineEnabled(): boolean {
+   return isEnabled(process.env.FINANCE_EVENT_PIPELINE_ENABLED, false);
+ }
+@@ -49,7 +58,7 @@ export function isSettlementApprovalFlowEnabled(): boolean {
+ }
+ 
+ export function isSettlementPayoutExecutionEnabled(): boolean {
+-  return isEnabled(process.env.SETTLEMENT_PAYOUT_EXECUTION_ENABLED, false);
++  return isGuardedExecutionEnabled(process.env.SETTLEMENT_PAYOUT_EXECUTION_ENABLED, "payout_execution");
+ }
+ 
+ export function isAutoPayoutEnabled(): boolean {
+@@ -149,7 +158,7 @@ export function isRefundAdminApprovalRequired(): boolean {
+ }
+ 
+ export function isRefundProviderExecutionEnabled(): boolean {
+-  return isEnabled(process.env.REFUND_PROVIDER_EXECUTION_ENABLED, false);
++  return isGuardedExecutionEnabled(process.env.REFUND_PROVIDER_EXECUTION_ENABLED, "refund_execution");
+ }
+ 
+ export function isRazorpayRefundsEnabled(): boolean {
+@@ -157,7 +166,7 @@ export function isRazorpayRefundsEnabled(): boolean {
+ }
+ 
+ export function isRazorpayXEnabled(): boolean {
+-  return isEnabled(process.env.RAZORPAYX_ENABLED, false);
++  return isEnabled(process.env.RAZORPAYX_ENABLED, false) && isRuntimeSafetySatisfied("razorpayx");
+ }
+ 
+ export function isPayoutAccountCreationEnabled(): boolean {
+@@ -201,9 +210,13 @@ export function isInvoicePdfGenerationEnabled(): boolean {
+ }
+ 
+ export function isInvoiceEmailDeliveryEnabled(): boolean {
+-  return isEnabled(process.env.INVOICE_EMAIL_DELIVERY_ENABLED, false);
++  return isGuardedExecutionEnabled(process.env.INVOICE_EMAIL_DELIVERY_ENABLED, "email_execution");
+ }
+ 
+ export function isAdminFinanceOpsUiEnabled(): boolean {
+   return isEnabled(process.env.ADMIN_FINANCE_OPS_UI_ENABLED, false);
+ }
++
++export function isChannexSyncExecutionEnabled(): boolean {
++  return isGuardedExecutionEnabled(process.env.CHANNEX_SYNC_EXECUTION_ENABLED, "channex_sync_execution");
++}
+diff --git a/lib/finance/finance-runtime-config.ts b/lib/finance/finance-runtime-config.ts
+index e9d86d4e..9b134add 100644
+--- a/lib/finance/finance-runtime-config.ts
++++ b/lib/finance/finance-runtime-config.ts
+@@ -1,4 +1,5 @@
+ import {
++  isChannexSyncExecutionEnabled,
+   isAdminFinanceOpsUiEnabled,
+   isAutoPayoutEnabled,
+   isCheckoutSection95PricingEnabled,
+@@ -80,6 +81,7 @@ export type FinanceRuntimeFlags = {
+   autoPayoutEnabled: boolean;
+   payoutHoldEnabled: boolean;
+   payoutAutoRetryEnabled: boolean;
++  channexSyncExecutionEnabled: boolean;
+   invoicePdfGenerationEnabled: boolean;
+   invoiceEmailDeliveryEnabled: boolean;
+   adminFinanceOpsUiEnabled: boolean;
+@@ -113,6 +115,7 @@ export function getFinanceRuntimeConfig(): FinanceRuntimeConfig {
+       autoPayoutEnabled: isAutoPayoutEnabled(),
+       payoutHoldEnabled: isPayoutHoldEnabled(),
+       payoutAutoRetryEnabled: isPayoutAutoRetryEnabled(),
++      channexSyncExecutionEnabled: isChannexSyncExecutionEnabled(),
+       invoicePdfGenerationEnabled: isInvoicePdfGenerationEnabled(),
+       invoiceEmailDeliveryEnabled: isInvoiceEmailDeliveryEnabled(),
+       adminFinanceOpsUiEnabled: isAdminFinanceOpsUiEnabled(),
+diff --git a/lib/host-pro-access.ts b/lib/host-pro-access.ts
+index 99b536f1..b597030e 100644
+--- a/lib/host-pro-access.ts
++++ b/lib/host-pro-access.ts
+@@ -20,6 +20,21 @@ type HostProSubscriptionRow = {
+   created_at: string | null;
+ };
+ 
++type ProBillingEntitlementRow = {
++  family_id: string;
++  status: string | null;
++  current_period_end: string | null;
++  created_at: string | null;
++  subscription_id: string | null;
++};
++
++type ProBillingSubscriptionRow = {
++  id: string;
++  status: string | null;
++  current_period_end: string | null;
++  created_at: string | null;
++};
++
+ const DEFAULT_RESULT: HostProAccessResult = {
+   allowed: false,
+   status: "inactive",
+@@ -132,6 +147,82 @@ function evaluateRow(row: HostProSubscriptionRow | null | undefined, now: Date):
+   };
+ }
+ 
++function evaluateProBillingRow(
++  row: ProBillingEntitlementRow | null | undefined,
++  subscription: ProBillingSubscriptionRow | null | undefined,
++  now: Date
++): HostProAccessResult {
++  if (!row) return DEFAULT_RESULT;
++
++  const entitlementStatus = String(row.status ?? "").trim().toLowerCase();
++  const subscriptionStatus = String(subscription?.status ?? "").trim().toLowerCase();
++  const currentPeriodEnd = asString(row.current_period_end) ?? asString(subscription?.current_period_end);
++  const periodMillis = toMillis(currentPeriodEnd);
++  const activeWindowOpen = periodMillis !== null && now.getTime() <= periodMillis;
++
++  if (entitlementStatus === "active" && subscriptionStatus === "active" && activeWindowOpen) {
++    return {
++      allowed: true,
++      status: "active",
++      current_period_end: currentPeriodEnd,
++      grace_until: null,
++      reason: "pro_billing_entitlement_active",
++    };
++  }
++
++  if (
++    entitlementStatus === "draft" ||
++    entitlementStatus === "pending_payment" ||
++    subscriptionStatus === "draft" ||
++    subscriptionStatus === "pending_payment" ||
++    subscriptionStatus === "past_due"
++  ) {
++    return {
++      allowed: false,
++      status: "inactive",
++      current_period_end: currentPeriodEnd,
++      grace_until: null,
++      reason: "pro_billing_payment_pending",
++    };
++  }
++
++  if (entitlementStatus === "cancelled" || subscriptionStatus === "cancelled") {
++    return {
++      allowed: false,
++      status: "cancelled",
++      current_period_end: currentPeriodEnd,
++      grace_until: null,
++      reason: "pro_billing_cancelled",
++    };
++  }
++
++  if (entitlementStatus === "expired" || subscriptionStatus === "expired" || (periodMillis !== null && now.getTime() > periodMillis)) {
++    return {
++      allowed: false,
++      status: "expired",
++      current_period_end: currentPeriodEnd,
++      grace_until: null,
++      reason: "pro_billing_period_ended",
++    };
++  }
++
++  return DEFAULT_RESULT;
++}
++
++function mergeAccessResults(legacy: HostProAccessResult, proBilling: HostProAccessResult): HostProAccessResult {
++  if (proBilling.allowed && !legacy.allowed) return proBilling;
++  if (legacy.allowed && !proBilling.allowed) return legacy;
++  if (proBilling.allowed && legacy.allowed) {
++    const proBoundary = toMillis(proBilling.current_period_end) ?? 0;
++    const legacyBoundary = toMillis(legacy.current_period_end) ?? 0;
++    return proBoundary >= legacyBoundary ? proBilling : legacy;
++  }
++  if (legacy.reason === DEFAULT_RESULT.reason && proBilling.reason !== DEFAULT_RESULT.reason) {
++    return proBilling;
++  }
++  return legacy;
++}
++
+ export function isFamloPlusPageEnabled(): boolean {
+   return String(process.env.FAMLO_ENABLE_FAMLO_PLUS_PAGE ?? "").trim().toLowerCase() === "true";
+ }
+@@ -145,6 +236,7 @@ export async function loadHostProAccess(
+   familyId: string,
+   options?: { now?: Date }
+ ): Promise<HostProAccessResult> {
++  const resultMap = await loadHostProAccessMap(supabase, [familyId], options);
+   const normalizedFamilyId = familyId.trim();
+   if (!normalizedFamilyId) {
+     return {
+@@ -152,25 +244,7 @@ export async function loadHostProAccess(
+       reason: "missing_family_id",
+     };
+   }
+-
+-  const { data, error } = await supabase
+-    .from("host_pro_subscriptions")
+-    .select("family_id,status,current_period_end,grace_until,created_at")
+-    .eq("family_id", normalizedFamilyId)
+-    .order("created_at", { ascending: false })
+-    .limit(10);
+-
+-  if (error) {
+-    const message = String(error.message ?? "");
+-    if (/relation|does not exist|schema cache/i.test(message)) {
+-      return DEFAULT_RESULT;
+-    }
+-    throw error;
+-  }
+-
+-  const rows = Array.isArray(data) ? (data as HostProSubscriptionRow[]) : [];
+-  rows.sort(compareRows);
+-  return evaluateRow(rows[0] ?? null, options?.now ?? new Date());
++  return resultMap[normalizedFamilyId] ?? DEFAULT_RESULT;
+ }
+ 
+ export async function loadHostProAccessMap(
+@@ -226,5 +300,84 @@ export async function loadHostProAccessMap(
+     resultMap[familyId] = evaluateRow(familyRows[0] ?? null, options?.now ?? new Date());
+   }
+ 
++  try {
++    const entitlementQuery = await supabase
++      .from("pro_property_entitlements")
++      .select("family_id,status,current_period_end,created_at,subscription_id")
++      .in("family_id", normalizedFamilyIds)
++      .order("created_at", { ascending: false });
++
++    if (entitlementQuery.error) {
++      const message = String(entitlementQuery.error.message ?? "");
++      if (!/relation|does not exist|schema cache/i.test(message)) {
++        throw entitlementQuery.error;
++      }
++      return resultMap;
++    }
++
++    const entitlementRows = Array.isArray(entitlementQuery.data) ? (entitlementQuery.data as JsonRecord[]) : [];
++    const proBillingRowsByFamilyId = new Map<string, ProBillingEntitlementRow[]>();
++    const subscriptionIds = uniqueStrings(entitlementRows.map((row) => asString(row.subscription_id)));
++
++    const subscriptionRowsById = new Map<string, ProBillingSubscriptionRow>();
++    if (subscriptionIds.length > 0) {
++      const subscriptionQuery = await supabase
++        .from("pro_subscriptions")
++        .select("id,status,current_period_end,created_at")
++        .in("id", subscriptionIds);
++
++      if (subscriptionQuery.error) {
++        const message = String(subscriptionQuery.error.message ?? "");
++        if (!/relation|does not exist|schema cache/i.test(message)) {
++          throw subscriptionQuery.error;
++        }
++      } else {
++        for (const row of (subscriptionQuery.data ?? []) as JsonRecord[]) {
++          const id = asString(row.id);
++          if (!id) continue;
++          subscriptionRowsById.set(id, {
++            id,
++            status: asString(row.status),
++            current_period_end: asString(row.current_period_end),
++            created_at: asString(row.created_at),
++          });
++        }
++      }
++    }
++
++    for (const row of entitlementRows) {
++      const familyId = asString(row.family_id);
++      if (!familyId) continue;
++      const nextRow: ProBillingEntitlementRow = {
++        family_id: familyId,
++        status: asString(row.status),
++        current_period_end: asString(row.current_period_end),
++        created_at: asString(row.created_at),
++        subscription_id: asString(row.subscription_id),
++      };
++      proBillingRowsByFamilyId.set(familyId, [...(proBillingRowsByFamilyId.get(familyId) ?? []), nextRow]);
++    }
++
++    for (const familyId of normalizedFamilyIds) {
++      const proBillingRows = proBillingRowsByFamilyId.get(familyId) ?? [];
++      const subscriptionId = proBillingRows[0]?.subscription_id ?? null;
++      const proBillingAccess = evaluateProBillingRow(
++        proBillingRows[0] ?? null,
++        subscriptionId ? subscriptionRowsById.get(subscriptionId) ?? null : null,
++        options?.now ?? new Date()
++      );
++      resultMap[familyId] = mergeAccessResults(resultMap[familyId] ?? DEFAULT_RESULT, proBillingAccess);
++    }
++  } catch (error) {
++    const message = error instanceof Error ? error.message : "";
++    if (!/relation|does not exist|schema cache/i.test(message)) {
++      throw error;
++    }
++  }
++
+   return resultMap;
+ }
++
++function uniqueStrings(values: Array<string | null | undefined>): string[] {
++  return [...new Set(values.filter((value): value is string => typeof value === "string" && value.trim().length > 0))];
++}
+diff --git a/lib/notifications/email/email-provider.ts b/lib/notifications/email/email-provider.ts
+index d152a058..03e4ebd5 100644
+--- a/lib/notifications/email/email-provider.ts
++++ b/lib/notifications/email/email-provider.ts
+@@ -1,3 +1,4 @@
++import { assertRuntimeSafety } from "@/lib/app-env";
+ import { sendEmail } from "@/lib/resend";
+ 
+ export type EmailPayload = {
+@@ -17,6 +18,7 @@ export async function deliverEmail(payload: EmailPayload): Promise<EmailProvider
+   const provider = process.env.EMAIL_PROVIDER?.trim().toLowerCase() || "resend";
+ 
+   if (provider === "resend") {
++    assertRuntimeSafety("email_execution");
+     const result = await sendEmail(payload);
+     return {
+       ok: Boolean(result?.success),
+diff --git a/lib/r2-upload.ts b/lib/r2-upload.ts
+index c86d096a..fbbf4388 100644
+--- a/lib/r2-upload.ts
++++ b/lib/r2-upload.ts
+@@ -1,5 +1,6 @@
+ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+ import sharp from "sharp";
++import { assertRuntimeSafety } from "@/lib/app-env";
+ 
+ function requireEnv(name: string): string {
+   const value = process.env[name];
+@@ -57,6 +58,7 @@ async function uploadBufferToR2(
+ }
+ 
+ function getR2Client(): S3Client {
++  assertRuntimeSafety("cloud_storage");
+   if (cachedClient) return cachedClient;
+   cachedClient = new S3Client({
+     region: "auto",
+diff --git a/lib/razorpay.ts b/lib/razorpay.ts
+index 8d2039c6..fbdfc696 100644
+--- a/lib/razorpay.ts
++++ b/lib/razorpay.ts
+@@ -1,4 +1,5 @@
+ import crypto from "crypto";
++import { assertRuntimeSafety, isRuntimeSafetySatisfied } from "@/lib/app-env";
+ 
+ export interface RazorpayOrderInput {
+   amountRupees: number;
+@@ -103,6 +104,7 @@ function safeCompare(left: string, right: string): boolean {
+ }
+ 
+ export function getRazorpayConfig(): { keyId: string; keySecret: string; webhookSecret?: string } {
++  assertRuntimeSafety("razorpay");
+   return {
+     keyId: requireEnv("RAZORPAY_KEY_ID"),
+     keySecret: requireEnv("RAZORPAY_KEY_SECRET"),
+@@ -111,10 +113,11 @@ export function getRazorpayConfig(): { keyId: string; keySecret: string; webhook
+ }
+ 
+ export function isRazorpayConfigured(): boolean {
+-  return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
++  return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) && isRuntimeSafetySatisfied("razorpay");
+ }
+ 
+ function getRazorpayXConfig(): { keyId: string; keySecret: string; accountNumber: string } {
++  assertRuntimeSafety("razorpayx");
+   return {
+     keyId: requireEnv("RAZORPAYX_KEY_ID"),
+     keySecret: requireEnv("RAZORPAYX_KEY_SECRET"),
+@@ -123,7 +126,10 @@ function getRazorpayXConfig(): { keyId: string; keySecret: string; accountNumber
+ }
+ 
+ export function isRazorpayXConfigured(): boolean {
+-  return Boolean(process.env.RAZORPAYX_KEY_ID && process.env.RAZORPAYX_KEY_SECRET && process.env.RAZORPAYX_ACCOUNT_NUMBER);
++  return (
++    Boolean(process.env.RAZORPAYX_KEY_ID && process.env.RAZORPAYX_KEY_SECRET && process.env.RAZORPAYX_ACCOUNT_NUMBER) &&
++    isRuntimeSafetySatisfied("razorpayx")
++  );
+ }
+ 
+ export async function createRazorpayOrder(input: RazorpayOrderInput): Promise<RazorpayOrder> {
+diff --git a/lib/resend.ts b/lib/resend.ts
+index 30294bef..450dcd84 100644
+--- a/lib/resend.ts
++++ b/lib/resend.ts
+@@ -1,4 +1,5 @@
+ // lib/resend.ts
++import { assertRuntimeSafety } from "@/lib/app-env";
+ 
+ /**
+  * Resend Direct HTTP API Utility
+@@ -8,6 +9,7 @@
+  */
+ 
+ export async function sendEmail({ to, subject, html }: { to: string; subject: string; html: string }) {
++  assertRuntimeSafety("email_execution");
+   const apiKey = process.env.RESEND_API_KEY;
+   const fromEmail = process.env.MAIL_FROM_EMAIL || "hello@resend.dev";
+ 
+diff --git a/lib/supabase.ts b/lib/supabase.ts
+index 151c1bb6..4009439d 100644
+--- a/lib/supabase.ts
++++ b/lib/supabase.ts
+@@ -1,4 +1,5 @@
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
++import { assertRuntimeSafety } from "@/lib/app-env";
+ import { recordRecentEntityViewCompatibility } from "@/lib/recent-views-db";
+ 
+ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+@@ -16,6 +17,7 @@ let _adminClient: SupabaseClient | null = null;
+ 
+ export function createPublicSupabaseClient(): SupabaseClient {
+   if (_publicClient) return _publicClient;
++  assertRuntimeSafety("supabase");
+   _publicClient = createClient(
+     requireEnv(supabaseUrl, "NEXT_PUBLIC_SUPABASE_URL"),
+     requireEnv(supabaseAnonKey, "NEXT_PUBLIC_SUPABASE_ANON_KEY")
+@@ -29,6 +31,7 @@ export function createBrowserSupabaseClient(): SupabaseClient {
+ 
+ export function createAdminSupabaseClient(): SupabaseClient {
+   if (_adminClient) return _adminClient;
++  assertRuntimeSafety("supabase");
+   _adminClient = createClient(
+     requireEnv(supabaseUrl, "NEXT_PUBLIC_SUPABASE_URL"),
+     requireEnv(supabaseServiceRoleKey, "SUPABASE_SERVICE_ROLE_KEY"),
+diff --git a/scripts/apply-chat-indexes.mjs b/scripts/apply-chat-indexes.mjs
+index 762301fe..e9e01909 100644
+--- a/scripts/apply-chat-indexes.mjs
++++ b/scripts/apply-chat-indexes.mjs
+@@ -1,5 +1,8 @@
+ import fs from "node:fs";
+ import { Client } from "pg";
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/apply-chat-indexes.mjs");
+ 
+ const sql = [
+   fs.readFileSync("supabase/migrations/20260415_000002_chat_message_enhancements.sql", "utf8"),
+diff --git a/scripts/apply-public-home-view.mjs b/scripts/apply-public-home-view.mjs
+index 0a735783..760aa6dd 100644
+--- a/scripts/apply-public-home-view.mjs
++++ b/scripts/apply-public-home-view.mjs
+@@ -1,5 +1,7 @@
+ import fs from 'node:fs';
+ import { Client } from 'pg';
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++assertSafeScriptEnv("scripts/apply-public-home-view.mjs");
+ const sql = fs.readFileSync('supabase/migrations/20260429_000002_public_home_cards_view.sql', 'utf8');
+ const client = new Client({connectionString: process.env.CHAT_DB_URL, ssl:{rejectUnauthorized:false}});
+ (async()=>{await client.connect(); await client.query(sql); const res=await client.query(`select column_name from information_schema.columns where table_schema='public' and table_name='public_home_cards_v1' order by ordinal_position`); console.log(JSON.stringify(res.rows,null,2)); await client.end();})().catch(async e=>{console.error(e); try{await client.end();}catch{} process.exit(1);});
+diff --git a/scripts/apply-safe-public-indexes.mjs b/scripts/apply-safe-public-indexes.mjs
+index ac0fe188..79a25bec 100644
+--- a/scripts/apply-safe-public-indexes.mjs
++++ b/scripts/apply-safe-public-indexes.mjs
+@@ -1,5 +1,8 @@
+ import fs from 'node:fs';
+ import { Client } from 'pg';
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/apply-safe-public-indexes.mjs");
+ 
+ const sql = fs.readFileSync('supabase/migrations/20260429_000001_safe_public_path_indexes.sql', 'utf8');
+ const expectedIndexes = [
+diff --git a/scripts/apply-stay-unit-room-migration.mjs b/scripts/apply-stay-unit-room-migration.mjs
+index 77070ef3..7ba775f1 100644
+--- a/scripts/apply-stay-unit-room-migration.mjs
++++ b/scripts/apply-stay-unit-room-migration.mjs
+@@ -1,5 +1,8 @@
+ import fs from "node:fs";
+ import { Client } from "pg";
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/apply-stay-unit-room-migration.mjs");
+ 
+ const connectionString = process.env.CHAT_DB_URL;
+ if (!connectionString) {
+diff --git a/scripts/backfill-canonical-inventory.mjs b/scripts/backfill-canonical-inventory.mjs
+index 1d02a838..72b78823 100644
+--- a/scripts/backfill-canonical-inventory.mjs
++++ b/scripts/backfill-canonical-inventory.mjs
+@@ -1,4 +1,7 @@
+ import pg from "pg";
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/backfill-canonical-inventory.mjs");
+ 
+ const { Client } = pg;
+ 
+diff --git a/scripts/backfill-image-variants.mjs b/scripts/backfill-image-variants.mjs
+index f08636ce..a8be6fa8 100644
+--- a/scripts/backfill-image-variants.mjs
++++ b/scripts/backfill-image-variants.mjs
+@@ -4,6 +4,9 @@ import { createHash } from "node:crypto";
+ import { createClient } from "@supabase/supabase-js";
+ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+ import sharp from "sharp";
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/backfill-image-variants.mjs");
+ 
+ function loadEnvFile(filePath) {
+   if (!fs.existsSync(filePath)) return;
+diff --git a/scripts/backfill-r2-cache-control.mjs b/scripts/backfill-r2-cache-control.mjs
+index a0563e76..9ed7e253 100644
+--- a/scripts/backfill-r2-cache-control.mjs
++++ b/scripts/backfill-r2-cache-control.mjs
+@@ -2,6 +2,9 @@ import fs from "node:fs";
+ import path from "node:path";
+ import { CopyObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
+ import { createClient } from "@supabase/supabase-js";
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/backfill-r2-cache-control.mjs");
+ 
+ function loadEnvFile(filePath) {
+   if (!fs.existsSync(filePath)) return;
+diff --git a/scripts/backfill-reservation-core.mjs b/scripts/backfill-reservation-core.mjs
+index 3be26c39..c94d7597 100644
+--- a/scripts/backfill-reservation-core.mjs
++++ b/scripts/backfill-reservation-core.mjs
+@@ -1,4 +1,7 @@
+ import pg from "pg";
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/backfill-reservation-core.mjs");
+ 
+ const { Client } = pg;
+ 
+diff --git a/scripts/backfill-v2.mjs b/scripts/backfill-v2.mjs
+index 7d02ac36..a540fc7e 100644
+--- a/scripts/backfill-v2.mjs
++++ b/scripts/backfill-v2.mjs
+@@ -1,6 +1,9 @@
+ import fs from "node:fs";
+ import path from "node:path";
+ import { createClient } from "@supabase/supabase-js";
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/backfill-v2.mjs");
+ 
+ function loadEnvFile(filePath) {
+   if (!fs.existsSync(filePath)) return;
+diff --git a/scripts/repair-room-rating-target.mjs b/scripts/repair-room-rating-target.mjs
+index b760d149..71676e47 100644
+--- a/scripts/repair-room-rating-target.mjs
++++ b/scripts/repair-room-rating-target.mjs
+@@ -1,6 +1,9 @@
+ import fs from "node:fs";
+ import path from "node:path";
+ import { createClient } from "@supabase/supabase-js";
++import { assertSafeScriptEnv } from "./production-guard.mjs";
++
++assertSafeScriptEnv("scripts/repair-room-rating-target.mjs");
+ 
+ function loadEnvFile(filePath) {
+   if (!fs.existsSync(filePath)) return;
+diff --git a/scripts/repair-stay-units-family.cjs b/scripts/repair-stay-units-family.cjs
+index 55a58b65..78b6ef2f 100644
+--- a/scripts/repair-stay-units-family.cjs
++++ b/scripts/repair-stay-units-family.cjs
+@@ -1,4 +1,7 @@
+ const { Client } = require("pg");
++const { assertSafeScriptEnv } = require("./production-guard.cjs");
++
++assertSafeScriptEnv("scripts/repair-stay-units-family.cjs");
+ 
+ const connectionString = process.env.CHAT_DB_URL;
+ const familyId = process.env.FAMILY_ID;

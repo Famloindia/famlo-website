@@ -1,0 +1,273 @@
+diff --git a/lib/channel-providers/channex/client.ts b/lib/channel-providers/channex/client.ts
+index 44fb801b..ae7131eb 100644
+--- a/lib/channel-providers/channex/client.ts
++++ b/lib/channel-providers/channex/client.ts
+@@ -1,3 +1,5 @@
++import { assertRuntimeSafety } from "@/lib/app-env";
++
+ export type ChannexEnvironment = "staging" | "production";
+ 
+ export type ChannexConfigSummary = {
+@@ -430,6 +432,7 @@ function buildHeaders(apiKey: string): HeadersInit {
+ }
+ 
+ export function getChannexConfigSummary(): ChannexConfigSummary {
++  assertRuntimeSafety("channex");
+   const environment = loadEnvironment();
+   const apiKeyConfigured = Boolean(loadApiKey(environment));
+   const baseUrlConfigured = Boolean(resolveBaseUrl(environment));
+@@ -1204,6 +1207,22 @@ async function postChannexJson(
+   body: Record<string, unknown>
+ ): Promise<ChannexAriPushResult> {
+   const environment = loadEnvironment();
++  try {
++    assertRuntimeSafety("channex_sync_execution");
++  } catch (error) {
++    return {
++      ok: false,
++      environment,
++      endpoint: endpointPath,
++      httpStatus: null,
++      retryAfterSeconds: null,
++      message: error instanceof Error ? error.message : "Channex sync execution is blocked.",
++      meta: null,
++      warnings: [],
++      rawValidation: null,
++      data: null,
++    };
++  }
+   const summary = getChannexConfigSummary();
+   const endpoint = `${resolveBaseUrl(environment)}${endpointPath}`;
+   const apiKey = loadApiKey(environment);
+diff --git a/lib/finance/feature-flags.ts b/lib/finance/feature-flags.ts
+index a00490cc..67989162 100644
+--- a/lib/finance/feature-flags.ts
++++ b/lib/finance/feature-flags.ts
+@@ -1,9 +1,18 @@
++import { isRuntimeSafetySatisfied } from "@/lib/app-env";
++
+ function isEnabled(value: string | undefined, fallback: boolean): boolean {
+   if (typeof value !== "string" || value.trim().length === 0) return fallback;
+   const normalized = value.trim().toLowerCase();
+   return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+ }
+ 
++function isGuardedExecutionEnabled(
++  value: string | undefined,
++  scope: Parameters<typeof isRuntimeSafetySatisfied>[0]
++): boolean {
++  return isEnabled(value, false) && isRuntimeSafetySatisfied(scope);
++}
++
+ export function isFinanceEventPipelineEnabled(): boolean {
+   return isEnabled(process.env.FINANCE_EVENT_PIPELINE_ENABLED, false);
+ }
+@@ -49,7 +58,7 @@ export function isSettlementApprovalFlowEnabled(): boolean {
+ }
+ 
+ export function isSettlementPayoutExecutionEnabled(): boolean {
+-  return isEnabled(process.env.SETTLEMENT_PAYOUT_EXECUTION_ENABLED, false);
++  return isGuardedExecutionEnabled(process.env.SETTLEMENT_PAYOUT_EXECUTION_ENABLED, "payout_execution");
+ }
+ 
+ export function isAutoPayoutEnabled(): boolean {
+@@ -149,7 +158,7 @@ export function isRefundAdminApprovalRequired(): boolean {
+ }
+ 
+ export function isRefundProviderExecutionEnabled(): boolean {
+-  return isEnabled(process.env.REFUND_PROVIDER_EXECUTION_ENABLED, false);
++  return isGuardedExecutionEnabled(process.env.REFUND_PROVIDER_EXECUTION_ENABLED, "refund_execution");
+ }
+ 
+ export function isRazorpayRefundsEnabled(): boolean {
+@@ -157,7 +166,7 @@ export function isRazorpayRefundsEnabled(): boolean {
+ }
+ 
+ export function isRazorpayXEnabled(): boolean {
+-  return isEnabled(process.env.RAZORPAYX_ENABLED, false);
++  return isEnabled(process.env.RAZORPAYX_ENABLED, false) && isRuntimeSafetySatisfied("razorpayx");
+ }
+ 
+ export function isPayoutAccountCreationEnabled(): boolean {
+@@ -201,9 +210,13 @@ export function isInvoicePdfGenerationEnabled(): boolean {
+ }
+ 
+ export function isInvoiceEmailDeliveryEnabled(): boolean {
+-  return isEnabled(process.env.INVOICE_EMAIL_DELIVERY_ENABLED, false);
++  return isGuardedExecutionEnabled(process.env.INVOICE_EMAIL_DELIVERY_ENABLED, "email_execution");
+ }
+ 
+ export function isAdminFinanceOpsUiEnabled(): boolean {
+   return isEnabled(process.env.ADMIN_FINANCE_OPS_UI_ENABLED, false);
+ }
++
++export function isChannexSyncExecutionEnabled(): boolean {
++  return isGuardedExecutionEnabled(process.env.CHANNEX_SYNC_EXECUTION_ENABLED, "channex_sync_execution");
++}
+diff --git a/lib/finance/finance-runtime-config.ts b/lib/finance/finance-runtime-config.ts
+index e9d86d4e..9b134add 100644
+--- a/lib/finance/finance-runtime-config.ts
++++ b/lib/finance/finance-runtime-config.ts
+@@ -1,4 +1,5 @@
+ import {
++  isChannexSyncExecutionEnabled,
+   isAdminFinanceOpsUiEnabled,
+   isAutoPayoutEnabled,
+   isCheckoutSection95PricingEnabled,
+@@ -80,6 +81,7 @@ export type FinanceRuntimeFlags = {
+   autoPayoutEnabled: boolean;
+   payoutHoldEnabled: boolean;
+   payoutAutoRetryEnabled: boolean;
++  channexSyncExecutionEnabled: boolean;
+   invoicePdfGenerationEnabled: boolean;
+   invoiceEmailDeliveryEnabled: boolean;
+   adminFinanceOpsUiEnabled: boolean;
+@@ -113,6 +115,7 @@ export function getFinanceRuntimeConfig(): FinanceRuntimeConfig {
+       autoPayoutEnabled: isAutoPayoutEnabled(),
+       payoutHoldEnabled: isPayoutHoldEnabled(),
+       payoutAutoRetryEnabled: isPayoutAutoRetryEnabled(),
++      channexSyncExecutionEnabled: isChannexSyncExecutionEnabled(),
+       invoicePdfGenerationEnabled: isInvoicePdfGenerationEnabled(),
+       invoiceEmailDeliveryEnabled: isInvoiceEmailDeliveryEnabled(),
+       adminFinanceOpsUiEnabled: isAdminFinanceOpsUiEnabled(),
+diff --git a/lib/notifications/email/email-provider.ts b/lib/notifications/email/email-provider.ts
+index d152a058..03e4ebd5 100644
+--- a/lib/notifications/email/email-provider.ts
++++ b/lib/notifications/email/email-provider.ts
+@@ -1,3 +1,4 @@
++import { assertRuntimeSafety } from "@/lib/app-env";
+ import { sendEmail } from "@/lib/resend";
+ 
+ export type EmailPayload = {
+@@ -17,6 +18,7 @@ export async function deliverEmail(payload: EmailPayload): Promise<EmailProvider
+   const provider = process.env.EMAIL_PROVIDER?.trim().toLowerCase() || "resend";
+ 
+   if (provider === "resend") {
++    assertRuntimeSafety("email_execution");
+     const result = await sendEmail(payload);
+     return {
+       ok: Boolean(result?.success),
+diff --git a/lib/notifications/providers/whatsapp.ts b/lib/notifications/providers/whatsapp.ts
+index f0ec8a3a..346f0b2a 100644
+--- a/lib/notifications/providers/whatsapp.ts
++++ b/lib/notifications/providers/whatsapp.ts
+@@ -1,3 +1,4 @@
++import { assertRuntimeSafety } from "@/lib/app-env";
+ import type { NotificationDeliveryResult } from "@/lib/notifications/types";
+ 
+ function normalizeWhatsAppPhone(value: string): string | null {
+@@ -50,6 +51,8 @@ async function sendWhatsAppPayload(
+   console.info("[whatsapp-send] to", phone);
+   console.info("[whatsapp-send] messageType", messageType);
+ 
++  assertRuntimeSafety("whatsapp_execution");
++
+   if (!apiKey || (!apiUrl && !phoneNumberId)) {
+     const mockId = `mock-whatsapp-${Date.now()}`;
+     console.info("[whatsapp-send] metaStatus", "mock");
+diff --git a/lib/r2-upload.ts b/lib/r2-upload.ts
+index c86d096a..fbbf4388 100644
+--- a/lib/r2-upload.ts
++++ b/lib/r2-upload.ts
+@@ -1,5 +1,6 @@
+ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+ import sharp from "sharp";
++import { assertRuntimeSafety } from "@/lib/app-env";
+ 
+ function requireEnv(name: string): string {
+   const value = process.env[name];
+@@ -57,6 +58,7 @@ async function uploadBufferToR2(
+ }
+ 
+ function getR2Client(): S3Client {
++  assertRuntimeSafety("cloud_storage");
+   if (cachedClient) return cachedClient;
+   cachedClient = new S3Client({
+     region: "auto",
+diff --git a/lib/razorpay.ts b/lib/razorpay.ts
+index 8d2039c6..fbdfc696 100644
+--- a/lib/razorpay.ts
++++ b/lib/razorpay.ts
+@@ -1,4 +1,5 @@
+ import crypto from "crypto";
++import { assertRuntimeSafety, isRuntimeSafetySatisfied } from "@/lib/app-env";
+ 
+ export interface RazorpayOrderInput {
+   amountRupees: number;
+@@ -103,6 +104,7 @@ function safeCompare(left: string, right: string): boolean {
+ }
+ 
+ export function getRazorpayConfig(): { keyId: string; keySecret: string; webhookSecret?: string } {
++  assertRuntimeSafety("razorpay");
+   return {
+     keyId: requireEnv("RAZORPAY_KEY_ID"),
+     keySecret: requireEnv("RAZORPAY_KEY_SECRET"),
+@@ -111,10 +113,11 @@ export function getRazorpayConfig(): { keyId: string; keySecret: string; webhook
+ }
+ 
+ export function isRazorpayConfigured(): boolean {
+-  return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
++  return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) && isRuntimeSafetySatisfied("razorpay");
+ }
+ 
+ function getRazorpayXConfig(): { keyId: string; keySecret: string; accountNumber: string } {
++  assertRuntimeSafety("razorpayx");
+   return {
+     keyId: requireEnv("RAZORPAYX_KEY_ID"),
+     keySecret: requireEnv("RAZORPAYX_KEY_SECRET"),
+@@ -123,7 +126,10 @@ function getRazorpayXConfig(): { keyId: string; keySecret: string; accountNumber
+ }
+ 
+ export function isRazorpayXConfigured(): boolean {
+-  return Boolean(process.env.RAZORPAYX_KEY_ID && process.env.RAZORPAYX_KEY_SECRET && process.env.RAZORPAYX_ACCOUNT_NUMBER);
++  return (
++    Boolean(process.env.RAZORPAYX_KEY_ID && process.env.RAZORPAYX_KEY_SECRET && process.env.RAZORPAYX_ACCOUNT_NUMBER) &&
++    isRuntimeSafetySatisfied("razorpayx")
++  );
+ }
+ 
+ export async function createRazorpayOrder(input: RazorpayOrderInput): Promise<RazorpayOrder> {
+diff --git a/lib/resend.ts b/lib/resend.ts
+index 30294bef..450dcd84 100644
+--- a/lib/resend.ts
++++ b/lib/resend.ts
+@@ -1,4 +1,5 @@
+ // lib/resend.ts
++import { assertRuntimeSafety } from "@/lib/app-env";
+ 
+ /**
+  * Resend Direct HTTP API Utility
+@@ -8,6 +9,7 @@
+  */
+ 
+ export async function sendEmail({ to, subject, html }: { to: string; subject: string; html: string }) {
++  assertRuntimeSafety("email_execution");
+   const apiKey = process.env.RESEND_API_KEY;
+   const fromEmail = process.env.MAIL_FROM_EMAIL || "hello@resend.dev";
+ 
+diff --git a/lib/supabase.ts b/lib/supabase.ts
+index 151c1bb6..4009439d 100644
+--- a/lib/supabase.ts
++++ b/lib/supabase.ts
+@@ -1,4 +1,5 @@
+ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
++import { assertRuntimeSafety } from "@/lib/app-env";
+ import { recordRecentEntityViewCompatibility } from "@/lib/recent-views-db";
+ 
+ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+@@ -16,6 +17,7 @@ let _adminClient: SupabaseClient | null = null;
+ 
+ export function createPublicSupabaseClient(): SupabaseClient {
+   if (_publicClient) return _publicClient;
++  assertRuntimeSafety("supabase");
+   _publicClient = createClient(
+     requireEnv(supabaseUrl, "NEXT_PUBLIC_SUPABASE_URL"),
+     requireEnv(supabaseAnonKey, "NEXT_PUBLIC_SUPABASE_ANON_KEY")
+@@ -29,6 +31,7 @@ export function createBrowserSupabaseClient(): SupabaseClient {
+ 
+ export function createAdminSupabaseClient(): SupabaseClient {
+   if (_adminClient) return _adminClient;
++  assertRuntimeSafety("supabase");
+   _adminClient = createClient(
+     requireEnv(supabaseUrl, "NEXT_PUBLIC_SUPABASE_URL"),
+     requireEnv(supabaseServiceRoleKey, "SUPABASE_SERVICE_ROLE_KEY"),

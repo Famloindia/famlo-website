@@ -1,0 +1,19 @@
+ M lib/channel-providers/channex/client.ts
+ M lib/finance/feature-flags.ts
+ M lib/finance/finance-runtime-config.ts
+ M lib/notifications/email/email-provider.ts
+ M lib/notifications/providers/whatsapp.ts
+ M lib/r2-upload.ts
+ M lib/razorpay.ts
+ M lib/resend.ts
+ M lib/supabase.ts
+?? .codex-backups/
+?? .env.local.example
+?? .env.production.example
+?? .env.staging.example
+?? antigravity-bad-diff-backup.patch
+?? docs/env-separation-rollout.md
+?? lib/app-env.ts
+?? scripts/production-guard.cjs
+?? scripts/production-guard.mjs
+?? tests/app-env-safety.test.ts
