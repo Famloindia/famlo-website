@@ -4,16 +4,28 @@ drop table if exists recently_viewed cascade;
 drop table if exists reviews cascade;
 drop table if exists payouts cascade;
 
-create table if not exists guide_payouts_archive as
-select *, now()::timestamptz as archived_at
-from guide_payouts
-where false;
+do $$
+begin
+  if to_regclass('public.guide_payouts') is not null then
+    execute $archive$
+      create table if not exists public.guide_payouts_archive as
+      select *, now()::timestamptz as archived_at
+      from public.guide_payouts
+      where false
+    $archive$;
+  end if;
+end $$;
 
-insert into guide_payouts_archive
-select *, now()::timestamptz as archived_at
-from guide_payouts;
+do $$
+begin
+  if to_regclass('public.guide_payouts') is not null then
+    insert into public.guide_payouts_archive
+    select *, now()::timestamptz as archived_at
+    from public.guide_payouts;
+  end if;
+end $$;
 
-drop table if exists guide_payouts cascade;
+drop table if exists public.guide_payouts cascade;
 
 commit;
 
