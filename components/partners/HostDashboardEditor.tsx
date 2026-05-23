@@ -3,7 +3,15 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
-import { parseHostListingMeta } from "@/lib/host-listing-meta";
+import {
+  buildComplianceFromFamily,
+  buildListingFromFamily,
+  buildPhotosFromAllPhotos,
+  buildProfileFromFamily,
+  buildScheduleFromFamily,
+  parseFamilyMeta,
+  saveFamilyProfileWorkspace,
+} from "@/lib/family-profile-editor";
 import styles from "./dashboard.module.css";
 import {
   Home, BookmarkCheck, Calendar as CalendarIcon, IndianRupee,
@@ -101,60 +109,6 @@ function getActiveRealtimeHostId(family: Record<string, unknown>): string | null
   return typeof family.v2_host_id === "string" ? family.v2_host_id : null;
 }
 
-function joinList(values: unknown): string {
-  if (Array.isArray(values)) return values.join(", ");
-  if (typeof values === "string") return values;
-  return "";
-}
-
-function pickObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function firstString(...values: unknown[]): string {
-  for (const value of values) {
-    if (typeof value !== "string") continue;
-    const trimmed = value.trim();
-    if (trimmed.length > 0) return trimmed;
-  }
-  return "";
-}
-
-function firstListString(...values: unknown[]): string {
-  for (const value of values) {
-    if (Array.isArray(value) && value.length > 0) {
-      return value
-        .map((item) => (typeof item === "string" ? item.trim() : ""))
-        .filter(Boolean)
-        .join(", ");
-    }
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value;
-    }
-  }
-  return "";
-}
-
-function getPrimaryRoomDraft(payload: Record<string, unknown>): Record<string, unknown> {
-  const rooms = Array.isArray(payload.rooms)
-    ? payload.rooms.filter((room): room is Record<string, unknown> => Boolean(room && typeof room === "object" && !Array.isArray(room)))
-    : [];
-
-  return (
-    rooms.find((room) => room.isPrimary === true) ??
-    rooms[0] ??
-    {}
-  );
-}
-
-function parsePrice(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "";
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? String(numeric) : "";
-}
-
 function parseCoordinate(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
@@ -162,145 +116,6 @@ function parseCoordinate(value: unknown): number | undefined {
     return Number.isFinite(numeric) ? numeric : undefined;
   }
   return undefined;
-}
-
-function buildProfileFromFamily(
-  family: Record<string, unknown>,
-  meta: ReturnType<typeof parseHostListingMeta>
-) {
-  const onboardingPayload = pickObject(family.latest_onboarding_payload);
-
-  return {
-    hostDisplayName: firstString(
-      meta.hostDisplayName,
-      onboardingPayload.hostName,
-      family.primary_host_name,
-      family.host_name
-    ),
-    hostHobbies: firstListString(meta.hostHobbies, onboardingPayload.hostHobbies, onboardingPayload.hobbies),
-    familyComposition: String(meta.familyComposition ?? ""),
-    city: firstString(onboardingPayload.city, family.city),
-    state: firstString(onboardingPayload.state, family.state),
-    cityNeighbourhood: firstString(onboardingPayload.cityNeighbourhood, family.village),
-    hostCatchphrase: firstString(meta.hostCatchphrase, onboardingPayload.hostCatchphrase),
-    hostSelfieUrl: firstString(family.host_photo_url, meta.hostSelfieUrl),
-    mobileNumber: String(family.host_phone ?? ""),
-    languages: joinList(family.languages_spoken ?? family.languages ?? []),
-  };
-}
-
-function buildListingFromFamily(
-  family: Record<string, unknown>,
-  meta: ReturnType<typeof parseHostListingMeta>
-) {
-  const onboardingPayload = pickObject(family.latest_onboarding_payload);
-  const primaryRoomDraft = getPrimaryRoomDraft(onboardingPayload);
-
-  return {
-    propertyName: firstString(onboardingPayload.propertyName, family.name),
-    hostBio: firstString(onboardingPayload.hostBio, family.about, family.description),
-    listingTitle: firstString(meta.listingTitle, onboardingPayload.listingTitle),
-    culturalOffering: firstString(onboardingPayload.culturalActivity, family.famlo_experience, meta.culturalOffering),
-    journeyStory: firstString(meta.journeyStory, onboardingPayload.journeyStory),
-    specialExperience: firstString(meta.specialExperience, onboardingPayload.specialExperience),
-    localExperience: firstString(meta.localExperience, onboardingPayload.localExperience),
-    interactionType: firstString(meta.interactionType, onboardingPayload.interactionType),
-    houseType: firstString(meta.houseType, onboardingPayload.houseType, meta.familyComposition),
-    checkInTime: firstString(meta.checkInTime, onboardingPayload.checkInTime),
-    checkOutTime: firstString(meta.checkOutTime, onboardingPayload.checkOutTime),
-    bathroomType: firstString(
-      family.bathroom_type,
-      meta.bathroomType,
-      onboardingPayload.bathroomType,
-      primaryRoomDraft.bathroomType
-    ),
-    propertyAddress: firstString(onboardingPayload.propertyAddress, family.street_address, meta.propertyAddress),
-    commonAreas: firstListString(onboardingPayload.commonAreas, family.common_areas, meta.commonAreas),
-    amenities: firstListString(
-      onboardingPayload.amenities,
-      family.amenities,
-      meta.amenities,
-      primaryRoomDraft.amenities,
-      primaryRoomDraft.roomAmenities
-    ),
-    includedItems: firstListString(
-      onboardingPayload.includedItems,
-      onboardingPayload.includedHighlights,
-      meta.includedItems
-    ),
-    houseRules: firstListString(onboardingPayload.houseRules, onboardingPayload.houseRulesText, family.house_rules, meta.houseRules),
-    googleMapsLink: firstString(meta.googleMapsLink, onboardingPayload.googleMapsLink, family.google_maps_link, meta.propertyAddress),
-    priceMorning: parsePrice(family.price_morning),
-    priceAfternoon: parsePrice(family.price_afternoon),
-    priceEvening: parsePrice(family.price_evening),
-    priceFullday: parsePrice(family.price_fullday),
-    foodType: firstListString(onboardingPayload.foodType, family.food_type, meta.foodType),
-  };
-}
-
-function buildScheduleFromFamily(family: Record<string, unknown>) {
-  const onboardingPayload = pickObject(family.latest_onboarding_payload);
-  const meta = parseHostListingMeta(typeof family.admin_notes === "string" ? family.admin_notes : null);
-  return {
-    isActive: Boolean(family.is_active),
-    isAccepting: Boolean(family.is_accepting),
-    bookingRequiresHostApproval:
-      typeof family.booking_requires_host_approval === "boolean"
-        ? family.booking_requires_host_approval
-        : typeof onboardingPayload.bookingRequiresHostApproval === "boolean"
-          ? onboardingPayload.bookingRequiresHostApproval
-          : Boolean(meta.bookingRequiresHostApproval),
-    maxGuests: String(family.max_guests ?? 3),
-    activeQuarters: joinList(
-      family.active_quarters ?? ["morning", "afternoon", "evening", "fullday"]
-    ),
-    blockedDates: joinList(family.blocked_dates),
-  };
-}
-
-function buildComplianceFromMeta(
-  family: Record<string, unknown>,
-  meta: ReturnType<typeof parseHostListingMeta>,
-  hostTaxDetails?: HostDashboardEditorProps["hostTaxDetails"]
-) {
-  return {
-    pccFileName: String(meta.pccFileName ?? ""),
-    propertyProofFileName: String(meta.propertyProofFileName ?? ""),
-    formCFileName: String(meta.formCFileName ?? ""),
-    panCardUrl: String(meta.panCardUrl ?? ""),
-    propertyOwnershipUrl: String(meta.propertyOwnershipUrl ?? ""),
-    nocUrl: String(meta.nocUrl ?? ""),
-    policeVerificationUrl: String(meta.policeVerificationUrl ?? ""),
-    fssaiRegistrationUrl: String(meta.fssaiRegistrationUrl ?? ""),
-    idDocumentType: String(family.id_document_type ?? meta.idDocumentType ?? ""),
-    idDocumentUrl: String(family.id_document_url ?? meta.idDocumentUrl ?? meta.idDocumentPhotoUrl ?? ""),
-    liveSelfieUrl: String(family.live_selfie_url ?? meta.liveSelfieUrl ?? ""),
-    panNumber: "",
-    panMasked: String(meta.panMasked ?? (hostTaxDetails?.pan_last_four ? `******${hostTaxDetails.pan_last_four}` : "")),
-    panLastFour: String(meta.panLastFour ?? hostTaxDetails?.pan_last_four ?? ""),
-    panHolderName: String(meta.panHolderName ?? hostTaxDetails?.pan_holder_name ?? ""),
-    panDateOfBirth: String(meta.panDateOfBirth ?? hostTaxDetails?.pan_date_of_birth ?? ""),
-    panVerificationStatus: String(meta.panVerificationStatus ?? hostTaxDetails?.verification_status ?? "pending"),
-    panVerificationProvider: String(meta.panVerificationProvider ?? hostTaxDetails?.verification_provider ?? ""),
-    panRiskFlag: Boolean(meta.panRiskFlag ?? hostTaxDetails?.risk_flag),
-    panConsentGiven: Boolean(hostTaxDetails?.consent_given ?? false),
-    isPanVerified: Boolean(hostTaxDetails?.is_verified ?? false),
-    panVerifiedAt: String(hostTaxDetails?.verified_at ?? ""),
-    adminNotes: String(meta.complianceNote ?? ""),
-  };
-}
-
-function buildPhotosFromAllPhotos(
-  allPhotos: Array<Record<string, unknown>>,
-  familyId: string
-): PhotoItem[] {
-  return allPhotos
-    .filter((p) => String(p.family_id) === familyId)
-    .map((p) => ({
-      id: String(p.id),
-      url: String(p.url),
-      isPrimary: Boolean(p.is_primary),
-    }));
 }
 
 export function HostDashboardEditor({
@@ -350,28 +165,19 @@ export function HostDashboardEditor({
   );
 
   const meta = useMemo(
-    () =>
-      parseHostListingMeta(
-        typeof activeFamily.admin_notes === "string" ? activeFamily.admin_notes : null
-      ),
+    () => parseFamilyMeta(activeFamily.admin_notes),
     [activeFamily.admin_notes]
   );
 
   const [profile, setProfile] = useState(() =>
-    buildProfileFromFamily(initialFamily, parseHostListingMeta(
-      typeof initialFamily.admin_notes === "string" ? initialFamily.admin_notes : null
-    ))
+    buildProfileFromFamily(initialFamily, parseFamilyMeta(initialFamily.admin_notes))
   );
   const [listing, setListing] = useState(() =>
-    buildListingFromFamily(initialFamily, parseHostListingMeta(
-      typeof initialFamily.admin_notes === "string" ? initialFamily.admin_notes : null
-    ))
+    buildListingFromFamily(initialFamily, parseFamilyMeta(initialFamily.admin_notes))
   );
   const [schedule, setSchedule] = useState(() => buildScheduleFromFamily(initialFamily));
   const [compliance, setCompliance] = useState(() =>
-    buildComplianceFromMeta(initialFamily, parseHostListingMeta(
-      typeof initialFamily.admin_notes === "string" ? initialFamily.admin_notes : null
-    ), hostTaxDetails)
+    buildComplianceFromFamily(initialFamily, parseFamilyMeta(initialFamily.admin_notes), hostTaxDetails)
   );
   const [photos, setPhotos] = useState<PhotoItem[]>(() =>
     buildPhotosFromAllPhotos(allPhotos, String(initialFamily.id))
@@ -382,7 +188,7 @@ export function HostDashboardEditor({
     setProfile(buildProfileFromFamily(activeFamily, meta));
     setListing(buildListingFromFamily(activeFamily, meta));
     setSchedule(buildScheduleFromFamily(activeFamily));
-    setCompliance(buildComplianceFromMeta(activeFamily, meta, hostTaxDetails));
+    setCompliance(buildComplianceFromFamily(activeFamily, meta, hostTaxDetails));
     setPhotos(buildPhotosFromAllPhotos(allPhotos, activeFamilyId));
   }, [activeFamilyId, activeFamily, meta, allPhotos, hostTaxDetails]); 
 
@@ -583,44 +389,16 @@ export function HostDashboardEditor({
         const finalProfile = options?.updatedProfile ?? profile;
         const finalCompliance = options?.updatedCompliance ?? complianceRef.current;
 
-        const photosPayload: Array<{ url: string; isPrimary: boolean }> = [
-          ...finalPhotos.filter((p) => p.isPrimary),
-          ...finalPhotos.filter((p) => !p.isPrimary),
-        ].map((p) => ({ url: p.url, isPrimary: p.isPrimary }));
-
-        const response = await fetch("/api/onboarding/home/dashboard-save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            familyId: activeFamilyId,
-            profile: finalProfile,
-            listing: finalListing,
-            schedule: finalSchedule,
-            photos: photosPayload,
-            compliancePatch: {
-              pccFileName: finalCompliance.pccFileName,
-              propertyProofFileName: finalCompliance.propertyProofFileName,
-              formCFileName: finalCompliance.formCFileName,
-              panCardUrl: finalCompliance.panCardUrl,
-              propertyOwnershipUrl: finalCompliance.propertyOwnershipUrl,
-              nocUrl: finalCompliance.nocUrl,
-              policeVerificationUrl: finalCompliance.policeVerificationUrl,
-              fssaiRegistrationUrl: finalCompliance.fssaiRegistrationUrl,
-              idDocumentType: finalCompliance.idDocumentType,
-              idDocumentUrl: finalCompliance.idDocumentUrl,
-              liveSelfieUrl: finalCompliance.liveSelfieUrl,
-              panNumber: finalCompliance.panNumber,
-              panHolderName: finalCompliance.panHolderName,
-              panDateOfBirth: finalCompliance.panDateOfBirth,
-              panConsentGiven: finalCompliance.panConsentGiven,
-              adminNotes: finalCompliance.adminNotes,
-            },
-          }),
+        const result = await saveFamilyProfileWorkspace({
+          familyId: activeFamilyId,
+          profile: finalProfile,
+          listing: finalListing,
+          schedule: finalSchedule,
+          photos: finalPhotos,
+          compliance: finalCompliance,
         });
 
-        const resData = await response.json();
-
-        if (response.ok) {
+        if (result.ok) {
           setMessage({ type: "success", text: "Listing updated live!" });
           if (options?.updatedSchedule) setSchedule(options.updatedSchedule);
           if (options?.updatedListing) setListing(options.updatedListing);
@@ -628,7 +406,7 @@ export function HostDashboardEditor({
           if (options?.updatedPhotos) setPhotos(options.updatedPhotos);
           if (options?.updatedCompliance) setCompliance(options.updatedCompliance);
         } else {
-          setMessage({ type: "error", text: resData.error ?? "Sync failed. Connection error." });
+          setMessage({ type: "error", text: result.error });
         }
       } catch (err) {
         console.error("Sync error:", err);

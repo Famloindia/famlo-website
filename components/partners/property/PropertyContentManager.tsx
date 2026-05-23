@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import styles from "../dashboard.module.css";
 import type { PhotoItem } from "../HostDashboardEditor";
+import type { FamilyListingDraft } from "@/lib/family-profile-editor";
 import { ImagePlus, MapPin } from "lucide-react";
 import {
   MAX_GALLERY_IMAGE_UPLOAD_BYTES,
@@ -21,25 +22,7 @@ const HOUSE_TYPE_OPTIONS = ["Joint family", "Nuclear family", "Couple", "Solo ho
 const INTERACTION_TYPE_OPTIONS = ["Friendly and available", "Extrovert", "Introvert", "Quiet and helpful", "Highly social", "Flexible"];
 const HOUSE_RULE_OPTIONS = ["No smoking", "No pets", "No alcohol", "Quiet after 10 PM"];
 
-type PropertyListingState = {
-  propertyName: string;
-  listingTitle: string;
-  journeyStory: string;
-  specialExperience: string;
-  localExperience: string;
-  houseType: string;
-  interactionType: string;
-  bathroomType: string;
-  propertyAddress: string;
-  commonAreas: string;
-  amenities: string;
-  includedItems: string;
-  houseRules: string;
-  googleMapsLink: string;
-  foodType: string;
-  checkInTime: string;
-  checkOutTime: string;
-};
+type PropertyListingState = FamilyListingDraft;
 
 export default function PropertyContentManager({
   familyId,

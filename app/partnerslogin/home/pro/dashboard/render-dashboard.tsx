@@ -19,6 +19,12 @@ import { isFamloProDashboardEnabled, loadHostProAccess, loadHostProAccessMap } f
 import { loadHostProChannelFoundation } from "@/lib/host-pro-channel-foundation";
 import { loadHostProSettings } from "@/lib/host-pro-settings";
 import { buildHostProSetupReadiness } from "@/lib/host-pro-setup-readiness";
+import {
+  buildComplianceFromFamily,
+  buildListingFromFamily,
+  buildProfileFromFamily,
+  buildScheduleFromFamily,
+} from "@/lib/family-profile-editor";
 import { ensureProjectedInventory } from "@/lib/inventory";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { loadStayUnitsForSelector } from "@/lib/stay-units";
@@ -150,16 +156,6 @@ function normalizeFamilyId(value: unknown): string {
 function isSchemaCompatibilityError(message: string): boolean {
   const lower = message.toLowerCase();
   return lower.includes("column") || lower.includes("schema cache") || lower.includes("does not exist") || lower.includes("relation");
-}
-
-function joinList(values: unknown): string {
-  if (Array.isArray(values)) {
-    return values
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter(Boolean)
-      .join(", ");
-  }
-  return typeof values === "string" ? values : "";
 }
 
 function resolveInitialSection(value: string | undefined): ProSectionId {
@@ -393,16 +389,6 @@ type PropertySwitcherOption = {
   activeRoomCount: number;
 };
 
-type HostProfileSummary = {
-  hostName: string;
-  accountLabel: string | null;
-  email: string | null;
-  phone: string | null;
-  photoUrl: string | null;
-  sharedIdentityNote: string;
-  selectedPropertyName: string;
-};
-
 function formatCalendarDayLabel(date: string): string {
   const value = new Date(`${date}T12:00:00+05:30`);
   return new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(value);
@@ -571,14 +557,14 @@ export async function renderFamloProDashboardPage({
 
   const familyRecordResult = await supabase
     .from("families")
-    .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type")
+    .select("id,name,property_name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type,host_phone,host_photo_url,street_address,about,description,famlo_experience,family_composition,languages,languages_spoken,id_document_type,id_document_url,live_selfie_url,max_guests,active_quarters,blocked_dates,booking_requires_host_approval,price_morning,price_afternoon,price_evening,price_fullday,village")
     .eq("id", familyId)
     .maybeSingle();
   const familyRecord =
     familyRecordResult.error && isSchemaCompatibilityError(familyRecordResult.error.message)
       ? await supabase
           .from("families")
-          .select("id,name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type")
+          .select("id,name,host_id,city,state,admin_notes,is_active,is_accepting,lat,lng,bathroom_type,google_maps_link,amenities,common_areas,house_rules,food_type,host_phone,host_photo_url,street_address,about,description,famlo_experience,family_composition,languages,languages_spoken,id_document_type,id_document_url,live_selfie_url,max_guests,active_quarters,blocked_dates,booking_requires_host_approval,price_morning,price_afternoon,price_evening,price_fullday,village")
           .eq("id", familyId)
           .maybeSingle()
       : familyRecordResult;
@@ -593,6 +579,20 @@ export async function renderFamloProDashboardPage({
   ]);
 
   const meta = parseHostListingMeta(asString(family?.admin_notes));
+  const { data: latestDraft } = await supabase
+    .from("host_onboarding_drafts")
+    .select("payload")
+    .eq("family_id", familyId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const familyProfileSeed: Record<string, unknown> = {
+    ...((family ?? {}) as Record<string, unknown>),
+    latest_onboarding_payload:
+      latestDraft?.payload && typeof latestDraft.payload === "object" && !Array.isArray(latestDraft.payload)
+        ? latestDraft.payload
+        : null,
+  };
   const preloadBookingWorkspace = shouldPreloadBookingWorkspace(initialSection);
   const preloadCalendarWorkspace = shouldPreloadCalendarWorkspace(initialSection, roomRouteState);
   const needsChannelSyncHistory =
@@ -766,15 +766,6 @@ export async function renderFamloProDashboardPage({
   const locationLabel =
     [propertyLocalityLabel, resolvedPropertyCity, resolvedPropertyState, resolvedPropertyCountry].filter(Boolean).join(", ") ||
     "Location pending";
-  const hostProfile: HostProfileSummary = {
-    hostName: asString(host?.display_name) ?? propertyName,
-    accountLabel: hostCode ?? effectiveHostUserId ?? null,
-    email: authUser?.email ?? null,
-    phone: authUser?.phone ?? null,
-    photoUrl: null,
-    sharedIdentityNote: "This is the shared host identity for this Famlo Pro workspace.",
-    selectedPropertyName: propertyName,
-  };
   const channexConfig = getChannexConfigSummary();
   const proSettings = {
     ...storedProSettings,
@@ -789,25 +780,10 @@ export async function renderFamloProDashboardPage({
     isPrimary: photo.is_primary === true,
     family_id: asString(photo.family_id) ?? familyId,
   })).filter((photo) => photo.url.length > 0);
-  const propertyContent = {
-    propertyName,
-    listingTitle: asString(meta.listingTitle) ?? "",
-    journeyStory: asString(meta.journeyStory) ?? "",
-    specialExperience: asString(meta.specialExperience) ?? "",
-    localExperience: asString(meta.localExperience) ?? "",
-    houseType: asString(meta.houseType) ?? "",
-    interactionType: asString(meta.interactionType) ?? "",
-    bathroomType: asString(family?.bathroom_type) ?? asString(meta.bathroomType) ?? "",
-    propertyAddress: asString(meta.propertyAddress) ?? "",
-    commonAreas: joinList(meta.commonAreas ?? family?.common_areas),
-    amenities: joinList(meta.amenities ?? family?.amenities),
-    includedItems: joinList(meta.includedItems),
-    houseRules: joinList(meta.houseRules ?? storedProSettings.houseRules ?? family?.house_rules),
-    googleMapsLink: asString(meta.googleMapsLink) ?? asString(family?.google_maps_link) ?? "",
-    foodType: joinList(meta.foodType ?? family?.food_type),
-    checkInTime: asString(meta.checkInTime) ?? storedProSettings.checkInTime ?? "",
-    checkOutTime: asString(meta.checkOutTime) ?? storedProSettings.checkOutTime ?? "",
-  };
+  const initialProfile = buildProfileFromFamily(familyProfileSeed, meta);
+  const initialSchedule = buildScheduleFromFamily(familyProfileSeed);
+  const initialCompliance = buildComplianceFromFamily(familyProfileSeed, meta);
+  const propertyContent = buildListingFromFamily(familyProfileSeed, meta);
   const roomSummaries = rooms.map((room) => ({
     id: room.id,
     name: room.name,
@@ -1785,7 +1761,6 @@ export async function renderFamloProDashboardPage({
       roomRouteState={roomRouteState}
       isAdminView={isAdminView}
       hostUserId={hostSession?.hostUserId ?? null}
-      hostProfile={hostProfile}
       propertyName={propertyName}
       propertyLocalityLabel={propertyLocalityLabel}
       propertyHomeLat={typeof family?.lat === "number" ? family.lat : null}
@@ -1808,7 +1783,10 @@ export async function renderFamloProDashboardPage({
       basicRoomUrl={basicRoomUrl}
       familyId={familyId}
       propertyOptions={propertyOptions}
+      initialProfile={initialProfile}
       initialPropertyContent={propertyContent}
+      initialSchedule={initialSchedule}
+      initialCompliance={initialCompliance}
       propertyPhotos={propertyPhotos}
       initialSettings={proSettings}
       channelFoundation={channelFoundation}

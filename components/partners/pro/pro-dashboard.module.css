@@ -233,6 +233,331 @@
   border: 1px solid rgba(15, 23, 42, 0.1);
 }
 
+.proProfileIntro {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.proProfileHeroCard,
+.proProfilePreviewCard,
+.proProfileSectionCard {
+  border-radius: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(10, 18, 34, 0.94), rgba(4, 11, 24, 0.92));
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.35);
+}
+
+.proProfileHeroCard {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  padding: 24px;
+}
+
+.proProfileHeroMedia,
+.proProfilePreviewMedia {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 24px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+}
+
+.proProfileHeroMedia {
+  width: 148px;
+  height: 148px;
+}
+
+.proProfilePreviewMedia {
+  min-height: 220px;
+}
+
+.proProfileHeroImage,
+.proProfilePreviewImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.proProfileHeroIcon {
+  width: 40px;
+  height: 40px;
+  color: rgba(148, 163, 184, 0.76);
+}
+
+.proProfileHeroBody,
+.proProfilePreviewDetails {
+  display: grid;
+  gap: 8px;
+}
+
+.proProfileStatusPill {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: rgba(37, 99, 235, 0.16);
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.proProfileHeroTitle,
+.proProfilePreviewName {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: white;
+}
+
+.proProfileHeroProperty,
+.proProfilePreviewProperty {
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(191, 219, 254, 0.94);
+}
+
+.proProfileHeroLocation,
+.proProfilePreviewLocation,
+.proProfileHeroSubcopy {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.proProfileHeroActions,
+.proProfileEditorActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.proProfileEditorShell {
+  display: grid;
+  gap: 22px;
+}
+
+.proProfileEditorHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.proProfileBackButton,
+.proProfileGhostButton,
+.proProfileUploadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 14px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.proProfilePreviewCard {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 22px;
+  padding: 22px;
+}
+
+.proProfileUploadButton {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  backdrop-filter: blur(14px);
+}
+
+.proProfileSectionGrid {
+  display: grid;
+  gap: 20px;
+}
+
+.proProfileSectionCard {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.proProfileSectionLabel {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #60a5fa;
+}
+
+.proProfileFieldGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.proProfileField,
+.proProfileFieldWide {
+  display: grid;
+  gap: 8px;
+}
+
+.proProfileFieldWide {
+  grid-column: 1 / -1;
+}
+
+.proProfileFieldLabel {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(191, 219, 254, 0.72);
+}
+
+.proProfileInput,
+.proProfileTextarea {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.76);
+  color: white;
+  padding: 14px 16px;
+  font: inherit;
+  outline: none;
+}
+
+.proProfileInput::placeholder,
+.proProfileTextarea::placeholder {
+  color: rgba(148, 163, 184, 0.72);
+}
+
+.proProfileTextarea {
+  min-height: 110px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.proProfileInput:focus,
+.proProfileTextarea:focus {
+  border-color: rgba(96, 165, 250, 0.52);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+.proProfileChipGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.proProfileChip {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.proProfileChipActive {
+  border-color: rgba(96, 165, 250, 0.42);
+  background: rgba(37, 99, 235, 0.18);
+  color: white;
+}
+
+.proProfileInlineControl {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.proProfileGalleryRow {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.proProfileGalleryCard,
+.proProfileGalleryAddCard {
+  flex-shrink: 0;
+  width: 184px;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(9, 15, 28, 0.92);
+}
+
+.proProfileGalleryCardPrimary {
+  border-color: rgba(96, 165, 250, 0.4);
+  box-shadow: 0 18px 36px rgba(37, 99, 235, 0.14);
+}
+
+.proProfileGalleryImage {
+  width: 100%;
+  height: 138px;
+  object-fit: cover;
+  display: block;
+}
+
+.proProfileGalleryActions {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.proProfileGalleryAddCard {
+  min-height: 230px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-style: dashed;
+  color: #bfdbfe;
+  cursor: pointer;
+}
+
+.proProfileGalleryAddCard small {
+  color: rgba(148, 163, 184, 0.88);
+}
+
+.proProfileDangerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  border: 1px solid rgba(248, 113, 113, 0.24);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
 .content {
   padding: 28px;
   display: grid;
@@ -3067,4 +3392,40 @@
 }
 .proLuxurySection .placeholderCopy {
   color: rgba(255, 255, 255, 0.75);
+}
+
+@media (max-width: 1024px) {
+  .proProfileHeroCard,
+  .proProfilePreviewCard {
+    grid-template-columns: 1fr;
+  }
+
+  .proProfileHeroActions,
+  .proProfileEditorActions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 768px) {
+  .proProfileFieldGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .proProfileInlineControl,
+  .proProfileEditorHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .proProfileHeroCard,
+  .proProfileSectionCard,
+  .proProfilePreviewCard {
+    padding: 18px;
+  }
+
+  .proProfileHeroMedia {
+    width: 100%;
+    max-width: 180px;
+    height: 180px;
+  }
 }
