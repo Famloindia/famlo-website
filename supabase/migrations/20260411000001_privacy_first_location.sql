@@ -40,6 +40,45 @@ ALTER TABLE families ADD COLUMN IF NOT EXISTS neighborhood_desc TEXT;
 ALTER TABLE families ADD COLUMN IF NOT EXISTS accessibility_desc TEXT;
 ALTER TABLE families ADD COLUMN IF NOT EXISTS pincode TEXT;
 
+CREATE TABLE IF NOT EXISTS public.host_onboarding_drafts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  family_application_id UUID,
+  mobile_number TEXT,
+  primary_host_name TEXT,
+  city_neighbourhood TEXT,
+  street_address TEXT,
+  email TEXT,
+  state TEXT,
+  country TEXT,
+  family_composition TEXT,
+  host_bio TEXT,
+  languages_spoken TEXT[] NOT NULL DEFAULT '{}'::text[],
+  famlo_experience TEXT,
+  images TEXT[] NOT NULL DEFAULT '{}'::text[],
+  bathroom_type TEXT,
+  common_areas TEXT[] NOT NULL DEFAULT '{}'::text[],
+  amenities TEXT[] NOT NULL DEFAULT '{}'::text[],
+  upi_id TEXT,
+  bank_account_holder_name TEXT,
+  bank_account_number TEXT,
+  ifsc_code TEXT,
+  bank_name TEXT,
+  host_photo_url TEXT,
+  password TEXT,
+  current_step INTEGER NOT NULL DEFAULT 1,
+  listing_status TEXT NOT NULL DEFAULT 'draft',
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  compliance JSONB NOT NULL DEFAULT '{}'::jsonb,
+  lat_exact NUMERIC,
+  lng_exact NUMERIC,
+  landmarks JSONB DEFAULT '[]',
+  neighborhood_desc TEXT,
+  accessibility_desc TEXT,
+  pincode TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- 3. Updates to host_onboarding_drafts
 ALTER TABLE host_onboarding_drafts ADD COLUMN IF NOT EXISTS lat_exact NUMERIC;
 ALTER TABLE host_onboarding_drafts ADD COLUMN IF NOT EXISTS lng_exact NUMERIC;
