@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { assertRuntimeSafety, isRuntimeSafetySatisfied } from "@/lib/app-env";
 
 export interface RazorpayOrderInput {
   amountRupees: number;
@@ -103,6 +104,7 @@ function safeCompare(left: string, right: string): boolean {
 }
 
 export function getRazorpayConfig(): { keyId: string; keySecret: string; webhookSecret?: string } {
+  assertRuntimeSafety("razorpay");
   return {
     keyId: requireEnv("RAZORPAY_KEY_ID"),
     keySecret: requireEnv("RAZORPAY_KEY_SECRET"),
@@ -111,10 +113,11 @@ export function getRazorpayConfig(): { keyId: string; keySecret: string; webhook
 }
 
 export function isRazorpayConfigured(): boolean {
-  return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
+  return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) && isRuntimeSafetySatisfied("razorpay");
 }
 
 function getRazorpayXConfig(): { keyId: string; keySecret: string; accountNumber: string } {
+  assertRuntimeSafety("razorpayx");
   return {
     keyId: requireEnv("RAZORPAYX_KEY_ID"),
     keySecret: requireEnv("RAZORPAYX_KEY_SECRET"),
@@ -123,7 +126,10 @@ function getRazorpayXConfig(): { keyId: string; keySecret: string; accountNumber
 }
 
 export function isRazorpayXConfigured(): boolean {
-  return Boolean(process.env.RAZORPAYX_KEY_ID && process.env.RAZORPAYX_KEY_SECRET && process.env.RAZORPAYX_ACCOUNT_NUMBER);
+  return (
+    Boolean(process.env.RAZORPAYX_KEY_ID && process.env.RAZORPAYX_KEY_SECRET && process.env.RAZORPAYX_ACCOUNT_NUMBER) &&
+    isRuntimeSafetySatisfied("razorpayx")
+  );
 }
 
 export async function createRazorpayOrder(input: RazorpayOrderInput): Promise<RazorpayOrder> {

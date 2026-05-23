@@ -1,3 +1,5 @@
+import { assertRuntimeSafety } from "@/lib/app-env";
+
 export type ChannexEnvironment = "staging" | "production";
 
 export type ChannexConfigSummary = {
@@ -430,6 +432,7 @@ function buildHeaders(apiKey: string): HeadersInit {
 }
 
 export function getChannexConfigSummary(): ChannexConfigSummary {
+  assertRuntimeSafety("channex");
   const environment = loadEnvironment();
   const apiKeyConfigured = Boolean(loadApiKey(environment));
   const baseUrlConfigured = Boolean(resolveBaseUrl(environment));
@@ -1204,6 +1207,22 @@ async function postChannexJson(
   body: Record<string, unknown>
 ): Promise<ChannexAriPushResult> {
   const environment = loadEnvironment();
+  try {
+    assertRuntimeSafety("channex_sync_execution");
+  } catch (error) {
+    return {
+      ok: false,
+      environment,
+      endpoint: endpointPath,
+      httpStatus: null,
+      retryAfterSeconds: null,
+      message: error instanceof Error ? error.message : "Channex sync execution is blocked.",
+      meta: null,
+      warnings: [],
+      rawValidation: null,
+      data: null,
+    };
+  }
   const summary = getChannexConfigSummary();
   const endpoint = `${resolveBaseUrl(environment)}${endpointPath}`;
   const apiKey = loadApiKey(environment);

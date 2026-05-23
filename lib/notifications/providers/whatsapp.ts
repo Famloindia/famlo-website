@@ -1,3 +1,4 @@
+import { assertRuntimeSafety } from "@/lib/app-env";
 import type { NotificationDeliveryResult } from "@/lib/notifications/types";
 
 function normalizeWhatsAppPhone(value: string): string | null {
@@ -49,6 +50,8 @@ async function sendWhatsAppPayload(
   console.info("[whatsapp-send] tokenPresent", Boolean(apiKey));
   console.info("[whatsapp-send] to", phone);
   console.info("[whatsapp-send] messageType", messageType);
+
+  assertRuntimeSafety("whatsapp_execution");
 
   if (!apiKey || (!apiUrl && !phoneNumberId)) {
     const mockId = `mock-whatsapp-${Date.now()}`;

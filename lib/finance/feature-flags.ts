@@ -1,7 +1,16 @@
+import { isRuntimeSafetySatisfied } from "@/lib/app-env";
+
 function isEnabled(value: string | undefined, fallback: boolean): boolean {
   if (typeof value !== "string" || value.trim().length === 0) return fallback;
   const normalized = value.trim().toLowerCase();
   return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+}
+
+function isGuardedExecutionEnabled(
+  value: string | undefined,
+  scope: Parameters<typeof isRuntimeSafetySatisfied>[0]
+): boolean {
+  return isEnabled(value, false) && isRuntimeSafetySatisfied(scope);
 }
 
 export function isFinanceEventPipelineEnabled(): boolean {
@@ -49,7 +58,7 @@ export function isSettlementApprovalFlowEnabled(): boolean {
 }
 
 export function isSettlementPayoutExecutionEnabled(): boolean {
-  return isEnabled(process.env.SETTLEMENT_PAYOUT_EXECUTION_ENABLED, false);
+  return isGuardedExecutionEnabled(process.env.SETTLEMENT_PAYOUT_EXECUTION_ENABLED, "payout_execution");
 }
 
 export function isAutoPayoutEnabled(): boolean {
@@ -149,7 +158,7 @@ export function isRefundAdminApprovalRequired(): boolean {
 }
 
 export function isRefundProviderExecutionEnabled(): boolean {
-  return isEnabled(process.env.REFUND_PROVIDER_EXECUTION_ENABLED, false);
+  return isGuardedExecutionEnabled(process.env.REFUND_PROVIDER_EXECUTION_ENABLED, "refund_execution");
 }
 
 export function isRazorpayRefundsEnabled(): boolean {
@@ -157,7 +166,7 @@ export function isRazorpayRefundsEnabled(): boolean {
 }
 
 export function isRazorpayXEnabled(): boolean {
-  return isEnabled(process.env.RAZORPAYX_ENABLED, false);
+  return isEnabled(process.env.RAZORPAYX_ENABLED, false) && isRuntimeSafetySatisfied("razorpayx");
 }
 
 export function isPayoutAccountCreationEnabled(): boolean {
@@ -201,9 +210,13 @@ export function isInvoicePdfGenerationEnabled(): boolean {
 }
 
 export function isInvoiceEmailDeliveryEnabled(): boolean {
-  return isEnabled(process.env.INVOICE_EMAIL_DELIVERY_ENABLED, false);
+  return isGuardedExecutionEnabled(process.env.INVOICE_EMAIL_DELIVERY_ENABLED, "email_execution");
 }
 
 export function isAdminFinanceOpsUiEnabled(): boolean {
   return isEnabled(process.env.ADMIN_FINANCE_OPS_UI_ENABLED, false);
+}
+
+export function isChannexSyncExecutionEnabled(): boolean {
+  return isGuardedExecutionEnabled(process.env.CHANNEX_SYNC_EXECUTION_ENABLED, "channex_sync_execution");
 }

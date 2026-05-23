@@ -1,4 +1,5 @@
 // lib/resend.ts
+import { assertRuntimeSafety } from "@/lib/app-env";
 
 /**
  * Resend Direct HTTP API Utility
@@ -8,6 +9,7 @@
  */
 
 export async function sendEmail({ to, subject, html }: { to: string; subject: string; html: string }) {
+  assertRuntimeSafety("email_execution");
   const apiKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.MAIL_FROM_EMAIL || "hello@resend.dev";
 

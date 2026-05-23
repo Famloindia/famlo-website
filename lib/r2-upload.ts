@@ -1,5 +1,6 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import sharp from "sharp";
+import { assertRuntimeSafety } from "@/lib/app-env";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -57,6 +58,7 @@ async function uploadBufferToR2(
 }
 
 function getR2Client(): S3Client {
+  assertRuntimeSafety("cloud_storage");
   if (cachedClient) return cachedClient;
   cachedClient = new S3Client({
     region: "auto",

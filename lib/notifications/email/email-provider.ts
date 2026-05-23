@@ -1,3 +1,4 @@
+import { assertRuntimeSafety } from "@/lib/app-env";
 import { sendEmail } from "@/lib/resend";
 
 export type EmailPayload = {
@@ -17,6 +18,7 @@ export async function deliverEmail(payload: EmailPayload): Promise<EmailProvider
   const provider = process.env.EMAIL_PROVIDER?.trim().toLowerCase() || "resend";
 
   if (provider === "resend") {
+    assertRuntimeSafety("email_execution");
     const result = await sendEmail(payload);
     return {
       ok: Boolean(result?.success),

@@ -1,4 +1,5 @@
 import {
+  isChannexSyncExecutionEnabled,
   isAdminFinanceOpsUiEnabled,
   isAutoPayoutEnabled,
   isCheckoutSection95PricingEnabled,
@@ -80,6 +81,7 @@ export type FinanceRuntimeFlags = {
   autoPayoutEnabled: boolean;
   payoutHoldEnabled: boolean;
   payoutAutoRetryEnabled: boolean;
+  channexSyncExecutionEnabled: boolean;
   invoicePdfGenerationEnabled: boolean;
   invoiceEmailDeliveryEnabled: boolean;
   adminFinanceOpsUiEnabled: boolean;
@@ -113,6 +115,7 @@ export function getFinanceRuntimeConfig(): FinanceRuntimeConfig {
       autoPayoutEnabled: isAutoPayoutEnabled(),
       payoutHoldEnabled: isPayoutHoldEnabled(),
       payoutAutoRetryEnabled: isPayoutAutoRetryEnabled(),
+      channexSyncExecutionEnabled: isChannexSyncExecutionEnabled(),
       invoicePdfGenerationEnabled: isInvoicePdfGenerationEnabled(),
       invoiceEmailDeliveryEnabled: isInvoiceEmailDeliveryEnabled(),
       adminFinanceOpsUiEnabled: isAdminFinanceOpsUiEnabled(),
