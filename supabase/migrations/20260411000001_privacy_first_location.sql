@@ -2,6 +2,27 @@
 -- Created At: 2026-04-11
 -- Adds support for exact/approximate coordinates and neighborhood metadata.
 
+CREATE TABLE IF NOT EXISTS public.families (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  host_id TEXT,
+  name TEXT,
+  about TEXT,
+  description TEXT,
+  max_guests INTEGER,
+  bathroom_type TEXT,
+  lat NUMERIC,
+  lng NUMERIC,
+  price_morning INTEGER,
+  price_afternoon INTEGER,
+  price_evening INTEGER,
+  price_fullday INTEGER,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  amenities TEXT[] NOT NULL DEFAULT '{}'::text[],
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- 1. Updates to hosts (V2)
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS lat_exact NUMERIC;
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS lng_exact NUMERIC;
