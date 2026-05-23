@@ -3,6 +3,27 @@
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+CREATE TABLE IF NOT EXISTS public.users (
+    id                        UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    name                      TEXT,
+    email                     TEXT,
+    phone                     TEXT,
+    avatar_url                TEXT,
+    city                      TEXT,
+    state                     TEXT,
+    gender                    TEXT,
+    about                     TEXT,
+    date_of_birth             TEXT,
+    role                      TEXT NOT NULL DEFAULT 'guest',
+    kyc_status                TEXT NOT NULL DEFAULT 'pending',
+    commission_rate_override  NUMERIC,
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS users_email_idx ON public.users(email);
+CREATE INDEX IF NOT EXISTS users_role_idx ON public.users(role);
+
 CREATE TABLE IF NOT EXISTS user_profiles_v2 (
     user_id                  UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     display_name             TEXT,
