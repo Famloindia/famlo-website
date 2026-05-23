@@ -40,4 +40,12 @@ next-env.d.ts
 
 # OS
 .DS_Store
-Thumbs.dbprod-backup-before-clean.sql
+Thumbs.db
+
+# local database dumps and backups
+prod-backup-before-clean.sql
+prod-data-for-staging.sql
+prod-data-for-staging-safe.sql
+prod-public-data-for-staging.sql
+prod-public-data-for-staging-safe.sql
+*.dump
