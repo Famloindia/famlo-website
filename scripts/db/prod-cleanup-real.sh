@@ -30,7 +30,7 @@ require_prod_db_env
 echo "Production cleanup preflight"
 echo "Project ref: ${PROD_PROJECT_REF}"
 echo
-"$ROOT_DIR/scripts/db/prod-cleanup-dry-run.sh"
+bash "$ROOT_DIR/scripts/db/prod-cleanup-dry-run.sh"
 
 existing_targets=()
 for table in "${CLEAN_TABLES[@]}"; do
