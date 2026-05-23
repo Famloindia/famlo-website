@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS public.families (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE public.families ADD COLUMN IF NOT EXISTS city TEXT;
+ALTER TABLE public.families ADD COLUMN IF NOT EXISTS state TEXT;
+ALTER TABLE public.families ADD COLUMN IF NOT EXISTS village TEXT;
+
 -- 1. Updates to hosts (V2)
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS lat_exact NUMERIC;
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS lng_exact NUMERIC;
