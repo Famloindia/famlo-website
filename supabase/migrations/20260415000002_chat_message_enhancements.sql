@@ -1,3 +1,20 @@
+CREATE TABLE IF NOT EXISTS public.messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID REFERENCES public.conversations(id) ON DELETE CASCADE,
+  booking_id UUID REFERENCES public.bookings_v2(id) ON DELETE SET NULL,
+  sender_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  receiver_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  sender_type TEXT,
+  text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  message_type TEXT NOT NULL DEFAULT 'text',
+  image_url TEXT,
+  image_name TEXT,
+  deleted_at TIMESTAMPTZ,
+  deleted_by UUID,
+  seen_at TIMESTAMPTZ
+);
+
 ALTER TABLE messages
   ADD COLUMN IF NOT EXISTS message_type TEXT NOT NULL DEFAULT 'text',
   ADD COLUMN IF NOT EXISTS image_url TEXT,
