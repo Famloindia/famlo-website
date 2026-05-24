@@ -201,15 +201,17 @@ export default function Step1Profile({ data, update, onStepComplete }: any) {
   const readUploadResponse = async (res: Response) => {
     const raw = await res.text();
     try {
-      const json = JSON.parse(raw) as { error?: string; url?: string; message?: string };
+      const json = JSON.parse(raw) as { error?: string; errorCode?: string; url?: string; message?: string };
+      const message =
+        typeof json.error === "string"
+          ? json.error
+          : typeof json.message === "string"
+            ? json.message
+            : null;
+      const errorCode = typeof json.errorCode === "string" ? json.errorCode : null;
       return {
         url: typeof json.url === "string" ? json.url : null,
-        error:
-          typeof json.error === "string"
-            ? json.error
-            : typeof json.message === "string"
-              ? json.message
-              : null,
+        error: errorCode && message ? `${errorCode}: ${message}` : message,
       };
     } catch {
       const trimmed = raw.trim();

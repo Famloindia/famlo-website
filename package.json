@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "r2:write-test": "node scripts/test-r2-write-access.mjs",
+    "r2:write-test:local": "node --env-file=.env.local scripts/test-r2-write-access.mjs",
     "test:channels": "tsx --test tests/channel-provider-lifecycle.test.ts",
     "db:v2:verify": "node scripts/verify-v2.mjs",
     "db:v2:backfill": "node scripts/backfill-v2.mjs",

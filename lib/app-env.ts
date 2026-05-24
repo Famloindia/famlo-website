@@ -159,14 +159,18 @@ function isSafeEmailProvider(provider: string): boolean {
   return provider === "log" || provider === "mock" || provider === "console" || provider === "disabled";
 }
 
-const PRODUCTION_R2_BUCKET = "famlo-images";
-const NON_PRODUCTION_R2_BUCKET = "famlo-images-staging";
+export const PRODUCTION_R2_BUCKET = "famlo-images";
+export const NON_PRODUCTION_R2_BUCKET = "famlo-images-staging";
 
 export function detectR2BucketStage(bucket: string | null): DeploymentStage {
   if (!bucket) return "unknown";
   if (bucket === PRODUCTION_R2_BUCKET) return "production";
   if (bucket === NON_PRODUCTION_R2_BUCKET) return "staging";
   return "unknown";
+}
+
+export function getExpectedR2BucketForAppEnv(appEnv: AppEnv): string {
+  return appEnv === "production" ? PRODUCTION_R2_BUCKET : NON_PRODUCTION_R2_BUCKET;
 }
 
 export function getTempUnsafeLocalProductionSupabaseWarning(
