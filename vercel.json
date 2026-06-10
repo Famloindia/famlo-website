@@ -2,19 +2,19 @@
   "crons": [
     {
       "path": "/api/internal/cron/platform-maintenance",
-      "schedule": "0 3 * * *"
+      "schedule": "0 4 * * *"
     },
     {
       "path": "/api/internal/cron/channel-sync-jobs",
-      "schedule": "* * * * *"
+      "schedule": "0 2 * * *"
     },
     {
       "path": "/api/internal/cron/channel-ops-alerts",
-      "schedule": "*/5 * * * *"
+      "schedule": "45 2 * * *"
     },
     {
       "path": "/api/internal/cron/channex-booking-feed",
-      "schedule": "*/15 * * * *"
+      "schedule": "30 2 * * *"
     }
   ]
 }
