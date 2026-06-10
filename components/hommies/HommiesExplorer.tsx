@@ -40,7 +40,7 @@ function calculateDistanceKm(
 
 export function HommiesExplorer({
   hommies
-}: HommiesExplorerProps): JSX.Element {
+}: HommiesExplorerProps) {
   const [query, setQuery] = useState("");
   const [nearbyOnly, setNearbyOnly] = useState(false);
   const [userLocation, setUserLocation] = useState<{

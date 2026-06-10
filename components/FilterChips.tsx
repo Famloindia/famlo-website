@@ -1,5 +1,7 @@
 "use client";
 
+import type { JSX } from "react";
+
 // FILE: components/FilterChips.tsx
 const chips = [
   "All",

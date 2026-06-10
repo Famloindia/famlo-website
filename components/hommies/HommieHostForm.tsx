@@ -85,7 +85,7 @@ function getSubmissionErrorMessage(error: unknown): string {
   return message;
 }
 
-export function HommieHostForm(): JSX.Element {
+export function HommieHostForm() {
   const [formState, setFormState] = useState<FormState>(initialState);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string>("");

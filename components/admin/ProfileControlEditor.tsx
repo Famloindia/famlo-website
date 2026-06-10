@@ -25,7 +25,7 @@ function joinList(values: string[] | null | undefined): string {
 export function ProfileControlEditor({
   entityType,
   profile
-}: ProfileControlEditorProps): JSX.Element {
+}: ProfileControlEditorProps) {
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [formState, setFormState] = useState<FormState>(() => {

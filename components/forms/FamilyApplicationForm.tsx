@@ -86,7 +86,7 @@ function resolveSelectedLanguages(state: FormState): string[] {
   return filteredLanguages;
 }
 
-export function FamilyApplicationForm(): JSX.Element {
+export function FamilyApplicationForm() {
   const [formState, setFormState] = useState<FormState>(initialFormState);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionState, setSubmissionState] = useState<SubmissionState | null>(
@@ -199,6 +199,9 @@ export function FamilyApplicationForm(): JSX.Element {
             : null,
         property_name: formState.propertyName.trim(),
         property_address: formState.propertyAddress.trim(),
+        google_maps_link: null,
+        latitude: null,
+        longitude: null,
         village: formState.village.trim().length > 0 ? formState.village.trim() : null,
         state: formState.state.trim().length > 0 ? formState.state.trim() : null,
         house_type: formState.houseType,

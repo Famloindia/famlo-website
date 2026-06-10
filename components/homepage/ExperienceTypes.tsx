@@ -19,7 +19,7 @@ const experienceTypes = [
   }
 ] as const;
 
-export function ExperienceTypes(): JSX.Element {
+export function ExperienceTypes() {
   return (
     <section className="bg-famloBlueLight py-20 sm:py-24">
       <div className="mx-auto w-full max-w-6xl px-6">

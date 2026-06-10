@@ -1,0 +1,809 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { enqueueChannexAriSyncJobs } from "@/lib/channex-ari-jobs";
+import {
+  getChannexMutationGuardSummary,
+  updateChannexRatePlanOccupancy,
+  updateChannexRoomTypeOccupancy,
+} from "@/lib/channel-providers/channex/client";
+import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { loadHostProAccess } from "@/lib/host-pro-access";
+import { projectInventoryRange } from "@/lib/inventory";
+import {
+  assertPaidHostProAddonOrderAvailable,
+  consumePaidHostProAddonOrder,
+  createHostProAddonCheckout,
+} from "@/lib/pro-billing/service";
+import { loadStayUnitsForSelector, mapStayUnitRow } from "@/lib/stay-units";
+import { normalizeAmenityList } from "@/lib/room-amenities";
+import { createAdminSupabaseClient } from "@/lib/supabase";
+
+type JsonRecord = Record<string, unknown>;
+type RoomOccupancySyncStatus = {
+  status: "not_mapped" | "queued" | "synced" | "failed";
+  message: string;
+  externalRoomTypeId: string | null;
+  externalRatePlanIds: string[];
+};
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asNullableString(value: unknown): string | null {
+  const next = asString(value);
+  return next.length > 0 ? next : null;
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function asNullableNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item) => item.length > 0);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  return [];
+}
+
+function normalizeMoney(value: unknown, fallback = 0): number {
+  const amount = Math.max(0, asNumber(value, fallback));
+  return Number(amount.toFixed(2));
+}
+
+function makeUnitKey(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 24);
+  return `room-${slug || "unit"}-${Date.now().toString(36)}`;
+}
+
+function addIndiaDays(date: string, days: number): string {
+  const base = new Date(`${date}T00:00:00.000Z`);
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().slice(0, 10);
+}
+
+function extractMissingColumnFromSchemaError(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  const match = message.match(/Could not find the '([^']+)' column/i);
+  return match?.[1] ?? null;
+}
+
+function pickObject(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
+}
+
+function mergeRoomIntoDraftRooms(
+  currentRooms: unknown,
+  roomPatch: JsonRecord,
+  identity: { roomId: string | null; unitKey: string | null; name: string }
+): JsonRecord[] {
+  const rooms = Array.isArray(currentRooms)
+    ? currentRooms
+        .filter((room): room is JsonRecord => Boolean(room && typeof room === "object" && !Array.isArray(room)))
+        .map((room) => ({ ...room }))
+    : [];
+
+  const roomIndex = rooms.findIndex((room) => {
+    const roomId = asNullableString(room.id);
+    const roomName = asNullableString(room.roomName ?? room.name);
+    return (
+      (identity.roomId != null && roomId === identity.roomId) ||
+      (identity.unitKey != null && roomId === identity.unitKey) ||
+      roomName === identity.name
+    );
+  });
+
+  if (roomIndex >= 0) {
+    rooms[roomIndex] = {
+      ...rooms[roomIndex],
+      ...roomPatch,
+    };
+    return rooms;
+  }
+
+  return [...rooms, roomPatch];
+}
+
+async function syncRoomDraftPayload(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  familyId: string,
+  roomIdentity: { roomId: string | null; unitKey: string | null; name: string },
+  roomPatch: JsonRecord
+): Promise<void> {
+  const { data: drafts } = await supabase
+    .from("host_onboarding_drafts")
+    .select("id,payload")
+    .eq("family_id", familyId)
+    .in("listing_status", ["approved", "live", "published"])
+    .order("updated_at", { ascending: false })
+    .limit(5);
+
+  if (!Array.isArray(drafts) || drafts.length === 0) {
+    return;
+  }
+
+  for (const draft of drafts) {
+    const draftRecord = pickObject(draft);
+    const payload = pickObject(draftRecord.payload);
+    const nextRooms = mergeRoomIntoDraftRooms(payload.rooms, roomPatch, roomIdentity);
+    const nextPayload: JsonRecord = {
+      ...payload,
+      rooms: nextRooms,
+    };
+
+    await supabase
+      .from("host_onboarding_drafts")
+      .update({
+        payload: nextPayload,
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("id", asString(draftRecord.id));
+  }
+}
+
+async function mutateStayUnitWithSchemaFallback(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  mode: "insert" | "update",
+  payload: JsonRecord,
+  unitId?: string | null
+): Promise<{ data: JsonRecord | null; error: unknown; strippedColumns: string[] }> {
+  const workingPayload: JsonRecord = { ...payload };
+  const strippedColumns: string[] = [];
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const query =
+      mode === "update"
+        ? supabase
+            .from("stay_units_v2")
+            .update(workingPayload as never)
+            .eq("id", unitId ?? "")
+            .select("*")
+            .maybeSingle()
+        : supabase.from("stay_units_v2").insert(workingPayload as never).select("*").maybeSingle();
+
+    const { data, error } = await query;
+    if (!error) {
+      return { data: (data as JsonRecord | null) ?? null, error: null, strippedColumns };
+    }
+
+    const missingColumn = extractMissingColumnFromSchemaError(error);
+    if (!missingColumn || !(missingColumn in workingPayload)) {
+      return { data: null, error, strippedColumns };
+    }
+
+    delete workingPayload[missingColumn];
+    strippedColumns.push(missingColumn);
+  }
+
+  return {
+    data: null,
+    error: new Error("Schema fallback exhausted for stay_units_v2."),
+    strippedColumns,
+  };
+}
+
+async function resolveHostContext(supabase: ReturnType<typeof createAdminSupabaseClient>, familyId: string): Promise<{
+  legacyFamilyId: string;
+  hostId: string | null;
+}> {
+  const { data: family } = await supabase
+    .from("families")
+    .select("id")
+    .eq("id", familyId)
+    .maybeSingle();
+
+  if (!family) {
+    return { legacyFamilyId: familyId, hostId: null };
+  }
+
+  const { data: host } = await supabase
+    .from("hosts")
+    .select("id")
+    .eq("legacy_family_id", familyId)
+    .maybeSingle();
+
+  return {
+    legacyFamilyId: familyId,
+    hostId: asNullableString((host as JsonRecord | null)?.id),
+  };
+}
+
+async function findExistingStayUnitIdForSave(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  input: {
+    hostId: string | null;
+    legacyFamilyId: string;
+    unitKey: string | null;
+    name: string;
+  }
+): Promise<string | null> {
+  if (input.unitKey) {
+    let query = supabase
+      .from("stay_units_v2")
+      .select("id")
+      .eq("unit_key", input.unitKey)
+      .eq("legacy_family_id", input.legacyFamilyId)
+      .order("updated_at", { ascending: false })
+      .limit(5);
+
+    if (input.hostId) {
+      query = query.eq("host_id", input.hostId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    const existingId = Array.isArray(data) ? asNullableString((data[0] as JsonRecord | undefined)?.id) : null;
+    if (existingId) return existingId;
+  }
+
+  const { data: sameNameRows, error: sameNameError } = await supabase
+    .from("stay_units_v2")
+    .select("id")
+    .eq("legacy_family_id", input.legacyFamilyId)
+    .eq("name", input.name)
+    .order("updated_at", { ascending: false })
+    .limit(5);
+  if (sameNameError) throw sameNameError;
+  return Array.isArray(sameNameRows) ? asNullableString((sameNameRows[0] as JsonRecord | undefined)?.id) : null;
+}
+
+async function collapseDuplicateStayUnits(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  input: {
+    familyId: string;
+    keepUnitId: string;
+    unitKey: string | null;
+  }
+): Promise<void> {
+  if (!input.unitKey) return;
+
+  const { data: rows, error } = await supabase
+    .from("stay_units_v2")
+    .select("id")
+    .eq("legacy_family_id", input.familyId)
+    .eq("unit_key", input.unitKey)
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+
+  const duplicateIds = (rows ?? [])
+    .map((row) => asNullableString((row as JsonRecord).id))
+    .filter((value): value is string => Boolean(value) && value !== input.keepUnitId);
+  if (duplicateIds.length === 0) return;
+
+  const migrationResults = await Promise.all([
+    supabase.from("channel_room_mappings").update({ stay_unit_id: input.keepUnitId } as never).in("stay_unit_id", duplicateIds),
+    supabase.from("channel_rate_plans").update({ stay_unit_id: input.keepUnitId } as never).in("stay_unit_id", duplicateIds),
+    supabase.from("inventory_event_log").update({ stay_unit_id: input.keepUnitId } as never).in("stay_unit_id", duplicateIds),
+    supabase.from("inventory_day_projection").update({ stay_unit_id: input.keepUnitId } as never).in("stay_unit_id", duplicateIds),
+    supabase
+      .from("calendar_events")
+      .update({ owner_id: input.keepUnitId } as never)
+      .eq("owner_type", "stay_unit")
+      .in("owner_id", duplicateIds),
+  ]);
+  for (const result of migrationResults) {
+    if (result.error) throw result.error;
+  }
+
+  const { error: deleteError } = await supabase.from("stay_units_v2").delete().in("id", duplicateIds);
+  if (deleteError) throw deleteError;
+}
+
+function mapRoomKind(unitType: string | null): "room" | "dorm" {
+  const normalized = unitType?.trim().toLowerCase() ?? "";
+  return normalized.includes("dorm") ? "dorm" : "room";
+}
+
+async function syncMappedChannexRoomOccupancy(input: {
+  supabase: ReturnType<typeof createAdminSupabaseClient>;
+  familyId: string;
+  stayUnitId: string;
+  maxGuests: number;
+  roomName: string;
+  unitType: string | null;
+  description: string | null;
+}): Promise<RoomOccupancySyncStatus> {
+  const [roomMappingResult, ratePlanMappingsResult] = await Promise.all([
+    input.supabase
+      .from("channel_room_mappings")
+      .select("external_property_id,external_room_type_id,count_of_rooms")
+      .eq("family_id", input.familyId)
+      .eq("stay_unit_id", input.stayUnitId)
+      .eq("provider_code", "channex")
+      .maybeSingle(),
+    input.supabase
+      .from("channel_rate_plans")
+      .select("external_rate_plan_id,title,meal_plan,metadata")
+      .eq("family_id", input.familyId)
+      .eq("stay_unit_id", input.stayUnitId)
+      .eq("provider_code", "channex"),
+  ]);
+  if (roomMappingResult.error) throw roomMappingResult.error;
+  if (ratePlanMappingsResult.error) throw ratePlanMappingsResult.error;
+
+  const externalRoomTypeId = asNullableString((roomMappingResult.data as JsonRecord | null)?.external_room_type_id);
+  const externalPropertyId = asNullableString((roomMappingResult.data as JsonRecord | null)?.external_property_id);
+  const mappedRatePlans = ((ratePlanMappingsResult.data ?? []) as JsonRecord[])
+    .map((row) => ({
+      externalRatePlanId: asNullableString(row.external_rate_plan_id),
+      title: asNullableString(row.title),
+      mealPlan: asNullableString(row.meal_plan),
+      metadata: pickObject(row.metadata),
+    }))
+    .filter((row) => Boolean(row.externalRatePlanId));
+
+  if (!externalRoomTypeId || !externalPropertyId || mappedRatePlans.length === 0) {
+    return {
+      status: "not_mapped",
+      message: "Channex room or rate plan mapping is missing, so occupancy sync is pending until mapping is completed.",
+      externalRoomTypeId,
+      externalRatePlanIds: mappedRatePlans.map((row) => row.externalRatePlanId!).filter(Boolean),
+    };
+  }
+
+  const mutationGuard = getChannexMutationGuardSummary();
+  if (mutationGuard.blockedProductionMutation) {
+    return {
+      status: "failed",
+      message: "Channex occupancy sync is blocked because production mutations are disabled in this environment.",
+      externalRoomTypeId,
+      externalRatePlanIds: mappedRatePlans.map((row) => row.externalRatePlanId!).filter(Boolean),
+    };
+  }
+
+  const roomTypeResult = await updateChannexRoomTypeOccupancy({
+    roomTypeId: externalRoomTypeId,
+    propertyId: externalPropertyId,
+    title: input.roomName,
+    countOfRooms: Math.max(1, asNumber((roomMappingResult.data as JsonRecord | null)?.count_of_rooms, 1)),
+    occAdults: Math.max(1, input.maxGuests),
+    occChildren: 0,
+    occInfants: 0,
+    defaultOccupancy: Math.max(1, input.maxGuests),
+    roomKind: mapRoomKind(input.unitType),
+    description: input.description,
+  });
+  if (!roomTypeResult.ok) {
+    return {
+      status: "failed",
+      message: roomTypeResult.message,
+      externalRoomTypeId,
+      externalRatePlanIds: mappedRatePlans.map((row) => row.externalRatePlanId!).filter(Boolean),
+    };
+  }
+
+  const ratePlanResults = await Promise.all(
+    mappedRatePlans.map((ratePlan) =>
+      updateChannexRatePlanOccupancy({
+        ratePlanId: ratePlan.externalRatePlanId ?? "",
+        title: ratePlan.title ?? `Standard Rate - ${input.roomName}`.trim(),
+        propertyId:
+          asNullableString(ratePlan.metadata.property_id) ??
+          externalPropertyId,
+        roomTypeId:
+          asNullableString(ratePlan.metadata.external_room_type_id) ??
+          externalRoomTypeId,
+        currency: "",
+        mealType: ratePlan.mealPlan ?? "room_only",
+        occupancy: Math.max(1, input.maxGuests),
+      })
+    )
+  );
+  const failedRatePlanResult = ratePlanResults.find((result) => !result.ok);
+  if (failedRatePlanResult) {
+    return {
+      status: "failed",
+      message: failedRatePlanResult.message,
+      externalRoomTypeId,
+      externalRatePlanIds: mappedRatePlans.map((row) => row.externalRatePlanId!).filter(Boolean),
+    };
+  }
+
+  return {
+    status: "synced",
+    message: `Channex occupancy sync updated ${mappedRatePlans.length} mapped rate plan${mappedRatePlans.length === 1 ? "" : "s"} successfully.`,
+    externalRoomTypeId,
+    externalRatePlanIds: mappedRatePlans.map((row) => row.externalRatePlanId!).filter(Boolean),
+  };
+}
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const familyId = request.nextUrl.searchParams.get("familyId");
+  if (!familyId) {
+    return NextResponse.json({ error: "Missing familyId." }, { status: 400 });
+  }
+
+  const supabase = createAdminSupabaseClient();
+  const hostAccess = await resolveAuthorizedHostResource(supabase, request, { familyId });
+  if (!hostAccess) {
+    return NextResponse.json({ error: "You do not have access to these rooms." }, { status: 403 });
+  }
+  const { hostId, legacyFamilyId } = await resolveHostContext(supabase, familyId);
+  const stayUnits = await loadStayUnitsForSelector(supabase, { hostId, legacyFamilyId });
+
+  return NextResponse.json({ stayUnits });
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  try {
+    const body = (await request.json()) as JsonRecord;
+    const familyId = asNullableString(body.familyId);
+    const clientId = asNullableString(body.clientId);
+    const addonOrderId = asNullableString(body.addonOrderId);
+    if (!familyId) {
+      return NextResponse.json({ error: "Missing familyId." }, { status: 400 });
+    }
+
+    const supabase = createAdminSupabaseClient();
+    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { familyId });
+    if (!hostAccess) {
+      return NextResponse.json({ error: "You do not have access to these rooms." }, { status: 403 });
+    }
+    const { hostId, legacyFamilyId } = await resolveHostContext(supabase, familyId);
+    const unit = body.unit && typeof body.unit === "object" ? (body.unit as JsonRecord) : {};
+    const unitId = asNullableString(unit.id);
+    const name = asString(unit.name);
+    if (!name) {
+      return NextResponse.json({ error: "Room name is required." }, { status: 400 });
+    }
+
+    const unitKey = asNullableString(unit.unitKey) || (unitId ? null : makeUnitKey(name));
+    const resolvedExistingUnitId = unitId ?? (await findExistingStayUnitIdForSave(supabase, {
+      hostId,
+      legacyFamilyId,
+      unitKey,
+      name,
+    }));
+    const previousStayUnit =
+      resolvedExistingUnitId
+        ? await supabase
+            .from("stay_units_v2")
+            .select("id,max_guests")
+            .eq("id", resolvedExistingUnitId)
+            .maybeSingle()
+        : null;
+    if (previousStayUnit?.error) {
+      throw previousStayUnit.error;
+    }
+    const proAccess = await loadHostProAccess(supabase, familyId);
+    const isNewRoomInsert = !resolvedExistingUnitId;
+    if (isNewRoomInsert) {
+      if (!proAccess.allowed || proAccess.status !== "active") {
+        return NextResponse.json(
+          { error: "Active Famlo Pro access is required before adding a new room." },
+          { status: 403 }
+        );
+      }
+      if (!hostAccess.hostUserId) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      }
+      if (!addonOrderId) {
+        const checkout = await createHostProAddonCheckout(supabase, {
+          hostUserId: hostAccess.hostUserId,
+          familyId,
+          addonType: "room",
+        });
+        return NextResponse.json(
+          {
+            error: "Room add-on payment is required before creation.",
+            addonPaymentRequired: true,
+            addonType: "room",
+            addonQuote: checkout.quote,
+            billingOrderId: checkout.billingOrderId,
+            keyId: checkout.keyId,
+            order: checkout.order,
+          },
+          { status: 402 }
+        );
+      }
+      await assertPaidHostProAddonOrderAvailable(supabase, {
+        billingOrderId: addonOrderId,
+        hostUserId: hostAccess.hostUserId,
+        familyId,
+        addonType: "room",
+      });
+    }
+    const normalizedLat = asNullableNumber(unit.lat);
+    const normalizedLng = asNullableNumber(unit.lng);
+    const payload: JsonRecord = {
+      host_id: hostId,
+      legacy_family_id: legacyFamilyId,
+      unit_key: unitKey ?? "primary",
+      name,
+      unit_type: asString(unit.unitType) || "private_room",
+      description: asNullableString(unit.description),
+      max_guests: Math.max(1, Math.trunc(asNumber(unit.maxGuests, 1))),
+      bed_info: asNullableString(unit.bedInfo),
+      bathroom_type: asNullableString(unit.bathroomType),
+      toilet_types: asStringArray((unit as JsonRecord).toiletTypes),
+      toilet_type: asNullableString((unit as JsonRecord).toiletType) ?? asStringArray((unit as JsonRecord).toiletTypes).join(", "),
+      room_size_sqm: typeof unit.roomSizeSqm === "number" || typeof unit.roomSizeSqm === "string" ? asNumber(unit.roomSizeSqm, 0) : null,
+      lat: normalizedLat,
+      lng: normalizedLng,
+      price_morning: normalizeMoney(unit.priceMorning, 0),
+      price_afternoon: normalizeMoney(unit.priceAfternoon, 0),
+      price_evening: normalizeMoney(unit.priceEvening, 0),
+      price_fullday: normalizeMoney(unit.priceFullday, 0),
+      quarter_enabled: asBoolean(unit.quarterEnabled, true),
+      is_active: asBoolean(unit.isActive, true),
+      is_primary: asBoolean(unit.isPrimary, false),
+      amenities: normalizeAmenityList(asStringArray(unit.amenities)),
+      photos: asStringArray(unit.photos),
+      locality_photos: asStringArray(unit.localityPhotos),
+      sort_order: Math.trunc(asNumber(unit.sortOrder, 0)),
+      updated_at: new Date().toISOString(),
+    };
+    const nextMaxGuests = Math.max(1, Math.trunc(asNumber(unit.maxGuests, 1)));
+    const previousMaxGuests = asNullableNumber((previousStayUnit?.data as JsonRecord | null)?.max_guests);
+    const shouldSyncMaxGuests = previousMaxGuests == null || previousMaxGuests !== nextMaxGuests;
+
+    const roomDraftPatch: JsonRecord = {
+      id: unitId ?? clientId ?? unitKey ?? name,
+      roomName: name,
+      roomType: asString(unit.unitType) || "private_room",
+      description: asNullableString(unit.description),
+      roomDescription: asNullableString(unit.description),
+      maxGuests: Math.max(1, Math.trunc(asNumber(unit.maxGuests, 1))),
+      bedConfiguration: asNullableString(unit.bedInfo),
+      bathroomType: asNullableString(unit.bathroomType),
+      toiletTypes: asStringArray((unit as JsonRecord).toiletTypes),
+      toiletType: asNullableString((unit as JsonRecord).toiletType) ?? asStringArray((unit as JsonRecord).toiletTypes).join(", "),
+      roomSizeSqm: typeof unit.roomSizeSqm === "number" || typeof unit.roomSizeSqm === "string" ? asNumber(unit.roomSizeSqm, 0) : null,
+      lat: normalizedLat,
+      lng: normalizedLng,
+      latitude: normalizedLat,
+      longitude: normalizedLng,
+      standardPrice: normalizeMoney(unit.priceFullday, 0),
+      lowDemandPrice: normalizeMoney(unit.priceMorning, 0),
+      highDemandPrice: normalizeMoney(unit.priceEvening, 0),
+      smartPricingEnabled: asBoolean(unit.quarterEnabled, true),
+      isActive: asBoolean(unit.isActive, true),
+      isPrimary: asBoolean(unit.isPrimary, false),
+      roomAmenities: normalizeAmenityList(asStringArray(unit.amenities)),
+      amenities: normalizeAmenityList(asStringArray(unit.amenities)),
+      roomPhotos: asStringArray(unit.photos),
+      photos: asStringArray(unit.photos),
+      localityPhotos: asStringArray(unit.localityPhotos),
+      locality_photos: asStringArray(unit.localityPhotos),
+      sortOrder: Math.trunc(asNumber(unit.sortOrder, 0)),
+    };
+
+    if (payload.is_primary) {
+      await supabase
+            .from("stay_units_v2")
+            .update({ is_primary: false })
+            .eq("legacy_family_id", legacyFamilyId)
+            .neq("id", resolvedExistingUnitId ?? "00000000-0000-0000-0000-000000000000");
+      if (hostId) {
+        await supabase
+          .from("stay_units_v2")
+          .update({ is_primary: false })
+          .eq("host_id", hostId)
+          .neq("id", resolvedExistingUnitId ?? "00000000-0000-0000-0000-000000000000");
+      }
+    }
+
+    if (resolvedExistingUnitId) {
+      const { data, error, strippedColumns } = await mutateStayUnitWithSchemaFallback(
+        supabase,
+        "update",
+        payload,
+        resolvedExistingUnitId
+      );
+      if (strippedColumns.length > 0) {
+        console.warn("[stay-units] stripped unsupported columns during update", strippedColumns);
+      }
+      if (error) throw error;
+      await syncRoomDraftPayload(
+        supabase,
+        familyId,
+        {
+          roomId: resolvedExistingUnitId ?? clientId,
+          unitKey: unitKey,
+          name,
+        },
+        roomDraftPatch
+      );
+      const mappedStayUnit = mapStayUnitRow(data as JsonRecord);
+      if (mappedStayUnit?.id) {
+        await collapseDuplicateStayUnits(supabase, {
+          familyId,
+          keepUnitId: mappedStayUnit.id,
+          unitKey: mappedStayUnit.unitKey,
+        });
+      }
+      if (mappedStayUnit?.id) {
+        const today = new Date().toISOString().slice(0, 10);
+        await projectInventoryRange(supabase, {
+          familyId,
+          stayUnitId: mappedStayUnit.id,
+          from: today,
+          to: addIndiaDays(today, 364),
+        });
+      }
+      const occupancySync =
+        mappedStayUnit?.id && shouldSyncMaxGuests
+          ? await syncMappedChannexRoomOccupancy({
+              supabase,
+              familyId,
+              stayUnitId: mappedStayUnit.id,
+              maxGuests: nextMaxGuests,
+              roomName: mappedStayUnit.name,
+              unitType: mappedStayUnit.unitType,
+              description: mappedStayUnit.description,
+            })
+          : null;
+      const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
+        familyId,
+        dateFrom: new Date().toISOString().slice(0, 10),
+        dateTo: new Date().toISOString().slice(0, 10),
+        jobTypes: ["full_sync"],
+        certificationScenario: "room_setup_saved",
+        sourceUiAction: "Famlo PMS room setup save",
+        sourceRoute: "/api/host/stay-units",
+        stayUnitIds: mappedStayUnit?.id ? [mappedStayUnit.id] : [],
+        actorUserId: hostAccess.hostUserId ?? null,
+        actorRole: hostAccess.isAdmin ? "admin" : "host",
+      });
+      return NextResponse.json({ stayUnit: mappedStayUnit, clientId, queuedJobIds, occupancySync });
+    }
+
+    const { data, error, strippedColumns } = await mutateStayUnitWithSchemaFallback(
+      supabase,
+      "insert",
+      payload
+    );
+    if (strippedColumns.length > 0) {
+      console.warn("[stay-units] stripped unsupported columns during insert", strippedColumns);
+    }
+    if (error) throw error;
+    if (hostAccess.hostUserId) {
+      await consumePaidHostProAddonOrder(supabase, {
+        billingOrderId: addonOrderId ?? "",
+        hostUserId: hostAccess.hostUserId,
+        familyId,
+        addonType: "room",
+        targetReference: asNullableString((data as JsonRecord | null)?.id) ?? name,
+      });
+    }
+    await syncRoomDraftPayload(
+      supabase,
+      familyId,
+      {
+        roomId: asNullableString((data as JsonRecord | null)?.id) ?? clientId,
+        unitKey: asNullableString((data as JsonRecord | null)?.unit_key) ?? unitKey,
+        name,
+      },
+      {
+        ...roomDraftPatch,
+        id: asNullableString((data as JsonRecord | null)?.id) ?? roomDraftPatch.id,
+      }
+    );
+    const mappedStayUnit = mapStayUnitRow(data as JsonRecord);
+    if (mappedStayUnit?.id) {
+      await collapseDuplicateStayUnits(supabase, {
+        familyId,
+        keepUnitId: mappedStayUnit.id,
+        unitKey: mappedStayUnit.unitKey,
+      });
+    }
+    if (mappedStayUnit?.id) {
+      const today = new Date().toISOString().slice(0, 10);
+      await projectInventoryRange(supabase, {
+        familyId,
+        stayUnitId: mappedStayUnit.id,
+        from: today,
+        to: addIndiaDays(today, 364),
+      });
+    }
+    const occupancySync =
+      mappedStayUnit?.id && shouldSyncMaxGuests
+        ? await syncMappedChannexRoomOccupancy({
+            supabase,
+            familyId,
+            stayUnitId: mappedStayUnit.id,
+            maxGuests: nextMaxGuests,
+            roomName: mappedStayUnit.name,
+            unitType: mappedStayUnit.unitType,
+            description: mappedStayUnit.description,
+          })
+        : null;
+    const queuedJobIds = await enqueueChannexAriSyncJobs(supabase, {
+      familyId,
+      dateFrom: new Date().toISOString().slice(0, 10),
+      dateTo: new Date().toISOString().slice(0, 10),
+      jobTypes: ["full_sync"],
+      certificationScenario: "room_setup_saved",
+      sourceUiAction: "Famlo PMS room setup save",
+      sourceRoute: "/api/host/stay-units",
+      stayUnitIds: mappedStayUnit?.id ? [mappedStayUnit.id] : [],
+      actorUserId: hostAccess.hostUserId ?? null,
+      actorRole: hostAccess.isAdmin ? "admin" : "host",
+    });
+    return NextResponse.json({ stayUnit: mappedStayUnit, clientId, queuedJobIds, occupancySync });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to save room." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  try {
+    const body = (await request.json()) as JsonRecord;
+    const familyId = asNullableString(body.familyId);
+    const unitId = asNullableString(body.unitId);
+
+    if (!familyId || !unitId) {
+      return NextResponse.json({ error: "Missing familyId or unitId." }, { status: 400 });
+    }
+
+    const supabase = createAdminSupabaseClient();
+    const hostAccess = await resolveAuthorizedHostResource(supabase, request, { familyId });
+    if (!hostAccess) {
+      return NextResponse.json({ error: "You do not have access to these rooms." }, { status: 403 });
+    }
+    const { hostId, legacyFamilyId } = await resolveHostContext(supabase, familyId);
+
+    const deleteQuery = supabase.from("stay_units_v2").delete().eq("id", unitId);
+    if (legacyFamilyId) {
+      deleteQuery.eq("legacy_family_id", legacyFamilyId);
+    }
+    if (hostId) {
+      deleteQuery.eq("host_id", hostId);
+    }
+
+    const { error } = await deleteQuery;
+    if (error) throw error;
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to delete room." },
+      { status: 500 }
+    );
+  }
+}

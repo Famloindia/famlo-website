@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export function HeroSection(): JSX.Element {
+export function HeroSection() {
   return (
     <section className="relative overflow-hidden bg-gradient-to-b from-famloBlueLight via-white to-white">
       <div className="absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top_left,_rgba(26,110,187,0.14),_transparent_55%)]" />

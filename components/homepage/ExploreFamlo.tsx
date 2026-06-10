@@ -20,7 +20,7 @@ function SectionCard({
   eyebrow: string;
   href: string;
   children: ReactNode;
-}): JSX.Element {
+}) {
   return (
     <section className="space-y-5">
       <div className="flex items-end justify-between gap-4">
@@ -46,7 +46,7 @@ export function ExploreFamlo({
   friends,
   hommies,
   homes
-}: ExploreFamloProps): JSX.Element {
+}: ExploreFamloProps) {
   const allStays = [
     ...hommies.map((hommie) => ({
       id: hommie.id,

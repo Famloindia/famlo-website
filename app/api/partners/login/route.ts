@@ -1,5 +1,9 @@
+//app/api/partners/login/route.ts
+
 import { NextResponse } from "next/server";
 
+import { isFamloProDashboardEnabled, loadHostProAccess, resolveHostDashboardHref } from "@/lib/host-pro-access";
+import { safeSelectFamilyOptionalField } from "@/lib/partner-login-compat";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -16,41 +20,89 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const supabase = createAdminSupabaseClient();
-
-  const { data: family, error } = await supabase
+  const { data, error } = await supabase
     .from("families")
-    .select("id, host_password, host_phone")
+    .select("id, user_id")
     .eq("host_id", identifier)
     .maybeSingle();
-  const familyRow = family as { id: string; host_password: string | null; host_phone: string | null } | null;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  if (!familyRow) {
+  const family = data as {
+    id: string;
+    user_id: string | null;
+  } | null;
+  if (!family) {
     return NextResponse.json({ error: "Partner ID or password is incorrect." }, { status: 401 });
   }
 
-  const fallbackPassword =
-    typeof familyRow.host_phone === "string" && familyRow.host_phone.length >= 4
-      ? `famlo${familyRow.host_phone.slice(-4)}`
-      : "";
+  try {
+    const [hostPassword, legacyPassword, hostPhone] = await Promise.all([
+      safeSelectFamilyOptionalField(supabase, family.id, "host_password"),
+      safeSelectFamilyOptionalField(supabase, family.id, "password"),
+      safeSelectFamilyOptionalField(supabase, family.id, "host_phone"),
+    ]);
 
-  const isMatch =
-    password === String(familyRow.host_password ?? "") ||
-    (fallbackPassword.length > 0 && password === fallbackPassword);
+    const fallbackPassword =
+      typeof hostPhone === "string" && hostPhone.length >= 4
+        ? `famlo${hostPhone.slice(-4)}`
+        : "";
 
-  if (!isMatch) {
-    return NextResponse.json({ error: "Partner ID or password is incorrect." }, { status: 401 });
+    let isMatch = false;
+
+    if (hostPassword && password === hostPassword) {
+      isMatch = true;
+    } else if (legacyPassword && password === legacyPassword) {
+      isMatch = true;
+    } else if (fallbackPassword.length > 0 && password === fallbackPassword) {
+      isMatch = true;
+    } else if (family.user_id) {
+      const { data: userRecord, error: userError } = await supabase
+        .from("users")
+        .select("email")
+        .eq("id", family.user_id)
+        .maybeSingle();
+
+      if (userError) {
+        return NextResponse.json({ error: userError.message }, { status: 500 });
+      }
+
+      const loginEmail = String((userRecord as { email?: string | null } | null)?.email ?? "").trim().toLowerCase();
+      if (loginEmail) {
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: loginEmail,
+          password,
+        });
+
+        if (!authError && authData.user) {
+          isMatch = true;
+        }
+      }
+    }
+
+    if (!isMatch) {
+      return NextResponse.json({ error: "Partner ID or password is incorrect." }, { status: 401 });
+    }
+  } catch (lookupError) {
+    const message = lookupError instanceof Error ? lookupError.message : "Failed to verify partner credentials.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
+  const proDashboardEnabled = isFamloProDashboardEnabled();
+  const proAccess = proDashboardEnabled ? await loadHostProAccess(supabase, family.id).catch(() => null) : null;
   const response = NextResponse.json({
     ok: true,
-    redirect: `/app/partnerslogin/home/dashboard?family=${familyRow.id}`
+    redirect: resolveHostDashboardHref({
+      familyId: family.id,
+      proDashboardEnabled,
+      proAccess,
+      proSection: "properties-home",
+    }),
   });
 
-  response.cookies.set("famlo_host_family_id", familyRow.id, {
+  response.cookies.set("famlo_host_family_id", family.id, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",

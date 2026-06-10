@@ -6,7 +6,7 @@ interface HommieCardProps {
   hommie: Hommie;
 }
 
-export function HommieCard({ hommie }: HommieCardProps): JSX.Element {
+export function HommieCard({ hommie }: HommieCardProps) {
   const coverImage = hommie.images?.[0];
 
   return (

@@ -155,7 +155,7 @@ export function HomeHostDashboard({
   hostBookings = [],
   initialSection = "overview",
   welcomeMode = false
-}: Readonly<HomeHostDashboardProps>): JSX.Element {
+}: Readonly<HomeHostDashboardProps>) {
   const router = useRouter();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const payload = (draft?.payload ?? {}) as Record<string, unknown>;
@@ -246,11 +246,12 @@ export function HomeHostDashboard({
   const totalStays = confirmedBookings.length;
   const monthlyStayCount = monthlyBookings.length;
   const serviceFee = totalStays >= 100 ? 12 : totalStays >= 50 ? 15 : 18;
+  const [transactionTimestamp, setTransactionTimestamp] = useState(() => Date.now());
   const transactions = useMemo(
     () =>
       hostBookings.map((booking) => {
         const bookingDate = booking.date_from ? new Date(booking.date_from) : new Date();
-        const daysAgo = (Date.now() - bookingDate.getTime()) / (1000 * 60 * 60 * 24);
+        const daysAgo = (transactionTimestamp - bookingDate.getTime()) / (1000 * 60 * 60 * 24);
         return {
           id: booking.id,
           period: daysAgo <= 7 ? "Week" : "Month",
@@ -260,7 +261,7 @@ export function HomeHostDashboard({
           status: booking.status === "confirmed" || booking.status === "completed" ? "Paid" : booking.status || "Pending"
         };
       }),
-    [hostBookings]
+    [hostBookings, transactionTimestamp]
   );
   const [transactionPeriod, setTransactionPeriod] = useState<"week" | "month">("week");
   const filteredTransactions = transactions.filter((item) => item.period.toLowerCase() === transactionPeriod);
@@ -292,6 +293,7 @@ export function HomeHostDashboard({
 
   useEffect(() => {
     const timer = window.setInterval(() => {
+      setTransactionTimestamp(Date.now());
       router.refresh();
     }, 10000);
     return () => window.clearInterval(timer);
@@ -463,7 +465,7 @@ export function HomeHostDashboard({
       .order("created_at", { ascending: false })
       .limit(1);
 
-    let conversationId = bookingConversationId || conversationRows?.[0]?.id ?? null;
+    let conversationId = bookingConversationId || (conversationRows?.[0]?.id ?? null);
 
     if (!conversationId) {
       const { data: insertedConversation } = await conversationsTable

@@ -34,7 +34,7 @@ const initialState: FormState = {
 
 export function HommieBookingRequestForm({
   hommie
-}: HommieBookingRequestFormProps): JSX.Element {
+}: HommieBookingRequestFormProps) {
   const [formState, setFormState] = useState<FormState>(initialState);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);

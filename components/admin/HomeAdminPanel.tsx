@@ -9,7 +9,7 @@ interface HomeAdminPanelProps {
   listings: Home[];
 }
 
-export function HomeAdminPanel({ applications, listings }: HomeAdminPanelProps): JSX.Element {
+export function HomeAdminPanel({ applications, listings }: HomeAdminPanelProps) {
   const [applicationItems, setApplicationItems] = useState(applications);
   const [listingItems, setListingItems] = useState(listings);
   const [message, setMessage] = useState("");

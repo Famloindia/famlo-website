@@ -31,7 +31,7 @@ const initialState: FormState = {
   notes: ""
 };
 
-export function HomeBookingRequestForm({ home }: HomeBookingRequestFormProps): JSX.Element {
+export function HomeBookingRequestForm({ home }: HomeBookingRequestFormProps) {
   const [formState, setFormState] = useState<FormState>(initialState);
   const [statusMessage, setStatusMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);

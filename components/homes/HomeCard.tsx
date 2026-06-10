@@ -6,7 +6,7 @@ interface HomeCardProps {
   home: Home;
 }
 
-export function HomeCard({ home }: HomeCardProps): JSX.Element {
+export function HomeCard({ home }: HomeCardProps) {
   const coverImage = home.images?.[0];
 
   return (

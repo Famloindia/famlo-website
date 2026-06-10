@@ -1,0 +1,498 @@
+import { NextResponse } from "next/server";
+
+import {
+  resolveNormalizedOtaSourceChannel,
+  resolveOtaPaymentCollectMode,
+} from "@/lib/channel-booking-normalization";
+import { syncBookingCalendarIndexBestEffort } from "@/lib/booking-calendar-index";
+import {
+  resolveChannelStorageProviderCode,
+  resolveProviderFromRevision,
+} from "@/lib/channel-providers/provider-capabilities";
+import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
+import { loadHostProAccess } from "@/lib/host-pro-access";
+import { resolveAuthorizedHostResource } from "@/lib/host-access";
+import { createAdminSupabaseClient } from "@/lib/supabase";
+
+type ImportPreviewBody = {
+  familyId?: string;
+  channelBookingRevisionId?: string;
+};
+
+export function assessImportPreviewEligibility(input: {
+  importStatus: string | null;
+  ackStatus: string | null;
+  externalBookingId: string | null;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  externalRoomTypeId: string | null;
+  amountNumber: number | null;
+  currency: string | null;
+  linkedBookingId: string | null;
+}): { ok: boolean; status: number; message: string; state: string } {
+  const importStatus = input.importStatus ?? "preview";
+  const ackStatus = input.ackStatus ?? "not_acknowledged";
+  if (!["preview", "failed"].includes(importStatus)) {
+    return { ok: false, status: 409, message: `This preview is already ${importStatus}.`, state: importStatus };
+  }
+  if (ackStatus !== "not_acknowledged") {
+    return { ok: false, status: 409, message: "Only not_acknowledged preview bookings can be imported in this phase.", state: ackStatus };
+  }
+  if (!input.externalBookingId || !input.arrivalDate || !input.departureDate || !input.externalRoomTypeId) {
+    return { ok: false, status: 409, message: "Preview booking is missing required booking, room, or date fields.", state: "missing_fields" };
+  }
+  if (input.amountNumber == null || !input.currency) {
+    return { ok: false, status: 409, message: "Preview booking amount or currency is missing.", state: "missing_amount" };
+  }
+  if (input.linkedBookingId) {
+    return { ok: true, status: 200, message: "This preview is already linked to a Famlo booking.", state: "already_imported" };
+  }
+  return { ok: true, status: 200, message: "Preview booking can be imported into Famlo.", state: "eligible" };
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asNumberOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown };
+  const code = typeof record.code === "string" ? record.code : "";
+  const message = typeof record.message === "string" ? record.message : "";
+  return (
+    (code === "42703" && message.includes(columnName)) ||
+    (message.includes(columnName) && (message.includes("schema cache") || message.includes("does not exist"))) ||
+    (columnName === "stay_unit_id" && message === "")
+  );
+}
+
+async function logImportResult(input: {
+  supabase: ReturnType<typeof createAdminSupabaseClient>;
+  familyId: string;
+  status: "success" | "failed";
+  message: string;
+  payload: Record<string, unknown>;
+}): Promise<void> {
+  const { error } = await input.supabase.from("channel_sync_logs").insert({
+    family_id: input.familyId,
+    provider_code: "channex",
+    action: "import_booking_preview",
+    status: input.status,
+    message: input.message,
+    payload: input.payload,
+  } as never);
+
+  if (error) {
+    const message = String(error.message ?? "");
+    if (!/relation|does not exist|schema cache/i.test(message)) {
+      console.error("[host.pro.channel.channex.bookings.import-preview] log failed:", error);
+    }
+  }
+}
+
+export async function POST(request: Request): Promise<NextResponse> {
+  try {
+    const body = (await request.json()) as ImportPreviewBody;
+    const familyId = asString(body.familyId);
+    const channelBookingRevisionId = asString(body.channelBookingRevisionId);
+
+    if (!familyId || !channelBookingRevisionId) {
+      return NextResponse.json({ error: "familyId and channelBookingRevisionId are required." }, { status: 400 });
+    }
+
+    const supabase = createAdminSupabaseClient();
+    const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
+    if (!authorizedResource?.familyId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!authorizedResource.isAdmin) {
+      return NextResponse.json({ error: "Operator access is required." }, { status: 403 });
+    }
+
+    const access = await loadHostProAccess(supabase, familyId);
+    if (!access.allowed) {
+      return NextResponse.json({ error: "Famlo Pro is not active for this property." }, { status: 403 });
+    }
+
+    const { data: revisionRow, error: revisionError } = await supabase
+      .from("channel_booking_revisions")
+      .select("id,family_id,provider_code,ota_provider_code,external_booking_id,external_revision_id,external_room_type_id,external_rate_plan_id,ota_name,status,arrival_date,departure_date,guest_name,amount,currency,payment_collect,source,raw_payload,import_status,ack_status,linked_booking_id")
+      .eq("id", channelBookingRevisionId)
+      .eq("family_id", familyId)
+      .eq("provider_code", "channex")
+      .maybeSingle();
+
+    if (revisionError) throw revisionError;
+    if (!revisionRow) {
+      return NextResponse.json({ error: "Preview booking not found for this property." }, { status: 404 });
+    }
+
+    const importStatus = asStringOrNull(revisionRow.import_status) ?? "preview";
+    const ackStatus = asStringOrNull(revisionRow.ack_status) ?? "not_acknowledged";
+    const externalBookingId = asStringOrNull(revisionRow.external_booking_id);
+    const arrivalDate = asStringOrNull(revisionRow.arrival_date);
+    const departureDate = asStringOrNull(revisionRow.departure_date);
+    const externalRoomTypeId = asStringOrNull(revisionRow.external_room_type_id);
+    const externalRatePlanId = asStringOrNull(revisionRow.external_rate_plan_id);
+    const currency = asStringOrNull(revisionRow.currency);
+    const amountNumber = asNumberOrNull(revisionRow.amount);
+    const rawPayload =
+      revisionRow.raw_payload && typeof revisionRow.raw_payload === "object" && !Array.isArray(revisionRow.raw_payload)
+        ? (revisionRow.raw_payload as Record<string, unknown>)
+        : {};
+    const revisionProvider = resolveProviderFromRevision({
+      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+      otaName: asStringOrNull(revisionRow.ota_name),
+    });
+    const storageProviderCode = resolveChannelStorageProviderCode(revisionProvider ?? "booking");
+
+    const eligibility = assessImportPreviewEligibility({
+      importStatus,
+      ackStatus,
+      externalBookingId,
+      arrivalDate,
+      departureDate,
+      externalRoomTypeId,
+      amountNumber,
+      currency,
+      linkedBookingId: asStringOrNull(revisionRow.linked_booking_id),
+    });
+    if (!eligibility.ok && eligibility.state === "missing_fields") {
+      return NextResponse.json(
+        {
+          error: eligibility.message,
+          missingFields: [
+            !externalBookingId ? "external_booking_id" : null,
+            !arrivalDate ? "arrival_date" : null,
+            !departureDate ? "departure_date" : null,
+            !externalRoomTypeId ? "external_room_type_id" : null,
+          ].filter(Boolean),
+        },
+        { status: eligibility.status }
+      );
+    }
+    if (!eligibility.ok && eligibility.state === "missing_amount") {
+      return NextResponse.json(
+        {
+          error: eligibility.message,
+          missingFields: [
+            amountNumber == null ? "amount" : null,
+            !currency ? "currency" : null,
+          ].filter(Boolean),
+        },
+        { status: eligibility.status }
+      );
+    }
+    if (!eligibility.ok) {
+      return NextResponse.json({ error: eligibility.message }, { status: eligibility.status });
+    }
+    if (eligibility.state === "already_imported") {
+      return NextResponse.json(
+        {
+          ok: true,
+          status: "already_imported",
+          message: eligibility.message,
+          bookingId: asStringOrNull(revisionRow.linked_booking_id),
+        },
+        { status: 200 }
+      );
+    }
+
+    const assuredAmountNumber = amountNumber as number;
+    const assuredCurrency = currency as string;
+
+    const { data: roomMappingRow, error: roomMappingError } = await supabase
+      .from("channel_room_mappings")
+      .select("stay_unit_id,external_room_type_id")
+      .eq("family_id", familyId)
+      .eq("provider_code", storageProviderCode)
+      .eq("external_room_type_id", externalRoomTypeId)
+      .maybeSingle();
+
+    if (roomMappingError) throw roomMappingError;
+    const stayUnitId = asStringOrNull(roomMappingRow?.stay_unit_id);
+    if (!stayUnitId) {
+      return NextResponse.json({ error: "Mapped stay unit was not found for this external room type." }, { status: 409 });
+    }
+
+    const { data: stayUnitRow, error: stayUnitError } = await supabase
+      .from("stay_units_v2")
+      .select("id,host_id,name")
+      .eq("id", stayUnitId)
+      .maybeSingle();
+
+    if (stayUnitError) throw stayUnitError;
+    const hostId = asStringOrNull(stayUnitRow?.host_id);
+    if (!hostId) {
+      return NextResponse.json({ error: "Resolved stay unit is not linked to an active host profile." }, { status: 409 });
+    }
+
+    const { data: existingBooking, error: existingBookingError } = await supabase
+      .from("bookings_v2")
+      .select("id,status,payment_status")
+      .eq("host_id", hostId)
+      .eq("pricing_snapshot->>channel_provider", "channex")
+      .eq("pricing_snapshot->>channel_external_booking_id", externalBookingId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingBookingError) throw existingBookingError;
+
+    if (existingBooking?.id) {
+      const existingBookingId = asStringOrNull(existingBooking.id);
+      const now = new Date().toISOString();
+      await supabase
+        .from("channel_booking_revisions")
+        .update({
+          import_status: "imported",
+          linked_booking_id: existingBookingId,
+          updated_at: now,
+        } as never)
+        .eq("id", channelBookingRevisionId);
+
+      await logImportResult({
+        supabase,
+        familyId,
+        status: "success",
+        message: "Preview booking already exists in Famlo. Linked the existing booking without acknowledging Channex.",
+        payload: {
+          external_booking_id: externalBookingId,
+          external_room_type_id: externalRoomTypeId,
+          external_rate_plan_id: externalRatePlanId,
+          linked_booking_id: existingBookingId,
+          duplicate_detected: true,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          status: "already_imported",
+          message: "A matching Famlo OTA booking already exists. Linked the preview to that booking without creating a duplicate.",
+          bookingId: existingBookingId,
+        },
+        { status: 200 }
+      );
+    }
+
+    const now = new Date().toISOString();
+    const guestName = asStringOrNull(revisionRow.guest_name) ?? "OTA Guest";
+    const amountRounded = Math.round(assuredAmountNumber);
+    const { data: familyRow, error: familyLookupError } = await supabase
+      .from("families")
+      .select("user_id")
+      .eq("id", familyId)
+      .maybeSingle();
+
+    if (familyLookupError) throw familyLookupError;
+
+    const { data: hostRow, error: hostLookupError } = await supabase
+      .from("hosts")
+      .select("user_id")
+      .eq("id", hostId)
+      .maybeSingle();
+
+    if (hostLookupError) throw hostLookupError;
+
+    const technicalUserId = asStringOrNull(familyRow?.user_id) ?? asStringOrNull(hostRow?.user_id);
+    if (!technicalUserId) {
+      await logImportResult({
+        supabase,
+        familyId,
+        status: "failed",
+        message: "Could not resolve a technical owner user for OTA preview import.",
+        payload: {
+          failed_stage: "technical_user_lookup",
+          host_id: hostId,
+          stay_unit_id: stayUnitId,
+          external_booking_id: externalBookingId,
+          family_user_id_present: Boolean(asStringOrNull(familyRow?.user_id)),
+          host_user_id_present: Boolean(asStringOrNull(hostRow?.user_id)),
+        },
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Could not resolve a technical owner user for this OTA import.",
+          failed_stage: "technical_user_lookup",
+          details: {
+            family_user_available: Boolean(asStringOrNull(familyRow?.user_id)),
+            host_user_available: Boolean(asStringOrNull(hostRow?.user_id)),
+          },
+          status: "technical_user_missing",
+        },
+        { status: 409 }
+      );
+    }
+
+    const guestEmail =
+      asStringOrNull(rawPayload.email) ??
+      asStringOrNull(rawPayload.guest_email) ??
+      asStringOrNull(rawPayload.customer_email);
+    const guestPhone =
+      asStringOrNull(rawPayload.phone) ??
+      asStringOrNull(rawPayload.guest_phone) ??
+      asStringOrNull(rawPayload.customer_phone);
+    const guestHidden = !guestName && !guestEmail && !guestPhone;
+    const sourceChannel = resolveNormalizedOtaSourceChannel({
+      otaProviderCode: asStringOrNull((revisionRow as Record<string, unknown>).ota_provider_code),
+      otaName: asStringOrNull(revisionRow.ota_name),
+      source: asStringOrNull(revisionRow.source),
+    });
+    const paymentCollectMode = resolveOtaPaymentCollectMode(asStringOrNull(revisionRow.payment_collect));
+
+    const pricingSnapshot = {
+      stay_unit_id: stayUnitId,
+      base_price: amountRounded,
+      unit_price: amountRounded,
+      total_amount: assuredAmountNumber.toFixed(2),
+      currency: assuredCurrency,
+      channel_provider: "channex",
+      channel_source_type: "ota",
+      channel_source: asStringOrNull(revisionRow.source) ?? "booking_list_api",
+      channel_import_source: asStringOrNull(revisionRow.source) ?? "booking_list_api",
+      channel_external_booking_id: externalBookingId,
+      channel_external_revision_id: asStringOrNull(revisionRow.external_revision_id),
+      channel_external_room_type_id: externalRoomTypeId,
+      channel_external_rate_plan_id: externalRatePlanId,
+      channel_booking_revision_id: channelBookingRevisionId,
+      payment_collect: asStringOrNull(revisionRow.payment_collect),
+      ota_name: asStringOrNull(revisionRow.ota_name),
+      imported_from_channex_preview: true,
+      guest_name: guestName,
+      channel_guest_name: guestName,
+      channel_guest_email: guestEmail,
+      channel_guest_phone: guestPhone,
+      channel_guest_hidden: guestHidden,
+      channel_guest_display_name: guestName || "OTA Guest",
+      channel_user_id_mode: "external_ota_guest",
+      technical_owner_user_id: technicalUserId,
+      payment_collect_mode: paymentCollectMode,
+    };
+
+    const bookingPayload: Record<string, unknown> = {
+      user_id: technicalUserId,
+      booking_type: "host_stay",
+      recipient_type: "host",
+      recipient_id: hostId,
+      product_type: "host_listing",
+      product_id: hostId,
+      host_id: hostId,
+      status: "confirmed",
+      start_date: arrivalDate,
+      end_date: departureDate,
+      quarter_type: null,
+      quarter_time: null,
+      guests_count: 1,
+      notes: `Imported from Channex preview ${externalBookingId}. Not acknowledged yet.`,
+      pricing_snapshot: pricingSnapshot,
+      source_channel: sourceChannel,
+      total_price: amountRounded,
+      partner_payout_amount: 0,
+      payment_status: "not_required",
+      cancellation_policy_code: null,
+      stay_unit_id: stayUnitId,
+    };
+
+    let insertResult;
+    try {
+      insertResult = await supabase.from("bookings_v2").insert(bookingPayload as never).select("id").single();
+    } catch (error) {
+      if (!isMissingColumnError(error, "stay_unit_id")) {
+        throw error;
+      }
+      const { stay_unit_id: _ignored, ...fallbackPayload } = bookingPayload;
+      insertResult = await supabase.from("bookings_v2").insert(fallbackPayload as never).select("id").single();
+    }
+
+    if (insertResult.error && isMissingColumnError(insertResult.error, "stay_unit_id")) {
+      const { stay_unit_id: _ignored, ...fallbackPayload } = bookingPayload;
+      insertResult = await supabase.from("bookings_v2").insert(fallbackPayload as never).select("id").single();
+    }
+
+    if (insertResult.error || !insertResult.data?.id) {
+      throw insertResult.error ?? new Error("Unable to create bookings_v2 row.");
+    }
+
+    const bookingId = asString(insertResult.data.id);
+    const { error: revisionUpdateError } = await supabase
+      .from("channel_booking_revisions")
+      .update({
+        import_status: "imported",
+        linked_booking_id: bookingId,
+        updated_at: now,
+      } as never)
+      .eq("id", channelBookingRevisionId);
+
+    if (revisionUpdateError) throw revisionUpdateError;
+
+    await processFinanceEventContract(supabase, {
+      bookingId,
+      eventType: "OTA_BOOKING_IMPORTED",
+      sourceEventId: channelBookingRevisionId,
+      calculationVersion: "batch2-direct-folio-v1",
+      bookingAmount: amountRounded,
+      sourceChannel,
+      paymentCollectMode,
+      metadata: {
+        source: "channex.import_preview",
+        external_booking_id: externalBookingId,
+      },
+    });
+
+    await syncBookingCalendarIndexBestEffort(supabase, bookingId, "channex_import_preview_apply");
+
+    await logImportResult({
+      supabase,
+      familyId,
+      status: "success",
+      message: "Imported Channex preview booking into Famlo without acknowledging Channex.",
+      payload: {
+        external_booking_id: externalBookingId,
+        external_room_type_id: externalRoomTypeId,
+        external_rate_plan_id: externalRatePlanId,
+        linked_booking_id: bookingId,
+        stay_unit_id: stayUnitId,
+        host_id: hostId,
+        amount: assuredAmountNumber.toFixed(2),
+        currency: assuredCurrency,
+        technical_owner_user_id: technicalUserId,
+      },
+    });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        status: "imported",
+        message: "Imported this Channex preview booking into Famlo bookings. Channex acknowledgement remains pending.",
+        bookingId,
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("[host.pro.channel.channex.bookings.import-preview] failed:", error);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : "Unable to import this preview booking.",
+      },
+      { status: 500 }
+    );
+  }
+}

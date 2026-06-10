@@ -32,7 +32,7 @@ function getLocation(application: AdminApplication): string {
 export function ApplicationsTable({
   applications,
   onView
-}: ApplicationsTableProps): JSX.Element {
+}: ApplicationsTableProps) {
   return (
     <div className="overflow-hidden rounded-[28px] border border-[#D5E7F8] bg-white shadow-[0_20px_60px_rgba(26,110,187,0.08)]">
       <div className="overflow-x-auto">

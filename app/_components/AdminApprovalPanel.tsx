@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 
 import type { ApprovalCredentials, HomeApplication, HommieApplication } from "@/lib/types";
 
@@ -18,7 +18,7 @@ interface ApprovalResult {
 export function AdminApprovalPanel({
   homeApplications,
   hommieApplications
-}: Readonly<AdminApprovalPanelProps>): JSX.Element {
+}: Readonly<AdminApprovalPanelProps>): ReactElement {
   const router = useRouter();
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [result, setResult] = useState<ApprovalResult | null>(null);

@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export function CTABanner(): JSX.Element {
+export function CTABanner() {
   return (
     <section className="bg-white py-20 sm:py-24">
       <div className="mx-auto w-full max-w-6xl px-6">

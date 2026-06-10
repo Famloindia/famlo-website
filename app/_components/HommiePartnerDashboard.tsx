@@ -25,7 +25,7 @@ function parseList(value: string): string[] {
 export function HommiePartnerDashboard({
   hommie,
   bookings
-}: HommiePartnerDashboardProps): JSX.Element {
+}: HommiePartnerDashboardProps) {
   const [section, setSection] = useState<Section>("overview");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>("");

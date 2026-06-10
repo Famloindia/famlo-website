@@ -1,6 +1,6 @@
 import { ResetPage } from "@/app/_components/ResetPage";
 
-export default function FamilyApplicationPage(): JSX.Element {
+export default function FamilyApplicationPage() {
   return (
     <ResetPage
       title="Family application page reset."

@@ -72,7 +72,7 @@ function resolveSelectedLanguages(state: FormState): string[] {
   return filteredLanguages;
 }
 
-export function FriendApplicationForm(): JSX.Element {
+export function FriendApplicationForm() {
   const [formState, setFormState] = useState<FormState>(initialFormState);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionState, setSubmissionState] = useState<SubmissionState | null>(

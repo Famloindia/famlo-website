@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export default function PartnersPage(): JSX.Element {
+export default function PartnersPage() {
   return (
     <section className="px-6 py-12 sm:py-16">
       <div className="mx-auto w-full max-w-6xl space-y-10">

@@ -38,7 +38,7 @@ function calculateDistanceKm(
   return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export function HomesExplorer({ homes }: HomesExplorerProps): JSX.Element {
+export function HomesExplorer({ homes }: HomesExplorerProps) {
   const [query, setQuery] = useState("");
   const [nearbyOnly, setNearbyOnly] = useState(false);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);

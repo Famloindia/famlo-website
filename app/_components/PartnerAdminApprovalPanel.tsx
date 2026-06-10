@@ -22,7 +22,7 @@ interface ActionState {
 export function PartnerAdminApprovalPanel({
   familyApplications,
   friendApplications
-}: Readonly<PartnerAdminApprovalPanelProps>): JSX.Element {
+}: Readonly<PartnerAdminApprovalPanelProps>) {
   const router = useRouter();
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [state, setState] = useState<ActionState | null>(null);

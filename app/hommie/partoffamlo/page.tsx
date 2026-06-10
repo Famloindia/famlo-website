@@ -1,6 +1,6 @@
 import { ResetPage } from "@/app/_components/ResetPage";
 
-export default function HommieJoinPage(): JSX.Element {
+export default function HommieJoinPage() {
   return (
     <ResetPage
       title="Hommie application page reset."

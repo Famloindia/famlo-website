@@ -13,8 +13,8 @@ function hasDoc(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-export default async function PausedListingsPage(): Promise<JSX.Element> {
-  const cookieStore = cookies();
+export default async function PausedListingsPage() {
+  const cookieStore = await cookies();
   const isAuthenticated = verifyAdminSessionToken(
     cookieStore.get(getAdminCookieName())?.value
   );

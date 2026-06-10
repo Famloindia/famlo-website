@@ -1,4 +1,4 @@
-export function AdminLogoutButton(): JSX.Element {
+export function AdminLogoutButton() {
   return (
     <form action="/api/admin/logout" method="post">
       <button

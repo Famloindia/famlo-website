@@ -1,7 +1,8 @@
 "use client";
 
 // FILE: components/QuarterModal.tsx
-import { useEffect, useMemo, useState } from "react";
+import type { JSX } from "react";
+import { useMemo, useState } from "react";
 
 import type { ListingItem, ListingQuarter } from "./HomeCard";
 
@@ -52,15 +53,6 @@ export function QuarterModal({
   const dates = useMemo(() => getNextSevenDays(), []);
   const [selectedDate, setSelectedDate] = useState<string>(formatDateKey(dates[0]));
   const [selectedQuarterKey, setSelectedQuarterKey] = useState<ListingQuarter["key"] | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    setSelectedDate(formatDateKey(dates[0]));
-    setSelectedQuarterKey(null);
-  }, [dates, isOpen, listing]);
 
   if (!isOpen || !listing) {
     return null;
@@ -212,7 +204,7 @@ export function QuarterModal({
                 : "Select a quarter"}
             </p>
             <p className="mt-1 text-xs text-[#6B7A99]">
-              {selectedQuarter ? `${selectedQuarter.timeRange} · 18% Famlo fee included` : "18% Famlo fee included"}
+              {selectedQuarter ? `${selectedQuarter.timeRange} · 16% Famlo fee included` : "16% Famlo fee included"}
             </p>
           </div>
           <button

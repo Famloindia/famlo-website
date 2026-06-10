@@ -24,7 +24,7 @@ function buildMapBounds(latitude: number, longitude: number): string {
 export function HommiesMap({
   hommies,
   highlightedSlug
-}: HommiesMapProps): JSX.Element {
+}: HommiesMapProps) {
   const highlighted = useMemo(
     () => hommies.find((item) => item.slug === highlightedSlug) ?? hommies[0] ?? null,
     [highlightedSlug, hommies]

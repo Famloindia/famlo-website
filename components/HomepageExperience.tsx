@@ -1,15 +1,51 @@
 "use client";
 
 // FILE: components/HomepageExperience.tsx
+import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import type { Home, Hommie } from "../lib/types";
 import { FilterChips } from "./FilterChips";
 import { HomeCard, type ListingItem, type ListingQuarter } from "./HomeCard";
 import { MapSection } from "./MapSection";
 import { QuarterModal } from "./QuarterModal";
 import { SearchBar } from "./SearchBar";
+
+interface Home {
+  id: string;
+  slug: string;
+  property_name: string;
+  city: string;
+  state: string;
+  locality: string | null;
+  description: string;
+  images: string[] | null;
+  latitude: number;
+  longitude: number;
+  google_maps_link: string | null;
+  is_approved: boolean;
+  food_details: string | null;
+  nightly_price: number;
+  blocked_dates?: string[] | null;
+}
+
+interface Hommie {
+  id: string;
+  slug: string;
+  property_name: string;
+  city: string;
+  state: string;
+  locality: string | null;
+  description: string;
+  images: string[] | null;
+  latitude: number;
+  longitude: number;
+  google_maps_link: string | null;
+  is_approved: boolean;
+  nightly_price: number;
+  blocked_dates?: string[] | null;
+  amenities?: string[] | null;
+}
 
 interface HomepageExperienceProps {
   homes: Home[];
@@ -167,7 +203,22 @@ export function HomepageExperience({
   const [activeChip, setActiveChip] = useState("All");
   const [selectedListing, setSelectedListing] = useState<ListingItem | null>(null);
   const [detectedCity, setDetectedCity] = useState("Jodhpur");
-  const [recentListingIds, setRecentListingIds] = useState<string[]>([]);
+  const [recentListingIds, setRecentListingIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+
+    const storedRecent = window.localStorage.getItem(recentStorageKey);
+    if (!storedRecent) {
+      return [];
+    }
+
+    try {
+      return JSON.parse(storedRecent) as string[];
+    } catch {
+      return [];
+    }
+  });
   const [selectedMapListingId, setSelectedMapListingId] = useState<string | null>(null);
 
   const listings = useMemo<ListingItem[]>(
@@ -177,26 +228,7 @@ export function HomepageExperience({
 
   useEffect(() => {
     void detectCity().then(setDetectedCity);
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const storedRecent = window.localStorage.getItem(recentStorageKey);
-    if (storedRecent) {
-      try {
-        const parsed = JSON.parse(storedRecent) as string[];
-        setRecentListingIds(parsed);
-      } catch {
-        setRecentListingIds([]);
-      }
-    }
   }, []);
-
-  useEffect(() => {
-    if (!selectedMapListingId && listings[0]) {
-      setSelectedMapListingId(listings[0].id);
-    }
-  }, [listings, selectedMapListingId]);
 
   function storeRecentListing(listing: ListingItem): void {
     const nextRecent = [listing.id, ...recentListingIds.filter((item) => item !== listing.id)].slice(0, 4);
@@ -273,6 +305,7 @@ export function HomepageExperience({
       })
       .slice(0, 4);
   }, [detectedCity, visibleListings]);
+  const effectiveSelectedMapListingId = selectedMapListingId ?? listings[0]?.id ?? null;
 
   return (
     <>
@@ -318,7 +351,7 @@ export function HomepageExperience({
             </h2>
             <MapSection
               listings={visibleListings}
-              selectedListingId={selectedMapListingId}
+              selectedListingId={effectiveSelectedMapListingId}
               onSelect={(listing) => setSelectedMapListingId(listing.id)}
               onOpen={openListingModal}
             />
@@ -336,6 +369,7 @@ export function HomepageExperience({
       </div>
 
       <QuarterModal
+        key={selectedListing?.id ?? "quarter-modal-empty"}
         listing={selectedListing}
         isOpen={selectedListing !== null}
         onClose={() => setSelectedListing(null)}

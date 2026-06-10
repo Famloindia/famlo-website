@@ -14,7 +14,7 @@ function formatDate(value: string): string {
 
 export function StoriesSection({
   stories
-}: StoriesSectionProps): JSX.Element | null {
+}: StoriesSectionProps) {
   if (stories.length === 0) {
     return null;
   }

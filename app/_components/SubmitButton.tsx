@@ -6,7 +6,7 @@ interface SubmitButtonProps {
   label: string;
 }
 
-export function SubmitButton({ label }: Readonly<SubmitButtonProps>): JSX.Element {
+export function SubmitButton({ label }: Readonly<SubmitButtonProps>) {
   const { pending } = useFormStatus();
 
   return (

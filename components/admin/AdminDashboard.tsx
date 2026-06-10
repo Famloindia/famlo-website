@@ -56,7 +56,7 @@ export function AdminDashboard({
   totalUsers,
   newUsersThisMonth,
   monthlyUsers
-}: AdminDashboardProps): JSX.Element {
+}: AdminDashboardProps) {
   const [familyItems, setFamilyItems] = useState(familyApplications);
   const [friendItems, setFriendItems] = useState(friendApplications);
   const [managedFamilies, setManagedFamilies] = useState(families);
@@ -458,6 +458,7 @@ export function AdminDashboard({
       </div>
 
       <ApplicationDetailModal
+        key={selectedApplication?.id ?? "empty"}
         application={selectedApplication}
         isOpen={selectedApplication !== null}
         onClose={() => setSelectedApplication(null)}

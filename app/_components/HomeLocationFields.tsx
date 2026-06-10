@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 
-export function HomeLocationFields(): JSX.Element {
+export function HomeLocationFields() {
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [mapsLink, setMapsLink] = useState("");
@@ -14,7 +14,7 @@ export function HomeLocationFields(): JSX.Element {
     setLongitude(nextLongitude);
   }
 
-  async function useCurrentLocation(): Promise<void> {
+  async function handleUseCurrentLocation(): Promise<void> {
     if (!navigator.geolocation) {
       setStatus("Geolocation is not supported in this browser.");
       return;
@@ -58,7 +58,7 @@ export function HomeLocationFields(): JSX.Element {
         </div>
         <button
           type="button"
-          onClick={() => void useCurrentLocation()}
+          onClick={() => void handleUseCurrentLocation()}
           className="inline-flex items-center justify-center rounded-full border border-[#1f2937] px-4 py-2 text-sm font-semibold text-[#1f2937]"
         >
           Use current location

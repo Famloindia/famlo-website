@@ -26,6 +26,7 @@ yarn-error.log*
 
 # local env files
 .env*.local
+.env.schema-drift.local
 
 # vercel
 .vercel
@@ -41,3 +42,13 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+# local database dumps and backups
+backups/staging-reset/
+prod-backup-before-clean.sql
+prod-data-for-staging.sql
+prod-data-for-staging-safe.sql
+prod-public-data-for-staging.sql
+prod-public-data-for-staging-safe.sql
+*.dump
+reports/schema-drift/*.json

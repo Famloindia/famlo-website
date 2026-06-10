@@ -1,0 +1,33 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "types/**/*.d.ts",
+    "types/**/*.ts",
+    "types/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "scripts/**/*.ts",
+    "scripts/**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/node_modules/**",
+    "**/node_modules 2/**",
+    ".next",
+    "**/.next/**",
+    ".codex-backups/**",
+    "backups/**",
+    "**/* 2/**",
+    "my-app/**",
+    "supabase/functions/**",
+    "supabase/functions 2/**",
+    "supabase/migrations 2/**"
+  ]
+}

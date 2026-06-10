@@ -1,6 +1,6 @@
 import { ResetPage } from "@/app/_components/ResetPage";
 
-export default function AdminHommiesPage(): JSX.Element {
+export default function AdminHommiesPage() {
   return (
     <ResetPage
       title="Admin hommies page reset."

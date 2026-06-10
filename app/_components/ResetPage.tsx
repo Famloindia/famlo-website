@@ -8,7 +8,7 @@ interface ResetPageProps {
 export function ResetPage({
   title,
   description
-}: Readonly<ResetPageProps>): JSX.Element {
+}: Readonly<ResetPageProps>) {
   return (
     <section className="flex min-h-screen items-center px-6 py-16">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 rounded-[32px] border border-white/60 bg-white/75 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur md:p-12">

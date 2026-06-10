@@ -1,6 +1,6 @@
 import { ResetPage } from "@/app/_components/ResetPage";
 
-export default function FriendsPage(): JSX.Element {
+export default function FriendsPage() {
   return (
     <ResetPage
       title="Friends page reset."

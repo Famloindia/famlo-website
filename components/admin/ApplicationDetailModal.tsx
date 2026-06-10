@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { StatusBadge } from "./StatusBadge";
 import type {
@@ -39,8 +39,8 @@ export function ApplicationDetailModal({
   isOpen,
   onClose,
   onUpdated
-}: ApplicationDetailModalProps): JSX.Element | null {
-  const [note, setNote] = useState("");
+}: ApplicationDetailModalProps) {
+  const [note, setNote] = useState(() => application?.review_notes ?? "");
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -48,13 +48,6 @@ export function ApplicationDetailModal({
   const [pendingAction, setPendingAction] = useState<ActionType | null>(null);
   const [approvalCredentials, setApprovalCredentials] =
     useState<ApprovalCredentials | null>(null);
-
-  useEffect(() => {
-    setNote(application?.review_notes ?? "");
-    setFeedback(null);
-    setPendingAction(null);
-    setApprovalCredentials(null);
-  }, [application]);
 
   if (!isOpen || !application) {
     return null;
@@ -113,7 +106,7 @@ export function ApplicationDetailModal({
     }
   }
 
-  function renderTypeSpecificFields(): JSX.Element {
+  function renderTypeSpecificFields() {
     if (currentApplication.application_type === "family") {
       return (
         <>

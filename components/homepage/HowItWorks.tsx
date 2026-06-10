@@ -19,7 +19,7 @@ const travelerSteps = [
   }
 ] as const;
 
-export function HowItWorks(): JSX.Element {
+export function HowItWorks() {
   return (
     <section className="bg-white py-20 sm:py-24">
       <div className="mx-auto w-full max-w-6xl px-6">

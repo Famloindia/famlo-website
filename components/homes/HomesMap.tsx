@@ -13,7 +13,7 @@ function buildMapBounds(latitude: number, longitude: number): string {
   return `${longitude - 1.6},${latitude - 1.6},${longitude + 1.6},${latitude + 1.6}`;
 }
 
-export function HomesMap({ homes, highlightedSlug }: HomesMapProps): JSX.Element {
+export function HomesMap({ homes, highlightedSlug }: HomesMapProps) {
   const highlighted = useMemo(
     () => homes.find((item) => item.slug === highlightedSlug) ?? homes[0] ?? null,
     [highlightedSlug, homes]

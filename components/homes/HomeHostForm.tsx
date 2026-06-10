@@ -54,7 +54,7 @@ function createSlug(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function HomeHostForm(): JSX.Element {
+export function HomeHostForm() {
   const [formState, setFormState] = useState<FormState>(initialState);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");

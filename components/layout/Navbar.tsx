@@ -47,7 +47,7 @@ async function detectCity(): Promise<string> {
   });
 }
 
-export function Navbar(): JSX.Element {
+export function Navbar() {
   const [city, setCity] = useState("Locating...");
 
   useEffect(() => {

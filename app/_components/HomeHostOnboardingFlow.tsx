@@ -135,7 +135,7 @@ const amenityOptions = [
   "Washing Machine"
 ];
 
-export function HomeHostOnboardingFlow(): JSX.Element {
+export function HomeHostOnboardingFlow() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [flow, setFlow] = useState<FlowState>(initialState);
@@ -159,6 +159,10 @@ export function HomeHostOnboardingFlow(): JSX.Element {
     const nightly = Number(flow.baseNightlyRate || 0);
     return nightly > 0 ? nightly * 10 : 0;
   }, [flow.baseNightlyRate]);
+  const visibleCitySuggestions = flow.state.trim() ? citySuggestions : [];
+  const visibleVillageSuggestions = flow.state.trim() && flow.cityName.trim() ? villageSuggestions : [];
+  const visibleIfscStatus =
+    flow.ifscCode.trim().length >= 11 && ifscStatus == null ? "Checking IFSC..." : ifscStatus;
 
   useEffect(() => {
     if (flow.ifscCode.trim().length < 11) {
@@ -166,7 +170,6 @@ export function HomeHostOnboardingFlow(): JSX.Element {
     }
 
     const controller = new AbortController();
-    setIfscStatus("Checking IFSC...");
 
     fetch(`/api/ifsc?code=${encodeURIComponent(flow.ifscCode.trim())}`, {
       signal: controller.signal
@@ -208,7 +211,6 @@ export function HomeHostOnboardingFlow(): JSX.Element {
 
   useEffect(() => {
     if (!flow.state.trim()) {
-      setCitySuggestions([]);
       return;
     }
 
@@ -229,7 +231,6 @@ export function HomeHostOnboardingFlow(): JSX.Element {
 
   useEffect(() => {
     if (!flow.state.trim() || !flow.cityName.trim()) {
-      setVillageSuggestions([]);
       return;
     }
 
@@ -249,6 +250,10 @@ export function HomeHostOnboardingFlow(): JSX.Element {
   }, [flow.cityName, flow.state, flow.villageName]);
 
   function update<K extends keyof FlowState>(key: K, value: FlowState[K]): void {
+    if (key === "ifscCode") {
+      setIfscStatus(null);
+    }
+
     setFlow((current) => ({
       ...current,
       [key]: value
@@ -561,7 +566,7 @@ export function HomeHostOnboardingFlow(): JSX.Element {
                 className="w-full rounded-2xl border border-[#e5e7eb] px-4 py-3 text-sm outline-none"
               />
               <datalist id="india-cities">
-                {citySuggestions.map((entry) => (
+                {visibleCitySuggestions.map((entry) => (
                   <option key={entry} value={entry} />
                 ))}
               </datalist>
@@ -573,7 +578,7 @@ export function HomeHostOnboardingFlow(): JSX.Element {
                 className="w-full rounded-2xl border border-[#e5e7eb] px-4 py-3 text-sm outline-none"
               />
               <datalist id="india-villages">
-                {villageSuggestions.map((entry) => (
+                {visibleVillageSuggestions.map((entry) => (
                   <option key={entry} value={entry} />
                 ))}
               </datalist>
@@ -1064,7 +1069,7 @@ export function HomeHostOnboardingFlow(): JSX.Element {
                   className="rounded-2xl border border-[#e5e7eb] px-4 py-3 text-sm outline-none"
                 />
               </div>
-              {ifscStatus ? <p className="text-sm text-[#52606d]">{ifscStatus}</p> : null}
+              {visibleIfscStatus ? <p className="text-sm text-[#52606d]">{visibleIfscStatus}</p> : null}
               <div className="flex gap-3">
                 <button
                   type="button"

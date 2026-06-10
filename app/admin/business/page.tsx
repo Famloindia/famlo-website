@@ -1,6 +1,6 @@
 import { ResetPage } from "@/app/_components/ResetPage";
 
-export default function AdminBusinessPage(): JSX.Element {
+export default function AdminBusinessPage() {
   return (
     <ResetPage
       title="Admin business page reset."

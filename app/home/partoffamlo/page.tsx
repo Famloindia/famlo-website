@@ -1,6 +1,6 @@
 import { ResetPage } from "@/app/_components/ResetPage";
 
-export default function HomeJoinPage(): JSX.Element {
+export default function HomeJoinPage() {
   return (
     <ResetPage
       title="Home host page reset."

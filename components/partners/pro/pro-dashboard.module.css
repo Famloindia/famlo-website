@@ -1,0 +1,8400 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  background: #030712;
+  color: white;
+  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.shellLight {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.shellLight .sidebar {
+  background: #ffffff;
+  color: #0f172a;
+  border-right-color: rgba(15, 23, 42, 0.08);
+  box-shadow: 10px 0 30px rgba(15, 23, 42, 0.06);
+}
+
+.shellLight .brandLogoFallback,
+.shellLight .headerTitle {
+  color: #0f172a;
+}
+
+.shellLight .header {
+  background: #ffffff;
+  border-bottom-color: rgba(15, 23, 42, 0.08);
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+}
+
+.shellLight .headerCopy,
+.shellLight .navHint,
+.shellLight .brandCopy,
+.shellLight .navGroupLabel {
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.shellLight .navButton {
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.shellLight .navButton:hover {
+  background: rgba(37, 99, 235, 0.06);
+  color: #0f172a;
+  border-color: rgba(37, 99, 235, 0.12);
+}
+
+.shellLight .navButtonActive {
+  color: white;
+}
+
+.bookingsWorkspaceShell {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.bookingsWorkspaceShell .sidebar {
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  box-shadow: none;
+}
+
+.bookingsWorkspaceShell .brandBlock {
+  border-bottom-color: #eef2f7;
+  padding-bottom: 22px;
+}
+
+.bookingsWorkspaceShell .header,
+.bookingsWorkspaceShell .main,
+.bookingsWorkspaceShell .content {
+  background: #f8fafc;
+}
+
+.bookingsWorkspaceShell .header {
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: none;
+}
+
+.bookingsWorkspaceShell .navButton {
+  transform: none;
+}
+
+.bookingsWorkspaceShell .navButton:hover {
+  transform: none;
+}
+
+.bookingsWorkspaceNavGroup {
+  gap: 6px;
+}
+
+.bookingsWorkspaceNavButton {
+  border-radius: 14px;
+  border: 1px solid transparent;
+  color: #475569;
+  padding: 12px 14px;
+}
+
+.bookingsWorkspaceNavButton:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+.bookingsWorkspaceNavButton:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.bookingsWorkspaceNavButtonActive {
+  background: #eaf2ff;
+  color: #2563eb;
+  border-color: #bfdbfe;
+  box-shadow: none;
+}
+
+.bookingsWorkspaceSidebarFooter {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.bookingsWorkspaceUserAvatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.bookingsWorkspaceUserMeta {
+  display: grid;
+  gap: 2px;
+}
+
+.bookingsWorkspaceUserName {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.bookingsWorkspaceUserEmail,
+.bookingsWorkspaceUserChevron {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.bookingsWorkspaceContent {
+  gap: 24px;
+  background: #f8fafc;
+}
+
+.bookingsWorkspaceHeaderActions {
+  gap: 12px;
+}
+
+.bookingsWorkspaceSecondaryButton,
+.bookingsWorkspacePrimaryButton,
+.bookingsWorkspaceToolbarButton,
+.bookingsWorkspacePaginationButton,
+.bookingsWorkspaceActionsButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.bookingsWorkspaceSecondaryButton {
+  padding: 11px 16px;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #dbe2ea;
+}
+
+.bookingsWorkspacePrimaryButton {
+  padding: 11px 18px;
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #2563eb;
+}
+
+.bookingsWorkspacePrimaryButton:hover,
+.bookingsWorkspaceSecondaryButton:hover,
+.bookingsWorkspaceToolbarButton:hover,
+.bookingsWorkspacePaginationButton:hover,
+.bookingsWorkspaceActionsButton:hover {
+  filter: brightness(0.98);
+}
+
+.shellLight .propertySwitcherSelect,
+.shellLight .propertySelectorSelect {
+  background: rgba(15, 23, 42, 0.04);
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+.shellLight .main,
+.shellLight .content {
+  background: #ffffff;
+}
+
+.shellLight .propertyCenterShell,
+.shellLight .propertySwitcherCard,
+.shellLight .card,
+.shellLight .heroCard,
+.shellLight .summaryCard,
+.shellLight .listCard,
+.shellLight .cardInset,
+.shellLight .feedbackBox,
+.shellLight .propertySelectorBar,
+.shellLight .propertyCenterHintCard,
+.shellLight .propertySubSectionBar,
+.shellLight .propertyTabLinks,
+.shellLight .settingsOptionCard,
+.shellLight .checkItem,
+.shellLight .roomControlPlaceholder,
+.shellLight .roomMainGlassPanel,
+.shellLight .roomSecondaryGlassPanel {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.2);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.shellLight .propertyCenterShellLuxury .propertyCenterHeader,
+.shellLight .propertyCenterShellLuxury .propertyCenterHintCard,
+.shellLight .propertyCenterShellLuxury .propertySubSectionBar,
+.shellLight .propertyCenterShellLuxury .propertyTabLinks {
+  background: #ffffff;
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.shellLight .sectionEyebrow,
+.shellLight .propertyCenterTitle,
+.shellLight .sectionTitle,
+.shellLight .listTitle,
+.shellLight .placeholderTitle,
+.shellLight .placeholderValue,
+.shellLight .mappingTitle,
+.shellLight .roomTitle,
+.shellLight .cardTitle {
+  color: #0f172a;
+}
+
+.shellLight .propertyCenterCopy,
+.shellLight .cardCopy,
+.shellLight .placeholderCopy,
+.shellLight .heroText,
+.shellLight .feedCopy,
+.shellLight .mappingSubcopy,
+.shellLight .roomCopy,
+.shellLight .checkTitle {
+  color: #475569;
+}
+
+.shellLight .fieldInput,
+.shellLight .fieldTextarea,
+.shellLight .propertySelectorSelect,
+.shellLight .propertySwitcherSelect {
+  background: #fff;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.shellLight .proLuxurySection {
+  background: transparent;
+}
+
+.shellLight .proLuxurySection .listTitle,
+.shellLight .proLuxurySection .placeholderTitle,
+.shellLight .proLuxurySection .placeholderValue,
+.shellLight .proLuxurySection .checkTitle {
+  color: #0f172a;
+}
+
+.shellLight .proLuxurySection .feedCopy,
+.shellLight .proLuxurySection .placeholderCopy,
+.shellLight .proLuxurySection .sectionCopy {
+  color: #64748b;
+}
+
+.shellLight .proLuxurySection .listTitle,
+.shellLight .proLuxurySection .emptyTitle,
+.shellLight .proLuxurySection .placeholderTitle,
+.shellLight .proLuxurySection .roomTitle,
+.shellLight .proLuxurySection .roleTitle,
+.shellLight .proLuxurySection .groupTitle,
+.shellLight .proLuxurySection .mappingTitle,
+.shellLight .proLuxurySection .fieldLabel,
+.shellLight .proLuxurySection .summaryValue,
+.shellLight .proLuxurySection .summaryLabel,
+.shellLight .proLuxurySection .summaryTitle,
+.shellLight .calendarLuxuryShell .metricValue,
+.shellLight .calendarLuxuryShell .cardTitle,
+.shellLight .calendarLuxuryShell .listTitle,
+.shellLight .calendarLuxuryShell .emptyTitle,
+.shellLight .calendarLuxuryShell .placeholderTitle,
+.shellLight .calendarBoardLuxury .calendarRoomHeader,
+.shellLight .calendarBoardLuxury .calendarHeaderDate,
+.shellLight .calendarBoardLuxury .calendarRoomName {
+  color: #0f172a;
+}
+
+.shellLight .calendarLuxuryShell .metricHint,
+.shellLight .calendarLuxuryShell .cardCopy,
+.shellLight .calendarLuxuryShell .feedCopy,
+.shellLight .calendarLuxuryShell .emptyCopy,
+.shellLight .calendarLuxuryShell .placeholderCopy,
+.shellLight .calendarLuxuryShell .placeholderLabel,
+.shellLight .calendarBoardLuxury .calendarHeaderDay,
+.shellLight .calendarBoardLuxury .calendarRoomType,
+.shellLight .calendarBoardLuxury .calendarMetricLabel {
+  color: #475569;
+}
+
+.shellLight .calendarLuxuryShell .placeholderValue,
+.shellLight .proLuxurySection .placeholderValue,
+.shellLight .proLuxurySection .miniValue,
+.shellLight .calendarMetricCode {
+  color: #1d4ed8;
+}
+
+.shellLight .calendarLuxuryLegend .filterChip {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(148, 163, 184, 0.22);
+  color: #334155;
+}
+
+.shellLight .calendarBoardLuxury {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.98));
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+}
+
+.shellLight .calendarBoardLuxury .calendarHeaderCell,
+.shellLight .calendarBoardLuxury .calendarRoomCell,
+.shellLight .calendarBoardLuxury .calendarCell {
+  border-right-color: rgba(148, 163, 184, 0.22);
+  border-bottom-color: rgba(148, 163, 184, 0.22);
+}
+
+.shellLight .calendarBoardLuxury .calendarHeaderCell {
+  background: rgba(226, 232, 240, 0.72);
+}
+
+.shellLight .calendarBoardLuxury .calendarRoomCell {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.shellLight .calendarBoardLuxury .calendarRateLabel,
+.shellLight .calendarBoardLuxury .calendarRateCell {
+  background: rgba(239, 246, 255, 0.78);
+  color: #0f172a;
+}
+
+.shellLight .calendarBoardLuxury .calendarCellAvailable {
+  background: #ffffff;
+  color: #111827;
+}
+
+.shellLight .calendarHeaderNavButton {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(148, 163, 184, 0.22);
+  color: #0f172a;
+}
+
+.shellLight .calendarHeaderDatePopover {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.shellLight .calendarHeaderDatePopoverLabel {
+  color: #475569;
+}
+
+.shellLight .calendarHeaderDateInput {
+  background: rgba(248, 250, 252, 0.98);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #0f172a;
+}
+
+.shellLight .calendarHeaderCellHighlighted {
+  background: linear-gradient(180deg, rgba(219, 234, 254, 0.9), rgba(191, 219, 254, 0.74));
+}
+
+.shellLight .calendarRateModal {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(241, 245, 249, 0.99));
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.shellLight .calendarRateModalDetails {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.shellLight .calendarRateModalLabel {
+  color: #475569;
+}
+
+.shellLight .calendarRateModalValue,
+.shellLight .calendarRateModalCurrentValue {
+  color: #0f172a;
+}
+
+.shellLight .calendarRateModalCurrentPrice {
+  background: rgba(219, 234, 254, 0.7);
+}
+
+.shellLight .calendarRateModalCurrentHint,
+.shellLight .calendarRateModalRangeHint {
+  color: #475569;
+}
+
+.shellLight .calendarBulkWeekdayButton {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.shellLight .calendarBulkWeekdayButtonSelected {
+  background: rgba(219, 234, 254, 0.92);
+  border-color: rgba(96, 165, 250, 0.42);
+  color: #1d4ed8;
+}
+
+.shellLight .calendarBulkSelectorPanel,
+.shellLight .calendarBulkSelectorItem {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.shellLight .calendarBulkSelectorItem strong {
+  color: #0f172a;
+}
+
+.shellLight .calendarBulkSelectorItem small {
+  color: #64748b;
+}
+
+.shellLight .proLuxurySection .fieldInput,
+.shellLight .proLuxurySection .fieldTextarea {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.shellLight .proLuxurySection .fieldInput:focus,
+.shellLight .proLuxurySection .fieldTextarea:focus {
+  background: #ffffff;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.16);
+}
+
+.shellLight .proLuxurySection .fieldInput::placeholder,
+.shellLight .proLuxurySection .fieldTextarea::placeholder {
+  color: #94a3b8;
+}
+
+.shellLight .proLuxurySection .fieldInput option {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.shellLight .calendarWorkspaceStateCard {
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.shellLight .calendarWorkspaceStateBadge {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  border-color: rgba(37, 99, 235, 0.18);
+}
+
+.shellLight .calendarWorkspaceStateTitle {
+  color: #0f172a;
+}
+
+.shellLight .calendarWorkspaceStateCopy,
+.shellLight .calendarWorkspaceStateMeta {
+  color: #475569;
+}
+
+.shellLight .fieldInput::placeholder,
+.shellLight .fieldTextarea::placeholder {
+  color: #94a3b8;
+}
+
+.shellLight .secondaryActionButton {
+  background: #fff;
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+.shellLight .secondaryActionButton:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.shellLight .propertyRoomShowcaseCard,
+.shellLight .addRoomShowcaseCard {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.08);
+}
+
+.shellLight .propertyRoomShowcaseBody,
+.shellLight .addRoomShowcaseBody {
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.shellLight .propertyRoomShowcaseMetaValue,
+.shellLight .propertyRoomShowcaseTitle,
+.shellLight .propertyRoomShowcasePrice,
+.shellLight .addRoomShowcaseTitle {
+  color: #0f172a;
+}
+
+.shellLight .propertyRoomShowcaseSummary,
+.shellLight .addRoomShowcaseCopy,
+.shellLight .propertyRoomStatusText {
+  color: #475569;
+}
+
+.navButtonUrgent {
+  border-color: rgba(248, 113, 113, 0.34);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+}
+
+.navButtonUrgent:hover {
+  background: rgba(153, 27, 27, 0.38);
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fff1f2;
+}
+
+.navButtonUrgentActive {
+  background: linear-gradient(135deg, #dc2626, #991b1b);
+  border-color: rgba(254, 202, 202, 0.28);
+  box-shadow: 0 10px 25px -5px rgba(220, 38, 38, 0.34);
+}
+
+.shellLight .navButtonUrgent {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.shellLight .navButtonUrgent:hover {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.sidebar {
+  width: 300px;
+  background: rgba(11, 18, 32, 0.96);
+  backdrop-filter: blur(16px);
+  color: #dbeafe;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 28px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.15);
+}
+
+.brandBlock {
+  display: grid;
+  gap: 8px;
+  padding: 10px 10px 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.brandLogoWrap {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.brandLogoImage {
+  display: block;
+  width: 188px;
+  max-width: 100%;
+  height: auto;
+}
+
+.brandLogoFallback {
+  font-size: 24px;
+  font-weight: 900;
+  color: white;
+  letter-spacing: -0.03em;
+}
+
+.brandEyebrow {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #60a5fa;
+}
+
+.brandTitle {
+  font-size: 24px;
+  font-weight: 900;
+  color: white;
+  letter-spacing: -0.03em;
+}
+
+.brandCopy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(219, 234, 254, 0.68);
+}
+
+.navGroup {
+  display: grid;
+  gap: 8px;
+}
+
+.navGroupLabel {
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(191, 219, 254, 0.42);
+}
+
+.navButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background: transparent;
+  color: rgba(219, 234, 254, 0.65);
+  padding: 12px 16px;
+  cursor: pointer;
+  font: inherit;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: left;
+}
+
+.navButton:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  border-color: rgba(255, 255, 255, 0.08);
+  transform: translateX(4px);
+}
+
+.navButtonActive {
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+  color: white;
+  transform: translateX(6px);
+  box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.4);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.navIcon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.navText {
+  display: grid;
+  gap: 3px;
+}
+
+.navTitle {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.navHint {
+  font-size: 11px;
+  color: rgba(219, 234, 254, 0.5);
+}
+
+.navChild {
+  padding-left: 28px;
+}
+
+.sidebarFooter {
+  margin-top: auto;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  display: grid;
+  gap: 8px;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 20px 32px;
+  backdrop-filter: blur(20px) saturate(180%);
+  background: rgba(3, 7, 18, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.headerTitle {
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: white;
+  margin: 0;
+}
+
+.headerCopy {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 14px;
+}
+
+.headerActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.headerThemeToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.headerThemeButton {
+  width: 52px;
+  height: 38px;
+  border: none;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.74);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.headerThemeButton:hover {
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.headerThemeButtonActive {
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.14);
+}
+
+.headerThemeButton:first-child.headerThemeButtonActive {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.headerThemeButton:last-child.headerThemeButtonActive {
+  background: #020617;
+  color: #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 8px 18px rgba(2, 6, 23, 0.28);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  background: white;
+  color: #0f172a;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.chipPrimary {
+  background: rgba(22, 93, 204, 0.1);
+  color: #165dcc;
+  border-color: rgba(22, 93, 204, 0.18);
+}
+
+.chipChecking {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.chipSuccess {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.chipDanger {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.chipSpinner {
+  animation: chipSpin 1.2s linear infinite;
+}
+
+.shellLight .headerThemeToggle {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.shellLight .headerThemeButton {
+  color: rgba(15, 23, 42, 0.68);
+}
+
+.shellLight .headerThemeButton:hover {
+  color: #0f172a;
+}
+
+.shellLight .headerThemeButton:first-child.headerThemeButtonActive {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.shellLight .headerThemeButton:last-child.headerThemeButtonActive {
+  background: #020617;
+  color: #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 8px 18px rgba(2, 6, 23, 0.24);
+}
+
+@keyframes chipSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.headerLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  border-radius: 12px;
+  padding: 11px 16px;
+  background: #0f172a;
+  color: white;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.headerSecondaryLink {
+  background: white;
+  color: #0f172a;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.proProfileIntro {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.proProfileHeroCard,
+.proProfilePreviewCard,
+.proProfileSectionCard {
+  border-radius: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(10, 18, 34, 0.94), rgba(4, 11, 24, 0.92));
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.35);
+}
+
+.proProfileHeroCard {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  padding: 24px;
+}
+
+.proProfileHeroMedia,
+.proProfilePreviewMedia {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 24px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+}
+
+.proProfileHeroMedia {
+  width: 148px;
+  height: 148px;
+}
+
+.proProfilePreviewMedia {
+  min-height: 220px;
+}
+
+.proProfileHeroImage,
+.proProfilePreviewImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.proProfileHeroIcon {
+  width: 40px;
+  height: 40px;
+  color: rgba(148, 163, 184, 0.76);
+}
+
+.proProfileHeroBody,
+.proProfilePreviewDetails {
+  display: grid;
+  gap: 8px;
+}
+
+.proProfileStatusPill {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: rgba(37, 99, 235, 0.16);
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.proProfileHeroTitle,
+.proProfilePreviewName {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: white;
+}
+
+.proProfileHeroProperty,
+.proProfilePreviewProperty {
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(191, 219, 254, 0.94);
+}
+
+.proProfileHeroLocation,
+.proProfilePreviewLocation,
+.proProfileHeroSubcopy {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.proProfileHeroActions,
+.proProfileEditorActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.proProfileSecondaryActionLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  border-radius: 14px;
+  padding: 12px 16px;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  background: rgba(7, 13, 24, 0.64);
+  color: #dbeafe;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 900;
+  transition: all 0.2s ease;
+}
+
+.proProfileSecondaryActionLink:hover {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(147, 197, 253, 0.4);
+  transform: translateY(-1px);
+}
+
+.proProfileEditorShell {
+  display: grid;
+  gap: 22px;
+}
+
+.proProfileEditorHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.proProfileBackButton,
+.proProfileGhostButton,
+.proProfileUploadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 14px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.proProfilePreviewCard {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 22px;
+  padding: 22px;
+}
+
+.proProfileUploadButton {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  backdrop-filter: blur(14px);
+}
+
+.proProfileSectionGrid {
+  display: grid;
+  gap: 20px;
+}
+
+.proProfileSectionCard {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.proProfileSectionLabel {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #60a5fa;
+}
+
+.proProfileFieldGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.proProfileField,
+.proProfileFieldWide {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.proProfileFieldWide {
+  grid-column: 1 / -1;
+}
+
+.proProfileFieldLabel {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(191, 219, 254, 0.72);
+}
+
+.proProfileInput,
+.proProfileTextarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.76);
+  color: white;
+  padding: 14px 16px;
+  font: inherit;
+  outline: none;
+}
+
+.proProfileInput::placeholder,
+.proProfileTextarea::placeholder {
+  color: rgba(148, 163, 184, 0.72);
+}
+
+.proProfileTextarea {
+  min-height: 110px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.proProfileInput:focus,
+.proProfileTextarea:focus {
+  border-color: rgba(96, 165, 250, 0.52);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+.proProfileChipGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.proProfileChip {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.proProfileChipActive {
+  border-color: rgba(96, 165, 250, 0.42);
+  background: rgba(37, 99, 235, 0.18);
+  color: white;
+}
+
+.proProfileInlineControl {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.proProfileGalleryRow {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.proProfileGalleryCard,
+.proProfileGalleryAddCard {
+  flex-shrink: 0;
+  width: 184px;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(9, 15, 28, 0.92);
+}
+
+.proProfileGalleryCardPrimary {
+  border-color: rgba(96, 165, 250, 0.4);
+  box-shadow: 0 18px 36px rgba(37, 99, 235, 0.14);
+}
+
+.proProfileGalleryImage {
+  width: 100%;
+  height: 138px;
+  object-fit: cover;
+  display: block;
+}
+
+.proProfileGalleryActions {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.proProfileGalleryAddCard {
+  min-height: 230px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-style: dashed;
+  color: #bfdbfe;
+  cursor: pointer;
+}
+
+.proProfileGalleryAddCard small {
+  color: rgba(148, 163, 184, 0.88);
+}
+
+.proProfileDangerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  border: 1px solid rgba(248, 113, 113, 0.24);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.content {
+  padding: 28px;
+  display: grid;
+  gap: 20px;
+}
+
+.propertiesHomeContent {
+  background: #030712;
+  border-radius: 28px 0 0 0;
+}
+
+.sectionIntro {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 4px 2px 2px;
+}
+
+.sectionEyebrow {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #3b82f6;
+}
+
+.sectionTitle {
+  margin: 6px 0 0;
+  font-size: 30px;
+  line-height: 1.04;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: white;
+}
+
+.sectionCopy {
+  margin: 8px 0 0;
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.sectionStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.propertyCenterShell {
+  display: grid;
+  gap: 24px;
+  padding: 28px;
+  border-radius: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+}
+
+.propertyCenterShellLuxury {
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(6, 15, 30, 0.78), rgba(3, 9, 20, 0.94));
+  border-color: rgba(148, 163, 184, 0.14);
+  box-shadow: 0 28px 60px rgba(2, 6, 23, 0.34);
+}
+
+.propertyCenterShellLuxury .propertyCenterHeader,
+.propertyCenterShellLuxury .propertyCenterHintCard,
+.propertyCenterShellLuxury .propertySubSectionBar,
+.propertyCenterShellLuxury .propertyTabLinks {
+  display: none;
+}
+
+.propertyCenterHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.propertyCenterTitle {
+  margin: 6px 0 0;
+  font-size: 28px;
+  line-height: 1.05;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: white;
+}
+
+.propertyCenterCopy {
+  margin: 8px 0 0;
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.propertyHeaderMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.propertyHeaderMetaItem {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.propertyCenterStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.propertySwitcherCard {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 16px 18px;
+}
+
+.propertySwitcherInfo {
+  display: grid;
+  gap: 6px;
+  max-width: 460px;
+}
+
+.propertySwitcherLabel {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #3b82f6;
+}
+
+.propertySwitcherCopy {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.propertySwitcherControls {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.propertySwitcherField {
+  display: grid;
+  gap: 6px;
+  min-width: 320px;
+}
+
+.propertySwitcherFieldLabel {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.propertySwitcherSelect {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.propertySwitcherStatusRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.propertySwitcherStatusPill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(15, 23, 42, 0.06);
+  color: rgba(15, 23, 42, 0.7);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.propertySelectorBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 24px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  margin-bottom: 8px;
+}
+
+.propertySelectorHeadline {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+}
+
+.propertySelectorControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.addPropertyControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: white;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.addPropertyControlLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.addPropertyControlLink:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(37, 99, 235, 0.3);
+  transform: translateY(-1px);
+}
+
+.addPropertyIconWrap {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(37, 99, 235, 0.08);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #2563eb;
+}
+
+.propertySelectorField {
+  min-width: 280px;
+}
+
+.propertySelectorSelect {
+  width: 100%;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.propertySelectorSelect:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(37, 99, 235, 0.3);
+}
+
+.propertySelectorMetaRow,
+.roomControlMetaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.propertySelectorMetaPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.propertiesRoomShowcaseGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.propertyRoomShowcaseCard,
+.addRoomShowcaseCard {
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.propertyRoomShowcaseCard {
+  display: flex;
+  flex-direction: column;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  height: 100%;
+}
+
+.propertyRoomShowcaseCardStatic {
+  cursor: default;
+}
+
+.propertyRoomShowcaseCard:hover {
+  transform: translateY(-8px) scale(1.02);
+  box-shadow: 0 30px 60px -15px rgba(15, 23, 42, 0.25);
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.propertyRoomShowcaseCardActive {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  box-shadow: 0 24px 48px rgba(37, 99, 235, 0.18);
+}
+
+.propertyRoomShowcaseMedia {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 20px;
+  background-size: cover;
+  background-position: center;
+  background-color: #f1f5f9;
+}
+
+.propertyRoomShowcaseTopRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.propertyRoomTypePill,
+.propertyRoomStatePill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.propertyRoomTypePill {
+  background: rgba(255, 255, 255, 0.92);
+  color: #2563eb;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.propertyRoomStatePillActive {
+  background: #6ecf63;
+  color: #10360f;
+}
+
+.propertyRoomStatePillMuted {
+  background: rgba(255, 255, 255, 0.88);
+  color: #475569;
+}
+
+.propertyRoomShowcaseBottom {
+  display: grid;
+  gap: 6px;
+  color: white;
+}
+
+.propertyRoomShowcaseTitle {
+  font-size: 24px;
+  line-height: 1.1;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.propertyRoomShowcasePrice {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.propertyRoomShowcasePrice span {
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.84;
+}
+
+.propertyRoomShowcaseBody {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.propertyRoomShowcaseMeta {
+  display: grid;
+  gap: 6px;
+}
+
+.propertyRoomShowcaseMetaLabel {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.propertyRoomShowcaseMetaValue {
+  font-size: 15px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.propertyRoomShowcaseSummary {
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.propertyRoomShowcaseChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.propertyRoomChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.propertyRoomShowcaseFooter {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.propertyRoomStatusText {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: rgba(191, 219, 254, 0.96);
+}
+
+.propertyRoomShowcaseAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #2563eb 0%, #165dcc 100%);
+  color: white;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  box-shadow: 0 18px 30px rgba(22, 93, 204, 0.28);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.propertyRoomShowcaseAction:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 22px 34px rgba(22, 93, 204, 0.34);
+  filter: brightness(1.03);
+}
+
+.propertyRoomFooterBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.propertyRoomManageLabel {
+  display: none;
+}
+
+.addRoomShowcaseCard {
+  justify-content: center;
+}
+
+.addRoomShowcaseCard:hover {
+  transform: translateY(-8px) scale(1.02);
+  box-shadow: 0 30px 60px -15px rgba(15, 23, 42, 0.25);
+}
+
+.addRoomShowcaseBody {
+  min-height: 100%;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+  padding: 24px 20px;
+  text-align: center;
+}
+
+.addRoomShowcaseIcon {
+  width: 86px;
+  height: 86px;
+  border-radius: 999px;
+  border: 4px solid white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.addRoomShowcaseTitle {
+  font-size: 24px;
+  font-weight: 900;
+  color: white;
+}
+
+.addRoomShowcaseCopy {
+  max-width: 240px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.addRoomShowcaseCopy {
+  max-width: 260px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.54);
+}
+
+.roomControlCenterShell {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 28px;
+  background: rgba(3, 7, 18, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
+}
+
+.roomControlCenterHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.roomControlCenterTitle {
+  margin: 6px 0 0;
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  color: white;
+}
+
+.roomControlCenterCopy {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.6);
+  max-width: 820px;
+}
+
+.roomControlCenterClose {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: white;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.roomControlBackLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  border-radius: 999px;
+  padding: 11px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.roomControlTabRow {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.roomControlTabButton {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: white;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.roomControlTabButton:hover {
+  transform: translateY(-1px);
+  border-color: rgba(37, 99, 235, 0.24);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
+}
+
+.roomControlTabButtonActive {
+  background: linear-gradient(135deg, #165dcc, #0f4cba);
+  color: white;
+  border-color: transparent;
+}
+
+.roomControlTabTitle {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.roomControlTabHint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.roomControlTabButtonActive .roomControlTabHint {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.roomControlPanel {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.roomInlineSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.roomControlPlaceholder,
+.propertyCenterHintCard {
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 18px;
+}
+
+.roomMainGlassPanel {
+  display: grid;
+  gap: 18px;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(15, 23, 42, 0.58)),
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 40%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 22px 42px rgba(5, 10, 22, 0.28);
+}
+
+.roomMainGlassPanelHeader {
+  display: grid;
+  gap: 8px;
+}
+
+.roomOtaSelectorRow,
+.roomMappingCardGrid,
+.roomIssueCardGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.roomMappingCardGrid,
+.roomIssueCardGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roomOtaSelectorRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.roomOtaSelectorRow .primaryActionButton {
+  min-height: 42px;
+}
+
+.roomOtaSelectorBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  scrollbar-width: thin;
+}
+
+.roomOtaPill {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.78);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.roomOtaPill:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.roomOtaPillActive {
+  color: #eff6ff;
+  border-color: rgba(96, 165, 250, 0.36);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.28), rgba(30, 41, 59, 0.3));
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.14);
+}
+
+.roomIssueCardHeader,
+.roomChannelPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.roomOtaCardTitle {
+  font-size: 15px;
+  font-weight: 900;
+  color: white;
+}
+
+.roomOtaCardCopy,
+.roomOtaCardMeta {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.roomOtaCardCta {
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #93c5fd;
+}
+
+.roomChannelPanel,
+.roomChannelPreviewCard,
+.roomIssueCard {
+  margin-top: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 18px;
+}
+
+.roomDarkCard {
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 16px;
+}
+
+.roomChannelSetupGrid,
+.roomChannelPreviewGrid,
+.roomChannelSummaryGrid,
+.roomChannelCatalogGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.roomChannelSetupGrid,
+.roomChannelPreviewGrid,
+.roomChannelCatalogGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roomChannelCheckboxRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.roomChannelCheckboxRow input {
+  margin-top: 4px;
+}
+
+.roomChannelStepLabel {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.roomChannelSetupHeader {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.roomInlineFeedback {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(226, 232, 240, 0.9);
+  border-color: rgba(148, 163, 184, 0.14);
+}
+
+.roomDarkEmptyState {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(15, 23, 42, 0.14));
+  border: 1px dashed rgba(148, 163, 184, 0.18);
+}
+
+.roomMainGlassPanel .placeholderTitle,
+.roomMainGlassPanel .emptyTitle,
+.roomMainGlassPanel .listTitle,
+.roomDarkCard .summaryValue,
+.roomDarkCard .summaryLabel,
+.roomDarkCard .summaryCopy,
+.roomDarkCard .feedTitle,
+.roomDarkCard .feedCopy,
+.roomIssueCard .roomOtaCardTitle,
+.roomIssueCard .roomOtaCardCopy,
+.roomChannelPanel .listTitle,
+.roomChannelPreviewCard .listTitle,
+.roomControlPlaceholder .emptyTitle {
+  color: #f8fafc;
+}
+
+.roomMainGlassPanel .placeholderCopy,
+.roomMainGlassPanel .emptyCopy,
+.roomDarkCard .summaryCopy,
+.roomChannelPanel .placeholderCopy,
+.roomChannelPreviewCard .placeholderCopy,
+.roomControlPlaceholder .emptyCopy {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.roomMainGlassPanel .placeholderLabel,
+.roomMainGlassPanel .summaryLabel,
+.roomMainGlassPanel .fieldLabel,
+.roomControlPlaceholder .summaryLabel {
+  color: rgba(148, 163, 184, 0.82);
+}
+
+.roomMainGlassPanel .placeholderValue,
+.roomMainGlassPanel .summaryValue,
+.roomControlPlaceholder .summaryValue {
+  color: #f8fafc;
+}
+
+.roomMainGlassPanel .fieldInput,
+.roomMainGlassPanel .fieldTextarea,
+.roomControlPlaceholder .fieldInput,
+.roomControlPlaceholder .fieldTextarea {
+  background: rgba(15, 23, 42, 0.52);
+  border-color: rgba(148, 163, 184, 0.18);
+  color: #f8fafc;
+}
+
+.roomMainGlassPanel .fieldInput::placeholder,
+.roomControlPlaceholder .fieldInput::placeholder,
+.roomMainGlassPanel .fieldTextarea::placeholder,
+.roomControlPlaceholder .fieldTextarea::placeholder {
+  color: rgba(148, 163, 184, 0.62);
+}
+
+.roomMainGlassPanel .placeholderRow,
+.roomChannelPreviewCard .placeholderRow,
+.roomControlPlaceholder .placeholderRow {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(148, 163, 184, 0.14);
+}
+
+.roomInlinePhotoPreview {
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.roomInlinePhotoImage {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  object-fit: cover;
+}
+
+.propertyTabGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.propertyTabButton {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.propertyTabButton:hover {
+  transform: translateY(-1px);
+  border-color: rgba(22, 93, 204, 0.22);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.propertyTabButtonActive {
+  background: linear-gradient(135deg, #165dcc, #0f4cba);
+  border-color: transparent;
+  box-shadow: 0 16px 34px rgba(15, 76, 186, 0.22);
+}
+
+.propertyTabIconWrap {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(22, 93, 204, 0.1);
+  color: #165dcc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.propertyTabButtonActive .propertyTabIconWrap {
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+}
+
+.propertyTabIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.propertyTabText {
+  display: grid;
+  gap: 4px;
+}
+
+.propertyTabTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: white;
+}
+
+.propertyTabHint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.propertyTabButtonActive .propertyTabTitle,
+.propertyTabButtonActive .propertyTabHint {
+  color: white;
+}
+
+.propertySubSectionBar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 2px 2px 0;
+}
+
+.propertySubSectionTitle {
+  font-size: 16px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.propertySubSectionCopy {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.propertyTabLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.propertyTabLinkButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.propertyTabLinkButton:hover {
+  border-color: rgba(22, 93, 204, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.propertyTabLinkButtonActive {
+  background: rgba(22, 93, 204, 0.15) !important;
+  border-color: rgba(22, 93, 204, 0.48) !important;
+  box-shadow: 0 0 15px rgba(22, 93, 204, 0.18);
+}
+
+.revenueFilterGroup {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  margin-bottom: 24px;
+}
+
+.propertyTabLinkIcon {
+  width: 16px;
+  height: 16px;
+  color: #165dcc;
+  flex-shrink: 0;
+}
+
+.propertyTabLinkText {
+  display: grid;
+  gap: 3px;
+}
+
+.propertyTabLinkTitle {
+  font-size: 13px;
+  font-weight: 900;
+  color: white;
+}
+
+.propertyTabLinkHint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.heroCard,
+.card {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.06);
+}
+
+.card {
+  color: #0f172a;
+}
+
+.heroCard {
+  padding: 32px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 40%, #2563eb 100%);
+  color: white;
+  border-radius: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 30px 60px -12px rgba(15, 23, 42, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+.heroCard::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.03) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.heroGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+  gap: 24px;
+}
+
+.dashboardHeroShell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.52fr) minmax(150px, 0.48fr);
+  gap: 12px;
+  align-items: stretch;
+  position: relative;
+  z-index: 1;
+  grid-template-areas:
+    "content spotlight"
+    "booking spotlight";
+}
+
+.dashboardHeroContent {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  grid-area: content;
+}
+
+.dashboardIntroGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.dashboardIntroCard {
+  padding: 16px 18px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.08) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 8px;
+}
+
+.dashboardIntroCard strong {
+  font-size: 18px;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.dashboardIntroLabel {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.dashboardHeroContent .dashboardIntroCard strong {
+  color: #fff;
+}
+
+.dashboardHeroContent .dashboardIntroLabel {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.dashboardStatusBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dashboardHostSpotlight {
+  min-height: 100%;
+  border-radius: 24px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.08) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  display: grid;
+  grid-template-rows: minmax(92px, 1fr) auto;
+  grid-area: spotlight;
+}
+
+.dashboardHostSpotlightImageWrap {
+  position: relative;
+  min-height: 92px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.dashboardHostSpotlightImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dashboardHostSpotlightPlaceholder {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.78);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.42) 0%, rgba(30, 64, 175, 0.42) 100%);
+}
+
+.dashboardHostSpotlightBody {
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  text-align: center;
+}
+
+.dashboardProfileButton {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-radius: 18px;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 800;
+  width: 100%;
+  min-width: 150px;
+  max-width: 170px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.dashboardHeroCard {
+  padding: 12px;
+}
+
+.dashboardGlassCard {
+  background: linear-gradient(180deg, rgba(9, 14, 28, 0.94) 0%, rgba(15, 23, 42, 0.92) 100%);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  box-shadow: 0 22px 48px rgba(2, 6, 23, 0.34);
+}
+
+.dashboardGlassCard .cardTitle {
+  color: #f8fafc;
+}
+
+.dashboardGlassCard .cardCopy,
+.dashboardGlassCard .emptyCopy {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.dashboardManualBookingBox {
+  grid-area: booking;
+  padding: 14px 16px 16px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: grid;
+  gap: 14px;
+}
+
+.dashboardManualBookingTitle {
+  font-size: 15px;
+  font-weight: 900;
+  color: #fff;
+}
+
+.dashboardManualBookingGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.dashboardManualBookingField {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboardManualBookingField span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.dashboardManualBookingField select,
+.dashboardManualBookingField input {
+  width: 100%;
+  min-width: 0;
+  height: 46px;
+  box-sizing: border-box;
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(2, 6, 23, 0.4);
+  color: #fff;
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+.dashboardManualBookingField input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.7;
+}
+
+.dashboardManualBookingFooter {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dashboardBookButton {
+  appearance: none;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.95) 0%, rgba(29, 78, 216, 0.95) 100%);
+  color: #fff;
+  border-radius: 16px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.dashboardActionButton {
+  min-width: 160px;
+  justify-content: center;
+}
+
+.dashboardManualBookingSuccess,
+.dashboardManualBookingError {
+  font-size: 13px;
+}
+
+.dashboardManualBookingSuccess {
+  color: #86efac;
+}
+
+.dashboardManualBookingError {
+  color: #fca5a5;
+}
+
+.dashboardSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.dashboardSummaryValue {
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  font-weight: 900;
+  color: #fff;
+}
+
+.dashboardTableWrap {
+  overflow: hidden;
+  border-radius: 22px;
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.78) 0%, rgba(15, 23, 42, 0.56) 100%);
+  backdrop-filter: blur(10px);
+}
+
+.dashboardTableHeader,
+.dashboardTableRow,
+.dashboardRoomTableHeader,
+.dashboardRoomTableRow {
+  display: grid;
+  gap: 14px;
+  align-items: center;
+}
+
+.dashboardTableHeader,
+.dashboardTableRow {
+  grid-template-columns: 1.2fr 1fr 0.9fr 0.9fr 1fr 1fr;
+}
+
+.dashboardRoomTableHeader,
+.dashboardRoomTableRow {
+  grid-template-columns: 1.2fr 0.9fr 0.8fr 1.2fr 0.9fr;
+}
+
+.dashboardTableHeader,
+.dashboardRoomTableHeader {
+  padding: 16px 18px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(191, 219, 254, 0.8);
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.dashboardTableRow,
+.dashboardRoomTableRow {
+  padding: 18px;
+  font-size: 14px;
+  color: #f8fafc;
+  border-top: 1px solid rgba(96, 165, 250, 0.08);
+}
+
+.dashboardTableRow strong,
+.dashboardRoomTableRow strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.dashboardGalleryRail {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 14px;
+}
+
+.dashboardHostGalleryCard,
+.dashboardGallerySquare {
+  position: relative;
+  min-height: 156px;
+  overflow: hidden;
+  border-radius: 22px;
+  background: rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.dashboardHostGalleryCard {
+  min-height: 188px;
+}
+
+.dashboardGalleryImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dashboardGallerySquareSelected,
+.dashboardReelCardSelected {
+  border-color: rgba(96, 165, 250, 0.9);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.3), 0 22px 40px rgba(15, 23, 42, 0.22);
+}
+
+.dashboardGallerySelectButton,
+.dashboardReelSelectButton {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.dashboardGallerySelectionBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(10px);
+}
+
+.dashboardGalleryTileActions {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dashboardTileActionButton {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(15, 23, 42, 0.76);
+  color: #fff;
+  border-radius: 12px;
+  padding: 9px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  backdrop-filter: blur(10px);
+}
+
+.dashboardTileActionButtonDanger {
+  background: rgba(127, 29, 29, 0.84);
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.dashboardGalleryOverlay {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.68);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dashboardReelCard {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  position: relative;
+}
+
+.dashboardReelGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 14px;
+}
+
+.dashboardReelVideo {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-height: none;
+  border-radius: 0;
+  object-fit: cover;
+  background: #020617;
+}
+
+.dashboardReelPlayButton {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(15, 23, 42, 0.58);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 16px 32px rgba(2, 6, 23, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.dashboardReelPlaceholder {
+  min-height: 260px;
+  border-radius: 24px;
+  border: 1px dashed rgba(59, 130, 246, 0.28);
+  background: rgba(37, 99, 235, 0.06);
+  padding: 22px;
+  display: grid;
+  gap: 12px;
+  align-content: center;
+  justify-items: start;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #60a5fa;
+}
+
+.heroTitle {
+  margin: 8px 0 0;
+  font-size: 28px;
+  line-height: 1.02;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  color: #fff;
+}
+
+.heroText {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.8;
+  font-size: 13px;
+  max-width: 760px;
+}
+
+.profileWorkspaceTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.profileWorkspaceTabs .propertyTabLinkButton {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.heroMeta {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.heroMetaItem {
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: grid;
+  gap: 4px;
+}
+
+.heroMetaLabel {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.62);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.heroMetaValue {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.heroPanel {
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: grid;
+  gap: 14px;
+}
+
+.heroPanelTitle {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.heroPanelList {
+  display: grid;
+  gap: 10px;
+}
+
+.heroPanelItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.statCard {
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  transition: all 0.3s ease;
+}
+
+.statCard:hover {
+  background: rgba(255, 255, 255, 0.9);
+  transform: translateY(-4px);
+  box-shadow: 0 15px 30px -10px rgba(15, 23, 42, 0.1);
+}
+
+.statLabel {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #64748b;
+}
+
+.statValue {
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  color: #0f172a;
+}
+
+.statHint {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.twoCol {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 20px;
+}
+
+.cardHeader {
+  padding: 22px 22px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.cardHeaderCompact {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+}
+
+.cardCopy {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.cardBody {
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.stack {
+  display: grid;
+  gap: 14px;
+}
+
+.actionItem,
+.feedItem,
+.checkItem,
+.channelCard,
+.roomCard,
+.placeholderRow {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f8fbff;
+}
+
+.actionItem,
+.feedItem,
+.checkItem,
+.placeholderRow {
+  padding: 16px;
+}
+
+.actionItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.actionTitle,
+.feedTitle,
+.roomTitle,
+.channelTitle,
+.placeholderTitle {
+  font-size: 15px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.actionCopy,
+.feedCopy,
+.roomCopy,
+.channelCopy,
+.placeholderCopy {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(22, 93, 204, 0.1);
+  color: #165dcc;
+}
+
+.badgeMuted {
+  background: rgba(148, 163, 184, 0.12);
+  color: #475569;
+}
+
+.checkGrid,
+.channelGrid,
+.roomGrid,
+.placeholderGrid,
+.roleGrid,
+.feedGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.checkGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.checkItem {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.checkItemSelected {
+  border-color: rgba(37, 99, 235, 0.34);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+}
+
+.checkIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.checkIconDone {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.checkIconTodo {
+  background: rgba(148, 163, 184, 0.12);
+  color: #475569;
+}
+
+.checkTitle {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.checkValue {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #165dcc;
+}
+
+.checkMeta {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.summaryGrid,
+.listGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.summaryGrid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.summaryCard,
+.recommendationCard,
+.listCard,
+.cardInset {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f8fbff;
+  padding: 16px;
+}
+
+.summaryCardLink {
+  text-decoration: none;
+  color: inherit;
+  display: grid;
+  gap: 10px;
+}
+
+.summaryCardLink:hover {
+  border-color: rgba(96, 165, 250, 0.28);
+  box-shadow: 0 18px 32px rgba(8, 15, 32, 0.18);
+  transform: translateY(-1px);
+}
+
+.revenueHighlightCard {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.18) 0%, rgba(15, 23, 42, 0.92) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+}
+
+.revenueSourceRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.summaryLabel {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(15, 23, 42, 0.46);
+}
+
+.summaryValue {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+  line-height: 1.05;
+}
+
+.metricValue {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+  line-height: 1.05;
+}
+
+.metricHint {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.summaryCopy {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.recommendationText {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.7;
+  color: #0f172a;
+}
+
+.inlineActionRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.primaryActionLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 12px 16px;
+  border: none;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.39);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.primaryActionLink:hover {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.23);
+}
+
+.inlineBadgeRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.primaryActionButton,
+.secondaryActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.primaryActionButton {
+  border: none;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: white;
+  box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.39);
+}
+
+.primaryActionButton:hover {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.23);
+}
+
+.primaryActionButton:active {
+  transform: translateY(0);
+}
+
+.primaryActionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.secondaryActionLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 12px 16px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: white;
+  color: #0f172a;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.hostProfileIdentityCard {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid rgba(37, 99, 235, 0.12);
+}
+
+.hostProfileMetaGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hostProfileMetaItem {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(37, 99, 235, 0.06);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+
+.hostProfileMetaLabel {
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.5;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.hostProfileMetaValue {
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.45;
+  color: #0f172a;
+}
+
+.secondaryActionButton {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(4px);
+  color: #0f172a;
+  transition: all 0.2s ease;
+}
+
+.secondaryActionButton:hover {
+  background: white;
+  border-color: rgba(15, 23, 42, 0.15);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.listGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.calendarJumpForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.calendarJumpField {
+  height: 100%;
+  align-content: start;
+}
+
+.calendarJumpActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.listTitle {
+  font-size: 15px;
+  font-weight: 900;
+  color: #0f172a;
+  margin-bottom: 12px;
+}
+
+.channelGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.providerCard {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, rgba(22, 93, 204, 0.06), #f8fbff);
+}
+
+.providerCardHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.providerMetaRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.providerActionRow {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.operatorDetails {
+  margin-top: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(248, 250, 252, 0.86);
+  padding: 14px;
+}
+
+.operatorDetails[open] {
+  display: grid;
+  gap: 16px;
+}
+
+.operatorSummary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  color: #0f172a;
+  list-style-position: inside;
+}
+
+.operatorSummary:hover {
+  color: #165dcc;
+}
+
+.channelCard,
+.roomCard {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.channelHeader,
+.roomHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.channelMeta,
+.roomMeta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.roomMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.roomMetaItem {
+  border-radius: 14px;
+  padding: 12px;
+  background: white;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  display: grid;
+  gap: 6px;
+}
+
+.roomMetaLabel {
+  font-size: 10px;
+  font-weight: 900;
+  color: rgba(15, 23, 42, 0.42);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.roomReadinessRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.readinessPill {
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(226, 232, 240, 0.72);
+  color: #334155;
+}
+
+.readinessPillOk {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.readinessPillReview {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.readinessPillMissing {
+  background: rgba(244, 63, 94, 0.1);
+  color: #be123c;
+}
+
+.roomGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roomStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.miniStat {
+  border-radius: 14px;
+  padding: 12px;
+  background: white;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  display: grid;
+  gap: 6px;
+}
+
+.miniLabel {
+  font-size: 10px;
+  font-weight: 900;
+  color: rgba(15, 23, 42, 0.42);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.miniValue {
+  font-size: 14px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.placeholderGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.placeholderRow {
+  display: grid;
+  gap: 10px;
+}
+
+.placeholderLabel {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(15, 23, 42, 0.66);
+}
+
+.placeholderValue {
+  font-size: 14px;
+  font-weight: 900;
+  color: #165dcc;
+}
+
+.mappingTable {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(220px, 1fr) 150px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.drawerDetailTable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.rateTable {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(180px, 1fr) repeat(6, minmax(140px, 1fr));
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.mappingHeader,
+.mappingCell,
+.mappingCellMuted {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.mappingHeader {
+  background: #eef4fb;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.mappingCell,
+.mappingCellMuted {
+  background: #f8fbff;
+}
+
+.mappingCellMuted {
+  color: rgba(15, 23, 42, 0.54);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mappingTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.mappingSubcopy {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.mappingPreviewGrid,
+.contentReadinessGrid,
+.otaRoomGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.mappingPreviewGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.contentReadinessGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.contentSectionGrid {
+  display: grid;
+  gap: 16px;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.groupTitle {
+  font-size: 15px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.settingsOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.settingsOptionCard {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.settingsOptionCard input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settingsOptionCard:hover {
+  transform: translateY(-1px);
+}
+
+.settingsOptionCardSelected {
+  border-color: rgba(37, 99, 235, 0.42);
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.14);
+}
+
+.settingsOptionBody {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.settingsOptionIndicator {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(148, 163, 184, 0.38);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.settingsOptionIndicatorDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.settingsOptionCardSelected .settingsOptionIndicator {
+  border-color: rgba(37, 99, 235, 0.75);
+  background: rgba(219, 234, 254, 0.95);
+}
+
+.settingsOptionCardSelected .settingsOptionIndicatorDot {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.fieldBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.fieldInput {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: white;
+  color: #0f172a;
+  padding: 12px 14px;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.fieldTextarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: white;
+  color: #0f172a;
+  padding: 12px 14px;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.feedbackBox {
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.settingsToggleInput {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settingsToggleControl {
+  width: 54px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(148, 163, 184, 0.16);
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  flex-shrink: 0;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.settingsToggleThumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.checkItemSelected .settingsToggleControl {
+  border-color: rgba(37, 99, 235, 0.42);
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.checkItemSelected .settingsToggleThumb {
+  transform: translateX(24px);
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.feedbackSuccess {
+  background: #effaf3;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  color: #166534;
+}
+
+.feedbackError {
+  background: #fff1f2;
+  border: 1px solid rgba(244, 63, 94, 0.18);
+  color: #be123c;
+}
+
+.filterRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filterRow>button {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.bookingViewTabs {
+  padding: 12px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.34));
+  backdrop-filter: blur(18px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 40px rgba(2, 6, 23, 0.16);
+}
+
+.bookingDateFilterField {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.bookingDateFilterSelect {
+  height: 46px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.bookingTableToolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  margin-top: 18px;
+  margin-bottom: 10px;
+}
+
+.bookingDateFilterInlineField {
+  display: grid;
+  gap: 6px;
+  width: min(240px, 100%);
+}
+
+.bookingDateFilterInlineLabel {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(191, 219, 254, 0.82);
+  text-align: right;
+}
+
+.bookingDateFilterInlineSelect {
+  height: 40px;
+  min-width: 220px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+
+.bookingTableShell {
+  margin-top: 0;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.58), rgba(15, 23, 42, 0.34)),
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.14), transparent 28%);
+  backdrop-filter: blur(22px);
+  box-shadow: 0 24px 56px rgba(2, 6, 23, 0.22);
+  overflow: hidden;
+}
+
+.bookingTableScroller {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+}
+
+.bookingTableScroller::-webkit-scrollbar {
+  height: 8px;
+}
+
+.bookingTableScroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.bookingTableScroller::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.38);
+  border-radius: 999px;
+}
+
+.bookingTableScroller::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.56);
+}
+
+.bookingTable {
+  width: 100%;
+  min-width: 1020px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.bookingTable th,
+.bookingTable td {
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  text-align: left;
+  vertical-align: top;
+}
+
+.bookingTable th {
+  background: rgba(2, 6, 23, 0.34);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(191, 219, 254, 0.88);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.bookingTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.bookingTableRowExpanded td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.bookingTablePrimary {
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.bookingTableSecondary {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(226, 232, 240, 0.66);
+}
+
+.bookingSourcePill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(37, 99, 235, 0.14);
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  color: #dbeafe;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.bookingTableStatusStack {
+  display: grid;
+  gap: 8px;
+}
+
+.bookingTableStatusText {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.76);
+}
+
+.bookingTableActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bookingTableActions button {
+  white-space: nowrap;
+}
+
+.bookingTableExpandedRow td {
+  padding: 0;
+  background: rgba(2, 6, 23, 0.3);
+}
+
+.bookingExpandedPanel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.bookingExpandedGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.bookingExpandedCard,
+.bookingExpandedAlert,
+.bookingExpandedEditor {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+  padding: 16px;
+}
+
+.bookingExpandedLabel {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #bfdbfe;
+}
+
+.bookingExpandedText {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.bookingExpandedBadgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.bookingExpandedBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fde68a;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bookingExpandedEditor {
+  display: grid;
+  gap: 12px;
+  background: rgba(37, 99, 235, 0.1);
+  border-color: rgba(96, 165, 250, 0.24);
+}
+
+.bookingExpandedFormGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.bookingDangerButton {
+  border-color: rgba(248, 113, 113, 0.34) !important;
+  background: rgba(127, 29, 29, 0.32) !important;
+  color: #fecaca !important;
+}
+
+.bookingDangerButton:hover {
+  border-color: rgba(252, 165, 165, 0.48) !important;
+  background: rgba(153, 27, 27, 0.42) !important;
+}
+
+.filterChip {
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  font-size: 12px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.emptyState {
+  padding: 28px;
+  border-radius: 20px;
+  border: 1px dashed rgba(15, 23, 42, 0.14);
+  background: linear-gradient(180deg, #fbfdff, #f5f9ff);
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+
+.bookingsWorkspacePanel {
+  gap: 22px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.bookingsWorkspaceStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.bookingsWorkspaceStatCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.bookingsWorkspaceStatIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.bookingsWorkspaceStatIconBlue {
+  background: #eaf2ff;
+  color: #2563eb;
+}
+
+.bookingsWorkspaceStatIconGreen {
+  background: #e7f8ef;
+  color: #16a34a;
+}
+
+.bookingsWorkspaceStatIconOrange {
+  background: #fff3e2;
+  color: #f59e0b;
+}
+
+.bookingsWorkspaceStatIconRed {
+  background: #feecec;
+  color: #ef4444;
+}
+
+.bookingsWorkspaceStatIconPurple {
+  background: #f1ebff;
+  color: #7c3aed;
+}
+
+.bookingsWorkspaceStatValue {
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.bookingsWorkspaceStatLabel {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.bookingsWorkspaceStatMeta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.bookingsWorkspaceToolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) repeat(3, minmax(160px, 0.7fr)) auto auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.bookingsWorkspaceSearch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  height: 48px;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #64748b;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.bookingsWorkspaceSearch input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  outline: none;
+}
+
+.bookingsWorkspaceSelect,
+.bookingsWorkspacePageSizeSelect {
+  height: 48px;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 0 14px;
+  font: inherit;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.bookingsWorkspaceToolbarButton {
+  min-height: 48px;
+  padding: 0 14px;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.bookingsWorkspaceToolbarMenuWrap,
+.bookingsWorkspaceActions {
+  position: relative;
+}
+
+.bookingsWorkspacePopover,
+.bookingsWorkspaceActionsMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.12);
+  z-index: 8;
+}
+
+.bookingsWorkspaceActionsMenu {
+  min-width: 180px;
+  gap: 4px;
+  padding: 8px;
+  z-index: 50;
+}
+
+.bookingsWorkspaceActionsMenu button {
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.bookingsWorkspaceActionsMenu button:hover {
+  background: #f8fafc;
+}
+
+.bookingsWorkspaceTableCard {
+  border-radius: 20px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.05);
+  overflow: visible;
+}
+
+.bookingsWorkspaceTableCard .bookingTableScroller {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 72px;
+}
+
+.bookingsWorkspaceTable {
+  min-width: 1400px;
+}
+
+.bookingsWorkspaceTable th,
+.bookingsWorkspaceTable td {
+  padding: 16px 14px;
+  border-bottom: 1px solid #eef2f7;
+  color: #0f172a;
+}
+
+.bookingsWorkspaceTable .bookingTableRowExpanded td,
+.bookingsWorkspaceTable .bookingTableExpandedRow td {
+  background: #f8fafc;
+}
+
+.bookingsWorkspaceTable th {
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.bookingsWorkspaceBookingLink {
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.bookingsWorkspaceCellPrimary {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.bookingsWorkspaceCellSecondary {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.bookingsWorkspaceChannelBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.bookingsWorkspaceChannelMarker {
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.bookingsWorkspaceStatusPill,
+.bookingsWorkspaceInfoPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.bookingsWorkspaceStatusConfirmed {
+  background: #eaf8ef;
+  color: #16a34a;
+  border-color: #bbf7d0;
+}
+
+.bookingsWorkspaceStatusPending {
+  background: #fff4e5;
+  color: #d97706;
+  border-color: #fed7aa;
+}
+
+.bookingsWorkspaceStatusCancelled {
+  background: #feecec;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.bookingsWorkspaceStatusReview {
+  background: #eef2ff;
+  color: #4f46e5;
+  border-color: #c7d2fe;
+}
+
+.bookingsWorkspaceInfoPill {
+  background: #f8fafc;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+
+.bookingsWorkspacePaymentPaid {
+  color: #16a34a;
+}
+
+.bookingsWorkspacePaymentPending {
+  color: #d97706;
+}
+
+.bookingsWorkspacePaymentRefunded {
+  color: #dc2626;
+}
+
+.bookingsWorkspaceActions {
+  display: flex;
+  justify-content: center;
+}
+
+.bookingsWorkspaceActionsButton {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: #ffffff;
+  color: #475569;
+  border: 1px solid #e5e7eb;
+}
+
+.bookingsWorkspaceExpandedPanel {
+  background: #f8fafc;
+}
+
+.bookingsWorkspacePanel .bookingExpandedEditor {
+  background: #ffffff;
+  border-color: #dbe2ea;
+}
+
+.bookingsWorkspacePanel .bookingExpandedLabel {
+  color: #2563eb;
+}
+
+.bookingsWorkspacePanel .bookingExpandedText {
+  color: #475569;
+}
+
+.bookingsWorkspaceExpandedGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bookingsWorkspaceExpandedCard {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.bookingsWorkspacePagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 18px 16px;
+  border-top: 1px solid #eef2f7;
+  background: #ffffff;
+  border-radius: 0 0 20px 20px;
+  position: relative;
+  z-index: 2;
+}
+
+.bookingsWorkspacePaginationSummary {
+  font-size: 13px;
+  color: #475569;
+}
+
+.bookingsWorkspacePaginationControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bookingsWorkspacePaginationButton {
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e5e7eb;
+}
+
+.bookingsWorkspacePaginationButtonActive {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+.bookingsWorkspacePaginationEllipsis {
+  padding: 0 4px;
+  color: #94a3b8;
+}
+
+.logList {
+  display: grid;
+  gap: 12px;
+}
+
+.logRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f8fbff;
+  padding: 16px;
+}
+
+.logTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.logCopy {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.logMeta {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.logTimestamp {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.54);
+}
+
+.payloadSummaryList {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.payloadSummaryItem {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.conflictActionCopy {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #0f4ea9;
+  font-weight: 700;
+}
+
+.emptyTitle {
+  font-size: 16px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.emptyCopy {
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.calendarBoard {
+  overflow-x: auto;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: #fbfdff;
+}
+
+.calendarLuxuryShell .summaryCard,
+.calendarLuxuryShell .listCard,
+.calendarLuxuryShell .placeholderRow,
+.calendarLuxuryShell .emptyState {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.calendarLuxuryShell .metricValue,
+.calendarLuxuryShell .cardTitle,
+.calendarLuxuryShell .listTitle,
+.calendarLuxuryShell .emptyTitle,
+.calendarLuxuryShell .placeholderTitle {
+  color: white;
+}
+
+.calendarLuxuryShell .metricHint,
+.calendarLuxuryShell .cardCopy,
+.calendarLuxuryShell .feedCopy,
+.calendarLuxuryShell .emptyCopy,
+.calendarLuxuryShell .placeholderCopy,
+.calendarLuxuryShell .placeholderLabel {
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.calendarLuxuryShell .miniLabel {
+  color: rgba(191, 219, 254, 0.58);
+}
+
+.calendarLuxuryShell .placeholderValue {
+  color: #93c5fd;
+}
+
+.calendarLuxuryLegend .filterChip {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.calendarManagerToolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.calendarManagerToolbarFilters,
+.calendarManagerToolbarActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.calendarToolbarDropdown {
+  position: relative;
+}
+
+.calendarToolbarDropdownDisabled {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.calendarToolbarDropdownSummary {
+  list-style: none;
+  min-width: 180px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.08);
+}
+
+.calendarToolbarDropdownSummary::-webkit-details-marker {
+  display: none;
+}
+
+.calendarToolbarDropdownLabel {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendarToolbarDropdownMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.99);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.14);
+  z-index: 15;
+}
+
+.calendarToolbarDropdownItem {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.calendarToolbarDropdownItem:hover:not(:disabled) {
+  background: rgba(219, 234, 254, 0.62);
+}
+
+.calendarToolbarDropdownItemSelected {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
+.calendarToolbarIconButton {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.calendarToolbarSpin {
+  animation: calendarToolbarSpin 1s linear infinite;
+}
+
+@keyframes calendarToolbarSpin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+.calendarBoardLuxury {
+  border-color: rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(12, 21, 39, 0.96), rgba(7, 14, 28, 0.98));
+  box-shadow: 0 24px 48px rgba(2, 6, 23, 0.28);
+}
+
+.calendarBoardLuxury .calendarHeaderCell {
+  background: rgba(255, 255, 255, 0.08);
+  border-right-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.calendarBoardLuxury .calendarRoomHeader,
+.calendarBoardLuxury .calendarHeaderDate,
+.calendarBoardLuxury .calendarRoomName {
+  color: white;
+}
+
+.calendarBoardLuxury .calendarHeaderDay,
+.calendarBoardLuxury .calendarRoomType,
+.calendarBoardLuxury .calendarMetricLabel {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.calendarBoardLuxury .calendarRoomCell {
+  background: rgba(10, 18, 34, 0.98);
+  border-right-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.calendarBoardLuxury .calendarRateLabel {
+  background: rgba(8, 15, 29, 0.98);
+}
+
+.calendarBoardLuxury .calendarCell {
+  border-right-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.calendarBoardLuxury .calendarRateCell {
+  background: rgba(12, 21, 39, 0.9);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.calendarBoardLuxury .calendarCellAvailable {
+  background: rgba(11, 19, 34, 0.94);
+  color: #93c5fd;
+}
+
+.calendarBoardLuxury .calendarCellFamlo {
+  background: #dcebff;
+  color: #0f4ea9;
+}
+
+.calendarBoardLuxury .calendarCellOta {
+  background: #efe3ff;
+  color: #6c3bb8;
+}
+
+.calendarBoardLuxury .calendarCellManual {
+  background: #ffe1e1;
+  color: #b42318;
+}
+
+.calendarBoardLuxury .calendarCellPending {
+  background: #fff1c8;
+  color: #9a6700;
+}
+
+.calendarBoardLuxury .calendarCellPast {
+  background: #eef2f7;
+  color: #7b879a;
+}
+
+.calendarWorkspaceStateCard {
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.calendarWorkspaceStateBadge {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 7px 12px;
+  border: 1px solid rgba(147, 197, 253, 0.28);
+  background: rgba(37, 99, 235, 0.14);
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.calendarWorkspaceStateTitle {
+  font-size: 20px;
+  font-weight: 900;
+  color: white;
+}
+
+.calendarWorkspaceStateCopy {
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.calendarWorkspaceStateMeta {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(191, 219, 254, 0.78);
+}
+
+.calendarWorkspaceStateActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.calendarWorkspaceSkeletonHeader {
+  display: grid;
+  gap: 12px;
+}
+
+.calendarWorkspaceSkeletonBadge,
+.calendarWorkspaceSkeletonTitle,
+.calendarWorkspaceSkeletonCell {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.calendarWorkspaceSkeletonBadge::after,
+.calendarWorkspaceSkeletonTitle::after,
+.calendarWorkspaceSkeletonCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.24), transparent);
+  animation: calendarWorkspaceShimmer 1.4s infinite;
+}
+
+.calendarWorkspaceSkeletonBadge {
+  width: 132px;
+  height: 30px;
+}
+
+.calendarWorkspaceSkeletonTitle {
+  width: min(420px, 100%);
+  height: 44px;
+}
+
+.calendarWorkspaceSkeletonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 12px;
+}
+
+.calendarWorkspaceSkeletonCell {
+  min-height: 78px;
+}
+
+@keyframes calendarWorkspaceShimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.proLuxurySection .summaryCard,
+.proLuxurySection .listCard,
+.proLuxurySection .placeholderRow,
+.proLuxurySection .emptyState,
+.proLuxurySection .cardInset,
+.proLuxurySection .roomCard,
+.proLuxurySection .roleCard,
+.proLuxurySection .feedbackBox,
+.proLuxurySection .propertySwitcherCard {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.proLuxurySection .listCard {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.proLuxurySection .metricValue,
+.proLuxurySection .listTitle,
+.proLuxurySection .emptyTitle,
+.proLuxurySection .placeholderTitle,
+.proLuxurySection .roomTitle,
+.proLuxurySection .roleTitle,
+.proLuxurySection .groupTitle,
+.proLuxurySection .mappingTitle,
+.proLuxurySection .fieldLabel,
+.proLuxurySection .summaryValue,
+.proLuxurySection .summaryLabel,
+.proLuxurySection .summaryTitle {
+  color: white;
+}
+
+.proLuxurySection .metricHint,
+.proLuxurySection .feedCopy,
+.proLuxurySection .cardCopy,
+.proLuxurySection .emptyCopy,
+.proLuxurySection .placeholderCopy,
+.proLuxurySection .roomCopy,
+.proLuxurySection .roleCopy,
+.proLuxurySection .mappingSubcopy,
+.proLuxurySection .summaryCopy,
+.proLuxurySection .placeholderLabel,
+.proLuxurySection .fieldHelp {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.proLuxurySection .miniLabel,
+.proLuxurySection .summaryLabel {
+  color: rgba(191, 219, 254, 0.75);
+}
+
+.proLuxurySection .placeholderValue,
+.proLuxurySection .miniValue {
+  color: #93c5fd;
+}
+
+.proLuxurySection .mappingTable,
+.proLuxurySection .drawerDetailTable,
+.proLuxurySection .rateTable {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.proLuxurySection .mappingHeader {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.68);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.proLuxurySection .mappingCell,
+.proLuxurySection .mappingCellMuted {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.proLuxurySection .mappingCellMuted {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.proLuxurySection .fieldInput,
+.proLuxurySection .fieldTextarea {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: white;
+  backdrop-filter: blur(8px);
+}
+
+.proLuxurySection .fieldInput:focus,
+.proLuxurySection .fieldTextarea:focus {
+  outline: none;
+  border-color: rgba(147, 197, 253, 0.6);
+  background: rgba(255, 255, 255, 0.11);
+  box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.15);
+}
+
+.proLuxurySection .fieldInput::placeholder,
+.proLuxurySection .fieldTextarea::placeholder {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+/* Native select options need a dark background so text is readable in OS dropdown */
+.proLuxurySection .fieldInput option {
+  background: #1e2d45;
+  color: white;
+}
+
+.proLuxurySection .settingsOptionCard {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+
+.proLuxurySection .settingsOptionCardSelected {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(96, 165, 250, 0.48);
+  box-shadow: 0 18px 34px rgba(30, 64, 175, 0.22);
+}
+
+.proLuxurySection .settingsOptionIndicator {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+.proLuxurySection .settingsOptionCardSelected .settingsOptionIndicator {
+  background: rgba(219, 234, 254, 0.14);
+  border-color: rgba(147, 197, 253, 0.72);
+}
+
+.proLuxurySection .checkItem {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+
+.proLuxurySection .checkItemSelected {
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(96, 165, 250, 0.34);
+  box-shadow: 0 16px 28px rgba(30, 64, 175, 0.18);
+}
+
+.proLuxurySection .settingsToggleControl {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+.proLuxurySection .checkItemSelected .settingsToggleControl {
+  background: rgba(37, 99, 235, 0.28);
+  border-color: rgba(147, 197, 253, 0.42);
+}
+
+.proLuxurySection .propertySwitcherLabel,
+.proLuxurySection .propertySwitcherFieldLabel {
+  color: rgba(191, 219, 254, 0.58);
+}
+
+.proLuxurySection .propertySwitcherCopy,
+.proLuxurySection .propertySwitcherStatusPill {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.proLuxurySection .propertySwitcherSelect {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
+.calendarGrid {
+  display: grid;
+  grid-template-columns: 220px repeat(30, minmax(76px, 1fr));
+  min-width: 2520px;
+}
+
+.calendarRowSpacer {
+  height: 18px;
+  background: transparent;
+}
+
+.calendarHeaderCell {
+  background: #eef4ff;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.calendarRoomHeader {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 900;
+  color: #11233f;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+}
+
+.calendarRoomHeaderSticky {
+  display: grid;
+  gap: 10px;
+}
+
+.calendarRoomHeaderTitle {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.calendarHeaderNavigation {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.calendarHeaderNavigationLabel {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendarHeaderNavigationActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calendarHeaderNavButton {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.24);
+  color: rgba(255, 255, 255, 0.86);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.calendarHeaderNavButton:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.22);
+  border-color: rgba(96, 165, 250, 0.36);
+  transform: translateY(-1px);
+}
+
+.calendarHeaderNavButton:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.calendarHeaderDatePopover {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  width: 220px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(8, 15, 28, 0.96);
+  box-shadow: 0 20px 44px rgba(2, 6, 23, 0.4);
+  display: grid;
+  gap: 10px;
+  z-index: 8;
+}
+
+.calendarHeaderDatePopoverLabel {
+  display: grid;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(191, 219, 254, 0.78);
+}
+
+.calendarHeaderDateInput {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  padding: 10px 12px;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.calendarHeaderDatePopoverActions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.calendarHeaderCellHighlighted {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.44);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.22), rgba(15, 23, 42, 0.2));
+}
+
+.calendarHeaderDay {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(17, 35, 63, 0.68);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.calendarHeaderDate {
+  font-size: 13px;
+  font-weight: 800;
+  color: #11233f;
+}
+
+.calendarRoomCell {
+  background: white;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 10px 14px;
+  display: grid;
+  gap: 4px;
+}
+
+.calendarRoomCellSticky {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+}
+
+.calendarRateLabel {
+  background: #f8fbff;
+}
+
+.calendarRoomName {
+  font-size: 14px;
+  font-weight: 900;
+  color: #11233f;
+}
+
+.calendarRoomType {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.calendarMetricLabel {
+  font-size: 11px;
+  font-weight: 800;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.calendarMetricCode {
+  font-size: 20px;
+  font-weight: 900;
+  color: white;
+  letter-spacing: 0.02em;
+}
+
+.calendarCell {
+  appearance: none;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  min-height: 56px;
+  padding: 8px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  border-top: 0;
+  border-left: 0;
+}
+
+.calendarRateCell {
+  background: white;
+  color: #11233f;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.calendarCellHighlighted {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.5);
+}
+
+.calendarCellAvailable {
+  background: #f8fcff;
+  color: #165dcc;
+}
+
+.calendarCellFamlo {
+  background: #dcebff;
+  color: #0f4ea9;
+}
+
+.calendarCellOta {
+  background: #efe3ff;
+  color: #6c3bb8;
+}
+
+.calendarCellManual {
+  background: #ffe1e1;
+  color: #b42318;
+}
+
+.calendarCellPending {
+  background: #fff1c8;
+  color: #9a6700;
+}
+
+.calendarCellPast {
+  background: #eef2f7;
+  color: #7b879a;
+}
+
+.calendarCellInteractive {
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.calendarCellInteractive:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 2px rgba(17, 35, 63, 0.08);
+}
+
+.calendarCellInteractive:disabled {
+  cursor: default;
+  box-shadow: none;
+}
+
+.calendarDrawerOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 40;
+  padding: 20px;
+}
+
+.calendarDrawer {
+  width: min(460px, 100%);
+  height: 100%;
+  background: white;
+  border-radius: 24px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 22px;
+  overflow-y: auto;
+}
+
+.calendarDrawerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.calendarRateModalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, 0.62);
+  backdrop-filter: blur(8px);
+}
+
+.calendarRateModal {
+  width: min(680px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(12, 21, 39, 0.98), rgba(8, 15, 28, 0.98));
+  box-shadow: 0 28px 60px rgba(2, 6, 23, 0.48);
+}
+
+.calendarRateModalHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.calendarRateModalDetails {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.calendarRateModalDetailRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: baseline;
+}
+
+.calendarRateModalLabel {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(191, 219, 254, 0.72);
+}
+
+.calendarRateModalValue {
+  font-size: 14px;
+  font-weight: 800;
+  color: white;
+  text-align: right;
+}
+
+.calendarRateModalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.calendarRateModalCurrentPrice {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+}
+
+.calendarRateModalCurrentValue {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 900;
+  color: white;
+}
+
+.calendarRateModalCurrentHint,
+.calendarRateModalRangeHint {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.calendarRateModalActions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.calendarRateModalPrimaryActions {
+  display: inline-flex;
+  gap: 10px;
+}
+
+.calendarBulkDrawerSection {
+  display: grid;
+  gap: 12px;
+}
+
+.calendarBulkDateGrid,
+.calendarBulkSelectorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.calendarBulkWeekdayRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.calendarBulkWeekdayButton {
+  min-width: 52px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.calendarBulkWeekdayButtonSelected {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: #dbeafe;
+}
+
+.calendarBulkRestrictionGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.calendarBulkSelectorPanel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  min-height: 240px;
+}
+
+.calendarBulkSelectorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendarBulkSelectorList {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.calendarBulkSelectorItem {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.calendarBulkSelectorItem span {
+  display: grid;
+  gap: 4px;
+}
+
+.calendarBulkSelectorItem strong {
+  font-size: 13px;
+  color: white;
+}
+
+.calendarBulkSelectorItem small {
+  font-size: 11px;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.drawerCloseButton {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #f8fbff;
+  color: #11233f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.drawerCloseIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.drawerSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.roleGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.roleCard {
+  padding: 18px;
+  border-radius: 18px;
+  background: #f8fbff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 10px;
+}
+
+.roleTitle {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.roleCopy {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.feedGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1200px) {
+  .statGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .propertyTabGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .propertiesRoomShowcaseGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .roomControlTabRow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .channelGrid,
+  .roleGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .heroGrid,
+  .dashboardHeroShell,
+  .dashboardIntroGrid,
+  .dashboardSummaryGrid,
+  .dashboardGalleryRail,
+  .dashboardManualBookingGrid,
+  .twoCol,
+  .checkGrid,
+  .summaryGrid,
+  .roomGrid,
+  .roomOtaSelectorRow,
+  .roomMappingCardGrid,
+  .roomIssueCardGrid,
+  .roomMetaGrid,
+  .roomChannelSetupGrid,
+  .roomChannelPreviewGrid,
+  .roomChannelCatalogGrid,
+  .mappingPreviewGrid,
+  .contentReadinessGrid,
+  .placeholderGrid,
+  .drawerSummaryGrid,
+  .feedGrid,
+  .listGrid,
+  .calendarJumpForm,
+  .settingsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardHeroShell {
+    grid-template-areas:
+      "content"
+      "spotlight"
+      "booking";
+  }
+}
+
+@media (max-width: 920px) {
+  .shell {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    border-right: none;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  }
+
+  .header {
+    position: static;
+    padding: 20px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .content {
+    padding: 20px;
+  }
+
+  .propertyCenterHeader,
+  .propertySwitcherCard,
+  .propertySubSectionBar,
+  .propertySelectorBar,
+  .roomControlCenterHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .propertyCenterStatus,
+  .propertySwitcherControls,
+  .propertySwitcherStatusRow {
+    width: 100%;
+    justify-content: flex-start;
+    justify-items: stretch;
+  }
+
+  .propertySwitcherField {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .propertySelectorControls,
+  .propertySelectorField {
+    width: 100%;
+  }
+
+  .propertySelectorSelect {
+    font-size: 16px;
+  }
+
+  .sectionIntro {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .statGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mappingTable {
+    grid-template-columns: 1fr;
+  }
+
+  .rateTable {
+    grid-template-columns: 1fr;
+  }
+
+  .mappingHeader {
+    display: none;
+  }
+
+  .propertiesRoomShowcaseGrid,
+  .roomControlTabRow,
+  .roomChannelSummaryGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .revenueSourceRow {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardManualBookingFooter {
+    align-items: flex-start;
+  }
+
+  .propertyRoomShowcaseFooter {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .propertyCenterShell {
+    padding: 16px;
+  }
+
+  .propertyTabGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .statGrid,
+  .channelGrid,
+  .roleGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardTableHeader,
+  .dashboardTableRow,
+  .dashboardRoomTableHeader,
+  .dashboardRoomTableRow {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardGalleryRail,
+  .dashboardReelGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .propertyCenterTitle,
+  .headerTitle,
+  .heroTitle {
+    font-size: 28px;
+  }
+
+  .propertySelectorHeadline,
+  .roomControlCenterTitle {
+    font-size: 24px;
+  }
+
+  .sectionTitle {
+    font-size: 24px;
+  }
+
+  .filterRow>button {
+    flex-basis: 100%;
+  }
+
+  .bookingExpandedGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .bookingTableToolbar {
+    justify-content: stretch;
+  }
+
+  .bookingDateFilterInlineField {
+    width: 100%;
+  }
+
+  .bookingDateFilterInlineLabel {
+    text-align: left;
+  }
+
+  .bookingDateFilterInlineSelect {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .calendarDrawerOverlay {
+    padding: 10px;
+  }
+
+  .calendarDrawer {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .calendarHeaderNavigation {
+    grid-template-columns: 28px minmax(0, 1fr) 62px;
+  }
+
+  .calendarHeaderNavigationLabel {
+    font-size: 12px;
+  }
+
+  .calendarRateModalOverlay {
+    padding: 12px;
+  }
+
+  .calendarRateModal {
+    padding: 18px;
+  }
+
+  .propertySelectorBar,
+  .roomControlCenterShell {
+    padding: 14px;
+  }
+
+  .addPropertyControl,
+  .propertySelectorSelect {
+    width: 100%;
+  }
+
+  .propertiesRoomShowcaseGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .propertyRoomShowcaseCard {
+    grid-template-rows: 160px auto;
+  }
+}
+.infoIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(147, 197, 253, 0.2);
+  color: rgba(147, 197, 253, 0.9);
+  font-size: 10px;
+  font-weight: 900;
+  font-style: italic;
+  border: 1px solid rgba(147, 197, 253, 0.35);
+  cursor: help;
+  padding: 0;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+  line-height: 1;
+  position: relative;
+  top: -1px;
+}
+.infoIconBtn:hover {
+  background: rgba(147, 197, 253, 0.35);
+  border-color: rgba(147, 197, 253, 0.6);
+  color: white;
+  transform: scale(1.1);
+}
+
+/* Secondary action buttons glass style in luxury section */
+.proLuxurySection .secondaryActionButton {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  backdrop-filter: blur(8px);
+}
+.proLuxurySection .secondaryActionButton:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
+}
+.proLuxurySection .secondaryActionButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Ensure listTitle is bright white in luxury section */
+.proLuxurySection .listTitle {
+  color: white;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+/* Placeholder row text in luxury section */
+.proLuxurySection .placeholderTitle {
+  color: white;
+}
+.proLuxurySection .placeholderValue {
+  color: #93c5fd;
+}
+.proLuxurySection .placeholderCopy {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.settingsAccordion {
+  margin-top: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.48) 0%, rgba(15, 23, 42, 0.28) 100%);
+  overflow: hidden;
+}
+
+.shellLight .settingsAccordion {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.96) 0%, rgba(241, 245, 249, 0.92) 100%);
+}
+
+.settingsAccordionSummary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px 18px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settingsAccordionSummary::-webkit-details-marker {
+  display: none;
+}
+
+.settingsAccordionSummary::after {
+  content: "+";
+  font-size: 18px;
+  line-height: 1;
+  color: rgba(191, 219, 254, 0.92);
+}
+
+.settingsAccordion[open] .settingsAccordionSummary::after {
+  content: "-";
+}
+
+.shellLight .settingsAccordionSummary {
+  color: #0f172a;
+}
+
+.shellLight .settingsAccordionSummary::after {
+  color: rgba(37, 99, 235, 0.88);
+}
+
+.settingsAccordionBody {
+  padding: 0 0 2px;
+}
+
+.settingsAccordionBody :global(section) {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 0;
+  background: transparent;
+}
+
+.shellLight .settingsAccordionBody :global(section) {
+  border-top-color: rgba(15, 23, 42, 0.08);
+}
+
+.settingsActionStack {
+  display: grid;
+  gap: 14px;
+}
+
+.settingsActionCard {
+  display: grid;
+  gap: 14px;
+}
+
+.settingsActionButton {
+  width: 100%;
+  border: 1px solid rgba(59, 130, 246, 0.26);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(29, 78, 216, 0.96) 0%, rgba(37, 99, 235, 0.84) 45%, rgba(30, 64, 175, 0.92) 100%);
+  color: #eff6ff;
+  padding: 16px 18px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  box-shadow: 0 16px 28px rgba(29, 78, 216, 0.18);
+}
+
+.settingsActionButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 30px rgba(29, 78, 216, 0.24);
+}
+
+.settingsActionButton:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.shellLight .settingsActionButton {
+  color: #ffffff;
+  box-shadow: 0 14px 24px rgba(37, 99, 235, 0.14);
+}
+
+.channelFinancePanel {
+  display: grid;
+  gap: 22px;
+}
+
+.channelFinanceHeader,
+.channelFinanceSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.channelFinanceSection {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.channelFinanceSectionTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.channelFinanceRules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.channelFinanceRuleCard {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.channelFinanceRuleHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.channelFinanceRuleGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.channelFinanceTwoColumn {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.channelFinanceToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.channelFinanceToggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+}
+
+.channelFinanceTogglesGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.channelFinancePreview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+}
+
+.channelFinancePreviewLogo {
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  background: #2563eb;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+  padding: 8px;
+}
+
+.channelFinancePreviewTitle {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.settingsFooterBar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.settingsFooterMeta {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.settingsFooterSection {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settingsFooterLabel {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.settingsFooterValue {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+}
+
+.settingsFooterCopy {
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.shellLight .settingsFooterLabel {
+  color: rgba(15, 23, 42, 0.5);
+}
+
+.shellLight .settingsFooterValue {
+  color: #0f172a;
+}
+
+.shellLight .settingsFooterCopy {
+  color: rgba(15, 23, 42, 0.66);
+}
+
+.logoutButton {
+  border: 1px solid rgba(248, 113, 113, 0.26);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(127, 29, 29, 0.92) 0%, rgba(239, 68, 68, 0.88) 100%);
+  color: #fff;
+  padding: 13px 28px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  min-width: 180px;
+}
+
+.logoutButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 24px rgba(127, 29, 29, 0.22);
+}
+
+.logoutButton:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.shellLight .logoutButton {
+  box-shadow: 0 10px 22px rgba(239, 68, 68, 0.12);
+}
+
+@media (max-width: 1024px) {
+  .proProfileHeroCard,
+  .proProfilePreviewCard {
+    grid-template-columns: 1fr;
+  }
+
+  .proProfileHeroActions,
+  .proProfileEditorActions {
+    justify-content: flex-start;
+  }
+
+  .settingsFooterBar {
+    align-items: center;
+  }
+
+  .bookingsWorkspaceStatsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .bookingsWorkspaceToolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .channelFinanceRules,
+  .channelFinanceTwoColumn {
+    grid-template-columns: 1fr;
+  }
+
+  .channelFinanceRuleGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .proProfileFieldGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendarRateModalGrid,
+  .calendarBulkDateGrid,
+  .calendarBulkSelectorGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendarManagerToolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .calendarManagerToolbarFilters,
+  .calendarManagerToolbarActions {
+    width: 100%;
+  }
+
+  .calendarToolbarDropdown {
+    flex: 1 1 100%;
+  }
+
+  .calendarToolbarDropdownSummary {
+    min-width: 0;
+  }
+
+  .calendarRateModalDetailRow,
+  .calendarRateModalActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .calendarRateModalValue {
+    text-align: left;
+  }
+
+  .channelFinanceHeader,
+  .channelFinanceSectionHeader,
+  .channelFinanceRuleHeader {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .channelFinanceRuleGrid,
+  .channelFinanceTogglesGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendarBulkSelectorHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .calendarHeaderDatePopover {
+    left: auto;
+    right: 0;
+  }
+
+  .bookingsWorkspaceStatsGrid,
+  .bookingsWorkspaceToolbar,
+  .bookingsWorkspaceExpandedGrid,
+  .bookingsWorkspacePagination {
+    grid-template-columns: 1fr;
+  }
+
+  .bookingsWorkspacePagination,
+  .bookingsWorkspacePaginationControls {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .bookingsWorkspaceHeaderActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .proProfileInlineControl,
+  .proProfileEditorHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .proProfileHeroCard,
+  .proProfileSectionCard,
+  .proProfilePreviewCard {
+    padding: 18px;
+  }
+
+  .proProfileHeroMedia {
+    width: 100%;
+    max-width: 180px;
+    height: 180px;
+  }
+
+  .settingsAccordionSummary {
+    padding: 14px 16px;
+  }
+
+  .settingsActionButton {
+    padding: 14px 16px;
+  }
+
+.logoutButton {
+  width: 100%;
+  min-width: 0;
+}
+}
+
+.sidebarFooter {
+  position: relative;
+  overflow: visible;
+}
+
+.sidebarHostButton {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  border: none;
+  background: transparent;
+  color: #dbeafe;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sidebarHostAvatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: white;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.sidebarHostMeta {
+  display: grid;
+  gap: 3px;
+}
+
+.sidebarHostName {
+  font-size: 14px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.sidebarHostSubcopy {
+  font-size: 12px;
+  color: rgba(191, 219, 254, 0.68);
+}
+
+.sidebarHostChevron {
+  color: rgba(191, 219, 254, 0.72);
+  transition: transform 0.2s ease;
+}
+
+.sidebarHostChevronOpen {
+  transform: rotate(180deg);
+}
+
+.sidebarHostMenu {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% + 10px);
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(7, 12, 24, 0.98);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  box-shadow: 0 18px 38px rgba(2, 6, 23, 0.48);
+  z-index: 40;
+}
+
+.sidebarHostMenuItem {
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #dbeafe;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  padding: 11px 12px;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.sidebarHostMenuItem:hover {
+  background: rgba(37, 99, 235, 0.14);
+  color: #f8fafc;
+}
+
+.dashboardWorkspaceShell {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.dashboardWorkspaceShell .sidebar {
+  background: #ffffff;
+  color: #0f172a;
+  border-right-color: rgba(15, 23, 42, 0.08);
+  box-shadow: 10px 0 30px rgba(15, 23, 42, 0.06);
+}
+
+.dashboardWorkspaceShell .brandLogoFallback,
+.dashboardWorkspaceShell .headerTitle {
+  color: #0f172a;
+}
+
+.dashboardWorkspaceShell .header,
+.dashboardWorkspaceMain,
+.dashboardWorkspaceHeader,
+.dashboardWorkspaceContent {
+  background: #f8fafc;
+}
+
+.dashboardWorkspaceShell .header {
+  background: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.06);
+}
+
+.dashboardWorkspaceShell .headerCopy,
+.dashboardWorkspaceShell .navHint,
+.dashboardWorkspaceShell .brandCopy,
+.dashboardWorkspaceShell .navGroupLabel {
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.dashboardWorkspaceShell .navButton {
+  color: rgba(15, 23, 42, 0.78);
+}
+
+.dashboardWorkspaceShell .navButton:hover {
+  background: rgba(37, 99, 235, 0.06);
+  color: #0f172a;
+  border-color: rgba(37, 99, 235, 0.12);
+}
+
+.dashboardWorkspaceShell .navButtonActive {
+  color: white;
+}
+
+.dashboardWorkspaceShell .headerThemeToggle {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.dashboardWorkspaceShell .headerThemeButton {
+  color: rgba(15, 23, 42, 0.68);
+}
+
+.dashboardWorkspaceShell .headerThemeButton:hover {
+  color: #0f172a;
+}
+
+.dashboardWorkspaceShell .headerThemeButton:first-child.headerThemeButtonActive {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.dashboardWorkspaceShell .headerThemeButton:last-child.headerThemeButtonActive {
+  background: #020617;
+  color: #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 8px 18px rgba(2, 6, 23, 0.18);
+}
+
+.dashboardWorkspaceShell .chipChecking {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.18);
+}
+
+.dashboardWorkspaceShell .chipSuccess {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.dashboardWorkspaceShell .chipDanger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.dashboardWorkspaceShell .sidebarFooter {
+  margin-top: auto;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.dashboardWorkspaceShell .sidebarHostButton {
+  color: #0f172a;
+}
+
+.dashboardWorkspaceShell .sidebarHostName {
+  color: #0f172a;
+}
+
+.dashboardWorkspaceShell .sidebarHostSubcopy,
+.dashboardWorkspaceShell .sidebarHostChevron {
+  color: #64748b;
+}
+
+.dashboardWorkspaceShell .sidebarHostMenu {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+}
+
+.dashboardWorkspaceShell .sidebarHostMenuItem {
+  color: #0f172a;
+}
+
+.dashboardWorkspaceShell .sidebarHostMenuItem:hover {
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+}
+
+.dashboardWorkspaceHeaderInfo {
+  display: grid;
+  gap: 6px;
+}
+
+.dashboardWorkspaceHeaderTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboardWorkspaceHeaderSwitch {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid #dbe2ea;
+  background: #ffffff;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.dashboardWorkspacePage {
+  display: grid;
+  gap: 20px;
+  padding: 8px;
+}
+
+.dashboardWorkspacePageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.dashboardWorkspacePageTitle {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+}
+
+.dashboardWorkspacePageSubtitle {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #64748b;
+}
+
+.inlineStatusMetaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.dashboardWorkspaceActionRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dashboardWorkspaceSecondaryButton,
+.dashboardWorkspacePrimaryButton,
+.dashboardMiniSelectButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid #dbe2ea;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.dashboardWorkspacePrimaryButton {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.16);
+}
+
+.dashboardWorkspaceSecondaryButton:hover,
+.dashboardMiniSelectButton:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.dashboardWorkspacePrimaryButton:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.dashboardWorkspaceSecondaryButton:disabled,
+.dashboardWorkspacePrimaryButton:disabled,
+.dashboardMiniSelectButton:disabled,
+.dashboardQuickActionButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dashboardKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.dashboardKpiCard,
+.dashboardPanel {
+  border: 1px solid #e5e7eb;
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+}
+
+.dashboardKpiCard {
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.dashboardKpiIcon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dashboardKpiIconBlue {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.dashboardKpiIconGreen {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.dashboardKpiIconOrange {
+  background: rgba(249, 115, 22, 0.12);
+  color: #ea580c;
+}
+
+.dashboardKpiIconPurple {
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+}
+
+.dashboardKpiIconPurpleSoft {
+  background: rgba(168, 85, 247, 0.12);
+  color: #9333ea;
+}
+
+.dashboardKpiIconRed {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.dashboardKpiLabel {
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.dashboardKpiValue {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 900;
+  color: #0f172a;
+  letter-spacing: -0.03em;
+}
+
+.dashboardKpiMeta {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.dashboardWorkspaceTopGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.95fr);
+  gap: 18px;
+}
+
+.dashboardWorkspaceMiddleGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: 18px;
+}
+
+.dashboardWorkspaceBottomGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.dashboardPanel {
+  padding: 20px;
+  display: grid;
+  gap: 18px;
+}
+
+.dashboardPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.dashboardPanelTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.dashboardPanelSubtle,
+.dashboardPanelHeaderMeta,
+.dashboardCellMeta,
+.dashboardRevenueMeta,
+.dashboardUpcomingNextGuest {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.dashboardInlineLink,
+.dashboardFooterLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.dashboardInlineLink:hover,
+.dashboardFooterLink:hover {
+  color: #1d4ed8;
+}
+
+.dashboardBookingsTable {
+  display: grid;
+}
+
+.dashboardBookingsTableHead,
+.dashboardBookingsTableRow {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) minmax(120px, 1fr) repeat(2, minmax(100px, 0.9fr)) minmax(110px, 0.9fr) minmax(110px, 0.8fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.dashboardBookingsTableHead {
+  padding: 0 0 12px;
+  border-bottom: 1px solid #eef2f7;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.dashboardBookingsTableRow {
+  padding: 14px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.dashboardBookingsTableRow:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.dashboardGuestCell,
+.dashboardChannelCell,
+.dashboardRoomStatusIdentity,
+.dashboardChannelHealthRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboardCellTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.dashboardAvatarBadge,
+.dashboardMessageAvatar,
+.dashboardChannelMarker,
+.dashboardRoomThumbFallback {
+  flex-shrink: 0;
+}
+
+.dashboardAvatarBadge,
+.dashboardRoomThumbFallback {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.dashboardChannelMarker {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.dashboardStatusChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid transparent;
+}
+
+.dashboardStatusSuccess {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.dashboardStatusWarning {
+  background: rgba(249, 115, 22, 0.12);
+  color: #c2410c;
+  border-color: rgba(249, 115, 22, 0.18);
+}
+
+.dashboardStatusDanger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.dashboardStatusInfo {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4338ca;
+  border-color: rgba(99, 102, 241, 0.18);
+}
+
+.dashboardStatusMuted {
+  background: rgba(148, 163, 184, 0.14);
+  color: #64748b;
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.dashboardQuickActionsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboardQuickActionButton {
+  min-height: 92px;
+  border-radius: 18px;
+  border: 1px solid #dbe2ea;
+  background: #ffffff;
+  color: #0f172a;
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  text-align: left;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.dashboardQuickActionButton:hover {
+  background: #f8fbff;
+  border-color: #bfdbfe;
+  transform: translateY(-1px);
+}
+
+.dashboardQuickActionIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dashboardRevenueValue {
+  margin-top: -6px;
+  font-size: 34px;
+  font-weight: 900;
+  color: #0f172a;
+  letter-spacing: -0.03em;
+}
+
+.dashboardRevenueTrend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #16a34a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.dashboardRevenueChartWrap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.dashboardRevenueYAxis {
+  display: grid;
+  align-content: space-between;
+  min-height: 220px;
+  padding-bottom: 26px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.dashboardRevenueChart {
+  display: grid;
+  gap: 10px;
+}
+
+.dashboardRevenueSvg {
+  width: 100%;
+  height: 220px;
+  overflow: visible;
+}
+
+.dashboardRevenueGridLine {
+  stroke: #e2e8f0;
+  stroke-width: 1;
+}
+
+.dashboardRevenueLine {
+  fill: none;
+  stroke: #2563eb;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dashboardRevenueXAxis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.dashboardRevenueXAxisGhost {
+  opacity: 0.36;
+}
+
+.dashboardMiniSelectButton {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.dashboardRoomStatusList,
+.dashboardChannelHealthList,
+.dashboardMessageList {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboardRoomStatusRow,
+.dashboardChannelHealthRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+}
+
+.dashboardRoomThumb,
+.dashboardRoomThumbFallback {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+}
+
+.dashboardRoomThumb {
+  object-fit: cover;
+  background: #e2e8f0;
+}
+
+.dashboardRoomStatusMeta {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.dashboardRoomNights,
+.dashboardUpcomingTotal {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.dashboardUpcomingRail {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(92px, 1fr));
+  gap: 10px;
+  overflow-x: auto;
+}
+
+.dashboardUpcomingCard {
+  min-width: 92px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  display: grid;
+  gap: 6px;
+}
+
+.dashboardUpcomingDay {
+  font-size: 12px;
+  font-weight: 800;
+  color: #2563eb;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dashboardUpcomingDate {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.dashboardUpcomingCount {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.dashboardUpcomingFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.dashboardMessageRow {
+  border: 1px solid #edf2f7;
+  border-radius: 18px;
+  background: #f8fafc;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dashboardMessageRow:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.dashboardMessageAvatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+.dashboardMessageBody {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.dashboardMessageTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dashboardMessageText {
+  font-size: 13px;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboardEmptyState {
+  border: 1px dashed #cbd5e1;
+  border-radius: 18px;
+  padding: 24px;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 600;
+  background: #f8fafc;
+}
+
+.dashboardModalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.46);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 90;
+}
+
+.dashboardModal {
+  width: min(560px, 100%);
+  border-radius: 24px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 32px 80px rgba(15, 23, 42, 0.26);
+  padding: 24px;
+  display: grid;
+  gap: 18px;
+}
+
+.bookingDocumentModal {
+  width: min(1100px, 100%);
+  max-height: min(880px, calc(100vh - 48px));
+  overflow: auto;
+}
+
+.dashboardModalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dashboardModalTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.dashboardModalCopy {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.dashboardModalClose {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.dashboardModalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.dashboardModalField {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboardModalField span {
+  font-size: 12px;
+  font-weight: 800;
+  color: #475569;
+}
+
+.dashboardModalField input,
+.dashboardModalField select {
+  min-height: 46px;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 14px;
+  padding: 0 14px;
+}
+
+.dashboardModalFeedback {
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dashboardModalFeedbackSuccess {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.dashboardModalFeedbackError {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.dashboardModalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bookingDocumentSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bookingDocumentSummary span {
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  color: #334155;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bookingDocumentFrameWrap {
+  min-height: 460px;
+  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.bookingDocumentFrame {
+  width: 100%;
+  height: 540px;
+  border: 0;
+  background: #ffffff;
+}
+
+@media (max-width: 1400px) {
+  .dashboardKpiGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dashboardWorkspaceMiddleGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboardWorkspaceMiddleGrid > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1120px) {
+  .dashboardWorkspaceTopGrid,
+  .dashboardWorkspaceMiddleGrid,
+  .dashboardWorkspaceBottomGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardBookingsTable {
+    overflow-x: auto;
+  }
+
+  .dashboardBookingsTableHead,
+  .dashboardBookingsTableRow {
+    min-width: 860px;
+  }
+}
+
+@media (max-width: 860px) {
+  .dashboardKpiGrid,
+  .dashboardModalGrid,
+  .dashboardQuickActionsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardRevenueChartWrap {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardRevenueYAxis {
+    grid-auto-flow: column;
+    min-height: auto;
+    padding-bottom: 0;
+  }
+}
+
+.revenueReportMain,
+.revenueReportHeader,
+.revenueReportContent {
+  background: #f8fafc;
+}
+
+.revenueReportHeader {
+  background: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.06);
+}
+
+.revenueReportHeader .headerTitle {
+  color: #0f172a;
+}
+
+.revenueReportHeader .headerCopy {
+  color: #64748b;
+}
+
+.revenueReportHeader .headerThemeToggle {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.revenueReportHeader .headerThemeButton {
+  color: rgba(15, 23, 42, 0.68);
+}
+
+.revenueReportHeader .headerThemeButton:hover {
+  color: #0f172a;
+}
+
+.revenueReportHeader .headerThemeButton:first-child.headerThemeButtonActive {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.revenueReportHeader .headerThemeButton:last-child.headerThemeButtonActive {
+  background: #020617;
+  color: #ffffff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 8px 18px rgba(2, 6, 23, 0.18);
+}
+
+.revenueReportHeader .chipChecking {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.18);
+}
+
+.revenueReportHeader .chipSuccess {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.revenueReportHeader .chipDanger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.revenueReportPage {
+  display: grid;
+  gap: 20px;
+  padding: 8px;
+}
+
+.revenueReportPageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.revenueReportEyebrow {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.revenueReportTitle {
+  margin: 6px 0 0;
+  font-size: 40px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+}
+
+.revenueReportSubtitle {
+  margin: 10px 0 0;
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #64748b;
+}
+
+.revenueReportActionRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.revenueReportSecondaryButton,
+.revenueReportPrimaryButton,
+.revenueReportSecondaryMiniButton,
+.revenueReportPrimaryMiniButton,
+.revenueReportDateButton,
+.revenueReportFilterChip,
+.revenueReportTabButton,
+.tableIconButton,
+.revenueInlineLinkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 14px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  text-decoration: none;
+}
+
+.revenueReportSecondaryButton,
+.revenueReportDateButton,
+.revenueReportSelect,
+.revenueReportSecondaryMiniButton,
+.revenueReportTabButton,
+.tableIconButton {
+  border: 1px solid #dbe2ea;
+  background: white;
+  color: #0f172a;
+}
+
+.revenueReportSecondaryButton,
+.revenueReportPrimaryButton {
+  min-height: 44px;
+  padding: 0 16px;
+}
+
+.revenueReportPrimaryButton,
+.revenueReportPrimaryMiniButton {
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.16);
+}
+
+.revenueReportSecondaryMiniButton,
+.revenueReportPrimaryMiniButton {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+  border-radius: 12px;
+}
+
+.revenueReportDateButton {
+  min-height: 44px;
+  padding: 0 16px;
+}
+
+.revenueReportSecondaryButton:hover,
+.revenueReportDateButton:hover,
+.revenueReportSelect:hover,
+.revenueReportSecondaryMiniButton:hover,
+.revenueReportTabButton:hover,
+.tableIconButton:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.revenueReportPrimaryButton:hover,
+.revenueReportPrimaryMiniButton:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.revenueInlineLinkButton {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 12px;
+}
+
+.revenueReportTabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  background: white;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+}
+
+.revenueReportTabButton {
+  min-height: 42px;
+  padding: 0 16px;
+  border-color: transparent;
+  color: #475569;
+}
+
+.revenueReportTabButtonActive {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+
+.revenueReportFilterRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.revenueReportWindowChips {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  background: white;
+}
+
+.revenueReportFilterChip {
+  min-height: 38px;
+  padding: 0 14px;
+  border-color: transparent;
+  color: #475569;
+}
+
+.revenueReportFilterChipActive {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+
+.revenueReportSelect {
+  min-height: 44px;
+  padding: 0 42px 0 14px;
+  border-radius: 14px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.revenueReportDetailsMenu {
+  position: relative;
+}
+
+.revenueReportDetailsMenu > summary {
+  list-style: none;
+}
+
+.revenueReportDetailsMenu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.revenueReportDetailsPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 240px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  background: white;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
+  z-index: 20;
+}
+
+.revenueReportMetricsGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.revenueMetricCard,
+.revenueReportCard,
+.reportCatalogCard,
+.reportDownloadItem {
+  border-radius: 22px;
+  border: 1px solid #e5e7eb;
+  background: white;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+}
+
+.revenueMetricCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px;
+}
+
+.revenueMetricIcon,
+.reportCardIconBox,
+.revenueBreakdownIcon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.revenueMetricIconGreen,
+.reportCardIconGreen,
+.revenueBreakdownIconGreen {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.revenueMetricIconBlue,
+.reportCardIconBlue {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.revenueMetricIconSky,
+.reportCardIconSky {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+}
+
+.revenueMetricIconOrange,
+.reportCardIconOrange,
+.revenueBreakdownIconOrange {
+  background: rgba(249, 115, 22, 0.12);
+  color: #ea580c;
+}
+
+.revenueMetricIconPurple,
+.reportCardIconPurple,
+.revenueBreakdownIconPurple {
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+}
+
+.reportCardIconRed,
+.revenueBreakdownIconRed {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.revenueBreakdownIconSlate {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+}
+
+.revenueMetricBody {
+  display: grid;
+  gap: 6px;
+}
+
+.revenueMetricLabel {
+  font-size: 13px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.revenueMetricValue,
+.revenueCardValue {
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+}
+
+.revenueMetricMeta,
+.revenueCardMeta,
+.revenueMutedMeta,
+.reportCatalogCopy,
+.reportInsightCopy,
+.revenueTableCellSecondary {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.revenueReportAnalyticsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr) minmax(300px, 0.9fr);
+  gap: 16px;
+}
+
+.revenueOverviewCard,
+.revenueReportCard {
+  padding: 20px;
+}
+
+.revenueCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.revenueCardTitle,
+.reportCatalogTitle,
+.reportDownloadTitle,
+.reportInsightTitle {
+  font-size: 18px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.revenueOverviewSelectors {
+  display: flex;
+  gap: 8px;
+}
+
+.revenueOverviewSvg {
+  width: 100%;
+  height: 280px;
+  display: block;
+}
+
+.revenueTrendPositive {
+  color: #16a34a;
+  font-weight: 800;
+}
+
+.revenueTrendNegative {
+  color: #dc2626;
+  font-weight: 800;
+}
+
+.revenueChannelLayout {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+}
+
+.revenueDonutWrap {
+  display: flex;
+  justify-content: center;
+}
+
+.revenueDonutChart {
+  width: 170px;
+  height: 170px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+}
+
+.revenueDonutInner {
+  width: 112px;
+  height: 112px;
+  border-radius: 999px;
+  background: white;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  box-shadow: inset 0 0 0 1px #e5e7eb;
+}
+
+.revenueDonutValue {
+  font-size: 18px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.revenueDonutLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.revenueChannelList,
+.reportInsightsList,
+.reportBuilderForm {
+  display: grid;
+  gap: 12px;
+}
+
+.revenueChannelRow,
+.revenueStatusRow,
+.reportInsightRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
+.revenueChannelLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.revenueChannelDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.revenueChannelValues {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.revenueStatusStack {
+  display: grid;
+  gap: 12px;
+}
+
+.revenueStatusRow {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.revenueStatusItemLabel {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.revenueStatusFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.revenueReportLowerGrid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.4fr);
+  gap: 16px;
+}
+
+.revenueBreakdownGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.revenueBreakdownItem {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  text-align: center;
+  padding: 14px 8px;
+  border-radius: 18px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.revenueBreakdownItemBody {
+  display: grid;
+  gap: 4px;
+}
+
+.revenueBreakdownLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.revenueBreakdownValue,
+.revenueTableCellPrimary {
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.revenueBreakdownMeta {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.revenueTableWrap {
+  overflow-x: auto;
+}
+
+.revenueDataTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.revenueDataTable th,
+.revenueDataTable td {
+  padding: 14px 12px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.revenueDataTable th {
+  font-size: 12px;
+  font-weight: 900;
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.revenueTableLinkCell {
+  font-size: 13px;
+  font-weight: 800;
+  color: #2563eb;
+}
+
+.revenueTableEmptyCell {
+  padding: 28px 12px;
+  text-align: center;
+  color: #64748b;
+}
+
+.reportStatusPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid transparent;
+}
+
+.reportStatusSuccess {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.reportStatusWarning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.18);
+}
+
+.reportStatusDanger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.reportStatusInfo {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+  border-color: rgba(59, 130, 246, 0.18);
+}
+
+.reportDownloadGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.reportDownloadItem {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+}
+
+.reportDownloadMeta {
+  display: grid;
+  gap: 4px;
+}
+
+.reportDownloadMonth {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.reportDownloadActions,
+.reportCatalogFooter,
+.reportChipRow,
+.reportFooterActionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reportFormatChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #dbe2ea;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.reportPageLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.72fr);
+  gap: 16px;
+}
+
+.reportPageMainColumn,
+.reportSideColumn,
+.reportDataGrid {
+  display: grid;
+  gap: 16px;
+}
+
+.reportCardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.reportCatalogCard {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.reportCatalogCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.reportCatalogChevron {
+  color: #94a3b8;
+}
+
+.reportCatalogLatest {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.reportInsightRow {
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.reportInsightRow:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.reportBuilderDateField {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.04);
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.tableIconButton {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+@media (max-width: 1440px) {
+  .revenueReportMetricsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .revenueReportAnalyticsGrid,
+  .reportPageLayout,
+  .reportDownloadGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reportCardGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .revenueReportLowerGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .revenueReportAnalyticsGrid,
+  .reportPageLayout,
+  .reportDownloadGrid,
+  .reportCardGrid,
+  .revenueBreakdownGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .revenueChannelLayout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -12,7 +12,7 @@ interface HommieAdminPanelProps {
 export function HommieAdminPanel({
   applications,
   listings
-}: HommieAdminPanelProps): JSX.Element {
+}: HommieAdminPanelProps) {
   const [applicationItems, setApplicationItems] = useState(applications);
   const [listingItems, setListingItems] = useState(listings);
   const [message, setMessage] = useState("");

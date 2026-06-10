@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { uploadFileToR2 } from "@/lib/r2-upload";
 import { createAdminSupabaseClient } from "@/lib/supabase";
+import { MAX_IMAGE_UPLOAD_BYTES } from "@/lib/upload-limits";
 
 export async function POST(request: Request): Promise<NextResponse> {
   const formData = await request.formData();
@@ -30,27 +32,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "You can keep up to 5 listing photos." }, { status: 400 });
   }
 
-  const uploadedUrls: string[] = [];
-
   for (const [index, file] of files.entries()) {
-    const extension = file.name.split(".").pop() || "jpg";
-    const filePath = `family_${familyId}_${Date.now()}_${index}.${extension}`;
-    const buffer = await file.arrayBuffer();
-
-    const { error: uploadError } = await supabase.storage
-      .from("photos")
-      .upload(filePath, buffer, {
-        contentType: file.type || "image/jpeg",
-        upsert: false
-      });
-
-    if (uploadError) {
-      return NextResponse.json({ error: uploadError.message }, { status: 500 });
+    if (!file.type.startsWith("image/")) {
+      return NextResponse.json({ error: "Please upload image files only." }, { status: 400 });
     }
-
-    const {
-      data: { publicUrl }
-    } = supabase.storage.from("photos").getPublicUrl(filePath);
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+      return NextResponse.json({ error: "Image must be 15MB or smaller." }, { status: 400 });
+    }
+    const publicUrl = await uploadFileToR2(file, `family-photos/${familyId}/${index}`);
 
     const { error: insertError } = await supabase.from("family_photos").insert({
       family_id: familyId,
@@ -61,8 +50,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (insertError) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
-
-    uploadedUrls.push(publicUrl);
   }
 
   const { data: photoRows, error: photoError } = await supabase
@@ -78,6 +65,8 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   return NextResponse.json({
     ok: true,
-    photoUrls: ((photoRows ?? []) as Array<{ url: string | null }>).map((row) => row.url ?? "").filter(Boolean)
+    photoUrls: ((photoRows ?? []) as Array<{ url: string | null }>)
+      .map((row) => row.url ?? "")
+      .filter(Boolean)
   });
 }

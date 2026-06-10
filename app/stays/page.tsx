@@ -1,6 +1,6 @@
 import { ResetPage } from "@/app/_components/ResetPage";
 
-export default function StaysPage(): JSX.Element {
+export default function StaysPage() {
   return (
     <ResetPage
       title="Stays page reset."

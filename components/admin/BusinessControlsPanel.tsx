@@ -30,7 +30,7 @@ export function BusinessControlsPanel({
   families,
   friends,
   hommies
-}: BusinessControlsPanelProps): JSX.Element {
+}: BusinessControlsPanelProps) {
   const [formState, setFormState] = useState<SettingsState>({
     global_family_commission_pct: String(settings.global_family_commission_pct),
     global_friend_commission_pct: String(settings.global_friend_commission_pct),
