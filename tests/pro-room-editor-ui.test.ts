@@ -1,0 +1,494 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import {
+  applyRoomCalendarAvailabilityOverride,
+  buildHostRoomIssueCards,
+  canRunHostChannelSync,
+  classifyOtaReadiness,
+  getChannelManagerConfirmationLabel,
+  rollbackRoomCalendarAvailabilityOverride,
+  resolveHostChannelCardState,
+  resolveSmartPricingUiState,
+} from "../lib/pro-room-editor-ui";
+import { CHANNEL_PROVIDER_REGISTRY } from "../lib/channel-providers/provider-registry";
+import { getChannelProviderCapabilities } from "../lib/channel-providers/provider-capabilities";
+import {
+  OTA_CONNECT_CONFIGS,
+  getOtaConnectConfig,
+  isOtaConnectId,
+} from "../lib/channels/ota-connect-config";
+import {
+  normalizeChannexPreview,
+  validateOtaFields,
+} from "../lib/channels/ota-connect-service";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const shellPath = path.join(repoRoot, "components/partners/pro/FamloProDashboardShell.tsx");
+const renderDashboardPath = path.join(repoRoot, "app/partnerslogin/home/pro/dashboard/render-dashboard.tsx");
+const cssPath = path.join(repoRoot, "components/partners/pro/pro-dashboard.module.css");
+const otaPreviewRoutePath = path.join(repoRoot, "app/api/partners/pro/channels/ota/preview/route.ts");
+const otaConfirmRoutePath = path.join(repoRoot, "app/api/partners/pro/channels/ota/confirm/route.ts");
+const otaAirbnbAuthorizeRoutePath = path.join(repoRoot, "app/api/partners/pro/channels/ota/airbnb/authorize/route.ts");
+const otaAirbnbCallbackRoutePath = path.join(repoRoot, "app/api/partners/pro/channels/ota/airbnb/callback/route.ts");
+const otaServicePath = path.join(repoRoot, "lib/channels/ota-connect-service.ts");
+const shellSource = readFileSync(shellPath, "utf8");
+const renderDashboardSource = readFileSync(renderDashboardPath, "utf8");
+const cssSource = readFileSync(cssPath, "utf8");
+const otaPreviewRouteSource = readFileSync(otaPreviewRoutePath, "utf8");
+const otaConfirmRouteSource = readFileSync(otaConfirmRoutePath, "utf8");
+const otaAirbnbAuthorizeRouteSource = readFileSync(otaAirbnbAuthorizeRoutePath, "utf8");
+const otaAirbnbCallbackRouteSource = readFileSync(otaAirbnbCallbackRoutePath, "utf8");
+const otaServiceSource = readFileSync(otaServicePath, "utf8");
+const roomChannelsSectionSource = shellSource.slice(shellSource.indexOf("Connect this room to OTA"), shellSource.indexOf('{roomEditorTab === "mapping"'));
+
+test("Add Room card reuses the room showcase card layout", () => {
+  assert.match(
+    shellSource,
+    /className=\{`\$\{styles\.propertyRoomShowcaseCard\} \$\{styles\.addRoomShowcaseCard\}`\}/
+  );
+  assert.match(shellSource, /Create a new room inside this property\./);
+});
+
+test("room cards stay independent from heavy sync logs on initial property load", () => {
+  assert.match(renderDashboardSource, /includeSyncLogs: needsChannelSyncHistory/);
+  assert.match(renderDashboardSource, /includeBookingRevisions: needsBookingRevisions/);
+});
+
+test("room tabs inline reused content replaces old open-another-page CTAs", () => {
+  assert.doesNotMatch(roomChannelsSectionSource, /Open Channels/);
+  assert.doesNotMatch(roomChannelsSectionSource, /Open Room Matching/);
+  assert.doesNotMatch(roomChannelsSectionSource, /View Sync Logs/);
+  assert.match(shellSource, /ChannelSetupWizard/);
+  assert.match(shellSource, /Go to Channels/);
+  assert.match(shellSource, /Advanced sync logs/);
+});
+
+test("channels tab shows one main ota connection flow with exactly five pill options", () => {
+  assert.match(shellSource, /Connect this room to OTA/);
+  assert.match(
+    shellSource,
+    /Select the OTA where this room is already listed\. Add the required details and Famlo will show a preview before syncing\./
+  );
+  assert.deepEqual(
+    OTA_CONNECT_CONFIGS.map((config) => config.id),
+    ["booking_com", "mmt_goibibo", "agoda", "expedia", "airbnb"]
+  );
+  assert.equal(isOtaConnectId("booking_com"), true);
+  assert.equal(isOtaConnectId("google_hotel"), false);
+  assert.match(shellSource, /Booking\.com/);
+  assert.match(shellSource, /MakeMyTrip \/ Goibibo/);
+  assert.match(shellSource, /Agoda/);
+  assert.match(shellSource, /Expedia/);
+  assert.match(shellSource, /Airbnb/);
+  assert.doesNotMatch(roomChannelsSectionSource, /Google Hotel/);
+});
+
+test("channels tab renders one main glass ota setup container with selector bar and connect button", () => {
+  assert.match(shellSource, /roomMainGlassPanel/);
+  assert.match(shellSource, /roomOtaSelectorRow/);
+  assert.match(shellSource, /roomOtaSelectorBar/);
+  assert.match(shellSource, /roomOtaPill/);
+  assert.match(cssSource, /\.roomMainGlassPanel/);
+  assert.match(cssSource, /\.roomOtaSelectorBar\s*\{[\s\S]*overflow-x:\s*auto;/);
+  assert.match(roomChannelsSectionSource, />\s*Connect\s*</);
+});
+
+test("selected ota opens the setup panel inside the same container", () => {
+  assert.match(shellSource, /setActiveChannelSetup\(provider\.key\)/);
+  assert.match(shellSource, /Only the selected OTA setup will open here/);
+  assert.match(shellSource, /roomChannelPanel/);
+});
+
+test("config exposes ota-specific setup fields and instructions", () => {
+  const booking = getOtaConnectConfig("booking_com");
+  const mmt = getOtaConnectConfig("mmt_goibibo");
+  const agoda = getOtaConnectConfig("agoda");
+
+  assert.equal(booking.displayName, "Booking.com");
+  assert.match(booking.instructions.join(" "), /Booking\.com extranet/);
+  assert.equal(mmt.requiredFields.some((field) => field.key === "providerAccessToken"), true);
+  assert.equal(agoda.requiredFields.some((field) => field.key === "providerListingId"), true);
+});
+
+test("inline setup panel requires channel-manager confirmation and preview before final sync", () => {
+  assert.match(shellSource, /Preview/);
+  assert.match(shellSource, /Yes, connect and start sync/);
+  assert.match(shellSource, /disabled=\{!selectedChannelConfirmationChecked \|\| !roomEditorPreviewAccepted/);
+  assert.match(shellSource, /I confirm this is the correct OTA property and room\. Famlo can manage availability, rates, and inventory for this OTA room\./);
+});
+
+test("preview card shows simple found property and room matching flow", () => {
+  assert.match(shellSource, /Found property/);
+  assert.match(shellSource, /Rooms found/);
+  assert.match(shellSource, /Suggested match/);
+  assert.match(shellSource, /Famlo room/);
+  assert.match(shellSource, /OTA room/);
+  assert.match(shellSource, /Advanced/);
+});
+
+test("connected OTA state only offers run sync when readiness allows it", () => {
+  assert.equal(
+    canRunHostChannelSync({
+      connected: true,
+      roomMatched: true,
+      rateMatched: true,
+      calendarReady: true,
+      supportsSelectedPropertySyncTest: true,
+    }),
+    true
+  );
+  assert.equal(
+    canRunHostChannelSync({
+      connected: true,
+      roomMatched: false,
+      rateMatched: true,
+      calendarReady: true,
+      supportsSelectedPropertySyncTest: true,
+    }),
+    false
+  );
+  assert.match(shellSource, /Run sync now/);
+});
+
+test("room and price matching tab uses host-friendly cards and links pricing back to Famlo pricing", () => {
+  assert.match(shellSource, /Manage OTA room and price mapping/);
+  assert.match(shellSource, /Famlo Room/);
+  assert.match(shellSource, /Connected OTA Room/);
+  assert.match(shellSource, /Price \/ Rate Plan/);
+  assert.match(shellSource, /Sync Result/);
+  assert.match(shellSource, /Famlo Pro is the master source\. Edit this room(?:&apos;|'|’)s price in Famlo Pro, then sync to matched OTA rate plans\./);
+  assert.match(shellSource, /Edit Famlo price/);
+  assert.match(shellSource, /setRoomEditorTab\("pricing"\)/);
+});
+
+test("room edit tabs use dark glass primitives instead of white summary cards", () => {
+  assert.match(shellSource, /roomDarkCard/);
+  assert.match(shellSource, /roomDarkEmptyState/);
+  assert.match(shellSource, /roomInlineFeedback/);
+  assert.match(cssSource, /\.roomDarkCard/);
+  assert.match(cssSource, /\.roomDarkEmptyState/);
+});
+
+test("channels tab removes bulky readiness cards and progress boxes from the host flow", () => {
+  assert.doesNotMatch(roomChannelsSectionSource, /Step 1 Select OTA/);
+  assert.doesNotMatch(roomChannelsSectionSource, /Ready to connect/);
+  assert.doesNotMatch(roomChannelsSectionSource, /roomOtaCardGrid/);
+  assert.doesNotMatch(roomChannelsSectionSource, /OTA room match/);
+  assert.doesNotMatch(roomChannelsSectionSource, /OTA rate plan/);
+});
+
+test("bootstrap copy stays explicit that readiness is being prepared, not live connection activated", () => {
+  assert.match(shellSource, /Prepare \/ refresh readiness/);
+  assert.match(shellSource, /Prepares or refreshes Channex room and rate readiness for this property\./);
+  assert.match(shellSource, /This does not activate OTA channels or mark any provider live\./);
+  assert.doesNotMatch(shellSource, /All OTAs connected/);
+});
+
+test("issues tab keeps a clean no-issues state and hides logs behind an advanced section", () => {
+  assert.match(shellSource, /No issues found/);
+  assert.match(shellSource, /This room is ready for connected channels\./);
+  assert.match(shellSource, /Advanced sync logs/);
+  assert.doesNotMatch(shellSource, /No room logs/);
+});
+
+test("calendar optimistic update success applies only the targeted room date", () => {
+  const current = {};
+  const next = applyRoomCalendarAvailabilityOverride(current, {
+    roomId: "room-1",
+    date: "2026-06-10",
+    action: "block",
+  });
+
+  assert.deepEqual(next, {
+    "room-1:2026-06-10": "manual_block",
+  });
+});
+
+test("calendar optimistic rollback restores the previous date state after failure", () => {
+  const optimistic = applyRoomCalendarAvailabilityOverride({}, {
+    roomId: "room-1",
+    date: "2026-06-10",
+    action: "block",
+  });
+
+  const rolledBack = rollbackRoomCalendarAvailabilityOverride(optimistic, {
+    roomId: "room-1",
+    date: "2026-06-10",
+    previousStatus: "available",
+  });
+
+  assert.deepEqual(rolledBack, {
+    "room-1:2026-06-10": "available",
+  });
+});
+
+test("manual pricing is the only active pricing state without operational backend support", () => {
+  assert.deepEqual(resolveSmartPricingUiState(false), {
+    manualPricingLabel: "Manual pricing active",
+    smartPricingLabel: "Coming soon",
+    smartPricingEnabled: false,
+  });
+});
+
+test("issues tab shows only real actionable issue cards for missing setup and content", () => {
+  assert.deepEqual(
+    buildHostRoomIssueCards({
+      roomInactive: false,
+      photosMissing: true,
+      basePriceMissing: true,
+      channelConnected: false,
+      channelConfirmationMissing: true,
+      roomMatched: false,
+      rateMatched: false,
+      calendarReady: false,
+      lastSyncFailed: true,
+      channelSetupIncomplete: true,
+    }).map((issue) => issue.actionLabel),
+    [
+      "Setup channel",
+      "Setup channel",
+      "Review room match",
+      "Review price match",
+      "Setup channel",
+      "Edit room details",
+      "Add photos",
+      "Setup channel",
+      "Review sync health",
+    ]
+  );
+  assert.deepEqual(
+    buildHostRoomIssueCards({
+      roomInactive: false,
+      photosMissing: false,
+      basePriceMissing: false,
+      channelConnected: true,
+      channelConfirmationMissing: false,
+      roomMatched: true,
+      rateMatched: false,
+      calendarReady: false,
+      lastSyncFailed: true,
+      channelSetupIncomplete: false,
+    }).at(-1),
+    {
+      key: "last-sync-failed",
+      title: "Latest sync needs review",
+      detail: "Rate plan mapping is missing. Open Room & Price Matching.",
+      severity: "Warning",
+      actionLabel: "Review sync health",
+      actionTarget: "sync-health",
+    }
+  );
+});
+
+test("host channel card helper stays honest about connected and setup states", () => {
+  assert.deepEqual(
+    resolveHostChannelCardState({
+      providerKey: "booking",
+      setupStarted: false,
+      connected: true,
+      roomMatched: true,
+      rateMatched: true,
+      syncReady: true,
+      providerMode: "self_serve",
+    }),
+    {
+      status: "Connected",
+      cta: "Connected",
+      helperText: "Room, price, and sync readiness are in place for this OTA.",
+      isConnected: true,
+      isComingSoon: false,
+    }
+  );
+  assert.match(
+    resolveHostChannelCardState({
+      providerKey: "booking",
+      setupStarted: false,
+      connected: false,
+      roomMatched: false,
+      rateMatched: false,
+      syncReady: false,
+      providerMode: "self_serve",
+    }).helperText,
+    /self-serve details/
+  );
+  assert.match(
+    resolveHostChannelCardState({
+      providerKey: "mmt",
+      setupStarted: false,
+      connected: false,
+      roomMatched: false,
+      rateMatched: false,
+      syncReady: false,
+      providerMode: "assisted_beta",
+    }).helperText,
+    /assisted setup details/
+  );
+});
+
+test("provider setup labels stay honest about assisted and self-serve providers", () => {
+  assert.equal(
+    CHANNEL_PROVIDER_REGISTRY.find((provider) => provider.key === "booking")?.setupMode,
+    "self-serve"
+  );
+  assert.equal(
+    CHANNEL_PROVIDER_REGISTRY.find((provider) => provider.key === "airbnb")?.setupMode,
+    "assisted"
+  );
+  assert.equal(getChannelProviderCapabilities("booking").displayStatus, "Self-serve / live");
+  assert.equal(getChannelProviderCapabilities("mmt").displayStatus, "Assisted / verification required");
+  assert.equal(getChannelProviderCapabilities("airbnb").displayStatus, "Authorization required");
+  assert.equal(getChannelProviderCapabilities("google-hotel").displayStatus, "Feed-driven / not self-serve");
+  assert.match(shellSource, /roomEditorActiveProviderCard\?\.setupModeLabel/);
+  assert.match(shellSource, /roomEditorActiveProviderCapabilities\.displayStatus/);
+  assert.match(shellSource, /const capabilities = getChannelProviderCapabilities\(provider\.key\);/);
+});
+
+test("sync health section exposes pending and failed jobs with safe review actions", () => {
+  assert.match(shellSource, /Issues & Sync Status/);
+  assert.match(shellSource, /Shows provider setup state, pending jobs, failed jobs, and friendly recovery actions/);
+  assert.match(shellSource, /Pending jobs:/);
+  assert.match(shellSource, /Failed jobs:/);
+  assert.match(shellSource, /Retryable state:/);
+  assert.match(shellSource, /Request review/);
+  assert.match(shellSource, /sync-health/);
+  assert.match(shellSource, /Open Room & Price Matching/);
+  assert.match(shellSource, /Open Channels/);
+});
+
+test("confirmation copy is provider-specific and host-friendly", () => {
+  assert.equal(
+    getChannelManagerConfirmationLabel("mmt"),
+    "I have enabled or requested Channex as channel manager in MakeMyTrip / Goibibo."
+  );
+  assert.equal(getChannelManagerConfirmationLabel("google-hotel"), null);
+});
+
+test("readiness audit helper classifies ota sync readiness honestly", () => {
+  assert.equal(
+    classifyOtaReadiness({
+      providerMode: "self_serve",
+      supportsRoomMatching: true,
+      supportsPriceMatching: true,
+      supportsAriSync: true,
+      supportsSelectedPropertySyncTest: true,
+      supportsGoLiveReadiness: true,
+      supportsAutoActivation: true,
+    }),
+    "Ready for live sync"
+  );
+  assert.equal(
+    classifyOtaReadiness({
+      providerMode: "assisted_beta",
+      supportsRoomMatching: true,
+      supportsPriceMatching: true,
+      supportsAriSync: true,
+      supportsSelectedPropertySyncTest: true,
+      supportsGoLiveReadiness: true,
+      supportsAutoActivation: false,
+    }),
+    "Setup/assisted only"
+  );
+  assert.equal(
+    classifyOtaReadiness({
+      providerMode: "feed_only",
+      supportsRoomMatching: true,
+      supportsPriceMatching: true,
+      supportsAriSync: true,
+      supportsSelectedPropertySyncTest: false,
+      supportsGoLiveReadiness: true,
+      supportsAutoActivation: false,
+    }),
+    "Coming soon / not ready"
+  );
+});
+
+test("preview api validates ota ids and delegates to unified ota preview service", () => {
+  assert.match(otaPreviewRouteSource, /isOtaConnectId/);
+  assert.match(otaPreviewRouteSource, /createOtaPreview/);
+  assert.match(otaPreviewRouteSource, /otaId is invalid/);
+});
+
+test("airbnb authorization routes and service placeholders are wired for the same flow", () => {
+  assert.match(otaAirbnbAuthorizeRouteSource, /createAirbnbAuthorizationUrl/);
+  assert.match(otaAirbnbCallbackRouteSource, /handleAirbnbAuthorizationCallback/);
+  assert.match(otaServiceSource, /createAirbnbAuthorizationUrl/);
+  assert.match(otaServiceSource, /handleAirbnbAuthorizationCallback/);
+  assert.match(otaServiceSource, /fetchAirbnbListingsPreview/);
+  assert.match(shellSource, /Connect Airbnb account/);
+  assert.match(shellSource, /handleStartAirbnbAuthorization/);
+});
+
+test("confirm api validates confirmation flow through unified ota confirm service", () => {
+  assert.match(otaConfirmRouteSource, /isOtaConnectId/);
+  assert.match(otaConfirmRouteSource, /confirmOtaConnection/);
+  assert.match(otaConfirmRouteSource, /confirmationAccepted/);
+});
+
+test("ota connect service validates ownership, calls channex-backed host routes, and redacts secrets", () => {
+  assert.match(otaServiceSource, /resolveAuthorizedHostResource/);
+  assert.match(otaServiceSource, /loadStayUnitsForSelector/);
+  assert.match(otaServiceSource, /createChannelRoute/);
+  assert.match(otaServiceSource, /providerStructureRoute/);
+  assert.match(otaServiceSource, /confirmMappingsRoute/);
+  assert.match(otaServiceSource, /enqueueChannexAriSyncJobs/);
+  assert.match(otaServiceSource, /\[redacted\]/);
+  assert.match(otaServiceSource, /channel_sync_logs/);
+});
+
+test("ota field validation requires only supported configured fields", () => {
+  assert.deepEqual(validateOtaFields("mmt_goibibo", {}), {
+    ok: false,
+    missingFields: ["MMT / Goibibo hotel ID"],
+  });
+  assert.deepEqual(
+    validateOtaFields("agoda", {
+      providerListingId: "AGO-99812",
+    }),
+    {
+      ok: true,
+      missingFields: [],
+    }
+  );
+});
+
+test("normalized channex preview returns host-safe matched property and warning data", () => {
+  const preview = normalizeChannexPreview({
+    propertyId: "family-1",
+    roomId: "room-1",
+    roomName: "Deluxe Room",
+    otaId: "booking_com",
+    fields: {
+      bookingHotelId: "1234567",
+    },
+    providerStructurePayload: {
+      verification: {
+        propertyTitle: "Hotel Aurora",
+        hotelId: "1234567",
+      },
+      catalog: {
+        room_types: [{ id: "room-x", title: "Twin Room" }],
+        rate_plans: [{ id: "rate-x", title: "Standard Rate", room_type_id: "room-x" }],
+      },
+      suggestions: [
+        {
+          roomId: "room-1",
+          famloRoomName: "Deluxe Room",
+          suggestedRoomTypeId: "room-x",
+          suggestedRoomTypeTitle: "Twin Room",
+          suggestedRatePlanId: "rate-x",
+          suggestedRatePlanTitle: "Standard Rate",
+        },
+      ],
+    },
+  });
+
+  assert.equal(preview.propertyName, "Hotel Aurora");
+  assert.equal(preview.propertyReference, "1234567");
+  assert.deepEqual(preview.roomList, [{ title: "Twin Room" }]);
+  assert.deepEqual(preview.ratePlans, [{ title: "Standard Rate" }]);
+  assert.deepEqual(preview.warnings, []);
+  assert.equal(preview.suggestedMapping?.otaRoomName, "Twin Room");
+});

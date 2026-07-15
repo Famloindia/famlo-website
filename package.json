@@ -1,0 +1,73 @@
+{
+  "name": "famlo-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "bash scripts/dev/dev-local.sh",
+    "port:kill": "bash scripts/dev/port-kill.sh 3000",
+    "dev:clean": "bash scripts/dev/dev-clean.sh",
+    "dev:3000": "bash scripts/dev/dev-local.sh",
+    "dev:webpack": "bash scripts/dev/dev-local.sh",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "db:push:staging": "bash scripts/db/supabase-schema-workflow.sh push staging",
+    "db:push:production": "bash scripts/db/supabase-schema-workflow.sh push production",
+    "db:diff:staging": "bash scripts/db/supabase-schema-workflow.sh diff staging",
+    "db:diff:production": "bash scripts/db/supabase-schema-workflow.sh diff production",
+    "db:audit:schema-drift": "node scripts/db/audit-supabase-schema-drift.mjs",
+    "db:audit:schema-drift:json": "node scripts/db/audit-supabase-schema-drift.mjs --json",
+    "db:guard:schema-drift": "node scripts/db/check-schema-drift-guard.mjs",
+    "db:predeploy:guard": "npm run db:guard:schema-drift",
+    "db:audit:dashboard-runtime-access": "node scripts/db/audit-dashboard-runtime-access.mjs",
+    "db:repair:staging-public-grants": "node scripts/db/repair-staging-public-grants.mjs",
+    "db:repair:staging-rls-policies": "node scripts/db/repair-staging-rls-policies.mjs",
+    "db:recover:staging-from-reset-backup": "node scripts/db/recover-empty-staging-from-reset-backup.mjs",
+    "db:reset:staging-from-production-schema": "node scripts/db/reset-staging-from-production-schema.mjs",
+    "db:reset:staging-preserve-data": "node scripts/db/reset-staging-schema-preserve-data.mjs",
+    "admin:supabase-check": "node scripts/check-admin-supabase-access.mjs",
+    "admin:supabase-check:local": "node --env-file=.env.local scripts/check-admin-supabase-access.mjs",
+    "r2:write-test": "node scripts/test-r2-write-access.mjs",
+    "r2:write-test:local": "node --env-file=.env.local scripts/test-r2-write-access.mjs",
+    "test:channels": "tsx --test tests/channel-provider-lifecycle.test.ts",
+    "db:v2:verify": "node scripts/verify-v2.mjs",
+    "db:v2:backfill": "node scripts/backfill-v2.mjs",
+    "inventory:backfill": "node scripts/backfill-canonical-inventory.mjs",
+    "reservations:backfill": "node scripts/backfill-reservation-core.mjs",
+    "images:backfill": "node scripts/backfill-image-variants.mjs",
+    "images:cache-backfill": "node scripts/backfill-r2-cache-control.mjs",
+    "reels:backfill": "node scripts/backfill-host-property-reels.mjs",
+    "stay-units:scan": "node scripts/scan-stay-unit-integrity.cjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1024.0",
+    "@aws-sdk/s3-request-presigner": "^3.1053.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^1.7.0",
+    "next": "16.2.7",
+    "pg": "^8.20.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-leaflet": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.21",
+    "@types/node": "^20",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.7",
+    "tsx": "^4.22.2",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "8.5.15",
+    "ws": "8.21.0"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

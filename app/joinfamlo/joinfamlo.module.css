@@ -1,0 +1,166 @@
+/* app/joinfamlo/joinfamlo.module.css */
+.joinContainer {
+  min-height: 100vh;
+  display: flex;
+  background: #f7f9fc;
+  font-family: var(--font-dm-sans), sans-serif;
+  color: #0f172a;
+}
+
+.mainSection {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 24px;
+}
+
+.selectionBox {
+  width: 100%;
+  max-width: 960px;
+}
+
+.selectionHeader {
+  margin-bottom: 64px;
+  text-align: center;
+}
+
+.overline {
+  color: #1A56DB;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 12px;
+}
+
+.title {
+  font-family: var(--font-playfair), serif;
+  font-size: 48px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.selectionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px;
+}
+
+.selectionCard {
+  text-decoration: none;
+  background: white;
+  padding: 56px 40px;
+  border-radius: 24px;
+  border: 1px solid #e5e7eb;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.selectionCard::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--card-accent, #1A56DB);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.selectionCard:hover {
+  transform: translateY(-12px);
+  box-shadow: 0 32px 64px -12px rgba(26, 86, 219, 0.12);
+  border-color: #1A56DB;
+}
+
+.selectionCard:hover::before {
+  opacity: 1;
+}
+
+.iconFrame {
+  width: 80px;
+  height: 80px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f4ff;
+  color: #1A56DB;
+  margin-bottom: 32px;
+  transition: all 0.3s ease;
+}
+
+.selectionCard:hover .iconFrame {
+  background: #1A56DB;
+  color: white;
+  transform: scale(1.1) rotate(5deg);
+}
+
+.cardContent {
+  margin-bottom: 32px;
+}
+
+.cardTitle {
+  font-family: var(--font-playfair), serif;
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 16px 0;
+}
+
+.cardDesc {
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: #6b7280;
+  margin: 0;
+  max-width: 280px;
+}
+
+.cardAction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  color: #1A56DB;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+  transition: opacity 0.3s ease;
+}
+
+.selectionCard:hover .cardAction {
+  opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .selectionGrid {
+    grid-template-columns: 1fr;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  .title {
+    font-size: 36px;
+  }
+}
+
+@media (max-width: 640px) {
+  .mainSection {
+    padding: 60px 20px;
+  }
+
+  .selectionCard {
+    padding: 40px 24px;
+  }
+}

@@ -1,0 +1,640 @@
+.workspace {
+  --host-shell-bg: linear-gradient(180deg, #f4f8ff 0%, #ecf3ff 20%, #ffffff 100%);
+  --host-shell-card: rgba(255, 255, 255, 0.96);
+  --host-shell-border: rgba(15, 31, 61, 0.08);
+  --host-shell-ink: #102343;
+  --host-shell-soft: #5a6b88;
+  --host-shell-primary: #1764da;
+  --host-shell-primary-deep: #0f3d9c;
+  --host-shell-highlight: #eff5ff;
+  min-height: 100dvh;
+  background: var(--host-shell-bg);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.workspaceFreeDashboard {
+  background:
+    radial-gradient(circle at top center, rgba(36, 138, 255, 0.15), transparent 32%),
+    linear-gradient(180deg, #f4f7fd 0%, #ffffff 45%, #eef3fb 100%);
+}
+
+.freeDashboardPhone {
+  width: min(100%, 430px);
+  min-height: 100dvh;
+  margin: 0 auto;
+  background: #f6f8fc;
+  box-shadow: 0 20px 50px rgba(16, 35, 67, 0.08);
+  display: grid;
+  grid-template-rows: 1fr auto;
+}
+
+.freeDashboardScroll {
+  padding: max(18px, env(safe-area-inset-top, 0px)) 0 24px;
+  overflow-y: auto;
+}
+
+.freeDashboardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #dbe2ec;
+}
+
+.freeDashboardLogo {
+  width: auto;
+  height: 32px;
+  display: block;
+}
+
+.freeDashboardHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.freeDashboardActionButton {
+  width: 38px;
+  height: 38px;
+  border: 1px solid #e7ebf2;
+  border-radius: 11px;
+  background: #ffffff;
+  color: #344155;
+  display: inline-grid;
+  place-items: center;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+.freeDashboardActionPrimary {
+  color: #ef6a79;
+  background: #fff1f3;
+  border-color: #ffd2d8;
+}
+
+.freeDashboardHero {
+  padding: 18px 14px 16px;
+  background: linear-gradient(180deg, #2888eb 0%, #2581e4 100%);
+  color: #ffffff;
+  display: grid;
+  gap: 14px;
+}
+
+.freeDashboardToggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.freeDashboardSwitch {
+  min-width: 94px;
+  height: 42px;
+  padding: 4px 12px 4px 5px;
+  border: 0;
+  border-radius: 999px;
+  background: #ff635f;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.9rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.freeDashboardSwitchKnob {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #121212;
+  flex: 0 0 auto;
+}
+
+.freeDashboardTabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 14px 0;
+}
+
+.freeDashboardTab {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid #1c2737;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #101828;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.freeDashboardTabActive {
+  background: #2888eb;
+  color: #ffffff;
+  border-color: #1165ca;
+}
+
+.freeDashboardStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 14px 0;
+}
+
+.freeDashboardStatCard,
+.freeDashboardPanel {
+  background: #ffffff;
+  border: 1px solid #dfe6ef;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+
+.freeDashboardStatCard {
+  padding: 14px 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.freeDashboardStatLabel {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #778295;
+}
+
+.freeDashboardStatValue {
+  font-size: 2rem;
+  line-height: 1;
+  color: #41526f;
+}
+
+.freeDashboardStatValueSuccess {
+  color: #10926f;
+}
+
+.freeDashboardPanel {
+  margin: 10px 14px 0;
+  padding: 14px 12px;
+}
+
+.freeDashboardPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.freeDashboardPanelHeader h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #273446;
+}
+
+.freeDashboardCountBadge {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #edf9f1;
+  color: #159560;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.freeDashboardEmptyState {
+  border: 1px dashed #d8dee8;
+  border-radius: 12px;
+  padding: 18px 14px;
+  color: #758195;
+  display: grid;
+  gap: 8px;
+}
+
+.freeDashboardEmptyState strong {
+  color: #253243;
+  font-size: 0.98rem;
+}
+
+.freeDashboardEmptyState p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.freeDashboardInfoRows {
+  display: grid;
+}
+
+.freeDashboardInfoRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 2px;
+  border-top: 1px solid #e8edf3;
+}
+
+.freeDashboardInfoRow:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.freeDashboardInfoRow span {
+  color: #748096;
+  font-weight: 700;
+}
+
+.freeDashboardInfoRow strong {
+  color: #253243;
+  text-align: right;
+}
+
+.freeDashboardBottomBar {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 10px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, rgba(246, 248, 252, 0), rgba(246, 248, 252, 0.96) 28%, #f6f8fc 100%);
+}
+
+.freeDashboardNav {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: end;
+  gap: 4px;
+  padding: 10px 8px 8px;
+  border-top: 1px solid #e3e8f1;
+  background: #ffffff;
+}
+
+.freeDashboardNavItem {
+  color: #697586;
+  text-decoration: none;
+  font-size: 0.6rem;
+  font-weight: 800;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.freeDashboardNavIconWrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: inline-grid;
+  place-items: center;
+}
+
+.freeDashboardNavItemActive .freeDashboardNavIconWrap {
+  background: linear-gradient(180deg, #3b82f6, #2358db);
+  color: #ffffff;
+  box-shadow: 0 16px 28px rgba(37, 88, 219, 0.22);
+}
+
+.freeDashboardNavItemFeatured {
+  transform: translateY(-16px);
+  color: #1677ec;
+}
+
+.freeDashboardNavItemFeatured .freeDashboardNavIconWrap {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #37a2ff, #1e7cec);
+  color: #ffffff;
+  box-shadow: 0 14px 28px rgba(30, 124, 236, 0.3);
+}
+
+.freeDashboardNavItemFeatured em {
+  font-style: normal;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.topBar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 18px 12px;
+  background:
+    linear-gradient(180deg, rgba(244, 248, 255, 0.98), rgba(244, 248, 255, 0.86)),
+    radial-gradient(circle at top right, rgba(23, 100, 218, 0.15), transparent 36%);
+  backdrop-filter: blur(16px);
+}
+
+.identityBlock {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--host-shell-primary);
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.55rem, 5vw, 2rem);
+  line-height: 0.96;
+  color: var(--host-shell-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--host-shell-soft);
+  font-size: 0.94rem;
+  line-height: 1.35;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.envBadge,
+.proPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--host-shell-border);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--host-shell-ink);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.envBadge {
+  color: #8f4f00;
+  background: #fff4d8;
+}
+
+.proPill {
+  background: linear-gradient(135deg, #0e2c63, #1764da);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 12px 24px rgba(23, 100, 218, 0.28);
+}
+
+.avatarButton {
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  background: linear-gradient(135deg, #102343, #2a76ea);
+  color: #ffffff;
+  font-size: 0.96rem;
+  font-weight: 900;
+  box-shadow: 0 14px 28px rgba(16, 35, 67, 0.24);
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  width: min(280px, calc(100vw - 28px));
+  padding: 12px;
+  border-radius: 22px;
+  border: 1px solid var(--host-shell-border);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 28px 48px rgba(16, 35, 67, 0.18);
+  display: grid;
+  gap: 10px;
+}
+
+.menuHeader {
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid rgba(15, 31, 61, 0.08);
+  display: grid;
+  gap: 4px;
+}
+
+.menuName {
+  font-weight: 800;
+  color: var(--host-shell-ink);
+}
+
+.menuMeta {
+  color: var(--host-shell-soft);
+  font-size: 0.86rem;
+}
+
+.menuLink {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  text-decoration: none;
+  color: var(--host-shell-ink);
+  border-radius: 16px;
+  background: #f7faff;
+  font-weight: 700;
+}
+
+.menuLink.isMenuActive,
+.isMenuActive {
+  background: var(--host-shell-highlight);
+  color: var(--host-shell-primary-deep);
+}
+
+.viewport {
+  padding: 8px 14px 12px;
+}
+
+.frameShell {
+  position: relative;
+  min-height: calc(100dvh - 170px);
+  border-radius: 28px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 31, 61, 0.08);
+  background: var(--host-shell-card);
+  box-shadow: 0 22px 52px rgba(19, 47, 95, 0.12);
+}
+
+.frameBackdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(245, 248, 255, 0.98), rgba(255, 255, 255, 0.92)),
+    radial-gradient(circle at top left, rgba(23, 100, 218, 0.12), transparent 40%);
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  color: var(--host-shell-soft);
+  z-index: 1;
+}
+
+.frameBackdrop.isFrameHidden,
+.isFrameHidden {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid rgba(23, 100, 218, 0.16);
+  border-top-color: var(--host-shell-primary);
+  animation: spin 1s linear infinite;
+}
+
+.frame {
+  width: 100%;
+  min-height: calc(100dvh - 170px);
+  border: 0;
+  background: #ffffff;
+}
+
+.bottomBanner {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  background:
+    linear-gradient(180deg, rgba(244, 248, 255, 0), rgba(244, 248, 255, 0.94) 26%, rgba(244, 248, 255, 0.98) 100%);
+}
+
+.navRail {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border-radius: 28px;
+  border: 1px solid rgba(15, 31, 61, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 34px rgba(16, 35, 67, 0.12);
+}
+
+.navItem {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-height: 64px;
+  align-content: center;
+  text-decoration: none;
+  color: var(--host-shell-soft);
+  border-radius: 20px;
+  font-size: 0.71rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  transition: transform 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.navItem span {
+  line-height: 1.1;
+  text-align: center;
+}
+
+.navItem.isNavActive,
+.isNavActive {
+  background: linear-gradient(180deg, #edf4ff, #e2eeff);
+  color: var(--host-shell-primary-deep);
+  transform: translateY(-1px);
+}
+
+.navItemDisabled {
+  opacity: 0.46;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 900px) {
+  .topBar {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .topBar {
+    padding: 16px 14px 10px;
+  }
+
+  .title {
+    font-size: 1.8rem;
+    white-space: normal;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+  }
+
+  .actions {
+    gap: 8px;
+  }
+
+  .envBadge,
+  .proPill {
+    min-height: 32px;
+    padding: 0 11px;
+    font-size: 0.7rem;
+  }
+
+  .viewport {
+    padding: 6px 10px 10px;
+  }
+
+  .frameShell,
+  .frame {
+    min-height: calc(100dvh - 190px);
+  }
+
+  .navRail {
+    gap: 4px;
+    padding: 6px;
+    border-radius: 24px;
+  }
+
+  .navItem {
+    min-height: 58px;
+    font-size: 0.62rem;
+  }
+}

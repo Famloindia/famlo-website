@@ -1,0 +1,60 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+dist/
+coverage/
+.turbo/
+.vercel/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Secrets and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.cer
+*.crt
+*.mobileprovision
+*.p8
+
+# Local backups, generated artifacts, and temp state
+.codex-backups/
+.codex-logs/
+backups/
+.generated/
+scratch/
+/reports/
+*.sql.backup
+*.dump
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.patch
+*.bak
+*.backup
+*.ui-backup
+*.disabled
+
+# Local machine and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# TypeScript incremental build info
+*.tsbuildinfo

@@ -1,0 +1,73 @@
+import { NextResponse } from "next/server";
+
+import { hasValidAdminSession } from "@/lib/admin-auth";
+import { loadCreditNoteReport } from "@/lib/finance/reports/credit-note-report";
+import { loadGstAccommodationReport } from "@/lib/finance/reports/gst-accommodation-report";
+import { loadPlatformFeeGstReport } from "@/lib/finance/reports/platform-fee-gst-report";
+import { buildCombinedGstExportRows } from "@/lib/finance/reports/gst-export-bundle";
+import { parseDateRange } from "@/lib/finance/reports/report-exporter";
+import { getFinanceSettings } from "@/lib/finance/settings";
+import { assertGstExportAllowed, getSafeTaxDisplayState } from "@/lib/finance/tax-compliance-guard";
+import { createAdminSupabaseClient } from "@/lib/supabase";
+
+export async function POST(request: Request) {
+  try {
+    if (!(await hasValidAdminSession())) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = (await request.json()) as { startDate?: string; endDate?: string };
+    const startDate = String(body.startDate ?? "").trim();
+    const endDate = String(body.endDate ?? "").trim();
+    if (!startDate || !endDate) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+    const range = parseDateRange(startDate, endDate);
+
+    const supabase = createAdminSupabaseClient();
+    const settings = await getFinanceSettings({ scopeType: "GLOBAL", scopeId: null }, supabase);
+
+    try {
+      assertGstExportAllowed(settings);
+    } catch (error) {
+      return NextResponse.json(
+        {
+          success: false,
+          disabled: true,
+          error: error instanceof Error ? error.message : "GST export is disabled.",
+          preview: [],
+          taxDisplay: getSafeTaxDisplayState(settings),
+        },
+        { status: 403 }
+      );
+    }
+
+    const [accommodation, platformFee, creditNotes] = await Promise.all([
+      loadGstAccommodationReport(supabase, range),
+      loadPlatformFeeGstReport(supabase, range),
+      loadCreditNoteReport(supabase, range),
+    ]);
+    const preview = buildCombinedGstExportRows({
+      accommodation,
+      platformFee,
+      creditNotes,
+    });
+
+    return NextResponse.json({
+      success: true,
+      disabled: false,
+      preview: preview.slice(0, 25),
+      taxDisplay: getSafeTaxDisplayState(settings),
+      counts: {
+        accommodation: accommodation.length,
+        platformFee: platformFee.length,
+        creditNotes: creditNotes.length,
+        total: preview.length,
+      },
+      message: `GST export is ready for ${range.startDate} to ${range.endDate}.`,
+    });
+  } catch (err) {
+    console.error("GST export generation failed:", err);
+    return NextResponse.json({ error: "Action failed" }, { status: 500 });
+  }
+}

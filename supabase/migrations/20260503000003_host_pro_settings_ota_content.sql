@@ -1,0 +1,16 @@
+alter table public.host_pro_settings
+  add column if not exists ota_title text,
+  add column if not exists contact_email text,
+  add column if not exists contact_phone text,
+  add column if not exists website text,
+  add column if not exists country text not null default 'India',
+  add column if not exists state text,
+  add column if not exists city text,
+  add column if not exists postal_code text,
+  add column if not exists address_line text,
+  add column if not exists latitude double precision,
+  add column if not exists longitude double precision,
+  add column if not exists property_description text,
+  add column if not exists check_in_instructions text,
+  add column if not exists house_rules text,
+  add column if not exists cancellation_policy_label text;

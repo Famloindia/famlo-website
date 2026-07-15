@@ -1,0 +1,1274 @@
+// app/admin/page.tsx
+import dynamicImport from "next/dynamic";
+import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { headers } from "next/headers";
+import type { ComponentProps } from "react";
+import {
+  createAdminSessionToken, getAdminCookieName, getAdminSessionMaxAge,
+  verifyAdminPassword, verifyAdminSessionToken
+} from "@/lib/admin-auth";
+import { detectChatSafetyIssue } from "@/lib/chat-safety";
+import { createAdminSupabaseClient, getSupabaseConfigDiagnostics } from "@/lib/supabase";
+import { logSessionEvent } from "@/lib/audit";
+import { DEFAULT_COMMISSION_PCT } from "@/lib/finance/constants";
+import { isSettlementPayoutExecutionEnabled } from "@/lib/finance/feature-flags";
+import { isChannexSyncExecutionEnabled } from "@/lib/finance/feature-flags";
+import { buildAdminFamloProAccessView } from "@/lib/pro-billing/admin-access";
+import { isFamloProAutopayEnabled } from "@/lib/pro-billing/config";
+import { isFamloProDevResetEnabled } from "@/lib/pro-billing/service";
+import AdminLayout from "@/components/admin/AdminLayout";
+import { fetchCancellationHistory } from "@/lib/cancellation-history";
+
+export const dynamic = "force-dynamic";
+
+interface AdminPageProps {
+  searchParams?: Promise<{ error?: string; tab?: string }>;
+}
+
+const ADMIN_ID = "system-admin";
+
+function TabPanelSkeleton({ label = "Loading admin section..." }: { label?: string }) {
+  return (
+    <div
+      style={{
+        minHeight: "320px",
+        borderRadius: "20px",
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.03)",
+        padding: "28px",
+      }}
+    >
+      <div style={{ width: "180px", height: "14px", borderRadius: "999px", background: "rgba(255,255,255,0.08)", marginBottom: "18px" }} />
+      <div style={{ width: "320px", maxWidth: "100%", height: "12px", borderRadius: "999px", background: "rgba(255,255,255,0.06)", marginBottom: "28px" }} />
+      <div style={{ color: "rgba(255,255,255,0.45)", fontSize: "13px", fontWeight: 700 }}>{label}</div>
+    </div>
+  );
+}
+
+const AdminAdsAndBanners = dynamicImport(() => import("@/components/admin/AdminAdsAndBanners"), { loading: () => <TabPanelSkeleton label="Loading Ads Control..." /> });
+const AdminCoupons = dynamicImport(() => import("@/components/admin/AdminCoupons"), { loading: () => <TabPanelSkeleton label="Loading Coupons..." /> });
+const MasterEntityTable = dynamicImport(() => import("@/components/admin/MasterEntityTable"), { loading: () => <TabPanelSkeleton label="Loading All Entities..." /> });
+const CommissionSlider = dynamicImport(() => import("@/components/admin/CommissionSlider"), { loading: () => <TabPanelSkeleton label="Loading Commission Control..." /> });
+const ChatMonitor = dynamicImport(() => import("@/components/admin/ChatMonitor"), { loading: () => <TabPanelSkeleton label="Loading Chat Monitor..." /> });
+const DisputeCenter = dynamicImport(() => import("@/components/admin/DisputeCenter"), { loading: () => <TabPanelSkeleton label="Loading Dispute Center..." /> });
+const KillSwitch = dynamicImport(() => import("@/components/admin/KillSwitch"), { loading: () => <TabPanelSkeleton label="Loading Emergency Controls..." /> });
+const BulkMailbox = dynamicImport(() => import("@/components/admin/BulkMailbox"), { loading: () => <TabPanelSkeleton label="Loading Bulk Mailbox..." /> });
+const ChannelManagerConsole = dynamicImport(() => import("@/components/admin/ChannelManagerConsole"), { loading: () => <TabPanelSkeleton label="Loading Channel Manager..." /> });
+const CompliancePacksDashboard = dynamicImport(() => import("@/components/admin/CompliancePacksDashboard"), { loading: () => <TabPanelSkeleton label="Loading Compliance Packs..." /> });
+const FamloPlusDesk = dynamicImport(() => import("@/components/admin/FamloPlusDesk"), { loading: () => <TabPanelSkeleton label="Loading Famlo Pro Access..." /> });
+const GrowthDashboard = dynamicImport(() => import("@/components/admin/GrowthDashboard"), { loading: () => <TabPanelSkeleton label="Loading Growth Dashboard..." /> });
+const GrievanceDashboard = dynamicImport(() => import("@/components/admin/GrievanceDashboard"), { loading: () => <TabPanelSkeleton label="Loading Grievances..." /> });
+const GSTExport = dynamicImport(() => import("@/components/admin/GSTExport"), { loading: () => <TabPanelSkeleton label="Loading GST Export..." /> });
+const FraudFlags = dynamicImport(() => import("@/components/admin/FraudFlags"), { loading: () => <TabPanelSkeleton label="Loading Fraud Flags..." /> });
+const AccountSuspend = dynamicImport(() => import("@/components/admin/AccountSuspend"), { loading: () => <TabPanelSkeleton label="Loading Suspend Accounts..." /> });
+const DataErasure = dynamicImport(() => import("@/components/admin/DataErasure"), { loading: () => <TabPanelSkeleton label="Loading Data Erasure..." /> });
+const ResponseTimeTracker = dynamicImport(() => import("@/components/admin/ResponseTimeTracker"), { loading: () => <TabPanelSkeleton label="Loading Response Times..." /> });
+const RevenueHeatmap = dynamicImport(() => import("@/components/admin/RevenueHeatmap"), { loading: () => <TabPanelSkeleton label="Loading Revenue Heatmap..." /> });
+const ShadowMode = dynamicImport(() => import("@/components/admin/ShadowMode"), { loading: () => <TabPanelSkeleton label="Loading Shadow Mode..." /> });
+const SupportManager = dynamicImport(() => import("@/components/admin/SupportManager"), { loading: () => <TabPanelSkeleton label="Loading Support Center..." /> });
+const PlatformOpsDashboard = dynamicImport(() => import("@/components/admin/PlatformOpsDashboard"), { loading: () => <TabPanelSkeleton label="Loading Ops Dashboard..." /> });
+const AdminProPropertiesSummary = dynamicImport(() => import("@/components/admin/AdminProPropertiesSummary"), { loading: () => <TabPanelSkeleton label="Loading Channels & Sync..." /> });
+const TestPropertyProvisioner = dynamicImport(() => import("@/components/admin/TestPropertyProvisioner"), { loading: () => <TabPanelSkeleton label="Loading Test Properties..." /> });
+const TestimonialsDesk = dynamicImport(() => import("@/components/admin/TestimonialsDesk"), { loading: () => <TabPanelSkeleton label="Loading Testimonials..." /> });
+const ManualPayoutDesk = dynamicImport(() => import("@/components/admin/ManualPayoutDesk"), { loading: () => <TabPanelSkeleton label="Loading Payout Overrides..." /> });
+const AuditTrail = dynamicImport(() => import("@/components/teams/AuditTrail"), { loading: () => <TabPanelSkeleton label="Loading Audit Trail..." /> });
+const CancellationTrail = dynamicImport(() => import("@/components/teams/CancellationTrail"), { loading: () => <TabPanelSkeleton label="Loading Cancellation Trail..." /> });
+const IDVerifier = dynamicImport(() => import("@/components/teams/IDVerifier"), { loading: () => <TabPanelSkeleton label="Loading ID Verifier..." /> });
+const VettingScorecard = dynamicImport(() => import("@/components/teams/VettingScorecard"), { loading: () => <TabPanelSkeleton label="Loading Vetting Queue..." /> });
+const TeamManagementPanel = dynamicImport(() => import("@/components/admin/TeamManagementPanel"), { loading: () => <TabPanelSkeleton label="Loading Manage Teams..." /> });
+
+function stableNumber(seed: string, max: number, offset = 0): number {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+
+  return (hash % max) + offset;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function isStaleByHours(timestamp: string | null | undefined, reference: Date, hours: number): boolean {
+  if (!timestamp) return true;
+  const value = Date.parse(timestamp);
+  if (!Number.isFinite(value)) return true;
+  return reference.getTime() - value > hours * 60 * 60 * 1000;
+}
+
+function getSupabaseErrorSummary(error: unknown): { code: string | null; message: string; details: string | null } {
+  if (!error || typeof error !== "object") {
+    return { code: null, message: "Unknown Supabase error.", details: null };
+  }
+
+  const record = error as Record<string, unknown>;
+  return {
+    code: typeof record.code === "string" ? record.code : null,
+    message: typeof record.message === "string" && record.message.trim().length > 0 ? record.message : "Unknown Supabase error.",
+    details: typeof record.details === "string" && record.details.trim().length > 0 ? record.details : null,
+  };
+}
+
+function logAdminReadFailure(table: string, error: unknown) {
+  const summary = getSupabaseErrorSummary(error);
+  console.error("[admin.supabase-read-failed]", {
+    table,
+    code: summary.code,
+    message: summary.message,
+    details: summary.details,
+  });
+}
+
+function isSchemaReadError(error: unknown): boolean {
+  const summary = getSupabaseErrorSummary(error);
+  const message = summary.message.toLowerCase();
+  const details = (summary.details ?? "").toLowerCase();
+  return (
+    summary.code === "PGRST205" ||
+    message.includes("does not exist") ||
+    message.includes("permission denied") ||
+    message.includes("could not find the table") ||
+    message.includes("could not find the '") ||
+    message.includes("schema cache") ||
+    details.includes("schema cache")
+  );
+}
+
+function buildFamloPlusEmptySummary() {
+  return {
+    proRevenue: 0,
+    proGst: 0,
+    proProfit: 0,
+    totalCollected: 0,
+    pendingPayments: 0,
+    failedPayments: 0,
+    activeSubscriptions: 0,
+    graceSubscriptions: 0,
+    pausedSubscriptions: 0,
+    haltedSubscriptions: 0,
+    autopaySubscriptions: 0,
+    manualSubscriptions: 0,
+    selectedPropertiesCount: 0,
+    selectedRoomsCount: 0,
+  };
+}
+
+async function readOptionalAdminRows(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  table: string,
+  columns: string,
+  diagnostics: string[],
+  configure?: (query: any) => any
+) {
+  try {
+    const baseQuery: any = supabase.from(table).select(columns);
+    const query = configure ? configure(baseQuery) : baseQuery;
+    const { data, error } = await query;
+    if (error) {
+      if (isSchemaReadError(error)) {
+        diagnostics.push(`${table} unavailable`);
+        return [];
+      }
+      throw error;
+    }
+    return data ?? [];
+  } catch (error) {
+    if (isSchemaReadError(error)) {
+      diagnostics.push(`${table} unavailable`);
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function readKillSwitchState(supabase: ReturnType<typeof createAdminSupabaseClient>): Promise<boolean | null> {
+  const { data, error } = await supabase
+    .from("platform_settings")
+    .select("value")
+    .eq("key", "kill_switch_active")
+    .single();
+
+  if (error) {
+    logAdminReadFailure("platform_settings", error);
+    return null;
+  }
+
+  return data?.value === "true";
+}
+
+// Login form component (inline server action)
+function LoginPage({ error }: { error?: boolean }) {
+  async function login(formData: FormData) {
+    "use server";
+    const password = String(formData.get("password") ?? "");
+    const cookieStore = await cookies();
+    if (!verifyAdminPassword(password)) redirect("/admin?error=invalid-password");
+    cookieStore.set(getAdminCookieName(), createAdminSessionToken(), {
+      httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production",
+      path: "/", maxAge: getAdminSessionMaxAge()
+    });
+    revalidatePath("/admin");
+    redirect("/admin");
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f7f9fc", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Inter', sans-serif" }}>
+      <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "24px", padding: "48px", maxWidth: "420px", width: "100%", margin: "20px", boxShadow: "0 10px 40px -10px rgba(0,0,0,0.06)" }}>
+        <h1 style={{ fontSize: "22px", fontWeight: 900, color: "#0f172a", margin: "0 0 8px" }}>Admin Access</h1>
+        <p style={{ fontSize: "13px", color: "#64748b", margin: "0 0 32px", lineHeight: 1.6 }}>
+          This portal is not indexed by search engines. Unauthorized access is logged.
+        </p>
+        <form action={login}>
+          <label style={{ display: "block", fontSize: "11px", fontWeight: 900, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>
+            Admin Password
+          </label>
+          <input name="password" type="password" required className="admin-login-input"
+            style={{ width: "100%", padding: "12px 16px", borderRadius: "10px", border: "1px solid #dbeafe", background: "#ffffff", color: "#0f172a", fontSize: "14px", outline: "none", fontFamily: "inherit", marginBottom: "8px", boxSizing: "border-box", transition: "border-color 0.2s" }} 
+            />
+          {error && <div style={{ fontSize: "12px", color: "#ef4444", fontWeight: 700, marginBottom: "12px" }}>Invalid admin password.</div>}
+          <button type="submit" style={{ width: "100%", padding: "14px", borderRadius: "12px", border: "none", background: "linear-gradient(135deg, #1A56DB, #3B82F6)", color: "white", fontWeight: 900, fontSize: "15px", cursor: "pointer", marginTop: "8px", boxShadow: "0 4px 14px rgba(26,86,219,0.42)" }}>
+            Enter Admin Portal
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export default async function AdminPage({ searchParams }: Readonly<AdminPageProps>) {
+  const params = await searchParams;
+  const cookieStore = await cookies();
+  const isAuthenticated = verifyAdminSessionToken(cookieStore.get(getAdminCookieName())?.value);
+
+  if (!isAuthenticated) {
+    return <LoginPage error={params?.error === "invalid-password"} />;
+  }
+
+  const reqHeaders = await headers();
+  const ip = reqHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const activeTab = params?.tab ?? "entities";
+  const supabase = createAdminSupabaseClient();
+  const autopayStatusLabel = isFamloProAutopayEnabled()
+    ? "Auto-renewal enabled with manual fallback available"
+    : "Manual renewal enabled, autopay not enabled";
+
+  void logSessionEvent({
+    actorId: ADMIN_ID,
+    role: "admin",
+    action: "page_view",
+    page: `/admin?tab=${activeTab}`,
+    ipAddress: ip,
+    userAgent: reqHeaders.get("user-agent") ?? undefined,
+  }).catch((error) => {
+    console.error("[admin.session-log-failed]", {
+      message: error instanceof Error ? error.message : "Unknown session logging failure.",
+    });
+  });
+  let killSwitchActive: boolean | null = null;
+
+  let content: React.ReactNode;
+
+  if (activeTab === "entities") {
+    content = <MasterEntityTable />;
+
+  } else if (activeTab === "famlo-plus") {
+    const famloPlusDiagnostics: string[] = [];
+    let famloPlusNotice: { tone: "info" | "warning" | "error"; text: string } | undefined;
+    let famloPlusDeskProps: ComponentProps<typeof FamloPlusDesk> = {
+      summary: buildFamloPlusEmptySummary(),
+      rows: [],
+      orders: [],
+      notice: undefined,
+      autopayStatusLabel: isFamloProAutopayEnabled() ? "Enabled" : "Not enabled",
+      allowDevReset: isFamloProDevResetEnabled(),
+    };
+
+    try {
+      const [orders, subscriptions, invoices, families, stayUnits, subscriptionRooms, orderProperties, hosts, users] = await Promise.all([
+        readOptionalAdminRows(
+          supabase,
+          "host_pro_billing_orders",
+          "id,host_user_id,status,property_count,room_count,subtotal_amount,gst_amount,total_amount,created_at,payment_captured_at,billing_mode,gateway_subscription_id",
+          famloPlusDiagnostics
+        ),
+        readOptionalAdminRows(
+          supabase,
+          "host_pro_subscriptions",
+          "id,family_id,status,current_period_start,current_period_end,grace_until,room_count,host_user_id,primary_pro_property_id,metadata,created_at,last_payment_at,last_charge_at,next_charge_at,billing_mode,autopay_enabled,autopay_status,mandate_status,razorpay_subscription_id,payment_failure_reason",
+          famloPlusDiagnostics
+        ),
+        readOptionalAdminRows(
+          supabase,
+          "host_pro_invoices",
+          "id,billing_order_id,status,invoice_number,receipt_number,total_amount,gst_amount,issued_at",
+          famloPlusDiagnostics
+        ),
+        readOptionalAdminRows(
+          supabase,
+          "families",
+          "id,name,property_name,host_id,city,state,user_id,is_active,created_at",
+          famloPlusDiagnostics,
+          (query) => query.order("created_at", { ascending: false }).limit(600)
+        ),
+        readOptionalAdminRows(
+          supabase,
+          "stay_units_v2",
+          "id,legacy_family_id,is_active,unit_key,host_id",
+          famloPlusDiagnostics
+        ),
+        readOptionalAdminRows(
+          supabase,
+          "host_pro_subscription_rooms",
+          "subscription_id,family_id,stay_unit_id,room_name,status",
+          famloPlusDiagnostics
+        ),
+        readOptionalAdminRows(
+          supabase,
+          "host_pro_billing_order_properties",
+          "billing_order_id,family_id,property_name",
+          famloPlusDiagnostics
+        ),
+        readOptionalAdminRows(
+          supabase,
+          "hosts",
+          "id,user_id,display_name",
+          famloPlusDiagnostics
+        ),
+        readOptionalAdminRows(
+          supabase,
+          "users",
+          "id,name,email,phone",
+          famloPlusDiagnostics
+        ),
+      ]);
+
+      const migrationMissing = famloPlusDiagnostics.some((entry) => entry.startsWith("host_pro_"));
+      if (migrationMissing) {
+        famloPlusNotice = {
+          tone: "warning",
+          text: "Pro billing migration not applied",
+        };
+      } else if (orders.length === 0 && subscriptions.length === 0 && invoices.length === 0) {
+        famloPlusNotice = {
+          tone: "info",
+          text: "No Famlo Pro purchases yet. Manual renewal enabled, autopay not enabled.",
+        };
+      }
+
+      const proAccessView = buildAdminFamloProAccessView({
+        subscriptions: subscriptions as Record<string, unknown>[],
+        families: families as Record<string, unknown>[],
+        stayUnits: stayUnits as Record<string, unknown>[],
+        subscriptionRooms: subscriptionRooms as Record<string, unknown>[],
+        orderProperties: orderProperties as Record<string, unknown>[],
+        hosts: hosts as Record<string, unknown>[],
+        users: users as Record<string, unknown>[],
+        orders: orders as Record<string, unknown>[],
+        invoices: invoices as Record<string, unknown>[],
+      });
+
+      const usersById = new Map(
+        (users as Record<string, unknown>[])
+          .map((row) => ({
+            id: asString(row.id),
+            email: asString(row.email),
+            phone: asString(row.phone),
+          }))
+          .filter((row): row is { id: string; email: string | null; phone: string | null } => Boolean(row.id))
+          .map((row) => [row.id, row])
+      );
+
+      const latestSubscriptionByRecordKey = new Map<string, Record<string, unknown>>();
+      const sortedSubscriptions = [...(subscriptions as Record<string, unknown>[])].sort(
+        (left, right) =>
+          new Date(String(right.created_at ?? 0)).getTime() - new Date(String(left.created_at ?? 0)).getTime()
+      );
+      for (const subscription of sortedSubscriptions) {
+        const familyId = asString(subscription.family_id);
+        const family = familyId ? (families as Record<string, unknown>[]).find((candidate) => candidate.id === familyId) : null;
+        const hostUserId = asString(subscription.host_user_id) ?? asString(family?.user_id);
+        const recordKey = hostUserId ? hostUserId : familyId ? `legacy-family:${familyId}` : asString(subscription.id);
+        if (recordKey && !latestSubscriptionByRecordKey.has(recordKey)) {
+          latestSubscriptionByRecordKey.set(recordKey, subscription);
+        }
+      }
+
+      const latestOrderByHostUserId = new Map<string, Record<string, unknown>>();
+      const sortedOrders = [...(orders as Record<string, unknown>[])].sort(
+        (left, right) =>
+          new Date(String(right.payment_captured_at ?? right.created_at ?? 0)).getTime() -
+          new Date(String(left.payment_captured_at ?? left.created_at ?? 0)).getTime()
+      );
+      for (const order of sortedOrders) {
+        const hostUserId = asString(order.host_user_id);
+        if (hostUserId && !latestOrderByHostUserId.has(hostUserId)) {
+          latestOrderByHostUserId.set(hostUserId, order);
+        }
+      }
+
+      const rows = proAccessView.rows.map((row) => {
+        const subscription = latestSubscriptionByRecordKey.get(row.recordKey);
+        const user = row.hostUserId ? usersById.get(row.hostUserId) : null;
+        const latestOrder = row.hostUserId ? latestOrderByHostUserId.get(row.hostUserId) : null;
+        const subscriptionMetadata = asObject(subscription?.metadata);
+
+        return {
+          ...row,
+          phone: user?.phone ?? null,
+          email: user?.email ?? null,
+          activationDuration: asString(subscriptionMetadata?.activation_duration),
+          customEndDate: asString(subscriptionMetadata?.custom_end_date),
+          latestOrderStatus: asString(latestOrder?.status),
+        };
+      });
+
+      famloPlusDeskProps = {
+        summary: proAccessView.summary,
+        rows,
+        orders: proAccessView.orders.slice(0, 24),
+        notice: famloPlusNotice,
+        autopayStatusLabel,
+        allowDevReset: isFamloProDevResetEnabled(),
+      };
+    } catch (error) {
+      logAdminReadFailure("famlo-plus", error);
+      const summary = getSupabaseErrorSummary(error);
+      const isMigrationIssue = isSchemaReadError(error);
+      famloPlusDeskProps = {
+        summary: buildFamloPlusEmptySummary(),
+        rows: [],
+        orders: [],
+        notice: {
+          tone: isMigrationIssue ? "warning" : "error",
+          text: isMigrationIssue
+            ? "Pro billing migration not applied"
+            : `Failed to load Famlo Pro access data: ${summary.message}`,
+        },
+        autopayStatusLabel,
+        allowDevReset: isFamloProDevResetEnabled(),
+      };
+    }
+
+    content = <FamloPlusDesk {...famloPlusDeskProps} />;
+
+  } else if (activeTab === "pro-channel-summary") {
+    const now = new Date();
+    const { data: families } = await supabase
+      .from("families")
+      .select("id,name,city,state")
+      .order("created_at", { ascending: false })
+      .limit(300);
+
+    const familyIds = (families ?? []).map((family) => family.id).filter(Boolean);
+    const [
+      subscriptionsResult,
+      settingsResult,
+      propertiesResult,
+      roomMappingsResult,
+      ratePlansResult,
+      revisionsResult,
+      stayUnitsResult,
+    ] = familyIds.length > 0
+      ? await Promise.all([
+          supabase
+            .from("host_pro_subscriptions")
+            .select("id,family_id,status,created_at")
+            .in("family_id", familyIds)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("host_pro_settings")
+            .select("family_id,id")
+            .in("family_id", familyIds),
+          supabase
+            .from("channel_properties")
+            .select("family_id,external_property_id,sync_status,metadata,last_synced_at")
+            .eq("provider_code", "channex")
+            .in("family_id", familyIds),
+          supabase
+            .from("channel_room_mappings")
+            .select("family_id,stay_unit_id,external_room_type_id")
+            .eq("provider_code", "channex")
+            .in("family_id", familyIds),
+          supabase
+            .from("channel_rate_plans")
+            .select("family_id,stay_unit_id,external_rate_plan_id")
+            .eq("provider_code", "channex")
+            .in("family_id", familyIds),
+          supabase
+            .from("channel_booking_revisions")
+            .select("family_id,external_booking_id,external_revision_id,import_status,ack_status,linked_booking_id,source")
+            .eq("provider_code", "channex")
+            .in("family_id", familyIds)
+            .limit(500),
+          supabase
+            .from("stay_units_v2")
+            .select("id,legacy_family_id,is_active,name,price_fullday")
+            .in("legacy_family_id", familyIds),
+        ])
+      : [
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+        ];
+    const channelDiagnostics: string[] = [];
+
+    const [syncJobsRows, syncLogsRows, providerAccountsRows, providersRows] = familyIds.length > 0
+      ? await Promise.all([
+          readOptionalAdminRows(
+            supabase,
+            "channel_sync_jobs",
+            "family_id,job_type,status,created_at,updated_at,error_message",
+            channelDiagnostics,
+            (query) => query.in("family_id", familyIds).order("created_at", { ascending: false }).limit(300)
+          ),
+          readOptionalAdminRows(
+            supabase,
+            "channel_sync_logs",
+            "family_id,action,status,message,created_at",
+            channelDiagnostics,
+            (query) => query.in("family_id", familyIds).eq("provider_code", "channex").order("created_at", { ascending: false }).limit(300)
+          ),
+          readOptionalAdminRows(
+            supabase,
+            "channel_provider_accounts",
+            "family_id,provider_code,status,created_at,updated_at",
+            channelDiagnostics,
+            (query) => query.in("family_id", familyIds).eq("provider_code", "channex")
+          ),
+          readOptionalAdminRows(
+            supabase,
+            "channel_providers",
+            "code,name,status,created_at",
+            channelDiagnostics,
+            (query) => query.order("created_at", { ascending: false })
+          ),
+        ])
+      : [[], [], [], []];
+
+    const latestSubscriptionByFamilyId = new Map<string, Record<string, unknown>>();
+    for (const row of (subscriptionsResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId || latestSubscriptionByFamilyId.has(familyId)) continue;
+      latestSubscriptionByFamilyId.set(familyId, row);
+    }
+
+    const settingsFamilyIds = new Set(
+      ((settingsResult.data ?? []) as Record<string, unknown>[])
+        .map((row) => asString(row.family_id))
+        .filter(Boolean) as string[]
+    );
+
+    const propertyByFamilyId = new Map<string, Record<string, unknown>>();
+    for (const row of (propertiesResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId || propertyByFamilyId.has(familyId)) continue;
+      propertyByFamilyId.set(familyId, row);
+    }
+
+    const roomMappingsByFamilyId = new Map<string, Set<string>>();
+    for (const row of (roomMappingsResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      const stayUnitId = asString(row.stay_unit_id);
+      if (!familyId || !stayUnitId || !asString(row.external_room_type_id)) continue;
+      const bucket = roomMappingsByFamilyId.get(familyId) ?? new Set<string>();
+      bucket.add(stayUnitId);
+      roomMappingsByFamilyId.set(familyId, bucket);
+    }
+
+    const ratePlansByFamilyId = new Map<string, Set<string>>();
+    for (const row of (ratePlansResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      const stayUnitId = asString(row.stay_unit_id);
+      if (!familyId || !stayUnitId || !asString(row.external_rate_plan_id)) continue;
+      const bucket = ratePlansByFamilyId.get(familyId) ?? new Set<string>();
+      bucket.add(stayUnitId);
+      ratePlansByFamilyId.set(familyId, bucket);
+    }
+
+    const revisionsByFamilyId = new Map<string, Record<string, unknown>[]>();
+    for (const row of (revisionsResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId) continue;
+      const bucket = revisionsByFamilyId.get(familyId) ?? [];
+      bucket.push(row);
+      revisionsByFamilyId.set(familyId, bucket);
+    }
+
+    const activeRoomsByFamilyId = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of (stayUnitsResult.data ?? []) as Record<string, unknown>[]) {
+      const familyId = asString(row.legacy_family_id);
+      if (!familyId || row.is_active !== true) continue;
+      const bucket = activeRoomsByFamilyId.get(familyId) ?? [];
+      bucket.push(row);
+      activeRoomsByFamilyId.set(familyId, bucket);
+    }
+
+    const syncJobsByFamilyId = new Map<string, Record<string, unknown>[]>();
+    for (const row of syncJobsRows as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId) continue;
+      const bucket = syncJobsByFamilyId.get(familyId) ?? [];
+      bucket.push(row);
+      syncJobsByFamilyId.set(familyId, bucket);
+    }
+
+    const syncLogsByFamilyId = new Map<string, Record<string, unknown>[]>();
+    for (const row of syncLogsRows as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId) continue;
+      const bucket = syncLogsByFamilyId.get(familyId) ?? [];
+      bucket.push(row);
+      syncLogsByFamilyId.set(familyId, bucket);
+    }
+
+    const providerAccountsByFamilyId = new Map<string, Record<string, unknown>[]>();
+    for (const row of providerAccountsRows as Record<string, unknown>[]) {
+      const familyId = asString(row.family_id);
+      if (!familyId) continue;
+      const bucket = providerAccountsByFamilyId.get(familyId) ?? [];
+      bucket.push(row);
+      providerAccountsByFamilyId.set(familyId, bucket);
+    }
+
+    const channexProvider = (providersRows as Record<string, unknown>[]).find((row) => asString(row.code) === "channex") ?? null;
+
+    const proFamilyIds = new Set<string>([
+      ...Array.from(latestSubscriptionByFamilyId.keys()),
+      ...Array.from(settingsFamilyIds.values()),
+      ...Array.from(propertyByFamilyId.keys()),
+    ]);
+
+    const rows = (families ?? [])
+      .filter((family) => proFamilyIds.has(family.id))
+      .map((family) => {
+        const subscription = latestSubscriptionByFamilyId.get(family.id);
+        const property = propertyByFamilyId.get(family.id);
+        const metadata = asObject(property?.metadata);
+        const feedHealth = asObject(metadata.channexFeedHealth);
+        const ariHealth = asObject(metadata.channexAriHealth);
+        const activeRooms = activeRoomsByFamilyId.get(family.id) ?? [];
+        const mappedRoomIds = roomMappingsByFamilyId.get(family.id) ?? new Set<string>();
+        const mappedRatePlanIds = ratePlansByFamilyId.get(family.id) ?? new Set<string>();
+        const revisions = revisionsByFamilyId.get(family.id) ?? [];
+        const syncJobs = syncJobsByFamilyId.get(family.id) ?? [];
+        const syncLogs = syncLogsByFamilyId.get(family.id) ?? [];
+        const providerAccounts = providerAccountsByFamilyId.get(family.id) ?? [];
+
+        const channelAttachedFromAri = ariHealth.channelAttached === true && ariHealth.channelActive === true;
+        const channelAttachedFromFeed = feedHealth.channelAttached === true && feedHealth.channelActive === true;
+        const currentChannelAttached = channelAttachedFromAri || (!("channelAttached" in ariHealth) && channelAttachedFromFeed);
+
+        const activeRoomIds = activeRooms
+          .map((room) => asString(room.id))
+          .filter(Boolean) as string[];
+        const roomMappingReady = activeRoomIds.length > 0 && activeRoomIds.every((roomId) => mappedRoomIds.has(roomId));
+        const rateMappingReady = activeRoomIds.length > 0 && activeRoomIds.every((roomId) => mappedRatePlanIds.has(roomId));
+
+        const unackedRevisionsCount = asNumber(feedHealth.unackedRevisionsCount, 0);
+        const failedImportCount = asNumber(feedHealth.failedImportCount, 0) + asNumber(feedHealth.failedAutoApplyCount, 0);
+        const pendingManualReviewCount = asNumber(feedHealth.pendingManualReviewCount, 0);
+        const failedSyncJobsCount = syncJobs.filter((job) => {
+          const status = (asString(job.status) ?? "").toLowerCase();
+          return status === "failed" || status === "error";
+        }).length;
+        const pendingSyncJobsCount = syncJobs.filter((job) => {
+          const status = (asString(job.status) ?? "").toLowerCase();
+          return status === "queued" || status === "pending" || status === "processing" || status === "running";
+        }).length;
+        const latestSuccessfulSyncAt = [
+          asString(property?.last_synced_at),
+          ...syncLogs
+            .filter((log) => {
+              const status = (asString(log.status) ?? "").toLowerCase();
+              return status === "success" || status === "completed" || status === "synced";
+            })
+            .map((log) => asString(log.created_at)),
+        ].filter(Boolean)[0] ?? null;
+        const recentWebhookIssuesCount = syncLogs.filter((log) => {
+          const action = (asString(log.action) ?? "").toLowerCase();
+          const status = (asString(log.status) ?? "").toLowerCase();
+          return (action.includes("webhook") || action.includes("booking")) && (status === "failed" || status === "error");
+        }).length;
+        const latestAriStatus = asString(ariHealth.lastAriSyncStatus) ?? "not_started";
+        const latestAriSuccess =
+          latestAriStatus === "synced" &&
+          !isStaleByHours(asString(ariHealth.lastSuccessfulAriSyncAt), now, 24);
+        const latestFeedPollSuccessful =
+          currentChannelAttached &&
+          Boolean(asString(feedHealth.lastSuccessfulPollAt)) &&
+          !asString(feedHealth.lastError) &&
+          !isStaleByHours(asString(feedHealth.lastSuccessfulPollAt), now, 24);
+
+        const bookingProofCompleted = revisions.some((revision) => revision.import_status === "imported" && revision.ack_status === "acknowledged");
+        const cancellationProofCompleted = revisions.some((revision) => revision.import_status === "cancelled_applied" && revision.ack_status === "acknowledged");
+        const modificationWorkflowAvailable = revisions.some((revision) => revision.import_status === "modified_applied" || revision.import_status === "modified_pending_review");
+
+        let criticalConflictsCount = 0;
+        if (!asString(property?.external_property_id)) criticalConflictsCount += 1;
+        if (!currentChannelAttached) criticalConflictsCount += 1;
+        if (latestAriStatus === "sync_failed" || latestAriStatus === "channel_disconnected") criticalConflictsCount += 1;
+        if (asString(feedHealth.lastError)) criticalConflictsCount += 1;
+        if (failedImportCount > 0) criticalConflictsCount += 1;
+        if (!roomMappingReady) criticalConflictsCount += 1;
+        if (!rateMappingReady) criticalConflictsCount += 1;
+
+        let goLiveReadiness: "Ready" | "Needs attention" | "Not ready" = "Ready";
+        let readinessReason = "Core launch, feed, and sync signals are aligned.";
+        if (
+          criticalConflictsCount > 0 ||
+          !latestAriSuccess ||
+          !latestFeedPollSuccessful ||
+          !bookingProofCompleted ||
+          !cancellationProofCompleted ||
+          !modificationWorkflowAvailable
+        ) {
+          goLiveReadiness = "Not ready";
+          if (!currentChannelAttached) {
+            readinessReason = "Channel disconnected or inactive. Famlo should stay blocked until channel health is restored.";
+          } else if (!roomMappingReady) {
+            readinessReason = "One or more active rooms are still missing Channex room mappings.";
+          } else if (!rateMappingReady) {
+            readinessReason = "One or more active rooms are still missing Channex rate mappings.";
+          } else if (!latestAriSuccess) {
+            readinessReason = "Latest 365-day ARI sync is not currently healthy enough for go-live.";
+          } else if (!latestFeedPollSuccessful) {
+            readinessReason = "Booking feed polling is not currently fresh and successful.";
+          } else if (!bookingProofCompleted) {
+            readinessReason = "Real new-booking proof is not fully completed yet.";
+          } else if (!cancellationProofCompleted) {
+            readinessReason = "Real cancellation proof is not fully completed yet.";
+          } else {
+            readinessReason = "Real modification-review workflow is not fully completed yet.";
+          }
+        } else if (unackedRevisionsCount > 0 || pendingManualReviewCount > 0) {
+          goLiveReadiness = "Needs attention";
+          readinessReason = pendingManualReviewCount > 0
+            ? "Modification revisions are waiting for manual operator review."
+            : "One or more revisions still need acknowledgement.";
+        }
+
+        return {
+          familyId: family.id,
+          familyName: family.name || "Famlo Home",
+          locationLabel: [family.city, family.state].filter(Boolean).join(", ") || "Location not saved",
+          famloPlusStatus: asString(subscription?.status) ?? (settingsFamilyIds.has(family.id) ? "configured" : "inactive"),
+          channexPropertyId: asString(property?.external_property_id),
+          channelAttached: currentChannelAttached,
+          channelActive: currentChannelAttached,
+          activeChannelTitle: asString(ariHealth.activeChannelTitle) ?? asString(feedHealth.activeChannelTitle),
+          activeChannelId: asString(ariHealth.activeChannelId) ?? asString(feedHealth.activeChannelId),
+          providerAccountConfigured: providerAccounts.some((account) => {
+            const status = (asString(account.status) ?? "").toLowerCase();
+            return status === "" || status === "active" || status === "connected" || status === "verified";
+          }),
+          ariHealthLabel:
+            latestAriStatus === "synced"
+              ? "Synced"
+              : latestAriStatus === "sync_failed"
+                ? "Sync failed"
+                : latestAriStatus === "sync_overdue"
+                  ? "Sync overdue"
+                  : latestAriStatus === "channel_disconnected"
+                    ? "Channel disconnected"
+                    : "Not started",
+          feedHealthLabel:
+            !currentChannelAttached
+              ? "Channel disconnected"
+              : asString(feedHealth.lastError)
+                ? "Feed poll failed"
+                : pendingManualReviewCount > 0
+                  ? "Needs review"
+                  : latestFeedPollSuccessful
+                    ? "Synced"
+                    : "Needs attention",
+          unackedRevisionsCount,
+          failedImportCount,
+          pendingManualReviewCount,
+          failedSyncJobsCount,
+          pendingSyncJobsCount,
+          latestSuccessfulSyncAt,
+          recentWebhookIssuesCount,
+          criticalConflictsCount,
+          goLiveReadiness,
+          readinessReason,
+          roomMappingReady,
+          rateMappingReady,
+          bookingProofCompleted,
+          cancellationProofCompleted,
+          modificationWorkflowAvailable,
+          possibleStagingIssue: !currentChannelAttached && Boolean(asString(property?.external_property_id)),
+        };
+      })
+      .sort((left, right) => {
+        const score = (value: "Ready" | "Needs attention" | "Not ready") =>
+          value === "Not ready" ? 0 : value === "Needs attention" ? 1 : 2;
+        return score(left.goLiveReadiness) - score(right.goLiveReadiness) || left.familyName.localeCompare(right.familyName);
+      });
+
+    const summary = {
+      connectedProperties: rows.filter((row) => row.channelAttached && row.channelActive).length,
+      mappedRooms: rows.filter((row) => row.roomMappingReady).length,
+      otaConnectedProperties: rows.filter((row) => row.providerAccountConfigured).length,
+      failedSyncJobs: rows.reduce((sum, row) => sum + row.failedSyncJobsCount, 0),
+      pendingSyncJobs: rows.reduce((sum, row) => sum + row.pendingSyncJobsCount, 0),
+      recentRevisionIssues: rows.reduce((sum, row) => sum + row.unackedRevisionsCount + row.pendingManualReviewCount + row.recentWebhookIssuesCount, 0),
+      lastSuccessfulSyncAt:
+        rows
+          .map((row) => row.latestSuccessfulSyncAt)
+          .filter(Boolean)
+          .sort((left, right) => String(right).localeCompare(String(left)))[0] ?? null,
+      providerLabel: asString(channexProvider?.name) ?? "Channex",
+    };
+
+    content = (
+      <AdminProPropertiesSummary
+        rows={rows}
+        summary={summary}
+        diagnostics={channelDiagnostics}
+        executionDisabledReason={
+          isChannexSyncExecutionEnabled() ? null : "Channex sync execution is disabled by rollout/runtime safety flags."
+        }
+      />
+    );
+
+  } else if (activeTab === "test-properties") {
+    const { data: families } = await supabase
+      .from("families")
+      .select("id,name,host_id,city,state,user_id,email")
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    const familyIds = (families ?? []).map((family) => family.id).filter(Boolean);
+    const { data: subscriptions } = familyIds.length > 0
+      ? await supabase
+          .from("host_pro_subscriptions")
+          .select("id,family_id,status,created_at")
+          .in("family_id", familyIds)
+          .order("created_at", { ascending: false })
+      : { data: [] };
+
+    const latestSubscriptionByFamilyId = new Map<string, Record<string, unknown>>();
+    for (const row of (subscriptions ?? []) as Record<string, unknown>[]) {
+      const familyId = typeof row.family_id === "string" ? row.family_id : null;
+      if (!familyId || latestSubscriptionByFamilyId.has(familyId)) continue;
+      latestSubscriptionByFamilyId.set(familyId, row);
+    }
+
+    const rows = (families ?? []).map((family) => {
+      const subscription = latestSubscriptionByFamilyId.get(family.id);
+      return {
+        familyId: family.id,
+        familyName: family.name || "Famlo Home",
+        hostCode: family.host_id ?? null,
+        city: family.city ?? null,
+        state: family.state ?? null,
+        famloPlusStatus: typeof subscription?.status === "string" ? subscription.status : "inactive",
+        ownerUserId: family.user_id ?? null,
+        email: family.email ?? null,
+      };
+    });
+
+    content = <TestPropertyProvisioner rows={rows} />;
+
+  } else if (activeTab === "vetting") {
+    const { data: familyApps } = await supabase
+      .from("family_applications")
+      .select("id, full_name, email, about_family, status, photo_url, onboarding_draft_id, property_name, property_address, village, state, payload")
+      .eq("status", "pending");
+
+    const { data: friendApps } = await supabase
+      .from("friend_applications")
+      .select("id, full_name, email, bio, status, photo_url")
+      .eq("status", "pending");
+
+    // Fetch full draft details for home apps
+    const draftIds = (familyApps ?? []).map(a => a.onboarding_draft_id).filter(Boolean);
+    const { data: drafts } = draftIds.length > 0 
+      ? await supabase.from("host_onboarding_drafts").select("*").in("id", draftIds)
+      : { data: [] };
+
+    const apps = [
+      ...(familyApps ?? []).map((a) => {
+        const familyApp = a as typeof a & {
+          host_photo_url?: string | null;
+          payload?: Record<string, unknown> | null;
+        };
+        const draft = (drafts ?? []).find(d => d.id === a.onboarding_draft_id);
+        const payload = {
+          ...(((familyApp.payload ?? {}) as Record<string, unknown>) || {}),
+          ...(((draft?.payload ?? {}) as Record<string, unknown>) || {}),
+        } as Record<string, unknown>;
+        const preferredPhoto =
+          draft?.host_photo_url ||
+          payload.hostPhoto ||
+          familyApp.host_photo_url ||
+          familyApp.photo_url ||
+          null;
+        return { 
+          application_type: "family",
+          ...a,
+          photo_url: preferredPhoto,
+          bio: a.about_family || draft?.host_bio || payload.hostBio,
+          address: `${a.property_name || 'Home'} - ${a.property_address || a.village || ''}, ${a.state || ''}`,
+          draft_data: draft
+            ? {
+                ...draft,
+                payload,
+              }
+            : { payload }
+        };
+      }),
+      ...(friendApps ?? []).map((a: any) => ({
+        application_type: "friend",
+        ...a,
+        address: "Friend Guide"
+      }))
+    ];
+    content = <VettingScorecard applications={apps as any} actorId={ADMIN_ID} actorRole="admin" />;
+
+
+  } else if (activeTab === "ads") {
+  const { data: adsV2Data } = await supabase.from("ads_v2").select("*").order("priority");
+  const { data: bannersData } = await supabase.from("hero_banners").select("*").order("sort_order");
+  content = <AdminAdsAndBanners ads={adsV2Data ?? []} banners={bannersData ?? []} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "channel-manager") {
+    content = <ChannelManagerConsole />;
+
+  } else if (activeTab === "ops-dashboard") {
+    content = <PlatformOpsDashboard />;
+
+  } else if (activeTab === "growth") {
+    content = <GrowthDashboard />;
+
+  } else if (activeTab === "testimonials") {
+    content = <TestimonialsDesk />;
+
+  } else if (activeTab === "compliance-packs") {
+    content = <CompliancePacksDashboard />;
+
+  } else if (activeTab === "coupons") {
+    const { data: couponsData } = await supabase.from("coupons_v2").select("*").order("created_at", { ascending: false });
+    content = <AdminCoupons coupons={couponsData ?? []} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "commission") {
+    const { data: users } = await supabase.from("users").select("id, name, email, role, commission_rate_override").in("role", ["host", "hommie"]).order("name");
+    const { data: activeDefaultRule } = await supabase
+      .from("commission_rules")
+      .select("rate_bps, rule_set_id")
+      .eq("scope", "global_default")
+      .eq("product_type", "host_stay")
+      .eq("is_preview", false)
+      .order("priority", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    const platformDefaultRate = Number(activeDefaultRule?.rate_bps ?? DEFAULT_COMMISSION_PCT * 100) / 100;
+    content = <CommissionSlider entities={(users ?? []) as any} platformDefaultRate={platformDefaultRate} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "chat") {
+    const { data: keywords } = await supabase.from("chat_keywords").select("keyword");
+    const keywordList = (keywords ?? []).map((row) => row.keyword);
+    const { data: flagRows } = await supabase
+      .from("chat_flags")
+      .select("conversation_id,status,reviewed_at")
+      .eq("status", "pending")
+      .limit(50);
+
+    const flaggedConversationIds = [...new Set((flagRows ?? []).map((row) => row.conversation_id).filter(Boolean))];
+
+    const { data: conversations } = flaggedConversationIds.length > 0
+      ? await supabase
+          .from("conversations")
+          .select("id, guest_id, host_id, family_id, last_message, guest_unread, host_unread")
+          .in("id", flaggedConversationIds)
+      : { data: [] };
+
+    const { data: messages } = flaggedConversationIds.length > 0
+      ? await supabase
+          .from("messages")
+          .select("id, conversation_id, sender_id, sender_type, text, created_at")
+          .in("conversation_id", flaggedConversationIds)
+          .order("created_at", { ascending: true })
+      : { data: [] };
+
+    const guestIds = [...new Set((conversations ?? []).map((row) => row.guest_id).filter(Boolean))];
+    const hostIds = [...new Set((conversations ?? []).map((row) => row.host_id).filter(Boolean))];
+    const familyIds = [...new Set((conversations ?? []).map((row) => row.family_id).filter(Boolean))];
+
+    const [guestResult, hostResult, familyResult] = await Promise.all([
+      guestIds.length > 0 ? supabase.from("users").select("id,name").in("id", guestIds) : Promise.resolve({ data: [], error: null }),
+      hostIds.length > 0 ? supabase.from("users").select("id,name").in("id", hostIds) : Promise.resolve({ data: [], error: null }),
+      familyIds.length > 0 ? supabase.from("families").select("id,name,host_id").in("id", familyIds) : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    const guestMap = Object.fromEntries((guestResult.data ?? []).map((row) => [row.id, row]));
+    const hostMap = Object.fromEntries((hostResult.data ?? []).map((row) => [row.id, row]));
+    const familyMap = Object.fromEntries((familyResult.data ?? []).map((row) => [row.id, row]));
+    const flagMap = new Map((flagRows ?? []).map((row) => [row.conversation_id, row]));
+    const messageMap = new Map<string, any[]>();
+
+    for (const message of messages ?? []) {
+      const bucket = messageMap.get(message.conversation_id) ?? [];
+      bucket.push(message);
+      messageMap.set(message.conversation_id, bucket);
+    }
+
+    const monitorConversations = (conversations ?? []).map((conversation: any) => {
+      const family = conversation.family_id ? familyMap[conversation.family_id] : null;
+      const guest = conversation.guest_id ? guestMap[conversation.guest_id] : null;
+      const host = conversation.host_id ? hostMap[conversation.host_id] : null;
+      const flag = flagMap.get(conversation.id);
+      const threadMessages = (messageMap.get(conversation.id) ?? []).map((message) => {
+        const messageText = message.text || "";
+        const safety = detectChatSafetyIssue(messageText, keywordList);
+        return {
+          id: message.id,
+          sender_name:
+            message.sender_type === "guest"
+              ? guest?.name ?? "Guest"
+              : host?.name ?? family?.name ?? "Host",
+          sender_type: message.sender_type,
+          content: messageText,
+          created_at: message.created_at,
+          flagged: safety.matched,
+          trigger_keyword: safety.trigger ?? undefined,
+        };
+      });
+
+      return {
+        id: conversation.id,
+        guest_name: guest?.name ?? "Guest",
+        host_name: host?.name ?? family?.name ?? "Host",
+        type: "guest-host" as const,
+        last_message: conversation.last_message ?? "Conversation started",
+        messages: threadMessages,
+        is_flagged: Boolean(flag),
+        flag_status: (flag?.status ?? null) as "pending" | "reviewed" | "dismissed" | null,
+      };
+    });
+
+    content = <ChatMonitor keywords={keywordList} conversations={monitorConversations} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "disputes") {
+    const { data: disputes } = await supabase.from("disputes").select("*, bookings(*, users(name))").order("created_at", { ascending: false });
+    const mapped = (disputes ?? []).map((d: any) => ({
+      id: d.id, booking_id: d.booking_id, raised_by_name: d.bookings?.users?.name ?? "Unknown", raised_by_type: "guest" as const, status: d.status,
+      amount: d.bookings?.total_price ?? 0, payout_frozen: d.payout_frozen, description: d.description, created_at: d.created_at,
+      acknowledged_at: d.acknowledged_at, resolved_at: d.resolved_at
+    }));
+    content = <DisputeCenter disputes={mapped as any} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "killswitch") {
+    killSwitchActive = await readKillSwitchState(supabase);
+    content = <KillSwitch isActive={killSwitchActive ?? false} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "mailbox") {
+    const { count: hostCount } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("role", "host");
+    const { count: hommieCount } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("role", "hommie");
+    content = <BulkMailbox hostCount={hostCount ?? 0} hommieCount={hommieCount ?? 0} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "grievances") {
+    const { data: grievances } = await supabase.from("grievances").select("*, users(name, email)").order("created_at", { ascending: false });
+    const mapped = (grievances ?? []).map((g: any) => ({
+      id: g.id, user_id: g.user_id, user_name: g.users?.name ?? "Unknown", user_email: g.users?.email ?? "", complaint_type: g.complaint_type,
+      description: g.description, status: g.status, assigned_to: g.assigned_to, acknowledged_at: g.acknowledged_at, sla_deadline: g.sla_deadline, resolved_at: g.resolved_at, created_at: g.created_at
+    }));
+    content = <GrievanceDashboard grievances={mapped as any} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "fraud") {
+    const { data: flags } = await supabase.from("fraud_flags").select("*, user_a:users!fraud_flags_user_id_a_fkey(name, email), user_b:users!fraud_flags_user_id_b_fkey(name, email)").order("created_at", { ascending: false });
+    const mapped = (flags ?? []).map((f: any) => ({
+      id: f.id, user_id_a: f.user_id_a, user_id_b: f.user_id_b, user_name_a: f.user_a?.name ?? "Unknown", user_name_b: f.user_b?.name ?? "Unknown",
+      email_a: f.user_a?.email ?? "", email_b: f.user_b?.email ?? "", flag_reason: f.flag_reason, status: f.status, created_at: f.created_at,
+    }));
+    content = <FraudFlags flags={mapped} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "audit") {
+    const [entriesRes, cancellationEntries] = await Promise.all([
+      supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(200),
+      fetchCancellationHistory(supabase, { limit: 100 }),
+    ]);
+
+    content = (
+      <div style={{ display: "grid", gap: "24px" }}>
+        <CancellationTrail entries={cancellationEntries as any} />
+        <AuditTrail entries={(entriesRes.data ?? []) as any} />
+      </div>
+    );
+
+  } else if (activeTab === "heatmap") {
+    const { data: bookingsV2 } = await supabase
+      .from("bookings_v2")
+      .select("host_id,total_price,hosts(lat,lng)")
+      .not("hosts.lat", "is", null);
+    const points = ((bookingsV2 ?? []) as any[]).map((b: any) => ({
+      id: b.host_id,
+      lat: b.hosts?.lat ?? 26.2389,
+      lng: b.hosts?.lng ?? 73.0243,
+      intensity: 0.8,
+      type: "booking" as const
+    }));
+    content = <RevenueHeatmap points={points} />;
+
+  } else if (activeTab === "shadow") {
+    const { data: users } = await supabase.from("users").select("id, name, email, role").in("role", ["host", "hommie"]).limit(100);
+    content = <ShadowMode users={(users ?? []) as any} actorId={ADMIN_ID} />;
+
+  } else if (activeTab === "payouts") {
+    const { data: payoutRows } = await supabase
+      .from("payouts_v2")
+      .select("id,booking_id,partner_type,partner_user_id,status,amount,net_transferable_amount,gross_booking_value,platform_fee,platform_fee_tax,hold_reason,notes,method,created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    const bookingIds = [...new Set((payoutRows ?? []).map((row) => row.booking_id).filter(Boolean))];
+    const partnerUserIds = [...new Set((payoutRows ?? []).map((row) => row.partner_user_id).filter(Boolean))];
+
+    const [bookingsResult, usersResult] = await Promise.all([
+      bookingIds.length > 0
+        ? supabase
+            .from("bookings_v2")
+            .select("id,status,payment_status,guest_name,host_name,hommie_name,host_id,hommie_id")
+            .in("id", bookingIds)
+        : Promise.resolve({ data: [], error: null }),
+      partnerUserIds.length > 0
+        ? supabase.from("users").select("id,name,email").in("id", partnerUserIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    const bookingMap = new Map((bookingsResult.data ?? []).map((row: any) => [row.id, row]));
+    const userMap = new Map((usersResult.data ?? []).map((row: any) => [row.id, row]));
+
+    const payoutDeskRows = (payoutRows ?? []).map((row: any) => {
+      const booking = bookingMap.get(row.booking_id) ?? {};
+      const user = userMap.get(row.partner_user_id) ?? {};
+
+      return {
+        payoutId: row.id,
+        bookingId: row.booking_id,
+        partnerType: row.partner_type,
+        partnerName: booking.host_name || booking.hommie_name || user.name || "Partner",
+        partnerEmail: user.email || "",
+        payoutStatus: row.status || "scheduled",
+        bookingStatus: booking.status || "unknown",
+        amount: Number(row.amount || 0),
+        netTransferableAmount: Number(row.net_transferable_amount || row.amount || 0),
+        grossBookingValue: Number(row.gross_booking_value || 0),
+        platformFee: Number(row.platform_fee || 0),
+        platformFeeTax: Number(row.platform_fee_tax || 0),
+        guestName: booking.guest_name || "Guest",
+        paymentStatus: booking.payment_status || "unknown",
+        createdAt: row.created_at || null,
+        holdReason: row.hold_reason || null,
+        payoutMethod: row.method || "manual",
+        notes: row.notes || null,
+      };
+    });
+
+    content = (
+      <ManualPayoutDesk
+        rows={payoutDeskRows as any}
+        executionDisabledReason={
+          isSettlementPayoutExecutionEnabled() ? null : "Settlement payout execution is disabled by rollout flags."
+        }
+      />
+    );
+
+  } else if (activeTab === "support") {
+    content = <SupportManager key={`${ADMIN_ID}-open`} actorId={ADMIN_ID} initialFilter="open" />;
+  } else if (activeTab === "user-problems") {
+    content = <SupportManager key={`${ADMIN_ID}-user-problems`} actorId={ADMIN_ID} initialFilter="user-problems" />;
+
+  } else if (activeTab === "teams-mgmt") {
+    const { data: team } = await supabase
+      .from("users")
+      .select("id, name, email, role, created_at")
+      .eq("role", "team")
+      .order("created_at", { ascending: false });
+
+    content = <TeamManagementPanel teamMembers={(team ?? []) as any} />;
+
+  } else if (activeTab === "gst") {
+    content = <GSTExport adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "suspend") {
+    const { data: users } = await supabase.from("users").select("id, name, email, role, kyc_status").in("role", ["host", "hommie"]).order("name");
+    content = <AccountSuspend users={(users ?? []) as any} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "erasure") {
+    const { data: users } = await supabase.from("users").select("id, name, email, role, created_at").neq("kyc_status", "erased").order("name");
+    content = <DataErasure users={(users ?? []) as any} adminId={ADMIN_ID} />;
+
+  } else if (activeTab === "response") {
+    const { data: hommies } = await supabase.from("hommie_profiles_v2").select("id, display_name, email").limit(50);
+    const stats = ((hommies ?? []) as any[]).map((h) => ({
+      id: h.id, name: h.display_name || "Unknown", email: h.email || "",
+      avg_response_minutes: stableNumber(`${h.id}-avg`, 150, 1),
+      total_conversations: stableNumber(`${h.id}-conversations`, 20, 1),
+      flagged: false
+    }));
+    content = <ResponseTimeTracker stats={stats} />;
+
+  } else if (activeTab === "id-verifier") {
+    const { data: guestRecords } = await supabase
+      .from("users")
+      .select("id, name, email, city, state, gender, about, date_of_birth, avatar_url, verification_url, verification_type, id_document_url, id_document_type, kyc_status")
+      .eq("role", "guest")
+      .in("kyc_status", ["pending_review", "needs_resubmission", "profile_saved"]);
+
+    const mapped = (guestRecords ?? [])
+      .map((r) => ({
+        id: r.id,
+        full_name: r.name ?? "Guest",
+        email: r.email ?? "",
+        city: (r as any).city ?? null,
+        state: (r as any).state ?? null,
+        gender: (r as any).gender ?? null,
+        about: (r as any).about ?? null,
+        date_of_birth: (r as any).date_of_birth ?? null,
+        kyc_status: r.kyc_status ?? null,
+        profile_photo_url: r.avatar_url ?? null,
+        id_document_url: r.id_document_url ?? r.verification_url ?? null,
+        id_document_type: r.id_document_type ?? r.verification_type ?? "aadhaar_face_match",
+        application_type: "guest" as const,
+      }))
+      .filter((r) => Boolean(r.profile_photo_url || r.id_document_url));
+
+    content = <IDVerifier records={mapped} actorId={ADMIN_ID} />;
+
+  } else {
+    content = (
+      <div style={{ textAlign: "center", padding: "80px", color: "rgba(255,255,255,0.2)" }}>
+        <div style={{ fontSize: "40px", marginBottom: "16px" }}>⚡</div>
+        <div style={{ fontSize: "18px", fontWeight: 900, color: "rgba(255,255,255,0.4)" }}>Select a feature from the sidebar</div>
+      </div>
+    );
+  }
+
+  return (
+    <AdminLayout admin={{ id: ADMIN_ID, name: "Famlo Admin", email: "admin@famlo.in" }} activeTab={activeTab} killSwitchActive={killSwitchActive}>
+      {content}
+    </AdminLayout>
+  );
+}
