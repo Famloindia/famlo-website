@@ -4,6 +4,7 @@ import { serializeHostListingMeta } from "@/lib/host-listing-meta";
 import { upsertHostGstProfile } from "@/lib/host-gst-profile";
 import { maskCoordinates } from "@/lib/location-utils";
 import { ensureApprovedStayUnitsForFamily } from "@/lib/stay-units";
+import { resolveVerifiedAuthPhone, seedHostWhatsappSettings } from "@/lib/host-whatsapp-settings";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -246,6 +247,7 @@ function buildApplicationDraft(source: JsonRecord): JsonRecord {
     mobileNumber:
       asString(source.mobile_number) ||
       asString(payload.mobileNumber),
+    whatsappConsent: payload.whatsappConsent === true,
     email:
       asString(source.email) ||
       asString(payload.email),
@@ -789,6 +791,22 @@ export async function approveFamilyApplication(
 
   const profile = await ensureFamilyProfile(supabase, normalized, userId, generatedPassword);
   await ensureHostProfileForFamily(supabase, profile.profileId ?? "", normalized);
+  const verifiedAuthPhone = await resolveVerifiedAuthPhone(supabase, {
+    hostUserId: userId,
+    expectedPhone: asString(normalized.mobileNumber),
+  });
+  await seedHostWhatsappSettings(supabase, {
+    hostUserId: userId,
+    phone: asString(normalized.mobileNumber),
+    verifiedAt: verifiedAuthPhone?.verifiedAt ?? null,
+    consent: normalized.whatsappConsent === true,
+    source:
+      normalized.whatsappConsent === true
+        ? "onboarding_consent"
+        : verifiedAuthPhone
+          ? "auth_phone_verified"
+          : "users_phone",
+  });
 
   const now = new Date().toISOString();
   const reviewNotes = notes?.trim() || "Approved by Famlo review team.";

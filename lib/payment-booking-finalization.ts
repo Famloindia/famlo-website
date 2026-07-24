@@ -259,32 +259,34 @@ export async function resolveBookingApprovalRequirement(
     }
   }
 
+  if (legacyFamilyId) {
+    const familyLookup = await supabase
+      .from("families")
+      .select("booking_requires_host_approval,admin_notes")
+      .eq("id", legacyFamilyId)
+      .maybeSingle();
+
+    if (familyLookup.error && !isSchemaCompatibilityError(familyLookup.error.message)) {
+      throw familyLookup.error;
+    }
+
+    const familyData = (familyLookup.data as JsonRecord | null) ?? null;
+    if (typeof familyData?.booking_requires_host_approval === "boolean") {
+      return familyData.booking_requires_host_approval;
+    }
+
+    const familyMeta = parseHostListingMeta(asString(familyData?.admin_notes));
+    if (typeof familyMeta.bookingRequiresHostApproval === "boolean") {
+      return familyMeta.bookingRequiresHostApproval;
+    }
+  }
+
   if (typeof hostRequiresApproval === "boolean") {
     return hostRequiresApproval;
   }
 
   if (!legacyFamilyId) {
     return false;
-  }
-
-  const familyLookup = await supabase
-    .from("families")
-    .select("booking_requires_host_approval,admin_notes")
-    .eq("id", legacyFamilyId)
-    .maybeSingle();
-
-  if (familyLookup.error && !isSchemaCompatibilityError(familyLookup.error.message)) {
-    throw familyLookup.error;
-  }
-
-  const familyData = (familyLookup.data as JsonRecord | null) ?? null;
-  if (typeof familyData?.booking_requires_host_approval === "boolean") {
-    return familyData.booking_requires_host_approval;
-  }
-
-  const familyMeta = parseHostListingMeta(asString(familyData?.admin_notes));
-  if (typeof familyMeta.bookingRequiresHostApproval === "boolean") {
-    return familyMeta.bookingRequiresHostApproval;
   }
 
   const draftLookup = await supabase

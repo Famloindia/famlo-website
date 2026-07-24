@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 
 import { isFamloProDashboardEnabled, loadHostProAccess, resolveHostDashboardHref } from "@/lib/host-pro-access";
+import { createHostSessionToken, getHostSessionMaxAge, HOST_SESSION_COOKIE_NAME } from "@/lib/host-session";
 import { safeSelectFamilyOptionalField } from "@/lib/partner-login-compat";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -108,6 +109,19 @@ export async function POST(request: Request): Promise<NextResponse> {
     path: "/",
     maxAge: 60 * 60 * 24 * 30
   });
+  if (family.user_id) {
+    response.cookies.set(
+      HOST_SESSION_COOKIE_NAME,
+      createHostSessionToken({ familyId: family.id, hostUserId: family.user_id }),
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: getHostSessionMaxAge(),
+      }
+    );
+  }
 
   return response;
 }

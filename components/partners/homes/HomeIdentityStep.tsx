@@ -24,6 +24,20 @@ export function HomeIdentityStep({ flow, update }: Readonly<StepProps>): React.J
             <span>Phone</span>
             <input className="text-input" value={flow.mobileNumber} onChange={(event) => update("mobileNumber", event.target.value)} />
           </label>
+          <label style={{ gridColumn: "1 / -1", display: "flex", gap: "10px", alignItems: "flex-start" }}>
+            <input
+              type="checkbox"
+              checked={flow.whatsappConsent}
+              onChange={(event) => update("whatsappConsent", event.target.checked)}
+              style={{ marginTop: "3px" }}
+            />
+            <span>
+              Send booking and important account updates to me on WhatsApp.
+              <small style={{ display: "block", marginTop: "4px" }}>
+                WhatsApp alerts remain off until this number is verified.
+              </small>
+            </span>
+          </label>
           <label>
             <span>Email</span>
             <input className="text-input" value={flow.email} onChange={(event) => update("email", event.target.value)} />

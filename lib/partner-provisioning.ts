@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { AppUser, ApprovalCredentials, FamilyApplication, FamilyProfile } from "./types";
+import { resolveVerifiedAuthPhone, seedHostWhatsappSettings } from "@/lib/host-whatsapp-settings";
 
 function generateTemporaryPassword(length = 14): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
@@ -136,6 +137,23 @@ export async function provisionFamilyFromApplication(
   });
 
   const profile = await ensureFamilyProfile(supabase, application, userId, generatedPassword);
+  const rawApplicationPayload = (application as FamilyApplication & { payload?: unknown }).payload;
+  const applicationPayload =
+    rawApplicationPayload && typeof rawApplicationPayload === "object" && !Array.isArray(rawApplicationPayload)
+      ? (rawApplicationPayload as Record<string, unknown>)
+      : {};
+  const verifiedAuthPhone = await resolveVerifiedAuthPhone(supabase, {
+    hostUserId: userId,
+    expectedPhone: application.phone,
+  });
+  const whatsappConsent = applicationPayload.whatsappConsent === true;
+  await seedHostWhatsappSettings(supabase, {
+    hostUserId: userId,
+    phone: application.phone,
+    verifiedAt: verifiedAuthPhone?.verifiedAt ?? null,
+    consent: whatsappConsent,
+    source: whatsappConsent ? "onboarding_consent" : verifiedAuthPhone ? "auth_phone_verified" : "users_phone",
+  });
 
   return {
     email: application.email,
