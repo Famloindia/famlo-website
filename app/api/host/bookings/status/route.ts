@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { applyHostBookingStatusUpdate } from "@/lib/host-booking-status";
+import {
+  applyHostBookingDecision,
+  HostBookingDecisionError,
+  type HostBookingDecision,
+} from "@/lib/host-booking-decision";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -32,27 +36,33 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "You do not have access to this host listing." }, { status: 403 });
     }
 
-    const { data: host } = await supabase
-      .from("hosts")
-      .select("id")
-      .eq("legacy_family_id", familyId)
-      .maybeSingle();
-    const resolvedHostId = typeof host?.id === "string" ? host.id : null;
+    const resolvedHostId = hostAccess.hostId;
+    if (!resolvedHostId) {
+      return NextResponse.json({ error: "Host profile not found for this listing." }, { status: 404 });
+    }
+    const decision: HostBookingDecision = status === "rejected" ? "decline" : "approve";
+    const requestIdempotencyKey = request.headers.get("idempotency-key")?.trim().slice(0, 160);
 
-    const updated = await applyHostBookingStatusUpdate(supabase, {
+    const result = await applyHostBookingDecision(supabase, {
       bookingId,
       familyId,
       hostId: resolvedHostId,
-      status,
+      decision,
+      source: "dashboard",
+      actor: {
+        userId: hostAccess.hostUserId,
+        role: hostAccess.isAdmin ? "admin" : "host",
+      },
+      idempotencyKey: requestIdempotencyKey || `dashboard:${bookingId}:${decision}`,
     });
 
-    if (!updated) {
-      return NextResponse.json({ error: "Booking not found for this listing." }, { status: 404 });
-    }
-
-    return NextResponse.json({ success: true, booking: updated });
+    return NextResponse.json({ success: true, result });
   } catch (error) {
     console.error("Host booking status update failed:", error);
+    if (error instanceof HostBookingDecisionError) {
+      const status = error.code === "BOOKING_NOT_FOUND" ? 404 : error.code === "HOST_MISMATCH" || error.code === "FAMILY_MISMATCH" ? 403 : 409;
+      return NextResponse.json({ error: error.message, code: error.code }, { status });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Could not update booking status." },
       { status: 500 }

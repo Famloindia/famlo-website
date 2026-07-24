@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { enqueuePostPaymentBookingNotifications } from "@/lib/booking-payment-notifications";
 import { appendPaymentEventAudit } from "@/lib/finance/payment-audit";
-import { createHostBookingActionLinks } from "@/lib/booking-action-tokens";
-import {
-  buildHostApprovalWhatsAppMessage,
-  createOrReuseBookingWhatsAppAction,
-} from "@/lib/booking-whatsapp-actions";
-import { buildBookingReceiptDocument, enqueueNotification } from "@/lib/booking-platform";
+import { buildBookingReceiptDocument } from "@/lib/booking-platform";
 import { processFinanceEventContract } from "@/lib/finance/folio-line-writer";
 import { appendLedgerEntryIfMissing } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
@@ -24,7 +20,6 @@ import {
 } from "@/lib/payment-booking-finalization";
 import { verifyRazorpayWebhookSignature } from "@/lib/razorpay";
 import { createAdminSupabaseClient } from "@/lib/supabase";
-import { loadUserProfileCompatibility } from "@/lib/user-profile";
 
 type RazorpayWebhookPayload = {
   event?: string;
@@ -55,43 +50,8 @@ type RazorpayWebhookPayload = {
   };
 };
 
-const HOST_APPROVAL_WHATSAPP_TEMPLATE_LANGUAGE =
-  process.env.WHATSAPP_HOST_APPROVAL_TEMPLATE_LANGUAGE?.trim() || "en_US";
-
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function resolveStayUnitId(record: Record<string, unknown> | null | undefined): string | null {
-  const direct = asString(record?.stay_unit_id);
-  if (direct) {
-    return direct;
-  }
-
-  const snapshot =
-    record && typeof record === "object"
-      ? ((record.pricing_snapshot as Record<string, unknown> | null) ?? null)
-      : null;
-
-  return asString(snapshot?.stay_unit_id);
-}
-
-function formatBookingDateRange(startDate: string | null, endDate: string | null): string {
-  if (!startDate) return "the selected dates";
-  if (!endDate || endDate === startDate) return startDate;
-  return `${startDate} to ${endDate}`;
-}
-
-function formatTemplateAmount(value: number): string {
-  try {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch {
-    return `INR ${value}`;
-  }
 }
 
 function resolvePaymentUpdate(eventName: string): { paymentStatus: string; bookingPaymentStatus: string } | null {
@@ -181,19 +141,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       processingStatus: "processing",
     });
 
-    const paymentLookup = gatewayPaymentId
+    let paymentLookup = gatewayPaymentId
       ? await supabase
           .from("payments_v2")
           .select("id,booking_id,status,raw_response,amount_total,platform_fee,tax_amount,currency")
           .eq("gateway_payment_id", gatewayPaymentId)
           .maybeSingle()
-      : gatewayOrderId
-        ? await supabase
-            .from("payments_v2")
-            .select("id,booking_id,status,raw_response,amount_total,platform_fee,tax_amount,currency")
-            .eq("gateway_order_id", gatewayOrderId)
-            .maybeSingle()
-        : { data: null, error: null };
+      : { data: null, error: null };
+
+    if (!paymentLookup.error && !paymentLookup.data && gatewayOrderId) {
+      paymentLookup = await supabase
+        .from("payments_v2")
+        .select("id,booking_id,status,raw_response,amount_total,platform_fee,tax_amount,currency")
+        .eq("gateway_order_id", gatewayOrderId)
+        .maybeSingle();
+    }
 
     if (paymentLookup.error) {
       throw paymentLookup.error;
@@ -682,204 +644,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         console.error("[payments.webhook] booking receipt generation failed:", documentError);
       }
 
-      await enqueueNotification(supabase, {
-        eventType: approvalRequired ? "booking_request" : "booking_confirmed",
-        channel: "email",
-        userId: typeof booking?.user_id === "string" ? booking.user_id : null,
-        bookingId: payment.booking_id,
-        dedupeKey: `${approvalRequired ? "booking_request" : "booking_confirmed"}:${payment.booking_id}`,
-        subject: approvalRequired ? "Your Famlo booking is awaiting host approval" : "Your Famlo booking is confirmed",
-        payload: {
-          message: approvalRequired
-            ? "Your payment was received and your Famlo booking is pending host approval."
-            : "Your Famlo booking has been confirmed from the payment webhook.",
-        },
+      await enqueuePostPaymentBookingNotifications(supabase, {
+        booking: bookingForNotifications as Record<string, unknown>,
+        payment: payment as Record<string, unknown>,
+        approvalRequired,
+        source: "payments_webhook",
       });
-      await enqueueNotification(supabase, {
-        eventType: approvalRequired ? "booking_request" : "booking_confirmed",
-        channel: "whatsapp",
-        userId: typeof booking?.user_id === "string" ? booking.user_id : null,
-        bookingId: payment.booking_id,
-        dedupeKey: `${approvalRequired ? "booking_request" : "booking_confirmed"}:${payment.booking_id}:whatsapp`,
-        subject: approvalRequired ? "Your Famlo booking is awaiting host approval" : "Your Famlo booking is confirmed",
-        templateName: approvalRequired ? "guest_booking_request_received" : "guest_booking_confirmed",
-        recipientRole: "guest",
-        payload: {
-          message: approvalRequired
-            ? "Your payment was received and your Famlo booking is pending host approval."
-            : "Your Famlo booking has been confirmed from the payment webhook.",
-        },
-      });
-      const hostRelation = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
-      const stayUnitId = resolveStayUnitId(booking as Record<string, unknown> | null | undefined);
-      const stayUnitName =
-        stayUnitId
-          ? await (async () => {
-              const stayUnitLookup = await supabase
-                .from("stay_units_v2")
-                .select("name")
-                .eq("id", stayUnitId)
-                .maybeSingle();
-              if (stayUnitLookup.error) {
-                console.error("[payments.webhook] stay unit lookup failed:", stayUnitLookup.error);
-                return null;
-              }
-              return asString(stayUnitLookup.data?.name);
-            })()
-          : null;
-      const bookingDateLabel = formatBookingDateRange(
-        asString(booking?.start_date),
-        asString(booking?.end_date) ?? asString(booking?.start_date)
-      );
-      const hostUserId = typeof hostRelation?.user_id === "string" ? hostRelation.user_id : null;
-      const guestProfile =
-        typeof booking?.user_id === "string" ? await loadUserProfileCompatibility(supabase, booking.user_id) : null;
-      const hostProfileContact = hostUserId ? await loadUserProfileCompatibility(supabase, hostUserId) : null;
-      const hostPhone = hostProfileContact?.phone ?? null;
-      const ownerName =
-        typeof hostProfileContact?.name === "string" && hostProfileContact.name.trim().length > 0
-          ? hostProfileContact.name.trim()
-          : null;
-      const hostPropertyLabel =
-        typeof hostRelation?.display_name === "string" && hostRelation.display_name.trim().length > 0
-          ? hostRelation.display_name.trim()
-          : "your Famlo stay";
-      const hostListingLabel =
-        stayUnitName ??
-        hostPropertyLabel;
-      const approvalAmountLabel = formatTemplateAmount(
-        typeof (payment as { amount_total?: number }).amount_total === "number"
-          ? (payment as { amount_total?: number }).amount_total ?? 0
-          : 0
-      );
-      const hostLegacyFamilyId =
-        typeof hostRelation?.legacy_family_id === "string" && hostRelation.legacy_family_id.trim().length > 0
-          ? hostRelation.legacy_family_id
-          : null;
-      const fallbackHostDashboardUrl = hostLegacyFamilyId
-        ? `/partnerslogin/home/dashboard?family=${encodeURIComponent(hostLegacyFamilyId)}&tab=bookings`
-        : "/partnerslogin/home/dashboard?tab=bookings";
-
-      if (approvalRequired && hostUserId) {
-        const whatsappAction = hostPhone
-          ? await createOrReuseBookingWhatsAppAction(supabase, {
-              bookingId: payment.booking_id,
-              hostPhone,
-              familyId: hostLegacyFamilyId,
-            })
-          : null;
-        const actionLinks = await createHostBookingActionLinks(supabase, {
-          bookingId: payment.booking_id,
-          familyId: hostLegacyFamilyId,
-          hostId: typeof booking?.host_id === "string" ? booking.host_id : null,
-          hostUserId,
-          metadata: {
-            source: "payments_webhook",
-          },
-        });
-
-        await enqueueNotification(supabase, {
-          eventType: "booking_host_action_required",
-          channel: "email",
-          userId: hostUserId,
-          bookingId: payment.booking_id,
-          dedupeKey: `booking_host_action_required:${payment.booking_id}:email`,
-          subject: "New Famlo booking request needs your approval",
-          templateName: "host_booking_approval_request",
-          recipientRole: "host",
-          payload: {
-            title: "New Booking Request",
-            message: `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
-            cta_label: "Review booking request",
-            cta_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
-            view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
-            accept_url: actionLinks?.acceptUrl,
-            reject_url: actionLinks?.rejectUrl,
-          },
-        });
-
-        await enqueueNotification(supabase, {
-          eventType: "booking_host_action_required",
-          channel: "whatsapp",
-          userId: hostUserId,
-          bookingId: payment.booking_id,
-          dedupeKey: `booking_host_action_required:${payment.booking_id}:whatsapp`,
-          subject: "New Famlo booking request needs your approval",
-          templateName: "host_booking_approval_request",
-          recipientRole: "host",
-          recipientPhone: hostPhone,
-          payload: {
-            title: "New Booking Request",
-            body_text:
-              whatsappAction && hostPhone
-                ? buildHostApprovalWhatsAppMessage({
-                    guestName: guestProfile?.name ?? null,
-                    propertyName: hostPropertyLabel,
-                    roomName: stayUnitName ?? hostListingLabel,
-                    startDate: asString(booking?.start_date),
-                    endDate: asString(booking?.end_date) ?? asString(booking?.start_date),
-                    amountTotal:
-                      typeof (payment as { amount_total?: number }).amount_total === "number"
-                        ? (payment as { amount_total?: number }).amount_total ?? 0
-                        : 0,
-                  })
-                : `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
-            message: `${hostListingLabel} has a paid booking request for ${bookingDateLabel}. Review it and accept or reject it soon.`,
-            view_url: actionLinks?.dashboardUrl ?? fallbackHostDashboardUrl,
-            accept_url: actionLinks?.acceptUrl,
-            reject_url: actionLinks?.rejectUrl,
-            action_token: whatsappAction?.action_token ?? null,
-            template_language: HOST_APPROVAL_WHATSAPP_TEMPLATE_LANGUAGE,
-            template_variables: [
-              ownerName ?? hostPropertyLabel,
-              guestProfile?.name ?? "Famlo guest",
-              hostPropertyLabel,
-              stayUnitName ?? hostListingLabel,
-              bookingDateLabel,
-              approvalAmountLabel,
-            ],
-            buttons:
-              whatsappAction
-                ? [
-                    { id: whatsappAction.approve_payload, title: "Approve" },
-                    { id: whatsappAction.reject_payload, title: "Reject" },
-                  ]
-                : [],
-          },
-        });
-      } else if (hostUserId) {
-        await enqueueNotification(supabase, {
-          eventType: "booking_confirmed",
-          channel: "email",
-          userId: hostUserId,
-          bookingId: payment.booking_id,
-          dedupeKey: `booking_confirmed:host:${payment.booking_id}:email:webhook`,
-          subject: "Your room is booked on Famlo",
-          payload: {
-            title: "Room booked",
-            message: `Congratulations. ${hostListingLabel} is booked for ${bookingDateLabel}.`,
-            cta_label: "View booking",
-            cta_url: fallbackHostDashboardUrl,
-            view_url: fallbackHostDashboardUrl,
-          },
-        });
-
-        await enqueueNotification(supabase, {
-          eventType: "booking_confirmed",
-          channel: "whatsapp",
-          userId: hostUserId,
-          bookingId: payment.booking_id,
-          dedupeKey: `booking_confirmed:host:${payment.booking_id}:whatsapp:webhook`,
-          subject: "Your room is booked on Famlo",
-          recipientRole: "host",
-          payload: {
-            title: "Room booked",
-            message: `Congratulations. ${hostListingLabel} is booked for ${bookingDateLabel}.`,
-            view_url: fallbackHostDashboardUrl,
-          },
-        });
-      }
-
     }
 
     await appendPaymentEventAudit(supabase, {

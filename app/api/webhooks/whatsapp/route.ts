@@ -141,7 +141,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      if (actionStatus !== "pending") {
+      if (!["pending", "processing"].includes(actionStatus)) {
         const queued = await queueBookingActionJob(supabase, {
           bookingId,
           bookingWhatsAppActionId: actionId,

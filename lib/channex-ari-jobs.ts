@@ -580,10 +580,20 @@ export async function enqueueChannexAriSyncJobs(
 
       const existingJobResult = await supabase
         .from("channel_sync_jobs")
-        .select("id")
+        .select("id,status")
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
       if (existingJobResult.error) throw existingJobResult.error;
+
+      const existingStatus = asString((existingJobResult.data as JsonRecord | null)?.status);
+      if (
+        existingJobResult.data?.id &&
+        existingStatus &&
+        ["queued", "running", "retrying", "succeeded"].includes(existingStatus)
+      ) {
+        queuedIds.push(String(existingJobResult.data.id));
+        continue;
+      }
 
       const { data, error } = existingJobResult.data?.id
         ? await supabase

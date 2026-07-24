@@ -487,24 +487,39 @@ export async function recordBookingInventoryTransition(
     return [];
   }
 
-  await appendInventoryEvent(supabase, {
-    familyId,
-    stayUnitId,
-    eventType: input.eventType,
-    eventSource: input.eventSource,
-    sourceReference: bookingId,
-    effectiveDateStart: inventoryRange.from,
-    effectiveDateEnd: inventoryRange.to,
-    slotKey: asString(input.booking?.quarter_type),
-    payload: {
-      booking_id: bookingId,
-      status: asString(input.booking?.status),
-      payment_status: asString(input.booking?.payment_status),
-      ...(input.payload ?? {}),
-    },
-    actorUserId: input.actorUserId ?? null,
-    actorRole: input.actorRole ?? null,
-  });
+  const existingEvent = await supabase
+    .from("inventory_event_log")
+    .select("id")
+    .eq("stay_unit_id", stayUnitId)
+    .eq("event_type", input.eventType)
+    .eq("source_reference", bookingId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingEvent.error && !isSchemaCompatibilityError(existingEvent.error.message)) {
+    throw existingEvent.error;
+  }
+
+  if (!existingEvent.data?.id) {
+    await appendInventoryEvent(supabase, {
+      familyId,
+      stayUnitId,
+      eventType: input.eventType,
+      eventSource: input.eventSource,
+      sourceReference: bookingId,
+      effectiveDateStart: inventoryRange.from,
+      effectiveDateEnd: inventoryRange.to,
+      slotKey: asString(input.booking?.quarter_type),
+      payload: {
+        booking_id: bookingId,
+        status: asString(input.booking?.status),
+        payment_status: asString(input.booking?.payment_status),
+        ...(input.payload ?? {}),
+      },
+      actorUserId: input.actorUserId ?? null,
+      actorRole: input.actorRole ?? null,
+    });
+  }
 
   await projectInventoryRange(supabase, {
     familyId,
