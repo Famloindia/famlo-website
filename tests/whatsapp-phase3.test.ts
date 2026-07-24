@@ -236,6 +236,7 @@ test("test message route queues rather than calling Meta", () => {
   assert.match(source, /enqueueNotificationRecord/);
   assert.doesNotMatch(source, /sendWhatsApp/);
   assert.match(source, /status: "queued"/);
+  assert.match(source, /code === "unauthorized" \? 401/);
 });
 
 test("test message requires the canonical eligibility check", () => {

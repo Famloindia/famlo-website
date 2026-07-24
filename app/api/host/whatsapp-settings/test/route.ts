@@ -84,12 +84,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 202 }
     );
   } catch (error) {
+    const code =
+      typeof error === "object" && error && "code" in error
+        ? String(error.code)
+        : "test_message_error";
+    const status = code === "unauthorized" ? 401 : code === "forbidden" ? 403 : 400;
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Unable to queue the test message.",
-        code: "test_message_error",
+        code,
       },
-      { status: 400 }
+      { status }
     );
   }
 }
