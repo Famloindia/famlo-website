@@ -303,3 +303,18 @@ test("environment config uses canonical Meta variable names", () => {
   process.env.WHATSAPP_API_KEY = "legacy";
   assert.equal(getWhatsAppRuntimeConfig().accessToken, "canonical");
 });
+
+test("staging worker scheduler uses Vault, pg_cron and authenticated POST", () => {
+  const migration = readFileSync(
+    `${repo}/supabase/migrations/20260724173000_notification_worker_scheduler.sql`,
+    "utf8"
+  );
+  const route = readFileSync(`${repo}/app/api/internal/cron/notifications/route.ts`, "utf8");
+  assert.match(migration, /create extension if not exists pg_cron/);
+  assert.match(migration, /create extension if not exists pg_net/);
+  assert.match(migration, /vault\.decrypted_secrets/);
+  assert.match(migration, /X-Famlo-Worker-Source/);
+  assert.doesNotMatch(migration, /Bearer [A-Za-z0-9_-]{16,}/);
+  assert.match(route, /export async function POST/);
+  assert.match(route, /notification_worker_runs/);
+});
