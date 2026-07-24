@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/internal/cron/notifications",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 1 * * *"
     },
     {
       "path": "/api/internal/cron/platform-maintenance",
