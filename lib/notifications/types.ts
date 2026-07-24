@@ -38,6 +38,13 @@ export interface NotificationQueueRow extends JsonRecord {
   template_name?: string | null;
   provider_message_id?: string | null;
   attempts?: number | null;
+  next_attempt_at?: string | null;
+  processing_started_at?: string | null;
+  lease_expires_at?: string | null;
+  completed_at?: string | null;
+  last_error?: string | null;
+  provider_status?: string | null;
+  provider_status_at?: string | null;
 }
 
 export interface NotificationMessageContent {
@@ -52,5 +59,9 @@ export interface NotificationMessageContent {
 export interface NotificationDeliveryResult {
   status: Extract<NotificationQueueStatus, "processed" | "failed" | "skipped">;
   providerMessageId?: string | null;
+  providerStatus?: "submitted" | "sent" | "delivered" | "read" | "failed" | null;
   errorMessage?: string | null;
+  errorCode?: string | null;
+  errorCategory?: string | null;
+  retryable?: boolean;
 }

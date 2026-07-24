@@ -2,12 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createHostBookingActionLinks } from "@/lib/booking-action-tokens";
 import {
-  buildHostApprovalWhatsAppMessage,
   createOrReuseBookingWhatsAppAction,
 } from "@/lib/booking-whatsapp-actions";
 import { enqueueNotification } from "@/lib/booking-platform";
 import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
 import { loadUserProfileCompatibility } from "@/lib/user-profile";
+import { getWhatsAppRuntimeConfig } from "@/lib/whatsapp-config";
+import { resolveEligibleHostWhatsApp } from "@/lib/whatsapp-eligibility";
 
 function firstRecord(value: unknown): JsonRecord | null {
   if (Array.isArray(value)) {
@@ -37,6 +38,15 @@ function formatTemplateAmount(value: number): string {
   } catch {
     return `INR ${value}`;
   }
+}
+
+function bookingStayLength(startDate: string | null, endDate: string | null): { nights: number; days: number } {
+  if (!startDate || !endDate) return { nights: 0, days: 0 };
+  const start = Date.parse(`${startDate}T00:00:00Z`);
+  const end = Date.parse(`${endDate}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return { nights: 0, days: 0 };
+  const nights = Math.max(0, Math.round((end - start) / 86_400_000));
+  return { nights, days: nights + 1 };
 }
 
 export async function enqueuePostPaymentBookingNotifications(
@@ -71,18 +81,6 @@ export async function enqueuePostPaymentBookingNotifications(
     recipientRole: "guest",
     payload: { message: guestMessage },
   });
-  await enqueueNotification(supabase, {
-    eventType: guestEventType,
-    channel: "whatsapp",
-    userId: guestUserId,
-    bookingId,
-    dedupeKey: `${guestEventType}:${bookingId}:whatsapp`,
-    subject: guestSubject,
-    templateName: input.approvalRequired ? "guest_booking_request_received" : "guest_booking_confirmed",
-    recipientRole: "guest",
-    payload: { message: guestMessage },
-  });
-
   const host = firstRecord(input.booking.hosts);
   const hostUserId = asString(host?.user_id);
   if (!hostUserId) return;
@@ -99,11 +97,7 @@ export async function enqueuePostPaymentBookingNotifications(
     stayUnitName = asString(data?.name);
   }
 
-  const [guestProfile, hostProfile] = await Promise.all([
-    guestUserId ? loadUserProfileCompatibility(supabase, guestUserId) : null,
-    loadUserProfileCompatibility(supabase, hostUserId),
-  ]);
-  const hostPhone = asString(hostProfile?.phone);
+  const guestProfile = guestUserId ? await loadUserProfileCompatibility(supabase, guestUserId) : null;
   const hostPropertyLabel = asString(host?.display_name) ?? "your Famlo stay";
   const hostListingLabel = stayUnitName ?? hostPropertyLabel;
   const familyId = asString(host?.legacy_family_id);
@@ -116,10 +110,12 @@ export async function enqueuePostPaymentBookingNotifications(
   );
 
   if (input.approvalRequired) {
-    const whatsappAction = hostPhone
+    const eligibleWhatsApp = await resolveEligibleHostWhatsApp(supabase, hostUserId);
+    const whatsappConfig = getWhatsAppRuntimeConfig();
+    const whatsappAction = eligibleWhatsApp && whatsappConfig.templates.bookingApproval
       ? await createOrReuseBookingWhatsAppAction(supabase, {
           bookingId,
-          hostPhone,
+          hostPhone: eligibleWhatsApp.phoneE164,
           familyId,
         })
       : null;
@@ -151,51 +147,45 @@ export async function enqueuePostPaymentBookingNotifications(
         reject_url: actionLinks?.rejectUrl,
       },
     });
-    await enqueueNotification(supabase, {
-      eventType: "booking_host_action_required",
-      channel: "whatsapp",
-      userId: hostUserId,
-      bookingId,
-      dedupeKey: `booking_host_action_required:${bookingId}:whatsapp`,
-      subject: "New Famlo booking request needs your approval",
-      templateName: "host_booking_approval_request",
-      recipientRole: "host",
-      recipientPhone: hostPhone,
-      payload: {
-        title: "New Booking Request",
-        body_text:
-          whatsappAction && hostPhone
-            ? buildHostApprovalWhatsAppMessage({
-                guestName: asString(guestProfile?.name),
-                propertyName: hostPropertyLabel,
-                roomName: stayUnitName ?? hostListingLabel,
-                startDate: asString(input.booking.start_date),
-                endDate: asString(input.booking.end_date) ?? asString(input.booking.start_date),
-                amountTotal: asNumber(input.payment.amount_total),
-              })
-            : message,
-        message,
-        view_url: actionLinks?.dashboardUrl ?? dashboardUrl,
-        accept_url: actionLinks?.acceptUrl,
-        reject_url: actionLinks?.rejectUrl,
-        action_token: asString(whatsappAction?.action_token),
-        template_language: process.env.WHATSAPP_HOST_APPROVAL_TEMPLATE_LANGUAGE?.trim() || "en_US",
-        template_variables: [
-          asString(hostProfile?.name) ?? hostPropertyLabel,
-          asString(guestProfile?.name) ?? "Famlo guest",
-          hostPropertyLabel,
-          stayUnitName ?? hostListingLabel,
-          bookingDateLabel,
-          formatTemplateAmount(asNumber(input.payment.amount_total)),
-        ],
-        buttons: whatsappAction
-          ? [
-              { id: whatsappAction.approve_payload, title: "Approve" },
-              { id: whatsappAction.reject_payload, title: "Reject" },
-            ]
-          : [],
-      },
-    });
+    if (eligibleWhatsApp && whatsappAction && whatsappConfig.templates.bookingApproval) {
+      const startDate = asString(input.booking.start_date);
+      const endDate = asString(input.booking.end_date) ?? startDate;
+      const length = bookingStayLength(startDate, endDate);
+      const bookingReference =
+        asString(input.booking.booking_reference) ??
+        asString(input.booking.reference_code) ??
+        `FAM-${bookingId.slice(0, 8).toUpperCase()}`;
+      await enqueueNotification(supabase, {
+        eventType: "booking_host_action_required",
+        channel: "whatsapp",
+        userId: hostUserId,
+        bookingId,
+        dedupeKey: `booking_host_action_required:${bookingId}:whatsapp`,
+        subject: "New Famlo booking request needs your approval",
+        templateName: whatsappConfig.templates.bookingApproval,
+        recipientRole: "host",
+        recipientPhone: eligibleWhatsApp.phoneE164,
+        payload: {
+          action_token: asString(whatsappAction.action_token),
+          template_language: eligibleWhatsApp.language,
+          template_parameters: {
+            property_name: hostPropertyLabel,
+            booking_reference: bookingReference,
+            check_in: startDate ?? "Not set",
+            check_out: endDate ?? "Not set",
+            nights: String(length.nights),
+            days: String(length.days),
+            guest_count: String(Math.max(1, asNumber(input.booking.guests_count, 1))),
+            booking_amount: formatTemplateAmount(asNumber(input.payment.amount_total)),
+            decision_deadline: asString(whatsappAction.expires_at) ?? "Review promptly",
+          },
+          buttons: [
+            { id: whatsappAction.approve_payload, title: "Approve Booking" },
+            { id: whatsappAction.reject_payload, title: "Decline Booking" },
+          ],
+        },
+      });
+    }
     return;
   }
 
@@ -213,21 +203,6 @@ export async function enqueuePostPaymentBookingNotifications(
       message: confirmationMessage,
       cta_label: "View booking",
       cta_url: dashboardUrl,
-      view_url: dashboardUrl,
-    },
-  });
-  await enqueueNotification(supabase, {
-    eventType: "booking_confirmed",
-    channel: "whatsapp",
-    userId: hostUserId,
-    bookingId,
-    dedupeKey: `booking_confirmed:host:${bookingId}:whatsapp`,
-    subject: "Your room is booked on Famlo",
-    recipientRole: "host",
-    recipientPhone: hostPhone,
-    payload: {
-      title: "Room booked",
-      message: confirmationMessage,
       view_url: dashboardUrl,
     },
   });

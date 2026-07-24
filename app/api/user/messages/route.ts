@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { canGuestAccessConversation, resolveConversationAccess } from "@/lib/chat-access";
 import { detectChatSafetyIssue, ensurePendingChatFlag, fetchChatKeywordsCached } from "@/lib/chat-safety";
 import { enqueueNotification } from "@/lib/booking-platform";
+import { enqueueGuestMessageWhatsAppAlert } from "@/lib/guest-message-whatsapp";
 import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -203,6 +204,15 @@ export async function POST(request: Request): Promise<NextResponse> {
             cta_url: `/messages?conversation=${access.conversationId}`,
           },
         }).catch((notificationError) => console.error("Guest message notification failed:", notificationError));
+      }
+      if (access.guestId === authUser.id && access.hostUserId) {
+        void enqueueGuestMessageWhatsAppAlert(supabase, {
+          messageId: String(message.id),
+          hostUserId: access.hostUserId,
+          conversationId: access.conversationId,
+          bookingId: access.legacyBookingId ?? access.bookingId ?? null,
+          familyId: access.familyId,
+        }).catch(() => undefined);
       }
     }
 
