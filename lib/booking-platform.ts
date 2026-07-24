@@ -565,7 +565,7 @@ export async function buildBookingReceiptDocument(
       : Promise.resolve({ data: null, error: null }),
     supabase
       .from("payments_v2")
-      .select("status,gateway,payment_method,created_at")
+      .select("status,gateway,created_at")
       .eq("booking_id", bookingId)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -641,7 +641,7 @@ export async function buildBookingReceiptDocument(
     total_price: asNumber(bookingRecord.total_price),
     payment_collect_mode: paymentCollectMode,
     payment_status: asString(payment?.status) ?? asString(bookingRecord.payment_status),
-    payment_method: asString(payment?.payment_method) ?? asString(payment?.gateway) ?? "Online",
+    payment_method: asString(payment?.gateway) ?? "Online",
     transaction_date: asString(payment?.created_at),
     support_details: "Email support@famlo.in or use the Famlo app chat for immediate help.",
     cancellation_policy: "Refer to the Famlo cancellation policy attached to your booking. Refunds depend on booking timing and host policy.",
