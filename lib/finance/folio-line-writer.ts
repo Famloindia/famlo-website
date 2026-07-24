@@ -811,6 +811,22 @@ export async function processFinanceEventContract(
   }
 
   const policy = resolveWritePolicy(booking, input);
+  if (policy.skippedReason === "pipeline_disabled") {
+    return {
+      pipelineEnabled: false,
+      dryRun: true,
+      skippedReason: policy.skippedReason,
+      insertedLineCount: 0,
+      duplicateLineCount: 0,
+      folioId: null,
+      lineCodes: baseLineCodes,
+      warnings: policy.warnings,
+      paymentCollectMode: policy.paymentCollectMode,
+      sourceChannel: policy.sourceChannel,
+      isSettlementEligible: policy.isSettlementEligible,
+    };
+  }
+
   const reservationState = await ensureReservationForBooking(supabase, {
     bookingId: input.bookingId,
     source: "finance_folio_writer",

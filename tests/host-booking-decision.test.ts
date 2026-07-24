@@ -307,3 +307,13 @@ test("booking chat access is not cached across a host decision", () => {
   assert.match(chatAccess, /if \(result\.kind === "network"\) \{\s*writeAccessCache\(cacheKey, result\)/);
   assert.doesNotMatch(chatAccess, /\n\s*writeAccessCache\(cacheKey, result\);\s*\n\s*return result;/);
 });
+
+test("disabled finance pipeline skips optional folio schema reads", () => {
+  const financeWriter = readFileSync("lib/finance/folio-line-writer.ts", "utf8");
+  const disabledGuard = financeWriter.indexOf('policy.skippedReason === "pipeline_disabled"');
+  const reservationRead = financeWriter.indexOf("const reservationState = await ensureReservationForBooking", disabledGuard);
+
+  assert.notEqual(disabledGuard, -1);
+  assert.ok(reservationRead > disabledGuard);
+  assert.match(financeWriter.slice(disabledGuard, reservationRead), /return \{/);
+});
