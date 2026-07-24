@@ -299,9 +299,19 @@ test("staging provider requires an explicit tester allowlist", async () => {
 });
 
 test("environment config uses canonical Meta variable names", () => {
-  process.env.WHATSAPP_ACCESS_TOKEN = "canonical";
-  process.env.WHATSAPP_API_KEY = "legacy";
+  process.env.WHATSAPP_API_KEY = "canonical";
+  process.env.WHATSAPP_ACCESS_TOKEN = "legacy";
   assert.equal(getWhatsAppRuntimeConfig().accessToken, "canonical");
+});
+
+test("staging delivery accepts exactly one canonical tester allowlist entry", () => {
+  process.env.WHATSAPP_STAGING_TESTER_ALLOWLIST = "+919999999999";
+  process.env.WHATSAPP_ALLOW_STAGING_DELIVERY = "true";
+  assert.equal(getWhatsAppRuntimeConfig().stagingTesterPhone, "919999999999");
+  process.env.WHATSAPP_STAGING_TESTER_ALLOWLIST = "+919999999999,+918888888888";
+  assert.equal(getWhatsAppRuntimeConfig().stagingTesterPhone, null);
+  delete process.env.WHATSAPP_STAGING_TESTER_ALLOWLIST;
+  delete process.env.WHATSAPP_ALLOW_STAGING_DELIVERY;
 });
 
 test("staging worker scheduler uses Vault, pg_cron and authenticated POST", () => {
