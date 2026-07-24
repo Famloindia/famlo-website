@@ -196,9 +196,9 @@ async function loadBookingForReservation(
   bookingId: string
 ): Promise<BookingReservationRow | null> {
   const primarySelect =
-    "id,legacy_booking_id,booking_type,status,payment_status,source_channel,user_id,host_id,stay_unit_id,start_date,end_date,guests_count,total_price,pricing_snapshot,hosts(legacy_family_id),users(name,email,phone)";
+    "id,legacy_booking_id,booking_type,status,payment_status,source_channel,user_id,host_id,stay_unit_id,start_date,end_date,guests_count,total_price,pricing_snapshot,hosts(legacy_family_id),users!bookings_v2_user_id_fkey(name,email,phone)";
   const fallbackSelect =
-    "id,legacy_booking_id,booking_type,status,payment_status,user_id,host_id,start_date,end_date,guests_count,total_price,pricing_snapshot,hosts(legacy_family_id),users(name,email,phone)";
+    "id,legacy_booking_id,booking_type,status,payment_status,user_id,host_id,start_date,end_date,guests_count,total_price,pricing_snapshot,hosts(legacy_family_id),users!bookings_v2_user_id_fkey(name,email,phone)";
 
   const result = await supabase
     .from("bookings_v2")

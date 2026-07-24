@@ -14,6 +14,11 @@ function isSchemaCompatibilityError(message: string): boolean {
   return lower.includes("column") || lower.includes("schema cache") || lower.includes("does not exist") || lower.includes("relation");
 }
 
+function isUniqueConstraintError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes("duplicate key") || lower.includes("unique constraint");
+}
+
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -75,6 +80,9 @@ export async function createBookingActionToken(
 
   if (error) {
     if (isSchemaCompatibilityError(error.message)) {
+      return null;
+    }
+    if (isUniqueConstraintError(error.message)) {
       return null;
     }
     throw error;
@@ -230,7 +238,16 @@ export async function loadBookingActionPreview(
     totalPrice: asNumber(booking.total_price, 0),
   };
 
-  if (currentStatus && currentStatus !== "pending" && currentStatus !== "pending_host_approval") {
+  const actionMatchesResolvedStatus =
+    (input.action === "accept_booking" && (currentStatus === "accepted" || currentStatus === "confirmed")) ||
+    (input.action === "reject_booking" &&
+      (currentStatus === "rejected" || currentStatus === "cancelled" || currentStatus === "cancelled_by_partner"));
+  if (
+    currentStatus &&
+    currentStatus !== "pending" &&
+    currentStatus !== "pending_host_approval" &&
+    !actionMatchesResolvedStatus
+  ) {
     return {
       status: "already_resolved",
       ...preview,
@@ -260,14 +277,6 @@ export async function consumeBookingActionToken(
       nextStatus: "accepted" | "rejected";
     }
 > {
-  const preview = await loadBookingActionPreview(supabase, input);
-  if (preview.status !== "ready") {
-    if (preview.status === "already_resolved") {
-      return { status: "already_resolved" };
-    }
-    return { status: preview.status };
-  }
-
   const tokenRow = await loadBookingActionTokenRow(supabase, input.token);
   if (tokenRow === "unavailable") {
     return { status: "unavailable" };
@@ -276,9 +285,29 @@ export async function consumeBookingActionToken(
     return { status: "invalid" };
   }
 
+  const rowAction = asString(tokenRow.action) as BookingActionType | null;
+  if (rowAction !== input.action) {
+    return { status: "mismatch" };
+  }
+  if (asString(tokenRow.used_at)) {
+    return { status: "used" };
+  }
+  if ((asString(tokenRow.expires_at) ?? "") < new Date().toISOString()) {
+    return { status: "expired" };
+  }
+
+  const bookingId = asString(tokenRow.booking_id);
+  if (!bookingId) {
+    return { status: "invalid" };
+  }
+  const booking = await loadBookingActionBooking(supabase, bookingId);
+  if (!booking) {
+    return { status: "invalid" };
+  }
+
   return {
     status: "ready",
-    bookingId: preview.bookingId,
+    bookingId,
     familyId: asString(tokenRow.family_id),
     hostId: asString(tokenRow.host_id),
     hostUserId: asString(tokenRow.host_user_id),

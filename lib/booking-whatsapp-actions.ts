@@ -2,9 +2,8 @@ import { randomBytes } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { applyHostBookingStatusUpdate } from "@/lib/host-booking-status";
+import { applyHostBookingDecision, HostBookingDecisionError } from "@/lib/host-booking-decision";
 import { enqueueNotificationRecord } from "@/lib/notifications/enqueue";
-import { loadUserProfileCompatibility } from "@/lib/user-profile";
 import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
 
 const ACTION_TTL_MINUTES = Number(process.env.FAMLO_HOST_BOOKING_ACTION_TTL_MINUTES ?? "60");
@@ -25,6 +24,12 @@ type BookingWhatsAppActionRow = JsonRecord & {
   expires_at?: string | null;
   responded_at?: string | null;
   created_at?: string | null;
+  attempts?: number | null;
+  processing_started_at?: string | null;
+  lease_expires_at?: string | null;
+  completed_at?: string | null;
+  last_error?: string | null;
+  final_outcome?: JsonRecord | null;
 };
 
 type BookingActionJobRow = JsonRecord & {
@@ -38,7 +43,39 @@ type BookingActionJobRow = JsonRecord & {
   inbound_phone?: string | null;
   error_message?: string | null;
   payload?: JsonRecord | null;
+  attempts?: number | null;
+  claimed_at?: string | null;
+  lease_expires_at?: string | null;
 };
+
+const ACTION_PROCESSING_LEASE_MINUTES = 5;
+const ACTION_MAX_ATTEMPTS = 6;
+const ACTION_SELECT =
+  "id,booking_id,host_phone,family_id,action_token,status,approve_payload,reject_payload,whatsapp_message_id,responded_whatsapp_message_id,expires_at,responded_at,created_at,attempts,processing_started_at,lease_expires_at,completed_at,last_error,final_outcome";
+const ACTION_JOB_SELECT =
+  "id,booking_id,booking_whatsapp_action_id,action_token,requested_action,status,inbound_message_id,inbound_phone,error_message,payload,attempts,claimed_at,lease_expires_at";
+
+export async function executeWhatsAppDecisionWithCompletion<T>(input: {
+  applyDecision: () => Promise<T>;
+  completeAction: (result: T) => Promise<void>;
+  releaseAction: (error: unknown) => Promise<void>;
+}): Promise<T> {
+  try {
+    const result = await input.applyDecision();
+    await input.completeAction(result);
+    return result;
+  } catch (error) {
+    await input.releaseAction(error);
+    throw error;
+  }
+}
+
+function isTerminalDecisionError(error: unknown): boolean {
+  return (
+    error instanceof HostBookingDecisionError &&
+    ["CONFLICTING_DECISION", "INVALID_STATE", "HOST_MISMATCH", "FAMILY_MISMATCH"].includes(error.code)
+  );
+}
 
 function normalizeWhatsAppPhone(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -148,9 +185,7 @@ export async function createOrReuseBookingWhatsAppAction(
   const now = new Date().toISOString();
   const existingLookup = await supabase
     .from("booking_whatsapp_actions")
-    .select(
-      "id,booking_id,host_phone,family_id,action_token,status,approve_payload,reject_payload,whatsapp_message_id,responded_whatsapp_message_id,expires_at,responded_at,created_at"
-    )
+    .select(ACTION_SELECT)
     .eq("booking_id", input.bookingId)
     .eq("host_phone", normalizedPhone)
     .eq("status", "pending")
@@ -183,9 +218,7 @@ export async function createOrReuseBookingWhatsAppAction(
       reject_payload: rejectPayload,
       expires_at: expiresAt,
     } as never)
-    .select(
-      "id,booking_id,host_phone,family_id,action_token,status,approve_payload,reject_payload,whatsapp_message_id,responded_whatsapp_message_id,expires_at,responded_at,created_at"
-    )
+    .select(ACTION_SELECT)
     .maybeSingle();
 
   if (insertResult.error) {
@@ -204,9 +237,7 @@ export async function loadBookingWhatsAppActionByToken(
 ): Promise<BookingWhatsAppActionRow | null> {
   const { data, error } = await supabase
     .from("booking_whatsapp_actions")
-    .select(
-      "id,booking_id,host_phone,family_id,action_token,status,approve_payload,reject_payload,whatsapp_message_id,responded_whatsapp_message_id,expires_at,responded_at,created_at"
-    )
+    .select(ACTION_SELECT)
     .eq("action_token", actionToken)
     .maybeSingle();
 
@@ -344,8 +375,6 @@ async function resolveBookingContext(
   hostUserId: string | null;
   hostId: string | null;
   familyId: string | null;
-  guestUserId: string | null;
-  guestPhone: string | null;
 }> {
   const { data, error } = await supabase
     .from("bookings_v2")
@@ -360,100 +389,22 @@ async function resolveBookingContext(
   const booking = (data as JsonRecord | null) ?? null;
   const hostRelation = Array.isArray(booking?.hosts) ? booking.hosts[0] : booking?.hosts;
   const hostUserId = asString((hostRelation as JsonRecord | null)?.user_id);
-  const guestUserId = asString(booking?.user_id);
-  const guestProfile = guestUserId ? await loadUserProfileCompatibility(supabase, guestUserId) : null;
-
   return {
     booking,
     hostUserId,
     hostId: asString(booking?.host_id),
     familyId: asString((hostRelation as JsonRecord | null)?.legacy_family_id),
-    guestUserId,
-    guestPhone: asString(guestProfile?.phone),
   };
-}
-
-async function markBookingRefundPending(
-  supabase: SupabaseClient,
-  booking: JsonRecord,
-  now: string
-): Promise<void> {
-  const bookingId = asString(booking.id);
-  const paymentId = asString(booking.payment_id);
-  const legacyBookingId = asString(booking.legacy_booking_id);
-  if (!bookingId) {
-    return;
-  }
-
-  const { error: bookingError } = await supabase
-    .from("bookings_v2")
-    .update({
-      payment_status: "refund_pending",
-      updated_at: now,
-    } as never)
-    .eq("id", bookingId);
-
-  if (bookingError) {
-    throw bookingError;
-  }
-
-  if (legacyBookingId) {
-    const { error: legacyBookingError } = await supabase
-      .from("bookings")
-      .update({
-        status: "rejected",
-        updated_at: now,
-      } as never)
-      .eq("id", legacyBookingId);
-
-    if (legacyBookingError && !isSchemaCompatibilityError(legacyBookingError.message)) {
-      throw legacyBookingError;
-    }
-  }
-
-  if (!paymentId) {
-    return;
-  }
-
-  const { error: paymentError } = await supabase
-    .from("payments_v2")
-    .update({
-      refund_status: "pending",
-    } as never)
-    .eq("id", paymentId);
-
-  if (paymentError) {
-    throw paymentError;
-  }
-
-}
-
-async function applyResolvedBookingStatus(
-  supabase: SupabaseClient,
-  input: {
-    bookingId: string;
-    familyId?: string | null;
-    hostId?: string | null;
-    nextStatus: "confirmed" | "rejected";
-    skipGuestNotifications?: boolean;
-  }
-): Promise<JsonRecord | null> {
-  return applyHostBookingStatusUpdate(supabase, {
-    bookingId: input.bookingId,
-    familyId: input.familyId ?? null,
-    hostId: input.hostId ?? null,
-    status: input.nextStatus,
-    skipGuestNotifications: input.skipGuestNotifications ?? false,
-  });
 }
 
 async function loadPendingBookingActionJobs(
   supabase: SupabaseClient
 ): Promise<BookingActionJobRow[]> {
+  const now = new Date().toISOString();
   const { data, error } = await supabase
     .from("booking_action_jobs")
-    .select("id,booking_id,booking_whatsapp_action_id,action_token,requested_action,status,inbound_message_id,inbound_phone,error_message,payload")
-    .eq("status", "pending")
+    .select(ACTION_JOB_SELECT)
+    .in("status", ["pending", "processing"])
     .order("created_at", { ascending: true })
     .limit(50);
 
@@ -464,7 +415,63 @@ async function loadPendingBookingActionJobs(
     throw error;
   }
 
-  return (data as BookingActionJobRow[] | null) ?? [];
+  return ((data as BookingActionJobRow[] | null) ?? []).filter((row) => {
+    if (asString(row.status) === "pending") return true;
+    const leaseExpiresAt = asString(row.lease_expires_at);
+    return Boolean(leaseExpiresAt && leaseExpiresAt < now);
+  });
+}
+
+async function claimActionJob(
+  supabase: SupabaseClient,
+  job: BookingActionJobRow
+): Promise<boolean> {
+  const jobId = asString(job.id);
+  if (!jobId) return false;
+  const now = new Date();
+  const leaseExpiresAt = new Date(now.getTime() + ACTION_PROCESSING_LEASE_MINUTES * 60_000).toISOString();
+  let query = supabase
+    .from("booking_action_jobs")
+    .update({
+      status: "processing",
+      attempts: asNumber(job.attempts, 0) + 1,
+      claimed_at: now.toISOString(),
+      lease_expires_at: leaseExpiresAt,
+      error_message: null,
+    } as never)
+    .eq("id", jobId);
+  query = asString(job.status) === "processing"
+    ? query.eq("status", "processing").lt("lease_expires_at", now.toISOString())
+    : query.eq("status", "pending");
+  const { data, error } = await query.select("id").maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.id);
+}
+
+async function claimWhatsAppAction(
+  supabase: SupabaseClient,
+  action: BookingWhatsAppActionRow
+): Promise<boolean> {
+  const actionId = asString(action.id);
+  if (!actionId) return false;
+  const now = new Date();
+  const leaseExpiresAt = new Date(now.getTime() + ACTION_PROCESSING_LEASE_MINUTES * 60_000).toISOString();
+  let query = supabase
+    .from("booking_whatsapp_actions")
+    .update({
+      status: "processing",
+      attempts: asNumber(action.attempts, 0) + 1,
+      processing_started_at: now.toISOString(),
+      lease_expires_at: leaseExpiresAt,
+      last_error: null,
+    } as never)
+    .eq("id", actionId);
+  query = asString(action.status) === "processing"
+    ? query.eq("status", "processing").lt("lease_expires_at", now.toISOString())
+    : query.eq("status", "pending");
+  const { data, error } = await query.select("id").maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.id);
 }
 
 async function enqueueHostResolutionMessage(
@@ -544,6 +551,12 @@ export async function processBookingActionJobBatch(
       continue;
     }
 
+    if (!(await claimActionJob(supabase, job))) {
+      continue;
+    }
+
+    let claimedActionId: string | null = null;
+
     try {
       const action = await loadBookingWhatsAppActionByToken(supabase, actionToken);
       if (!action) {
@@ -590,11 +603,12 @@ export async function processBookingActionJobBatch(
         continue;
       }
 
-      if (actionStatus !== "pending") {
+      if (!["pending", "processing"].includes(actionStatus)) {
         await updateActionJobRow(supabase, jobId, {
           status: "ignored",
           error_message: "This booking action was already processed earlier.",
           processed_at: now,
+          lease_expires_at: null,
         });
         await enqueueIgnoredHostMessage(supabase, {
           bookingId,
@@ -609,11 +623,15 @@ export async function processBookingActionJobBatch(
       if (expiresAt < now) {
         await updateActionRow(supabase, actionId, {
           status: "expired",
+          completed_at: now,
+          lease_expires_at: null,
+          final_outcome: { reason: "expired" },
         });
         await updateActionJobRow(supabase, jobId, {
           status: "ignored",
           error_message: "This booking action expired before it was processed.",
           processed_at: now,
+          lease_expires_at: null,
         });
         await enqueueIgnoredHostMessage(supabase, {
           bookingId,
@@ -636,63 +654,66 @@ export async function processBookingActionJobBatch(
         continue;
       }
 
-      const currentStatus = asString(context.booking.status) ?? "pending";
-      if (currentStatus !== "pending" && currentStatus !== "pending_host_approval") {
+      if (!context.hostId) {
+        throw new Error("Booking host could not be resolved for this WhatsApp action.");
+      }
+
+      if (!(await claimWhatsAppAction(supabase, action))) {
         await updateActionJobRow(supabase, jobId, {
           status: "ignored",
-          error_message: `Booking is already in status ${currentStatus}.`,
+          error_message: "Another worker is already processing this booking action.",
           processed_at: now,
-        });
-        await enqueueIgnoredHostMessage(supabase, {
-          bookingId,
-          hostPhone,
-          hostUserId: context.hostUserId,
-          reason: "already_resolved",
-          actionToken,
+          lease_expires_at: null,
         });
         ignored += 1;
         continue;
       }
+      claimedActionId = actionId;
 
-      await updateActionRow(supabase, actionId, {
-        status: requestedAction === "approve" ? "approved" : "rejected",
-        responded_at: now,
-        responded_whatsapp_message_id: asString(job.inbound_message_id),
+      const decision = requestedAction === "approve" ? "approve" : "decline";
+      await executeWhatsAppDecisionWithCompletion({
+        applyDecision: () =>
+          applyHostBookingDecision(supabase, {
+            bookingId,
+            familyId: asString(action.family_id) ?? context.familyId,
+            hostId: context.hostId as string,
+            decision,
+            source: "whatsapp",
+            actor: {
+              userId: context.hostUserId,
+              role: "host",
+            },
+            idempotencyKey: `whatsapp:${actionToken}:${decision}`,
+          }),
+        completeAction: async (decisionResult) => {
+          await updateActionRow(supabase, actionId, {
+            status: requestedAction === "approve" ? "approved" : "rejected",
+            responded_at: now,
+            completed_at: now,
+            lease_expires_at: null,
+            last_error: null,
+            responded_whatsapp_message_id: asString(job.inbound_message_id),
+            final_outcome: decisionResult,
+          });
+          claimedActionId = null;
+        },
+        releaseAction: async (error) => {
+          const terminal = isTerminalDecisionError(error);
+          await updateActionRow(supabase, actionId, {
+            status: terminal ? "ignored" : "pending",
+            lease_expires_at: null,
+            processing_started_at: null,
+            last_error: error instanceof Error ? error.message : "Unknown booking action processing error.",
+            ...(terminal
+              ? {
+                  completed_at: new Date().toISOString(),
+                  final_outcome: { error: error instanceof Error ? error.message : String(error) },
+                }
+              : {}),
+          });
+          claimedActionId = null;
+        },
       });
-
-      if (requestedAction === "approve") {
-        await applyResolvedBookingStatus(supabase, {
-          bookingId,
-          familyId: asString(action.family_id) ?? context.familyId,
-          hostId: context.hostId,
-          nextStatus: "confirmed",
-        });
-      } else {
-        await applyResolvedBookingStatus(supabase, {
-          bookingId,
-          familyId: asString(action.family_id) ?? context.familyId,
-          hostId: context.hostId,
-          nextStatus: "rejected",
-          skipGuestNotifications: true,
-        });
-        await markBookingRefundPending(supabase, context.booking, now);
-
-        await enqueueDirectNotification(supabase, {
-          eventType: "booking_refund_pending",
-          channel: "whatsapp",
-          userId: context.guestUserId,
-          recipientPhone: context.guestPhone,
-          bookingId,
-          dedupeKey: `booking_refund_pending:${bookingId}:guest:whatsapp`,
-          subject: "Your Famlo booking could not be approved",
-          templateName: "guest_booking_refund_pending",
-          recipientRole: "guest",
-          payload: {
-            message:
-              "Hi, your Famlo booking could not be approved by the host at this time.\n\nYour payment refund has been initiated and will be processed within 2–4 working days.\n\nThanks for being with Famlo.",
-          },
-        });
-      }
 
       await enqueueHostResolutionMessage(supabase, {
         bookingId,
@@ -705,15 +726,35 @@ export async function processBookingActionJobBatch(
         status: "processed",
         error_message: null,
         processed_at: now,
+        lease_expires_at: null,
       });
       processed += 1;
     } catch (error) {
+      const terminalDecisionError = isTerminalDecisionError(error);
+      const attempts = asNumber(job.attempts, 0) + 1;
+      const retryable = !terminalDecisionError && attempts < ACTION_MAX_ATTEMPTS;
+      if (claimedActionId) {
+        await updateActionRow(supabase, claimedActionId, {
+          status: terminalDecisionError ? "ignored" : "pending",
+          lease_expires_at: null,
+          processing_started_at: null,
+          last_error: error instanceof Error ? error.message : "Unknown booking action processing error.",
+          ...(terminalDecisionError
+            ? { completed_at: new Date().toISOString(), final_outcome: { error: error instanceof Error ? error.message : String(error) } }
+            : {}),
+        });
+      }
       await updateActionJobRow(supabase, jobId, {
-        status: "failed",
+        status: terminalDecisionError ? "ignored" : retryable ? "pending" : "failed",
         error_message: error instanceof Error ? error.message : "Unknown booking action processing error.",
-        processed_at: new Date().toISOString(),
+        processed_at: retryable ? null : new Date().toISOString(),
+        lease_expires_at: null,
       });
-      failed += 1;
+      if (terminalDecisionError) {
+        ignored += 1;
+      } else {
+        failed += 1;
+      }
     }
   }
 

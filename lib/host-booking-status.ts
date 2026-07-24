@@ -59,7 +59,7 @@ export function buildHostBookingStatusMessage(
         hostMapPinUrl
       );
     case "rejected":
-      return "Famlo update: this booking was not accepted by the host. Team Famlo can help you choose another live home if needed.";
+      return "Famlo update: this booking was not accepted by the host. Your refund is being processed, and Team Famlo can help you choose another live home if needed.";
     case "checked_in":
       return "Famlo update: your host has marked you as checked in. Enjoy the Famlo experience and use this chat if you need support.";
     case "completed":
@@ -77,9 +77,25 @@ export async function applyHostBookingStatusUpdate(
     hostId?: string | null;
     status: string;
     skipGuestNotifications?: boolean;
+    previousStatus?: string | null;
+    actorUserId?: string | null;
+    actorRole?: string | null;
+    source?: string;
+    idempotencyKey?: string | null;
   }
 ): Promise<JsonRecord | null> {
-  const { bookingId, familyId, hostId, status, skipGuestNotifications = false } = params;
+  const {
+    bookingId,
+    familyId,
+    hostId,
+    status,
+    skipGuestNotifications = false,
+    previousStatus,
+    actorUserId = null,
+    actorRole = "host",
+    source = "host_booking_status",
+    idempotencyKey,
+  } = params;
 
   const { data: v2Booking, error: v2BookingError } = await supabase
     .from("bookings_v2")
@@ -137,7 +153,7 @@ export async function applyHostBookingStatusUpdate(
     }
   }
 
-  const thread = await resolveMessageThread(supabase, bookingId, { createIfMissing: true });
+  const thread = await resolveMessageThread(supabase, bookingId, { createIfMissing: false });
   const guestUserId = thread?.guestId ?? (typeof v2Booking?.user_id === "string" ? v2Booking.user_id : null);
   const notificationEventType = status === "rejected" ? "booking_rejected" : "booking_confirmed";
   const notificationSubject =
@@ -179,19 +195,39 @@ export async function applyHostBookingStatusUpdate(
     cta_url: "/bookings",
   };
 
-  await supabase.from("booking_status_history_v2").insert({
-    booking_id: bookingId,
-    old_status: v2Booking?.status ?? null,
-    new_status: status,
-    changed_by_user_id: null,
-    reason: "host_booking_status_update",
-    created_at: new Date().toISOString(),
-  } as never);
+  const historyReason = idempotencyKey
+    ? `host_booking_decision:${source}:${idempotencyKey}`
+    : `host_booking_status_update:${source}`;
+  const existingHistory = await supabase
+    .from("booking_status_history_v2")
+    .select("id")
+    .eq("booking_id", String(v2Booking?.id ?? bookingId))
+    .eq("new_status", status)
+    .eq("reason", historyReason)
+    .limit(1)
+    .maybeSingle();
+  if (existingHistory.error) throw existingHistory.error;
+  if (!existingHistory.data?.id) {
+    const { error: historyError } = await supabase.from("booking_status_history_v2").insert({
+      booking_id: String(v2Booking?.id ?? bookingId),
+      old_status: previousStatus ?? v2Booking?.status ?? null,
+      new_status: status,
+      changed_by_user_id: actorUserId,
+      reason: historyReason,
+      created_at: new Date().toISOString(),
+    } as never);
+    if (historyError) throw historyError;
+  }
 
   await syncReservationFromBooking(supabase, {
     bookingId: String(updated.id ?? bookingId),
-    source: "host_booking_status",
-    eventType: "status_synced",
+    source,
+    actorUserId,
+    actorRole,
+    eventType: status === "rejected" ? "cancellation_applied" : "status_synced",
+    idempotencyKey: idempotencyKey
+      ? `host_booking_decision:${String(updated.id ?? bookingId)}:${idempotencyKey}`
+      : null,
     payload: {
       booking_status: status,
     },
@@ -235,19 +271,35 @@ export async function applyHostBookingStatusUpdate(
     const statusMessage = buildHostBookingStatusMessage(status, bookingContext);
     const conversationPreviewMessage = stripFamloMapTag(statusMessage);
 
-    const { error: insertMessageError } = await supabase.from("messages").insert({
-      conversation_id: thread.conversationId,
-      booking_id: thread.legacyBookingId,
-      sender_id: null,
-      receiver_id: thread.guestId ?? (typeof v2Booking?.user_id === "string" ? v2Booking.user_id : null),
-      sender_type: "system",
-      text: statusMessage,
-      created_at: now,
-    } as never);
+    const existingMessage = await supabase
+      .from("messages")
+      .select("id")
+      .eq("conversation_id", thread.conversationId)
+      .eq("sender_type", "system")
+      .eq("text", statusMessage)
+      .limit(1)
+      .maybeSingle();
+    const insertMessageError = existingMessage.error;
+    let insertedMessage = Boolean(existingMessage.data?.id);
+    if (!insertMessageError && !insertedMessage) {
+      const insertResult = await supabase.from("messages").insert({
+        conversation_id: thread.conversationId,
+        booking_id: thread.legacyBookingId,
+        sender_id: null,
+        receiver_id: thread.guestId ?? (typeof v2Booking?.user_id === "string" ? v2Booking.user_id : null),
+        sender_type: "system",
+        text: statusMessage,
+        created_at: now,
+      } as never);
+      insertedMessage = !insertResult.error;
+      if (insertResult.error) {
+        console.error("Host booking status message failed:", insertResult.error);
+      }
+    }
 
     if (insertMessageError) {
       console.error("Host booking status message failed:", insertMessageError);
-    } else {
+    } else if (insertedMessage) {
       const { error: conversationError } = await supabase
         .from("conversations")
         .update({

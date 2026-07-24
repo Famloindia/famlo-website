@@ -327,7 +327,11 @@ export async function resolveConversationAccess(
     chatUnlocked: kind === "network" ? true : isBookingChatUnlocked(bookingStatus),
   };
 
-  writeAccessCache(cacheKey, result);
+  // Booking status controls chat access and can change immediately after a host
+  // decision. Only status-independent network conversations are safe to cache.
+  if (result.kind === "network") {
+    writeAccessCache(cacheKey, result);
+  }
   return result;
 }
 
