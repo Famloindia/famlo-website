@@ -63,6 +63,10 @@ export function HomeIdentityStep({ flow, update }: Readonly<StepProps>): React.J
             <input className="text-input" value={flow.hostProfession} onChange={(event) => update("hostProfession", event.target.value)} />
           </label>
           <label>
+            <span>Hobbies and interests</span>
+            <input className="text-input" placeholder="Cooking, music, travel" value={flow.hobbies} onChange={(event) => update("hobbies", event.target.value)} />
+          </label>
+          <label>
             <span>Family composition</span>
             <input className="text-input" value={flow.familyComposition} onChange={(event) => update("familyComposition", event.target.value)} />
           </label>

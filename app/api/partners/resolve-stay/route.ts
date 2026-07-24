@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { createAdminSupabaseClient } from "@/lib/supabase";
+import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
+import { createHostSessionToken, HOST_SESSION_COOKIE } from "@/lib/host-session-token";
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json()) as {
@@ -16,11 +18,15 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const supabase = createAdminSupabaseClient();
-  const { data: family } = userId
+  const authenticatedUser = await resolveStrictAuthenticatedUser(supabase, request);
+  if (!authenticatedUser?.id || (userId && authenticatedUser.id !== userId)) {
+    return NextResponse.json({ error: "Authentication is required." }, { status: 401 });
+  }
+  const { data: family } = authenticatedUser.id
     ? await supabase
         .from("families")
-        .select("id")
-        .eq("user_id", userId)
+        .select("id,user_id")
+        .eq("user_id", authenticatedUser.id)
         .limit(1)
         .maybeSingle()
     : { data: null };
@@ -37,6 +43,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     });
+    response.cookies.set(HOST_SESSION_COOKIE, createHostSessionToken({ familyId: family.id, userId: family.user_id }), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    });
 
     return response;
   }
@@ -44,7 +57,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const { data: v2Hommie } = await supabase
     .from("hommie_profiles_v2")
     .select("id,slug,legacy_hommie_id")
-    .or([userId ? `user_id.eq.${userId}` : null, email ? `email.eq.${email}` : null].filter(Boolean).join(","))
+    .or([`user_id.eq.${authenticatedUser.id}`, email ? `email.eq.${email}` : null].filter(Boolean).join(","))
     .eq("status", "published")
     .limit(1)
     .maybeSingle();

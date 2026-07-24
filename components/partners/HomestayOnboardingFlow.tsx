@@ -90,7 +90,7 @@ export default function HomestayOnboardingFlow(): React.JSX.Element {
     specialExperience: "",
     localExperience: "",
     languagesSpoken: ["English", "Hindi"],
-    houseType: "Joint family",
+    houseType: "Independent home",
     interactionType: "Friendly and available",
     hobbies: [] as string[],
     customHobby: "",

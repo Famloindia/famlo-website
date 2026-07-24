@@ -57,3 +57,19 @@ export function toggleListValue(values: string[], nextValue: string): string[] {
     ? values.filter((item) => item.toLowerCase() !== normalized.toLowerCase())
     : [...values, normalized];
 }
+
+export const HOME_TYPE_OPTIONS = [
+  "Independent home",
+  "Apartment",
+  "Villa",
+  "Farm stay",
+  "Heritage home",
+] as const;
+
+export const FAMILY_TYPE_OPTIONS = [
+  "Joint family",
+  "Nuclear family",
+  "Couple",
+  "Solo host",
+  "Shared household",
+] as const;

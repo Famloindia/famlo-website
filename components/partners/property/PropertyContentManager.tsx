@@ -5,7 +5,7 @@ import styles from "../dashboard.module.css";
 import type { PhotoItem } from "../HostDashboardEditor";
 import type { PropertyReelItem } from "../HostDashboardEditor";
 import type { FamilyListingDraft } from "@/lib/family-profile-editor";
-import { ImagePlus, MapPin, Loader2, Video, RefreshCw } from "lucide-react";
+import { ImagePlus, Loader2, Video, RefreshCw } from "lucide-react";
 import {
   MAX_GALLERY_IMAGE_UPLOAD_BYTES,
   formatGalleryImageUploadLimitLabel,
@@ -15,12 +15,12 @@ import {
   AMENITY_OPTIONS,
   BATHROOM_TYPE_OPTIONS,
   FOOD_OFFERING_OPTIONS,
+  HOME_TYPE_OPTIONS,
   parseMultiValueList,
   serializeMultiValueList,
   toggleListValue,
 } from "@/lib/home-listing-options";
 
-const HOUSE_TYPE_OPTIONS = ["Joint family", "Nuclear family", "Couple", "Solo host", "Shared household"];
 const INTERACTION_TYPE_OPTIONS = ["Friendly and available", "Extrovert", "Introvert", "Quiet and helpful", "Highly social", "Flexible"];
 const HOUSE_RULE_OPTIONS = ["No smoking", "No pets", "No alcohol", "Quiet after 10 PM"];
 
@@ -138,10 +138,8 @@ export default function PropertyContentManager({
   const [reelUploadProgress, setReelUploadProgress] = useState(0);
   const [reelStatus, setReelStatus] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [reels, setReels] = useState<PropertyReelItem[]>(propertyReels);
-
-  useEffect(() => {
-    setReels(propertyReels);
-  }, [propertyReels]);
+  const [reelTitleDrafts, setReelTitleDrafts] = useState<Record<string, string>>({});
+  const [savingReelId, setSavingReelId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/locations/search")
@@ -510,6 +508,7 @@ export default function PropertyContentManager({
           storageKey: uploadedAsset.storageKey,
           mimeType: file.type,
           sizeBytes: file.size,
+          title: file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim() || "Host reel",
         }),
       });
       const payload = (await response.json()) as { error?: string; reel?: Record<string, unknown> };
@@ -602,6 +601,47 @@ export default function PropertyContentManager({
     }
   };
 
+  const handleSaveReelTitle = async (reel: PropertyReelItem) => {
+    const title = (reelTitleDrafts[reel.id] ?? reel.title ?? "").trim();
+    if (!title) {
+      setReelStatus({ type: "error", text: "Add a reel title before saving." });
+      return;
+    }
+
+    setSavingReelId(reel.id);
+    setReelStatus(null);
+    try {
+      const response = await fetch("/api/host/property-reels", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          familyId,
+          reelId: reel.id,
+          action: "update_metadata",
+          title,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string; reel?: PropertyReelItem };
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to save the reel title.");
+      }
+
+      const savedTitle = payload.reel?.title || title;
+      const nextReels = reels.map((item) => item.id === reel.id ? { ...item, title: savedTitle } : item);
+      setReels(nextReels);
+      setPropertyReels(nextReels);
+      setReelTitleDrafts((current) => ({ ...current, [reel.id]: savedTitle }));
+      setReelStatus({ type: "success", text: "Reel title saved and published." });
+    } catch (error) {
+      setReelStatus({
+        type: "error",
+        text: error instanceof Error ? error.message : "Unable to save the reel title.",
+      });
+    } finally {
+      setSavingReelId(null);
+    }
+  };
+
   const handleRemoveReel = async (reelId: string) => {
     setReelStatus(null);
     try {
@@ -636,18 +676,6 @@ export default function PropertyContentManager({
         type: "error",
         text: error instanceof Error ? error.message : "Unable to remove this reel.",
       });
-    }
-  };
-
-  const detectLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const coords = `${position.coords.latitude}, ${position.coords.longitude}`;
-          setListing((current) => ({ ...current, googleMapsLink: `https://maps.google.com/?q=${coords}` }));
-        },
-        () => setGalleryStatus({ type: "error", text: "Location access denied or failed. Please check browser settings." })
-      );
     }
   };
 
@@ -880,6 +908,24 @@ export default function PropertyContentManager({
                 <video src={reel.publicUrl} controls playsInline preload="metadata" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
               </div>
               <div style={{ display: "grid", gap: "8px" }}>
+                <label style={{ display: "grid", gap: "6px", color: "#475569", fontSize: "11px", fontWeight: 800 }}>
+                  Reel title
+                  <input
+                    className={styles.inputField}
+                    maxLength={120}
+                    placeholder="E.g., Evening on our terrace"
+                    value={reelTitleDrafts[reel.id] ?? reel.title ?? ""}
+                    onChange={(event) => setReelTitleDrafts((current) => ({ ...current, [reel.id]: event.target.value }))}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveReelTitle(reel)}
+                  disabled={savingReelId === reel.id}
+                  style={{ borderRadius: "10px", border: "1px solid rgba(22,93,204,0.18)", background: "#165dcc", color: "#fff", padding: "9px 12px", fontSize: "11px", fontWeight: 800, cursor: savingReelId === reel.id ? "wait" : "pointer" }}
+                >
+                  {savingReelId === reel.id ? "Saving title..." : "Save title"}
+                </button>
                 <button type="button" onClick={() => void handleSetFeaturedReel(reel.id)} style={{ borderRadius: "10px", border: "1px solid rgba(22,93,204,0.18)", background: reel.isFeatured ? "#dbeafe" : "#eff6ff", color: "#165dcc", padding: "9px 12px", fontSize: "11px", fontWeight: 800, cursor: "pointer" }}>
                   {reel.isFeatured ? "Featured" : "Set featured"}
                 </button>
@@ -956,7 +1002,7 @@ export default function PropertyContentManager({
             <label style={{ fontSize: "12px", fontWeight: 800, color: "rgba(14,43,87,0.6)", textTransform: "uppercase", marginBottom: "8px", display: "block" }}>Home Type</label>
             <select className={styles.inputField} value={listing.houseType || ""} onChange={(e) => setListing((current) => ({ ...current, houseType: e.target.value }))}>
               <option value="">Select home type</option>
-              {HOUSE_TYPE_OPTIONS.map((option) => (
+              {HOME_TYPE_OPTIONS.map((option) => (
                 <option key={option} value={option}>{option}</option>
               ))}
             </select>
@@ -1137,21 +1183,12 @@ export default function PropertyContentManager({
             <input className={styles.inputField} value={listing.propertyAddress} onChange={(e) => setListing((current) => ({ ...current, propertyAddress: e.target.value }))} />
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
-            <label style={{ fontSize: "12px", fontWeight: 800, color: "rgba(14,43,87,0.6)", textTransform: "uppercase", marginBottom: "8px", display: "block" }}>Geolocation Data</label>
-            <div style={{ display: "flex", gap: "16px" }}>
-              <input className={styles.inputField} style={{ flex: 1 }} placeholder="Calculated maps link or coordinates..." value={listing.googleMapsLink} onChange={(e) => setListing((current) => ({ ...current, googleMapsLink: e.target.value }))} />
-              <button className={styles.primaryBtn} type="button" onClick={detectLocation} style={{ width: "auto", background: "#ecfdf5", color: "#059669", border: "1px solid #10b981" }}>
-                <MapPin size={20} /> Detect Map Link
-              </button>
-            </div>
-          </div>
-          <div style={{ gridColumn: "1 / -1" }}>
             <label style={{ fontSize: "12px", fontWeight: 800, color: "rgba(14,43,87,0.6)", textTransform: "uppercase", marginBottom: "8px", display: "block" }}>Check In</label>
-            <input className={styles.inputField} placeholder="12:00 PM" value={listing.checkInTime || ""} onChange={(e) => setListing((current) => ({ ...current, checkInTime: e.target.value }))} />
+            <input type="time" className={styles.inputField} value={listing.checkInTime || ""} onChange={(e) => setListing((current) => ({ ...current, checkInTime: e.target.value }))} />
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={{ fontSize: "12px", fontWeight: 800, color: "rgba(14,43,87,0.6)", textTransform: "uppercase", marginBottom: "8px", display: "block" }}>Check Out</label>
-            <input className={styles.inputField} placeholder="10:00 AM" value={listing.checkOutTime || ""} onChange={(e) => setListing((current) => ({ ...current, checkOutTime: e.target.value }))} />
+            <input type="time" className={styles.inputField} value={listing.checkOutTime || ""} onChange={(e) => setListing((current) => ({ ...current, checkOutTime: e.target.value }))} />
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={{ fontSize: "12px", fontWeight: 800, color: "rgba(14,43,87,0.6)", textTransform: "uppercase", marginBottom: "8px", display: "block" }}>Common Area Access (Comma separated)</label>

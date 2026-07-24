@@ -142,9 +142,9 @@ export default function DashboardTab({
   }, [roomDrafts]);
   const firstInactiveRoom = useMemo(() => roomDrafts.find((room) => !room.isActive) ?? null, [roomDrafts]);
   const listingPreviewUrl = buildHomestayPath(
-    profile?.hostDisplayName || listing?.propertyName || listing?.listingTitle || "Homestay",
-    profile?.locality || listing?.locality || null,
-    profile?.city || listing?.city || null,
+    listing?.listingTitle || listing?.propertyName || profile?.hostDisplayName || "Homestay",
+    profile?.cityNeighbourhood || null,
+    profile?.city || null,
     familyId
   );
 

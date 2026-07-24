@@ -10,11 +10,11 @@ import {
   validateHostReelFile,
 } from "@/lib/host-reel-shared";
 import { ROOM_AMENITY_GROUPS } from "@/lib/room-amenities";
+import { HOME_TYPE_OPTIONS } from "@/lib/home-listing-options";
 import styles from "../../onboarding.module.css";
 import { formatImageUploadLimitLabel, MAX_IMAGE_UPLOAD_BYTES } from "@/lib/upload-limits";
 
 const LANGUAGE_OPTIONS = ["English", "Hindi", "Marwari", "Rajasthani", "Gujarati", "Punjabi", "Marathi", "Tamil", "Telugu"];
-const HOUSE_TYPES = ["Joint family", "Nuclear family", "Couple", "Solo host", "Shared household"];
 const INTERACTION_TYPES = ["Friendly and available", "Extrovert", "Introvert", "Quiet and helpful", "Highly social", "Flexible"];
 const HOBBIES = ["Cooking", "Music", "Gardening", "Reading", "Yoga", "Art", "Travel", "Dance", "Photography"];
 const INCLUDED_OPTIONS = ["Breakfast", "Tea / coffee", "Home-cooked meals", "Local guide tips", "Pickup help", "Filtered water", "WiFi"];
@@ -819,7 +819,7 @@ export default function Step2Story({ data, update }: any) {
             <label>
               <span>House type</span>
               <select className={styles.inputField} value={data.houseType} onChange={(event) => update("houseType", event.target.value)}>
-                {HOUSE_TYPES.map((item) => (
+                {HOME_TYPE_OPTIONS.map((item) => (
                   <option key={item} value={item}>{item}</option>
                 ))}
               </select>

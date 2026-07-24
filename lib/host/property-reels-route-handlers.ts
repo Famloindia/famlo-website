@@ -145,6 +145,8 @@ function buildLegacyReelResponse(input: {
   id?: string | null;
   hostId: string;
   publicUrl: string;
+  title?: string;
+  caption?: string;
   storageKey: string | null;
   mimeType: string;
   sizeBytes: number | null;
@@ -159,8 +161,8 @@ function buildLegacyReelResponse(input: {
     hostId: input.hostId,
     storageKey: input.storageKey ?? "",
     publicUrl: input.publicUrl,
-    title: "",
-    caption: "",
+    title: input.title ?? "",
+    caption: input.caption ?? "",
     mimeType: input.mimeType,
     sizeBytes: input.sizeBytes,
     durationSeconds: input.durationSeconds,
@@ -187,8 +189,8 @@ function normalizeLegacyReelRows(meta: ReturnType<typeof parseHostListingMeta>):
         userId: "",
         storageKey: asString(row?.storageKey),
         publicUrl,
-        title: "",
-        caption: "",
+        title: asString(row?.title),
+        caption: asString(row?.caption),
         mimeType: asString(row?.mimeType) || "video/mp4",
         sizeBytes: typeof row?.sizeBytes === "number" ? row.sizeBytes : null,
         durationSeconds: typeof row?.durationSeconds === "number" ? row.durationSeconds : null,
@@ -221,7 +223,7 @@ function normalizeLegacyReelRows(meta: ReturnType<typeof parseHostListingMeta>):
       userId: "",
       storageKey: asString(meta.hostReelStorageKey),
       publicUrl,
-      title: "",
+      title: "Host reel",
       caption: "",
       mimeType: asString(meta.hostReelMimeType) || "video/mp4",
       sizeBytes: typeof meta.hostReelSizeBytes === "number" ? meta.hostReelSizeBytes : null,
@@ -242,6 +244,8 @@ function serializeLegacyReelRows(rows: CanonicalReelRecord[]) {
     id: row.id || `legacy-reel-${index + 1}`,
     publicUrl: row.publicUrl,
     storageKey: row.storageKey,
+    title: row.title,
+    caption: row.caption,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     durationSeconds: row.durationSeconds,
@@ -258,6 +262,8 @@ async function persistLegacyReelMetadata(params: {
   familyId: string;
   storageKey: string | null;
   publicUrl: string;
+  title?: string;
+  caption?: string;
   mimeType: string;
   sizeBytes: number | null;
   uploadedAt: string;
@@ -282,8 +288,8 @@ async function persistLegacyReelMetadata(params: {
     userId: "",
     storageKey: params.storageKey ?? "",
     publicUrl: params.publicUrl,
-    title: "",
-    caption: "",
+    title: asString(params.title) || "Host reel",
+    caption: asString(params.caption),
     mimeType: params.mimeType,
     sizeBytes: params.sizeBytes,
     durationSeconds: null,
@@ -315,40 +321,6 @@ async function persistLegacyReelMetadata(params: {
 
   if (familyUpdateError) {
     throw familyUpdateError;
-  }
-
-  const { data: latestDraft } = await params.supabase
-    .from("host_onboarding_drafts")
-    .select("id,payload")
-    .eq("family_id", params.familyId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestDraft?.id) {
-    const existingPayload =
-      latestDraft.payload && typeof latestDraft.payload === "object" && !Array.isArray(latestDraft.payload)
-        ? (latestDraft.payload as JsonRecord)
-        : {};
-
-    const { error: draftUpdateError } = await params.supabase
-      .from("host_onboarding_drafts")
-      .update({
-        payload: {
-          ...existingPayload,
-          hostReels: nextRows,
-          hostReelStorageKey: featuredRow?.storageKey ?? "",
-          hostReelPublicUrl: featuredRow?.publicUrl ?? "",
-          hostReelMimeType: featuredRow?.mimeType ?? "",
-          hostReelSizeBytes: featuredRow?.sizeBytes ?? null,
-          hostReelUploadedAt: featuredRow?.updatedAt ?? featuredRow?.createdAt ?? "",
-        },
-      } as never)
-      .eq("id", latestDraft.id);
-
-    if (draftUpdateError) {
-      throw draftUpdateError;
-    }
   }
 
   return nextRow;
@@ -390,39 +362,6 @@ async function clearLegacyReelMetadata(params: {
     throw familyUpdateError;
   }
 
-  const { data: latestDraft } = await params.supabase
-    .from("host_onboarding_drafts")
-    .select("id,payload")
-    .eq("family_id", params.familyId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestDraft?.id) {
-    const existingPayload =
-      latestDraft.payload && typeof latestDraft.payload === "object" && !Array.isArray(latestDraft.payload)
-        ? (latestDraft.payload as JsonRecord)
-        : {};
-
-    const { error: draftUpdateError } = await params.supabase
-      .from("host_onboarding_drafts")
-      .update({
-        payload: {
-          ...existingPayload,
-          hostReels: [],
-          hostReelStorageKey: "",
-          hostReelPublicUrl: "",
-          hostReelMimeType: "",
-          hostReelSizeBytes: null,
-          hostReelUploadedAt: "",
-        },
-      } as never)
-      .eq("id", latestDraft.id);
-
-    if (draftUpdateError) {
-      throw draftUpdateError;
-    }
-  }
 }
 
 async function updateLegacyReelRows(params: {
@@ -466,46 +405,14 @@ async function updateLegacyReelRows(params: {
     throw familyUpdateError;
   }
 
-  const { data: latestDraft } = await params.supabase
-    .from("host_onboarding_drafts")
-    .select("id,payload")
-    .eq("family_id", params.familyId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestDraft?.id) {
-    const existingPayload =
-      latestDraft.payload && typeof latestDraft.payload === "object" && !Array.isArray(latestDraft.payload)
-        ? (latestDraft.payload as JsonRecord)
-        : {};
-
-    const { error: draftUpdateError } = await params.supabase
-      .from("host_onboarding_drafts")
-      .update({
-        payload: {
-          ...existingPayload,
-          hostReels: serializedRows,
-          hostReelStorageKey: featuredRow?.storageKey ?? "",
-          hostReelPublicUrl: featuredRow?.publicUrl ?? "",
-          hostReelMimeType: featuredRow?.mimeType ?? "",
-          hostReelSizeBytes: featuredRow?.sizeBytes ?? null,
-          hostReelUploadedAt: featuredRow?.updatedAt ?? featuredRow?.createdAt ?? "",
-        },
-      } as never)
-      .eq("id", latestDraft.id);
-
-    if (draftUpdateError) {
-      throw draftUpdateError;
-    }
-  }
-
   return serializedRows.map((row) =>
     mapReelRow({
       id: row.id,
       family_id: params.familyId,
       storage_key: row.storageKey,
       public_url: row.publicUrl,
+      title: row.title,
+      caption: row.caption,
       mime_type: row.mimeType,
       size_bytes: row.sizeBytes,
       duration_seconds: row.durationSeconds,
@@ -546,10 +453,13 @@ function revalidatePropertyPaths(
   deps: Pick<PropertyReelsRouteDeps, "revalidatePath" | "revalidateTag">
 ): void {
   deps.revalidateTag("homepage-discovery", "max");
+  deps.revalidateTag("home-route-resolution", "max");
   deps.revalidateTag("home-detail-public-data", "max");
+  deps.revalidateTag("public-home-stay-data", "max");
   deps.revalidatePath("/");
   deps.revalidatePath("/homestays");
   deps.revalidatePath(`/homes/${familyId}`);
+  deps.revalidatePath("/homestay/[slug]/[id]", "page");
   deps.revalidatePath(`/partnerslogin/home/dashboard?family=${familyId}&tab=profile`);
 }
 
@@ -679,6 +589,8 @@ async function syncLegacyMirrorFromFeaturedCanonical(params: {
     familyId: params.familyId,
     storageKey: featured.storageKey || null,
     publicUrl: featured.publicUrl,
+    title: featured.title,
+    caption: featured.caption,
     mimeType: featured.mimeType,
     sizeBytes: featured.sizeBytes,
     uploadedAt: featured.updatedAt || featured.createdAt || new Date().toISOString(),
@@ -713,6 +625,8 @@ export function createPropertyReelsRouteHandlers(deps: PropertyReelsRouteDeps = 
         user_id: access.hostUserId,
         storage_key: reel.storageKey,
         public_url: reel.publicUrl,
+        title: reel.title,
+        caption: reel.caption,
         mime_type: reel.mimeType,
         size_bytes: reel.sizeBytes,
         duration_seconds: reel.durationSeconds,
@@ -840,6 +754,8 @@ export function createPropertyReelsRouteHandlers(deps: PropertyReelsRouteDeps = 
     }
 
     const createdAt = new Date().toISOString();
+    const title = asString(body.title).slice(0, 120) || "Host reel";
+    const caption = asString(body.caption).slice(0, 500);
     const sizeBytes = asNumber(body.sizeBytes ?? body.size_bytes);
     const durationSeconds = asNumber(body.durationSeconds ?? body.duration_seconds);
     const width = asNumber(body.width);
@@ -853,6 +769,8 @@ export function createPropertyReelsRouteHandlers(deps: PropertyReelsRouteDeps = 
         user_id: resolvedHostUserId,
         storage_key: storageKey ?? publicUrl,
         public_url: publicUrl,
+        title,
+        caption,
         mime_type: mimeType,
         size_bytes: sizeBytes,
         duration_seconds: durationSeconds,
@@ -869,6 +787,8 @@ export function createPropertyReelsRouteHandlers(deps: PropertyReelsRouteDeps = 
         user_id: resolvedHostUserId,
         storage_key: storageKey ?? publicUrl,
         public_url: publicUrl,
+        title,
+        caption,
         mime_type: mimeType,
         size_bytes: sizeBytes,
         duration_seconds: durationSeconds,
@@ -922,6 +842,8 @@ export function createPropertyReelsRouteHandlers(deps: PropertyReelsRouteDeps = 
           familyId: resolvedFamilyId,
           storageKey,
           publicUrl,
+          title,
+          caption,
           mimeType,
           sizeBytes,
           uploadedAt: createdAt,
@@ -933,6 +855,8 @@ export function createPropertyReelsRouteHandlers(deps: PropertyReelsRouteDeps = 
           hostId: resolvedHostId ?? "",
           storageKey,
           publicUrl,
+          title,
+          caption,
           mimeType,
           sizeBytes,
           durationSeconds,
@@ -1012,18 +936,63 @@ export function createPropertyReelsRouteHandlers(deps: PropertyReelsRouteDeps = 
     const body = (await request.json()) as {
       familyId?: string;
       reelId?: string;
-      action?: "set_featured";
+      action?: "set_featured" | "update_metadata";
+      title?: string;
+      caption?: string;
     };
     const familyId = asString(body.familyId);
     const reelId = asString(body.reelId);
     if (!familyId || !reelId || !body.action) {
       return NextResponse.json({ error: "Family ID, reel ID, and action are required." }, { status: 400 });
     }
+    if (body.action !== "set_featured" && body.action !== "update_metadata") {
+      return NextResponse.json({ error: "Unsupported reel update action." }, { status: 400 });
+    }
 
     const supabase = deps.createAdminSupabaseClient();
     const access = await deps.resolveAuthorizedHostResource(supabase, request, { familyId });
     if (!access?.familyId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (body.action === "update_metadata") {
+      const title = asString(body.title).slice(0, 120);
+      const caption = asString(body.caption).slice(0, 500);
+      if (!title) {
+        return NextResponse.json({ error: "Reel title is required." }, { status: 400 });
+      }
+
+      if (reelId.startsWith("legacy-")) {
+        const updatedRows = await updateLegacyReelRows({
+          supabase,
+          familyId: access.familyId,
+          update: (rows) => rows.map((row) => row.id === reelId
+            ? { ...row, title, caption, updatedAt: new Date().toISOString() }
+            : row),
+        });
+        const updatedReel = updatedRows.find((row) => row.id === reelId);
+        if (!updatedReel) {
+          return NextResponse.json({ error: "Reel not found." }, { status: 404 });
+        }
+        revalidatePropertyPaths(access.familyId, deps);
+        return NextResponse.json({ ok: true, reel: updatedReel });
+      }
+
+      const updated = await supabase
+        .from("host_property_reels")
+        .update({ title, caption, updated_at: new Date().toISOString() } as never)
+        .eq("family_id", access.familyId)
+        .eq("id", reelId)
+        .select("*")
+        .maybeSingle();
+      if (updated.error) throw updated.error;
+      if (!updated.data) {
+        return NextResponse.json({ error: "Reel not found." }, { status: 404 });
+      }
+      const updatedReel = mapReelRow(updated.data as JsonRecord);
+      await syncLegacyMirrorFromFeaturedCanonical({ supabase, familyId: access.familyId });
+      revalidatePropertyPaths(access.familyId, deps);
+      return NextResponse.json({ ok: true, reel: updatedReel });
     }
 
     if (reelId.startsWith("legacy-")) {

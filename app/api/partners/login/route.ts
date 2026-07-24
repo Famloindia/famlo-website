@@ -121,6 +121,9 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const proDashboardEnabled = isFamloProDashboardEnabled();
   const proAccess = proDashboardEnabled ? await loadHostProAccess(supabase, family.id).catch(() => null) : null;
+  if (!family.user_id) {
+    return NextResponse.json({ error: "This partner account is not linked to an owner." }, { status: 409 });
+  }
   const response = NextResponse.json({
     ok: true,
     redirect: resolveHostDashboardHref({

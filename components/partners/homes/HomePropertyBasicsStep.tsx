@@ -24,6 +24,30 @@ export function HomePropertyBasicsStep({
             <input className="text-input" value={flow.propertyName} onChange={(event) => update("propertyName", event.target.value)} />
           </label>
           <label>
+            <span>Public listing title</span>
+            <input className="text-input" value={flow.listingTitle} onChange={(event) => update("listingTitle", event.target.value)} />
+          </label>
+          <label>
+            <span>Home type</span>
+            <select className="text-input" value={flow.homeType} onChange={(event) => update("homeType", event.target.value)}>
+              <option value="">Select home type</option>
+              <option value="Independent home">Independent home</option>
+              <option value="Apartment">Apartment</option>
+              <option value="Villa">Villa</option>
+              <option value="Farm stay">Farm stay</option>
+              <option value="Heritage home">Heritage home</option>
+            </select>
+          </label>
+          <label>
+            <span>Interaction type</span>
+            <select className="text-input" value={flow.interactionType} onChange={(event) => update("interactionType", event.target.value)}>
+              <option value="">Select interaction type</option>
+              <option value="Social and interactive">Social and interactive</option>
+              <option value="Available when needed">Available when needed</option>
+              <option value="Independent stay">Independent stay</option>
+            </select>
+          </label>
+          <label>
             <span>Room type</span>
             <input className="text-input" value={flow.roomType} onChange={(event) => update("roomType", event.target.value)} />
           </label>

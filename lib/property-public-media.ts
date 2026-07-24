@@ -174,7 +174,7 @@ async function queryPropertyReels(
 ): Promise<QueryResult> {
   const preferred = await supabase
     .from("host_property_reels")
-    .select("id,public_url,storage_key,mime_type,size_bytes,duration_seconds,width,height,is_featured,status,created_at,updated_at")
+    .select("id,public_url,storage_key,title,caption,mime_type,size_bytes,duration_seconds,width,height,is_featured,status,created_at,updated_at")
     .eq("family_id", familyId)
     .neq("status", "deleted")
     .order("is_featured", { ascending: false })
@@ -259,6 +259,8 @@ export type PublicPropertyReel = {
   id: string;
   publicUrl: string;
   storageKey: string;
+  title: string;
+  caption: string;
   mimeType: string;
   sizeBytes: number | null;
   durationSeconds: number | null;
@@ -485,6 +487,8 @@ export async function resolvePublicPropertyMedia(
       id: asString(row.id),
       publicUrl: asString(row.public_url),
       storageKey: asString(row.storage_key) || asString(row.r2_key),
+      title: asString(row.title),
+      caption: asString(row.caption),
       mimeType: asString(row.mime_type),
       sizeBytes: asNumber(row.size_bytes),
       durationSeconds: asNumber(row.duration_seconds),
@@ -512,6 +516,8 @@ export async function resolvePublicPropertyMedia(
         id: asString(reel.id) || `legacy-reel-${index + 1}`,
         publicUrl,
         storageKey: asString(reel.storageKey),
+        title: asString(reel.title),
+        caption: asString(reel.caption),
         mimeType: asString(reel.mimeType) || "video/mp4",
         sizeBytes: asNumber(reel.sizeBytes),
         durationSeconds: asNumber(reel.durationSeconds),
@@ -535,6 +541,8 @@ export async function resolvePublicPropertyMedia(
             id: "legacy-reel-1",
             publicUrl: legacyReelAsset.publicUrl,
             storageKey: legacyReelAsset.storageKey,
+            title: "Host reel",
+            caption: "",
             mimeType: legacyReelAsset.mimeType,
             sizeBytes: legacyReelAsset.sizeBytes || null,
             durationSeconds: null,

@@ -5,7 +5,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { Bath, Bed, Coffee, Globe, Heart, Lock, MapPin, MessageCircle, Monitor, ShieldCheck, ShowerHead, Snowflake, Sunrise, Sun, Sunset, SunMoon, Users, Wifi } from "lucide-react";
 
 import { HomeBookingPreview } from "@/components/public/HomeBookingPreview";
@@ -16,18 +16,32 @@ import { GuestStoriesRail } from "@/components/public/GuestStoriesRail";
 import { RecentHomeViewTracker } from "@/components/public/RecentHomeViewTracker";
 import { RouteWarmup } from "@/components/public/RouteWarmup";
 import { getCachedPublicHomeSideData, getCachedPublicHomeStayData } from "@/lib/home-detail-public-data";
+import { formatListingTime, getPublicListingProfile } from "@/lib/host-property-profile";
 import { canListOnMarketplace } from "@/lib/host-access-policy";
 import { DEFAULT_EXPERIENCE_CARDS, parseMultiValueList } from "@/lib/home-listing-options";
-import { parseHostListingMeta } from "@/lib/host-listing-meta";
-import { getPublicCoordinates } from "@/lib/location-utils";
-import { resolvePublicPropertyMedia } from "@/lib/property-public-media";
-import { getCachedHomeRouteResolution } from "@/lib/home-route-resolution";
+import {
+  getCachedHomeRouteResolution,
+  getCanonicalHomestayPath,
+  type ResolvedHomeRoute,
+} from "@/lib/home-route-resolution";
 import { getHomesDiscoveryData } from "@/lib/discovery";
 import { buildHomestayPath } from "@/lib/slug";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import styles from "./home-details.module.css";
 
 export const revalidate = 300;
+
+function uniqueLocationParts(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  return values.filter((value): value is string => {
+    const normalized = value?.trim();
+    if (!normalized) return false;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 async function MoreHomesSection({
   currentHomeId,
@@ -110,12 +124,14 @@ export async function generateMetadata({
     return {};
   }
 
-  const meta = parseHostListingMeta(asString(family?.admin_notes) || null);
-  const homeTitle =
-    meta.listingTitle ||
-    asString(family?.name) ||
-    asString(host?.display_name) ||
-    "Famlo homestay";
+  const profile = family
+    ? await getPublicListingProfile(createAdminSupabaseClient(), {
+        familyId: asString(family.id),
+        familyRow: family,
+        hostRow: host,
+      })
+    : null;
+  const homeTitle = profile?.property.listingTitle || profile?.property.propertyName || "Famlo homestay";
   const canonicalPath = buildHomestayPath(
     homeTitle,
     asString(family?.village) || asString(host?.locality),
@@ -127,9 +143,8 @@ export async function generateMetadata({
   return {
     title: homeTitle,
     description:
-      asString(family?.description) ||
-      asString(host?.about) ||
-      meta.culturalOffering ||
+      profile?.property.hostBio ||
+      profile?.property.culturalOffering ||
       `Discover ${homeTitle} on Famlo.`,
     alternates: {
       canonical: new URL(canonicalPath, siteUrl).toString(),
@@ -141,6 +156,8 @@ interface HomeDetailPageProps {
   params: Promise<{
     id: string;
   }>;
+  canonicalRequest?: boolean;
+  resolvedRoute?: ResolvedHomeRoute;
 }
 
 const QUARTERS = [
@@ -174,72 +191,8 @@ function asNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function asNullableNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function asArray(value: unknown): string[] {
   return Array.isArray(value) ? value : [];
-}
-
-function asStringList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter((item) => item.length > 0);
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    return parseMultiValueList(value);
-  }
-  return [];
-}
-
-function splitLines(value: unknown): string[] {
-  if (typeof value !== "string") return [];
-  return value
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
-function firstStringValue(...values: unknown[]): string {
-  for (const value of values) {
-    if (typeof value !== "string") continue;
-    const trimmed = value.trim();
-    if (trimmed.length > 0) return trimmed;
-  }
-  return "";
-}
-
-function firstArrayValue<T = unknown>(...values: unknown[]): T[] {
-  for (const value of values) {
-    if (Array.isArray(value) && value.length > 0) {
-      return value as T[];
-    }
-  }
-  return [];
-}
-
-function pickObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function asExperienceCards(value: unknown): Array<{ title: string; description: string }> {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const next = item as Record<string, unknown>;
-      const title = asString(next.title);
-      const description = asString(next.description);
-      if (!title || !description) return null;
-      return { title, description };
-    })
-    .filter((item): item is { title: string; description: string } => Boolean(item));
 }
 
 function formatRoomType(value: string | null | undefined): string {
@@ -262,17 +215,24 @@ type StoryItem = {
 };
 
 export default async function HomeDetailPage({
-  params
+  params,
+  canonicalRequest = false,
+  resolvedRoute,
 }: Readonly<HomeDetailPageProps>): Promise<React.JSX.Element> {
   const { id } = await params;
   const supabase = createAdminSupabaseClient();
-  const resolved = await getCachedHomeRouteResolution(id);
+  const resolved = resolvedRoute ?? await getCachedHomeRouteResolution(id);
   const family = resolved.familyRow;
   const host = resolved.hostRow;
 
-  // 2. Not found OR not live
-  if (!family && !host) {
+  if (!resolved.familyId || !family) {
     notFound();
+  }
+
+  if (!canonicalRequest) {
+    const canonicalPath = await getCanonicalHomestayPath(supabase, resolved);
+    if (!canonicalPath) notFound();
+    permanentRedirect(canonicalPath);
   }
 
   const isAccepting = Boolean(family?.is_accepting ?? host?.is_accepting);
@@ -295,20 +255,15 @@ export default async function HomeDetailPage({
   const hostId = resolved.hostId;
   const metricsId = familyId ?? hostId ?? id;
 
-  // 3. Fetch the independent data in parallel.
-  const approvedDraftPromise = familyId
-    ? supabase
-        .from("host_onboarding_drafts")
-        .select("payload,updated_at")
-        .eq("family_id", familyId)
-        .eq("listing_status", "approved")
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-    : Promise.resolve({ data: null as { payload?: unknown; updated_at?: string | null } | null });
-
-  const [approvedDraftResult, publicSideData] = await Promise.all([
-    approvedDraftPromise,
+  // 3. Fetch public-safe canonical listing content and independent side data.
+  const [listingProfile, publicSideData] = await Promise.all([
+    familyId
+      ? getPublicListingProfile(supabase, {
+          familyId,
+          familyRow: family as Record<string, unknown> | null,
+          hostRow: host as Record<string, unknown> | null,
+        })
+      : Promise.resolve(null),
     getCachedPublicHomeSideData({
       routeId: metricsId,
       hostId,
@@ -316,79 +271,36 @@ export default async function HomeDetailPage({
     }),
   ]);
   const existingBookings = publicSideData.stayBookingRows;
+  if (!listingProfile) notFound();
 
-  const meta = parseHostListingMeta(asString(family?.admin_notes) || null);
-  const approvedDraft = approvedDraftResult.data;
-  const onboardingPayload = pickObject(approvedDraft?.payload);
-  const propertyMedia = familyId
-    ? await resolvePublicPropertyMedia(supabase, {
-        familyId,
-        hostId,
-        familyRow: family as Record<string, unknown> | null,
-        hostRow: host as Record<string, unknown> | null,
-        approvedDraftRow: approvedDraft as Record<string, unknown> | null,
-        debugContext: "public-home-page",
-      })
-    : {
-        gallery: [],
-        reels: [],
-        debug: {
-          familyId: "",
-          hostId: asString(host?.id),
-          gallerySource: "none" as const,
-          reelSource: "none" as const,
-          galleryCount: 0,
-          reelCount: 0,
-        },
-      };
-  const hostPhotoSeed = asString(family?.host_photo_url) || asString(host?.host_photo_url) || meta.hostSelfieUrl || "";
-  const imageUrls = propertyMedia.gallery.map((item) => item.url);
-  const hostReels = propertyMedia.reels;
-  const draftIncludedItems = asArray(onboardingPayload.includedHighlights).length > 0
-    ? asArray(onboardingPayload.includedHighlights)
-    : asArray(onboardingPayload.includedItems);
-  const draftHouseRules = splitLines(onboardingPayload.houseRulesText).length > 0
-    ? splitLines(onboardingPayload.houseRulesText)
-    : asArray(onboardingPayload.customRules);
-  const draftCommonAreas = asArray(onboardingPayload.commonAreas);
-  const draftHobbies = asArray(onboardingPayload.hobbies);
-  const draftNearbyPlaces =
-    Array.isArray(onboardingPayload.nearbyPlaces) && onboardingPayload.nearbyPlaces.length > 0
-      ? onboardingPayload.nearbyPlaces
-      : [];
-
-  const title =
-    asString((family as Record<string, unknown> | null)?.property_name) ||
-    asString(family?.name) ||
-    asString(host?.display_name) ||
-    meta.listingTitle ||
-    "";
-  const propertyName = asString((family as Record<string, unknown> | null)?.property_name) || asString(family?.name) || title || asString(host?.display_name);
-  const hostName =
-    asString(family?.primary_host_name) ||
-    asString(family?.host_name) ||
-    asString(host?.display_name) ||
-    meta.hostDisplayName ||
-    asString(family?.name) ||
-    "Famlo host";
+  const propertyMedia = {
+    gallery: listingProfile.photos,
+    reels: listingProfile.reels,
+  };
+  const hostPhotoSeed = listingProfile.identity.profilePhotoUrl;
+  const imageUrls = listingProfile.photos.map((item) => item.url);
+  const hostReels = listingProfile.reels;
+  const title = listingProfile.property.listingTitle || listingProfile.property.propertyName;
+  const propertyName = listingProfile.property.propertyName || title;
+  const hostName = listingProfile.identity.displayName || "Famlo host";
   const hostReelTitle =
     hostName && hostName !== "Famlo host"
       ? `${hostName}${hostName.endsWith("s") ? "'" : "'s"} Reels`
       : "Host Reels";
-  const hostPhotoUrl = hostPhotoSeed;
+  const hostPhotoUrl = listingProfile.identity.profilePhotoUrl;
   const likedCount =
     publicSideData.likedCount ||
     (typeof family?.total_reviews === "number" ? family.total_reviews : publicSideData.stories.length);
-  const languageList = asArray(family?.languages ?? host?.languages);
+  const languageList = listingProfile.identity.languages;
   const blockedDateSource =
     asArray(family?.blocked_dates).length > 0 ? asArray(family?.blocked_dates) : asArray(host?.blocked_dates);
-  const publicCoords = getPublicCoordinates({
-    lat: asNullableNumber(family?.lat ?? host?.lat),
-    lng: asNullableNumber(family?.lng ?? host?.lng),
-    latExact: asNullableNumber(family?.lat_exact ?? host?.lat_exact),
-    lngExact: asNullableNumber(family?.lng_exact ?? host?.lng_exact),
-    seed: String(familyId || hostId || id),
-  });
+  const publicCoords =
+    listingProfile.property.publicLatitude != null && listingProfile.property.publicLongitude != null
+      ? {
+          lat: listingProfile.property.publicLatitude,
+          lng: listingProfile.property.publicLongitude,
+        }
+      : null;
 
   // 4. Normalize data
   const home = {
@@ -398,52 +310,32 @@ export default async function HomeDetailPage({
     hostUserId: resolved.hostUserId,
     name: propertyName,
     listingTitle: title,
-    description: asString(family?.description) || asString(host?.about),
-    culturalOffering: asString(family?.famlo_experience) || asString(host?.family_story) || meta.culturalOffering || asString(family?.about),
-    village: asString(family?.village) || asString(host?.locality),
-    city: asString(family?.city) || asString(host?.city),
-    state: asString(family?.state) || asString(host?.state),
+    description: listingProfile.property.hostBio,
+    culturalOffering: listingProfile.property.culturalOffering,
+    village: listingProfile.property.locality,
+    city: listingProfile.property.city,
+    state: listingProfile.property.state,
     maxGuests: asNumber(family?.max_guests ?? host?.max_guests),
     rating: family?.rating ? Number(family.rating) : null,
     isActive,
     isAccepting,
     imageUrls,
     languages: languageList,
-    amenities: firstArrayValue<string>(
-      asStringList((family as Record<string, unknown> | null)?.primary_stay_unit_amenities),
-      asStringList(family?.amenities),
-      asStringList(host?.amenities),
-      asStringList(meta.amenities),
-      asStringList(onboardingPayload.amenities)
-    ),
-    includedItems: firstArrayValue<string>(
-      asStringList(family?.included_items),
-      asStringList(meta.includedItems),
-      asStringList(draftIncludedItems)
-    ),
-    houseRules: firstArrayValue<string>(
-      asStringList(family?.house_rules),
-      asStringList(host?.house_rules),
-      asStringList(meta.houseRules),
-      asStringList(draftHouseRules)
-    ),
-    bathroomType: meta.bathroomType || asString(family?.bathroom_type) || asString(host?.bathroom_type),
-    foodType: asString(family?.food_type) || asString(host?.food_type) || meta.foodType,
-    commonAreas: firstArrayValue<string>(
-      asStringList(family?.common_areas),
-      asStringList(host?.common_areas),
-      asStringList(meta.commonAreas),
-      asStringList(draftCommonAreas)
-    ),
+    amenities: listingProfile.property.amenities,
+    includedItems: listingProfile.property.includedItems,
+    houseRules: listingProfile.property.houseRules,
+    bathroomType: listingProfile.property.bathroomType,
+    foodType: listingProfile.property.foodTypes.join(", "),
+    commonAreas: listingProfile.property.commonAreas,
     blockedDates: blockedDateSource,
-    hostBio: asString(family?.about) || asString(host?.about) || asString(family?.description),
-    hostHobbies: firstStringValue(asString((family as Record<string, unknown> | null)?.host_hobbies), meta.hostHobbies, draftHobbies.join(", ")),
-    hostCatchphrase: asString((family as Record<string, unknown> | null)?.host_catchphrase) || meta.hostCatchphrase || "",
+    hostBio: listingProfile.property.hostBio || listingProfile.identity.biography,
+    hostHobbies: listingProfile.identity.hobbies.join(", "),
+    hostCatchphrase: "",
     hostPhotoUrl,
     hostReelUrl: hostReels[0]?.publicUrl ?? null,
     hostReels,
     hostName,
-    googleMapsLink: asString(family?.google_maps_link) || asString(host?.google_maps_link) || null,
+    googleMapsLink: null,
     likedCount,
     stories: publicSideData.stories,
     platformCommissionPct:
@@ -455,8 +347,7 @@ export default async function HomeDetailPage({
     bookingRequiresHostApproval: Boolean(
       family?.booking_requires_host_approval ??
         host?.booking_requires_host_approval ??
-        meta.bookingRequiresHostApproval ??
-        onboardingPayload.bookingRequiresHostApproval
+        false
     ),
     price_morning: asNumber(family?.price_morning ?? host?.price_morning),
     price_afternoon: asNumber(family?.price_afternoon ?? host?.price_afternoon),
@@ -464,17 +355,17 @@ export default async function HomeDetailPage({
     price_fullday: asNumber(family?.price_fullday ?? host?.price_fullday),
     lat: publicCoords?.lat ?? null,
     lng: publicCoords?.lng ?? null,
-    landmarks:
-      firstArrayValue<any>(family?.landmarks, host?.landmarks, draftNearbyPlaces),
-    neighborhoodDesc: asString(family?.neighborhood_desc ?? host?.neighborhood_desc),
-    accessibilityDesc: asString(family?.accessibility_desc ?? host?.accessibility_desc),
-    checkInTime: firstStringValue(asString(family?.check_in_time), asString(host?.check_in_time), meta.checkInTime, asString(onboardingPayload.checkInTime)),
-    checkOutTime: firstStringValue(asString(family?.check_out_time), asString(host?.check_out_time), meta.checkOutTime, asString(onboardingPayload.checkOutTime)),
-    journeyStory: firstStringValue(asString((family as Record<string, unknown> | null)?.journey_story), meta.journeyStory, asString(onboardingPayload.journeyStory)),
-    specialExperience: firstStringValue(asString((family as Record<string, unknown> | null)?.special_experience), meta.specialExperience, asString(onboardingPayload.specialExperience)),
-    localExperience: firstStringValue(asString((family as Record<string, unknown> | null)?.local_experience), meta.localExperience, asString(onboardingPayload.localExperience)),
-    interactionType: firstStringValue(asString((family as Record<string, unknown> | null)?.interaction_type), meta.interactionType, asString(onboardingPayload.interactionType)),
-    houseType: firstStringValue(asString((family as Record<string, unknown> | null)?.house_type), meta.houseType, meta.familyComposition, asString(onboardingPayload.houseType)),
+    landmarks: listingProfile.property.nearbyPlaces,
+    neighborhoodDesc: listingProfile.property.neighborhoodDescription,
+    accessibilityDesc: listingProfile.property.accessibilityDescription,
+    checkInTime: formatListingTime(listingProfile.property.checkInTime),
+    checkOutTime: formatListingTime(listingProfile.property.checkOutTime),
+    journeyStory: listingProfile.property.journeyStory,
+    specialExperience: listingProfile.property.specialExperience,
+    localExperience: listingProfile.property.localExperience,
+    interactionType: listingProfile.property.interactionType,
+    houseType: listingProfile.property.familyType,
+    homeType: listingProfile.property.homeType,
   };
   const { stayUnits, roomRatingSummaryEntries } = await getCachedPublicHomeStayData(home);
   const visibleStayUnits = stayUnits.filter((unit) => unit.isActive);
@@ -488,7 +379,7 @@ export default async function HomeDetailPage({
   const primaryRoomHref = primaryStayUnit
     ? `/host/${home.legacyFamilyId ?? home.hostId ?? home.id}/room/${primaryStayUnit.id}`
     : null;
-  const homeAmenities = primaryStayUnit?.amenities.length ? primaryStayUnit.amenities : home.amenities;
+  const homeAmenities = home.amenities;
   const homeQuarterPrices = {
     morning: primaryStayUnit?.priceMorning && primaryStayUnit.priceMorning > 0 ? primaryStayUnit.priceMorning : home.price_morning,
     afternoon: primaryStayUnit?.priceAfternoon && primaryStayUnit.priceAfternoon > 0 ? primaryStayUnit.priceAfternoon : home.price_afternoon,
@@ -496,7 +387,7 @@ export default async function HomeDetailPage({
     fullday: primaryStayUnit?.priceFullday && primaryStayUnit.priceFullday > 0 ? primaryStayUnit.priceFullday : home.price_fullday,
   };
 
-  const publicLocation = [home.village, home.city].filter(Boolean).join(", ");
+  const publicLocation = uniqueLocationParts([home.village, home.city, home.state]).join(", ");
   const amenityIncluded = homeAmenities.map((item) => item);
   const nonAmenityIncluded = Array.from(new Set([
     ...parseMultiValueList(home.foodType || "").map((item) => `Food type: ${item}`),
@@ -541,12 +432,8 @@ export default async function HomeDetailPage({
     : home.maxGuests
       ? `${home.maxGuests} guests`
       : "Rooms available";
-  const customExperienceCards = asExperienceCards(meta.famloExperienceCards);
-  const experienceCards =
-    customExperienceCards.length > 0
-      ? customExperienceCards.map((card) => ({ title: card.title, body: card.description }))
-      : DEFAULT_EXPERIENCE_CARDS.map((card) => ({ title: card.title, body: card.description }));
-  const foodOffering = parseMultiValueList(meta.foodType || asString(family?.food_type) || asString(host?.food_type));
+  const experienceCards = DEFAULT_EXPERIENCE_CARDS.map((card) => ({ title: card.title, body: card.description }));
+  const foodOffering = parseMultiValueList(home.foodType);
   const foodOfferingCards =
     foodOffering.length > 0
       ? foodOffering.map((item) => ({
@@ -683,7 +570,11 @@ export default async function HomeDetailPage({
           </section>
 
           <div className={styles.homeMainContent}>
-            {(home.journeyStory || home.specialExperience) ? (
+            {(home.journeyStory ||
+              home.specialExperience ||
+              imageUrls.length > 0 ||
+              visibleStayUnits.length > 0 ||
+              hasInactiveStayUnits) ? (
               <section style={{ display: "grid", gap: "12px" }}>
                 {home.journeyStory ? (
                   <div className={styles.contentTab} style={{ borderRadius: "16px", border: "1px solid #e2e8f0", padding: "20px 22px" }}>
@@ -871,6 +762,7 @@ export default async function HomeDetailPage({
                     {[
                       { label: "Speaks", value: home.languages.join(", ") || "Not shared yet" },
                       { label: "Family Type", value: home.houseType || "Not shared yet" },
+                      { label: "Home Type", value: home.homeType || "Not shared yet" },
                       {
                         label: "Hobbies",
                         value: parseMultiValueList(home.hostHobbies || "").length > 0 ? (
@@ -1050,19 +942,29 @@ export default async function HomeDetailPage({
                         scrollSnapAlign: "start",
                       }}
                     >
-                      {home.hostReels.length > 1 ? (
-                        <div
-                          style={{
-                            color: reel.isFeatured ? "#0f766e" : "#64748b",
-                            fontSize: "11px",
-                            fontWeight: 900,
-                            letterSpacing: "0.08em",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          {reel.isFeatured ? "Featured reel" : `Reel ${index + 1}`}
+                      <div style={{ display: "grid", gap: "3px" }}>
+                        {home.hostReels.length > 1 ? (
+                          <div
+                            style={{
+                              color: reel.isFeatured ? "#0f766e" : "#64748b",
+                              fontSize: "10px",
+                              fontWeight: 900,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            {reel.isFeatured ? "Featured reel" : `Reel ${index + 1}`}
+                          </div>
+                        ) : null}
+                        <div style={{ color: "#0f172a", fontSize: "15px", fontWeight: 800 }}>
+                          {reel.title || "Host reel"}
                         </div>
-                      ) : null}
+                        {reel.caption ? (
+                          <div style={{ color: "#64748b", fontSize: "12px", fontWeight: 600, lineHeight: 1.5 }}>
+                            {reel.caption}
+                          </div>
+                        ) : null}
+                      </div>
                       <div style={{ width: "100%", aspectRatio: "9 / 16", borderRadius: "22px", overflow: "hidden", background: "#0f172a" }}>
                         <video
                           src={reel.publicUrl}

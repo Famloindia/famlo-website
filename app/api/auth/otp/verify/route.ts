@@ -1,15 +1,29 @@
 import { NextResponse } from "next/server";
 import { createGuestSessionToken, getGuestCookieName, getGuestSessionMaxAge } from "@/lib/guest-auth";
+import { normalizeGuestPhone } from "@/lib/guest-identity";
+import { loadGuestSessionSnapshot } from "@/lib/guest-session";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
+type ExistingGuestProfile = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  city: string | null;
+  state: string | null;
+  about: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
+  avatar_url: string | null;
+  onboarding_completed: boolean | null;
+  updated_at: string | null;
+};
+
 function normalizePhone(input: string): string {
-  const clean = input.replace(/[^\d+]/g, "").trim();
-  const withoutPlus = clean.startsWith("+") ? clean.slice(1) : clean;
-  const normalized = withoutPlus.startsWith("91") ? withoutPlus : `91${withoutPlus}`;
-  if (!/^91\d{10}$/.test(normalized)) {
+  const normalized = normalizeGuestPhone(input);
+  if (!normalized || !/^\+91\d{10}$/.test(normalized)) {
     throw new Error("Please enter a valid Indian mobile number.");
   }
-  return normalized;
+  return normalized.replace(/^\+/, "");
 }
 
 function stablePhonePassword(phone: string): string {
@@ -20,6 +34,38 @@ function stablePhonePassword(phone: string): string {
 function deterministicGuestId(phone: string): string {
   const digest = Buffer.from(phone).toString("hex").padEnd(32, "0").slice(0, 32);
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
+}
+
+function scoreExistingGuestProfile(profile: ExistingGuestProfile): number {
+  let score = 0;
+  if (profile.onboarding_completed) score += 8;
+  if (profile.name) score += 2;
+  if (profile.email) score += 2;
+  if (profile.city) score += 1;
+  if (profile.state) score += 1;
+  if (profile.about) score += 3;
+  if (profile.date_of_birth) score += 2;
+  if (profile.gender) score += 1;
+  if (profile.avatar_url) score += 1;
+  return score;
+}
+
+function pickBestExistingGuestProfile(
+  profiles: ExistingGuestProfile[],
+  preferredUserId: string
+): ExistingGuestProfile | null {
+  if (profiles.length === 0) return null;
+
+  const preferred = profiles.find((profile) => profile.id === preferredUserId);
+  if (preferred) return preferred;
+
+  return profiles
+    .slice()
+    .sort((left, right) => {
+      const scoreDiff = scoreExistingGuestProfile(right) - scoreExistingGuestProfile(left);
+      if (scoreDiff !== 0) return scoreDiff;
+      return String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? ""));
+    })[0] ?? null;
 }
 
 function getJwtRole(token: string | undefined): string | null {
@@ -76,9 +122,33 @@ export async function POST(request: Request) {
           type: "magiclink"
         });
         if (loginError) throw loginError;
+        if (loginData.user?.id) {
+          await loadGuestSessionSnapshot(supabase, {
+            id: loginData.user.id,
+            email: loginData.user.email ?? null,
+            phone: loginData.user.phone ?? null,
+            provider:
+              typeof loginData.user.app_metadata?.provider === "string"
+                ? loginData.user.app_metadata.provider
+                : "email",
+            authKind: "supabase",
+          });
+        }
         return NextResponse.json({ success: true, session: loginData.session });
       }
 
+      if (data.user?.id) {
+        await loadGuestSessionSnapshot(supabase, {
+          id: data.user.id,
+          email: data.user.email ?? null,
+          phone: data.user.phone ?? null,
+          provider:
+            typeof data.user.app_metadata?.provider === "string"
+              ? data.user.app_metadata.provider
+              : "email",
+          authKind: "supabase",
+        });
+      }
       return NextResponse.json({ success: true, session: data.session });
     }
 
@@ -106,15 +176,13 @@ export async function POST(request: Request) {
           const deterministicPassword = stablePhonePassword(cleanPhone);
           let authUser = authUsers.users.find((user) => user.phone === cleanPhone) ?? null;
 
-          const { data: profile, error: pError } = await supabase
+          const { data: profileRows, error: pError } = await supabase
             .from("users")
-            .select("id, name, email, onboarding_completed")
+            .select("id, name, email, city, state, about, date_of_birth, gender, avatar_url, onboarding_completed, updated_at")
             .eq("phone", cleanPhone)
-            .maybeSingle();
+            .limit(20);
 
           if (pError) throw pError;
-
-          let userId = typeof profile?.id === "string" ? profile.id : authUser?.id ?? null;
 
           if (!authUser) {
             const { data: createdUser, error: createError } = await supabase.auth.admin.createUser({
@@ -134,7 +202,6 @@ export async function POST(request: Request) {
             }
 
             authUser = createdUser.user;
-            userId = createdUser.user.id;
           } else {
             const { error: updateError } = await supabase.auth.admin.updateUserById(authUser.id, {
               password: deterministicPassword,
@@ -152,34 +219,50 @@ export async function POST(request: Request) {
             }
           }
 
-          if (!userId) {
+          if (!authUser?.id) {
             throw new Error("Unable to resolve phone auth user.");
           }
+
+          const canonicalUserId = authUser.id;
+          const bestProfile = pickBestExistingGuestProfile(
+            ((profileRows ?? []) as ExistingGuestProfile[]).filter((profile) => typeof profile.id === "string" && profile.id.length > 0),
+            canonicalUserId
+          );
 
           const { error: upsertError } = await supabase
             .from("users")
             .upsert({
-              id: userId,
+              id: canonicalUserId,
               phone: cleanPhone,
-              email: profile?.email ?? null,
-              name: profile?.name ?? null,
+              email: bestProfile?.email ?? authUser.email ?? null,
+              name: bestProfile?.name ?? null,
+              city: bestProfile?.city ?? null,
+              state: bestProfile?.state ?? null,
+              about: bestProfile?.about ?? null,
+              date_of_birth: bestProfile?.date_of_birth ?? null,
+              gender: bestProfile?.gender ?? null,
+              avatar_url: bestProfile?.avatar_url ?? null,
               role: "guest",
-              onboarding_completed: Boolean(profile?.onboarding_completed),
+              onboarding_completed: Boolean(bestProfile?.onboarding_completed),
               auth_provider: "phone",
               updated_at: new Date().toISOString(),
             } as never, { onConflict: "id" });
 
           if (upsertError) throw upsertError;
 
-          const response = NextResponse.json({ success: true, customSession: true });
-          response.cookies.set(getGuestCookieName(), createGuestSessionToken(userId, cleanPhone), {
-            httpOnly: true,
-            sameSite: "lax",
-            secure: process.env.NODE_ENV === "production",
-            path: "/",
-            maxAge: getGuestSessionMaxAge(),
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            phone: cleanPhone,
+            password: deterministicPassword,
           });
-          return response;
+
+          if (signInError || !signInData.session) {
+            throw new Error(signInError?.message ?? "Unable to open phone session.");
+          }
+
+          return NextResponse.json({
+            success: true,
+            session: signInData.session,
+          });
         } catch (adminError) {
           console.warn("[auth.otp.verify] admin phone login fallback", adminError);
         }
@@ -198,19 +281,23 @@ export async function POST(request: Request) {
             userId: signInData.user.id,
           };
         } else {
-          const { data: existingProfile, error: profileError } = await supabase
+          const { data: existingProfiles, error: profileError } = await supabase
             .from("users")
             .select("id")
             .eq("phone", cleanPhone)
-            .maybeSingle();
+            .limit(20);
 
           if (profileError) {
             console.warn("[auth.otp.verify] guest profile lookup fallback", profileError);
           }
 
+          const canonicalProfileId =
+            Array.isArray(existingProfiles) && existingProfiles.length > 0 && typeof existingProfiles[0]?.id === "string"
+              ? existingProfiles[0].id
+              : null;
           const userId =
-            typeof existingProfile?.id === "string" && existingProfile.id.length > 0
-              ? existingProfile.id
+            canonicalProfileId && canonicalProfileId.length > 0
+              ? canonicalProfileId
               : deterministicGuestId(cleanPhone);
 
           const response = NextResponse.json({ success: true, customSession: true });

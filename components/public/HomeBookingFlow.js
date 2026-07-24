@@ -66,6 +66,7 @@ var react_1 = require("react");
 var lucide_react_1 = require("lucide-react");
 var ProfileCompletionForm_1 = require("@/components/account/ProfileCompletionForm");
 var AuthModal_1 = require("@/components/auth/AuthModal");
+var guest_session_client_1 = require("@/lib/guest-session-client");
 var user_profile_1 = require("@/lib/user-profile");
 var booking_time_1 = require("@/lib/booking-time");
 var host_interactions_1 = require("@/lib/host-interactions");
@@ -654,8 +655,7 @@ function HomeBookingFlow(_a) {
         return dayOccupancy.anyBooking;
     }
     var syncAuthState = (0, react_1.useCallback)(function () { return __awaiter(_this, void 0, void 0, function () {
-        var user, userRow, nextProfileComplete, error_1;
-        var _a, _b, _c;
+        var snapshot, resolvedUser, nextProfileComplete, error_1;
         return __generator(this, function (_d) {
             switch (_d.label) {
                 case 0:
@@ -664,10 +664,11 @@ function HomeBookingFlow(_a) {
                     _d.label = 1;
                 case 1:
                     _d.trys.push([1, 4, 5, 6]);
-                    return [4 /*yield*/, supabase.auth.getUser()];
+                    return [4 /*yield*/, (0, guest_session_client_1.fetchGuestSessionSnapshot)(supabase)];
                 case 2:
-                    user = (_d.sent()).data.user;
-                    if (!user) {
+                    snapshot = (_d.sent()).snapshot;
+                    resolvedUser = snapshot.user;
+                    if (!(resolvedUser === null || resolvedUser === void 0 ? void 0 : resolvedUser.id)) {
                         setCurrentUserId(null);
                         setCurrentUserEmail(null);
                         setGuestName(null);
@@ -676,36 +677,14 @@ function HomeBookingFlow(_a) {
                         setStep("login");
                         return [2 /*return*/, { userId: null, profileComplete: false }];
                     }
-                    return [4 /*yield*/, supabase
-                            .from("users")
-                            .select("name, phone, email, city, state, about, date_of_birth, gender")
-                            .eq("id", user.id)
-                            .maybeSingle()];
-                case 3:
-                    userRow = (_d.sent()).data;
-                    nextProfileComplete = (0, user_profile_1.isGuestProfileComplete)({
-                        id: user.id,
-                        name: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.name) === "string" ? userRow.name : null,
-                        phone: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.phone) === "string" ? userRow.phone : (_a = user.phone) !== null && _a !== void 0 ? _a : null,
-                        email: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.email) === "string" ? userRow.email : (_b = user.email) !== null && _b !== void 0 ? _b : null,
-                        city: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.city) === "string" ? userRow.city : null,
-                        state: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.state) === "string" ? userRow.state : null,
-                        onboarding_completed: false,
-                        avatar_url: null,
-                        about: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.about) === "string" ? userRow.about : null,
-                        date_of_birth: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.date_of_birth) === "string" ? userRow.date_of_birth : null,
-                        gender: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.gender) === "string" ? userRow.gender : null,
-                        kyc_status: null,
-                        id_document_url: null,
-                        id_document_type: null,
-                    });
-                    setCurrentUserId(user.id);
-                    setCurrentUserEmail((_c = user.email) !== null && _c !== void 0 ? _c : null);
-                    setGuestName(typeof (userRow === null || userRow === void 0 ? void 0 : userRow.name) === "string" ? userRow.name : null);
-                    setGuestCity(typeof (userRow === null || userRow === void 0 ? void 0 : userRow.city) === "string" ? userRow.city : null);
+                    nextProfileComplete = snapshot.profileComplete || (0, user_profile_1.isGuestProfileComplete)(snapshot.profile);
+                    setCurrentUserId(resolvedUser.id);
+                    setCurrentUserEmail(resolvedUser.email || null);
+                    setGuestName((snapshot.profile === null || snapshot.profile === void 0 ? void 0 : snapshot.profile.name) || null);
+                    setGuestCity((snapshot.profile === null || snapshot.profile === void 0 ? void 0 : snapshot.profile.city) || ((snapshot.profile === null || snapshot.profile === void 0 ? void 0 : snapshot.profile.last_location_label) || null));
                     setProfileComplete(nextProfileComplete);
-                    setStep(resolveNextStep(user.id, nextProfileComplete));
-                    return [2 /*return*/, { userId: user.id, profileComplete: nextProfileComplete }];
+                    setStep(resolveNextStep(resolvedUser.id, nextProfileComplete));
+                    return [2 /*return*/, { userId: resolvedUser.id, profileComplete: nextProfileComplete }];
                 case 4:
                     error_1 = _d.sent();
                     console.error("[booking.flow] failed to sync auth state", error_1);

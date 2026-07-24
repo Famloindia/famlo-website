@@ -11,6 +11,7 @@ import {
   type FamilyScheduleDraft,
 } from "@/lib/family-profile-editor";
 import type { HostListingMeta } from "@/lib/host-listing-meta";
+import type { HostPropertyListingProfile } from "@/lib/host-property-profile";
 
 const profile: FamilyProfileDraft = {
   hostDisplayName: "Asha Host",
@@ -98,6 +99,54 @@ const photos: FamilyPhotoItem[] = [
   },
 ];
 
+const canonicalProfile: HostPropertyListingProfile = {
+  identity: {
+    userId: "user-a",
+    displayName: profile.hostDisplayName,
+    profilePhotoUrl: profile.hostSelfieUrl,
+    hobbies: ["Cooking", "Travel"],
+    languages: [],
+    biography: listing.hostBio,
+  },
+  property: {
+    familyId: "family-b",
+    hostId: "host-b",
+    propertyName: listing.propertyName,
+    listingTitle: listing.listingTitle,
+    hostBio: listing.hostBio,
+    city: profile.city,
+    state: profile.state,
+    locality: profile.cityNeighbourhood,
+    journeyStory: listing.journeyStory,
+    specialExperience: listing.specialExperience,
+    localExperience: listing.localExperience,
+    culturalOffering: listing.culturalOffering,
+    homeType: listing.houseType,
+    interactionType: listing.interactionType,
+    houseRules: ["No smoking"],
+    amenities: ["Wifi"],
+    foodTypes: ["Vegetarian"],
+    includedItems: ["Breakfast"],
+    bathroomType: listing.bathroomType,
+    checkInTime: "12:00",
+    checkOutTime: "10:00",
+    commonAreas: [],
+    streetAddress: listing.propertyAddress,
+    googleMapsLink: listing.googleMapsLink,
+    exactLatitude: null,
+    exactLongitude: null,
+    publicLatitude: null,
+    publicLongitude: null,
+    nearbyPlaces: [],
+    neighborhoodDescription: "",
+    accessibilityDescription: "",
+    pincode: "",
+    familyType: "",
+  },
+  photos: [{ id: "photo-1", url: photos[0]!.url, isPrimary: true, createdAt: "", source: "family_photos" }],
+  reels: [],
+};
+
 test("Profile builders stay scoped to the selected family payload", () => {
   const meta: HostListingMeta = {
     hostDisplayName: "Property B Host",
@@ -167,7 +216,7 @@ test("Shared profile save helper posts the selected family payload", async () =>
       url: String(input),
       body: typeof init?.body === "string" ? init.body : "",
     });
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, profile: canonicalProfile }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -185,11 +234,11 @@ test("Shared profile save helper posts the selected family payload", async () =>
 
     assert.equal(result.ok, true);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0]?.url, "/api/onboarding/home/dashboard-save");
+    assert.equal(calls[0]?.url, "/api/host/listing-profile");
 
-    const payload = JSON.parse(calls[0]?.body ?? "{}") as { familyId?: string; profile?: { hostDisplayName?: string } };
+    const payload = JSON.parse(calls[0]?.body ?? "{}") as { familyId?: string; identity?: { displayName?: string } };
     assert.equal(payload.familyId, "family-b");
-    assert.equal(payload.profile?.hostDisplayName, "Asha Host");
+    assert.equal(payload.identity?.displayName, "Asha Host");
   } finally {
     global.fetch = originalFetch;
   }
@@ -201,7 +250,7 @@ test("Profile save helper preserves listing and profile fields for the selected 
 
   global.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ body: typeof init?.body === "string" ? init.body : "" });
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, profile: canonicalProfile }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -210,7 +259,7 @@ test("Profile save helper preserves listing and profile fields for the selected 
   try {
     await saveFamilyProfileWorkspace({
       familyId: "family-c",
-      profile,
+      profile: { ...profile, languages: "English, Hindi", hostHobbies: "Cooking, Pottery" },
       listing,
       schedule,
       photos,
@@ -219,12 +268,14 @@ test("Profile save helper preserves listing and profile fields for the selected 
 
     const payload = JSON.parse(calls[0]?.body ?? "{}") as {
       familyId?: string;
-      listing?: { propertyName?: string };
-      profile?: { hostDisplayName?: string };
+      property?: { propertyName?: string };
+      identity?: { displayName?: string; languages?: string; hobbies?: string };
     };
     assert.equal(payload.familyId, "family-c");
-    assert.equal(payload.listing?.propertyName, "Sun Courtyard Villa");
-    assert.equal(payload.profile?.hostDisplayName, "Asha Host");
+    assert.equal(payload.property?.propertyName, "Sun Courtyard Villa");
+    assert.equal(payload.identity?.displayName, "Asha Host");
+    assert.equal(payload.identity?.languages, "English, Hindi");
+    assert.equal(payload.identity?.hobbies, "Cooking, Pottery");
   } finally {
     global.fetch = originalFetch;
   }
@@ -236,7 +287,7 @@ test("Profile save helper includes optional GSTIN compliance details", async () 
 
   global.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ body: typeof init?.body === "string" ? init.body : "" });
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, profile: canonicalProfile }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -253,10 +304,10 @@ test("Profile save helper includes optional GSTIN compliance details", async () 
     });
 
     const payload = JSON.parse(calls[0]?.body ?? "{}") as {
-      compliancePatch?: { gstin?: string; platformAgreementAcceptedAt?: string };
+      compliance?: { gstin?: string; platformAgreementAcceptedAt?: string };
     };
-    assert.equal(payload.compliancePatch?.gstin, "27ABCDE1234F1Z5");
-    assert.equal(payload.compliancePatch?.platformAgreementAcceptedAt, "2026-05-24T00:00:00.000Z");
+    assert.equal(payload.compliance?.gstin, "27ABCDE1234F1Z5");
+    assert.equal(payload.compliance?.platformAgreementAcceptedAt, "2026-05-24T00:00:00.000Z");
   } finally {
     global.fetch = originalFetch;
   }

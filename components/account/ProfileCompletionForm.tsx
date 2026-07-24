@@ -48,7 +48,7 @@ export function ProfileCompletionForm({
   compact = false,
   onSuccess,
 }: Readonly<ProfileCompletionFormProps>): React.JSX.Element {
-  const { user, profile, refreshProfile } = useUser();
+  const { user, profile, refreshAuth } = useUser();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [manualEditMode, setManualEditMode] = useState(false);
@@ -199,7 +199,24 @@ export function ProfileCompletionForm({
         throw new Error(typeof data.error === "string" ? data.error : "Profile save failed.");
       }
 
-      await refreshProfile();
+      const savedProfile = (data.profile as Record<string, unknown> | undefined) ?? null;
+      if (!savedProfile || typeof savedProfile.id !== "string") {
+        throw new Error("Profile save could not be verified.");
+      }
+
+      const returnedName = typeof savedProfile.name === "string" ? savedProfile.name.trim() : "";
+      const returnedCity = typeof savedProfile.city === "string" ? savedProfile.city.trim() : "";
+      const returnedState = typeof savedProfile.state === "string" ? savedProfile.state.trim() : "";
+
+      if (
+        returnedName !== resolvedForm.name.trim() ||
+        returnedCity !== resolvedForm.city.trim() ||
+        returnedState !== resolvedForm.state.trim()
+      ) {
+        throw new Error("Profile save could not be verified. Please try again.");
+      }
+
+      await refreshAuth();
       if (onSuccess) await onSuccess();
       setManualEditMode(false);
       setMessage({

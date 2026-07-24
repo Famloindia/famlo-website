@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BadgeCheck, ChevronLeft } from "lucide-react";
+import { notFound, permanentRedirect } from "next/navigation";
 
 import styles from "@/components/public/RoomDetailPage.module.css";
 import { RoomBookingPanel } from "@/components/public/RoomBookingPanel";
@@ -191,20 +192,14 @@ export default async function HostRoomPage({
   const { slug, roomId } = await params;
   const supabase = createAdminSupabaseClient();
   const resolvedRoute = await resolveHomeRoute(supabase, slug);
-  const resolved = resolvedRoute.hostId || resolvedRoute.familyId
-    ? resolvedRoute
-    : {
-        hostId: slug,
-        familyId: null,
-        hostUserId: null,
-        hostRow: null,
-        familyRow: null,
-      };
+  const familyId = resolvedRoute.familyId;
+  if (!familyId || !resolvedRoute.familyRow) notFound();
+  if (resolvedRoute.kind === "legacy-host") {
+    permanentRedirect(`/host/${encodeURIComponent(familyId)}/room/${encodeURIComponent(roomId)}`);
+  }
+  const resolved = resolvedRoute;
 
-  const canonicalId = resolved.familyId ?? resolved.hostId ?? slug ?? roomId;
-  const routeId = canonicalId ?? slug ?? roomId;
-
-  const familyId = resolved.familyId;
+  const routeId = familyId;
   const hostId = resolved.hostId;
 
   const meta = parseHostListingMeta(asString(resolved.familyRow?.admin_notes) || null);
@@ -224,38 +219,10 @@ export default async function HostRoomPage({
   const directRoomMatchesFamily = !directRoom || !resolved.familyId || !directRoom.legacyFamilyId || directRoom.legacyFamilyId === resolved.familyId;
   const resolvedRoom =
     matchedFallbackRoom ??
-    (directRoomMatchesHost && directRoomMatchesFamily ? hydratedDirectRoom : null) ??
-    fallbackRoom.find((unit) => unit.id === roomId || unit.unitKey === roomId) ??
-    fallbackRoom.find((unit) => unit.isPrimary) ??
-    fallbackRoom[0] ??
-    {
-      id: roomId || routeId,
-      hostId: resolved.hostId ?? null,
-      legacyFamilyId: resolved.familyId ?? null,
-      unitKey: "primary",
-      name: "Primary room",
-      unitType: "private_room",
-      description: "A warm, local room designed for comfortable travel and an easy booking rhythm.",
-      maxGuests: 1,
-      bedInfo: "1 bed",
-      bathroomType: "Shared or attached",
-      toiletTypes: [],
-      roomSizeSqm: null,
-      priceMorning: 0,
-      priceAfternoon: 0,
-      priceEvening: 0,
-      priceFullday: 0,
-      quarterEnabled: true,
-      isActive: true,
-      isPrimary: true,
-      amenities: [],
-      photos: [],
-      blockedDates: [],
-      sortOrder: 0,
-      source: "fallback",
-    };
+    (directRoomMatchesHost && directRoomMatchesFamily ? hydratedDirectRoom : null);
+  if (!resolvedRoom) notFound();
 
-  const room = await hydrateRoomWithBlockedDates(supabase, resolvedRoom as StayUnitRecord);
+  const room = await hydrateRoomWithBlockedDates(supabase, resolvedRoom);
   const roomRatingSummary = await getCachedStayUnitRatingSummary(room.id);
   const homeName = meta.listingTitle || asString(resolved.familyRow?.name) || asString(resolved.hostRow?.display_name) || "Famlo Home";
   const hostName =

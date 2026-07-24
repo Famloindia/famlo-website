@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { hasValidBackofficeSession } from "@/lib/admin-auth";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -12,5 +13,7 @@ export async function POST(req: NextRequest) {
   const supabase = createAdminSupabaseClient();
   const { error } = await supabase.from("hero_banners").insert({ image_url, alt_text, sort_order, is_active: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  revalidateTag("homepage-discovery", "max");
+  revalidatePath("/");
   return NextResponse.json({ ok: true });
 }

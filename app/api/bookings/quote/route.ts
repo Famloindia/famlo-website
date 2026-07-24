@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { buildBookingQuote, type BookingQuoteInput } from "@/lib/booking-compat";
 import { getErrorDiagnostics, getErrorMessage } from "@/lib/error-utils";
-import { resolveAuthenticatedUser } from "@/lib/request-user";
+import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, req);
+    const authUser = await resolveStrictAuthenticatedUser(supabase, req);
     if (!authUser) {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }

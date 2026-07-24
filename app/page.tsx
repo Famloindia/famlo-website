@@ -9,7 +9,7 @@ import { getMostInteractedHostScores } from "@/lib/host-interactions";
 export const revalidate = 300;
 const MOST_INTERACTED_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOST_INTERACTED_HOSTS === "true";
 const HOMEPAGE_DATA_TIMEOUT_MS = 3500;
-const HOMEPAGE_REELS_TIMEOUT_MS = 2500;
+const HOMEPAGE_REELS_TIMEOUT_MS = 8000;
 const EMPTY_HOMEPAGE_DATA: HomepageData = {
   homes: [],
   companions: [],
@@ -47,15 +47,15 @@ const getCachedMostInteractedHostScores = unstable_cache(
 );
 
 export default async function HomePage(): Promise<React.JSX.Element> {
-  const data = await withTimeoutFallback(
-    getHomepageData(),
-    EMPTY_HOMEPAGE_DATA,
-    "Discovery data",
-    HOMEPAGE_DATA_TIMEOUT_MS
-  );
-  const hostReels = data.hostReels.length > 0
-    ? data.hostReels
-    : await withTimeoutFallback(getHomepageReelsData(), [], "Host reels data", HOMEPAGE_REELS_TIMEOUT_MS);
+  const [data, hostReels] = await Promise.all([
+    withTimeoutFallback(
+      getHomepageData(),
+      EMPTY_HOMEPAGE_DATA,
+      "Discovery data",
+      HOMEPAGE_DATA_TIMEOUT_MS
+    ),
+    withTimeoutFallback(getHomepageReelsData(), [], "Host reels data", HOMEPAGE_REELS_TIMEOUT_MS),
+  ]);
   const interactionScores = MOST_INTERACTED_ENABLED
     ? new Map(
         await getCachedMostInteractedHostScores(

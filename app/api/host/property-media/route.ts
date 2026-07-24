@@ -77,10 +77,13 @@ async function ensureSinglePrimaryPhoto(
 
 function revalidatePropertyPaths(familyId: string): void {
   revalidateTag("homepage-discovery", "max");
+  revalidateTag("home-route-resolution", "max");
   revalidateTag("home-detail-public-data", "max");
+  revalidateTag("public-home-stay-data", "max");
   revalidatePath("/");
   revalidatePath("/homestays");
   revalidatePath(`/homes/${familyId}`);
+  revalidatePath("/homestay/[slug]/[id]", "page");
   revalidatePath(`/partnerslogin/home/dashboard?family=${familyId}&tab=profile`);
 }
 

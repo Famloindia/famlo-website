@@ -39,6 +39,8 @@ export type HostListingMeta = {
     id?: string;
     publicUrl?: string;
     storageKey?: string;
+    title?: string;
+    caption?: string;
     mimeType?: string;
     sizeBytes?: number | null;
     durationSeconds?: number | null;

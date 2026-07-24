@@ -2,7 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 import { resolveMessageThread, type MessageThreadResolution } from "@/lib/chat-thread";
-import { resolveAuthenticatedUser } from "@/lib/request-user";
+import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
+import { HOST_SESSION_COOKIE, readHostSessionToken } from "@/lib/host-session-token";
 
 type ConversationRecord = {
   id: string;
@@ -359,7 +360,7 @@ export async function resolveAuthorizedHostSession(
   supabase: SupabaseClient,
   request?: Request
 ): Promise<AuthorizedHostSession | null> {
-  const authUser = await resolveAuthenticatedUser(supabase, request);
+  const authUser = await resolveStrictAuthenticatedUser(supabase, request);
 
   if (authUser?.id) {
     const hostRecord = await fetchHostRecord(supabase, { hostUserId: authUser.id });
@@ -384,8 +385,9 @@ export async function resolveAuthorizedHostSession(
   }
 
   const cookieStore = await cookies();
-  const cookieFamilyId = cookieStore.get("famlo_host_family_id")?.value ?? "";
-  if (!cookieFamilyId) return null;
+  const signedSession = readHostSessionToken(cookieStore.get(HOST_SESSION_COOKIE)?.value);
+  if (!signedSession) return null;
+  const cookieFamilyId = signedSession.familyId;
 
   const hostRecord = await fetchHostRecord(supabase, { familyId: cookieFamilyId });
   const resolvedHostUserId = normalizeString(hostRecord?.user_id);

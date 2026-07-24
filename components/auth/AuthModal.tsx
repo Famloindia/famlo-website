@@ -116,8 +116,10 @@ export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModa
         if (signInError) throw signInError;
       }
 
-      await refreshAuth();
+      const snapshot = await refreshAuth();
       if (skipProfileStep) {
+        onClose();
+      } else if (snapshot?.profileComplete) {
         onClose();
       } else {
         setStep("profile");
@@ -227,22 +229,25 @@ export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModa
           background: rgba(15, 23, 42, 0.6);
           backdrop-filter: blur(8px);
           z-index: 9999;
-          overflow: hidden;
+          overflow-y: auto;
           overscroll-behavior: contain;
-          display: block;
+          display: grid;
+          place-items: center;
+          min-height: 100dvh;
+          padding:
+            max(16px, env(safe-area-inset-top))
+            16px
+            max(16px, env(safe-area-inset-bottom));
         }
 
         .modal-content {
           background: #fff;
-          width: calc(100% - 32px);
+          width: min(100%, 500px);
           max-width: 500px;
-          max-height: calc(100vh - 40px);
+          max-height: calc(100dvh - 32px);
           border-radius: 24px;
           padding: 1.75rem;
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
+          position: relative;
           box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
           overflow-y: auto;
           scrollbar-width: thin;
@@ -251,8 +256,8 @@ export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModa
         }
 
         @keyframes modal-pop {
-          from { opacity: 0; transform: translate(-50%, -48%) scale(0.98); }
-          to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          from { opacity: 0; transform: translateY(12px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
         }
 
         .modal-content::-webkit-scrollbar {
@@ -410,6 +415,25 @@ export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModa
           letter-spacing: 0.4rem;
           font-weight: 800;
           font-size: 1.75rem;
+        }
+
+        @media (max-width: 520px) {
+          .modal-overlay {
+            padding:
+              max(12px, env(safe-area-inset-top))
+              12px
+              max(12px, env(safe-area-inset-bottom));
+          }
+
+          .modal-content {
+            max-height: calc(100dvh - 24px);
+          }
+        }
+
+        @media (max-height: 720px) {
+          .modal-content {
+            max-height: calc(100dvh - 20px);
+          }
         }
 
         .submit-btn {

@@ -3,10 +3,14 @@ import { NextResponse } from "next/server";
 
 import { isFamloProDashboardEnabled, loadHostProAccess, resolveHostDashboardHref } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
+import { resolveAuthorizedHostSession } from "@/lib/chat-access";
+import { HOST_SESSION_COOKIE } from "@/lib/host-session-token";
 
 export async function GET(): Promise<NextResponse> {
   const cookieStore = await cookies();
-  const familyId = cookieStore.get("famlo_host_family_id")?.value ?? "";
+  const supabase = createAdminSupabaseClient();
+  const authorizedSession = await resolveAuthorizedHostSession(supabase);
+  const familyId = authorizedSession?.familyId ?? "";
 
   if (!familyId) {
     return NextResponse.json({
@@ -17,7 +21,6 @@ export async function GET(): Promise<NextResponse> {
   }
 
   try {
-    const supabase = createAdminSupabaseClient();
     const { data: family, error: familyError } = await supabase
       .from("families")
       .select("id,user_id,name")
@@ -75,6 +78,12 @@ export async function GET(): Promise<NextResponse> {
 export async function DELETE(): Promise<NextResponse> {
   const response = NextResponse.json({ success: true });
   response.cookies.set("famlo_host_family_id", "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+  response.cookies.set(HOST_SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
     path: "/",

@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 
 import { HomeBookingFlow } from "@/components/public/HomeBookingFlow";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
@@ -134,8 +134,9 @@ export default async function BookingPage({
   const family = resolved.familyRow;
   const host = resolved.hostRow;
 
-  if (!family && !host) {
-    notFound();
+  if (!resolved.familyId || !family) notFound();
+  if (resolved.kind === "legacy-host") {
+    permanentRedirect(`/homes/${encodeURIComponent(resolved.familyId)}/book`);
   }
 
   const isAccepting = Boolean(family?.is_accepting ?? host?.is_accepting);

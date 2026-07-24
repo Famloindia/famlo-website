@@ -267,6 +267,8 @@ test("POST /api/host/property-reels saves canonical metadata", async () => {
     user_id: "user-1",
     storage_key: "property-media/family-1/reels/reel-2.mp4",
     public_url: "https://cdn.example.com/property-media/family-1/reels/reel-2.mp4",
+    title: "Host reel",
+    caption: "",
     mime_type: "video/mp4",
     size_bytes: 191424,
     duration_seconds: 12.5,
@@ -289,6 +291,8 @@ test("resolver loads dashboard reel from host_property_reels before legacy metad
         family_id: "family-1",
         storage_key: "property-media/family-1/reels/reel-canonical.mp4",
         public_url: "https://cdn.example.com/reel-canonical.mp4",
+        title: "Courtyard evenings",
+        caption: "Tea and conversations with guests.",
         mime_type: "video/mp4",
         size_bytes: 1234,
         duration_seconds: 11,
@@ -323,6 +327,48 @@ test("resolver loads dashboard reel from host_property_reels before legacy metad
   assert.equal(media.debug.reelSource, "host_property_reels");
   assert.equal(media.reels[0]?.publicUrl, "https://cdn.example.com/reel-canonical.mp4");
   assert.equal(media.reels[0]?.storageKey, "property-media/family-1/reels/reel-canonical.mp4");
+  assert.equal(media.reels[0]?.title, "Courtyard evenings");
+  assert.equal(media.reels[0]?.caption, "Tea and conversations with guests.");
+});
+
+test("PATCH /api/host/property-reels updates a family-scoped reel title", async () => {
+  seedRouteDatabase();
+  routeState.db.host_property_reels = [
+    {
+      id: "reel-title",
+      family_id: "family-1",
+      host_id: "host-1",
+      user_id: "user-1",
+      storage_key: "property-media/family-1/reels/title.mp4",
+      public_url: "https://cdn.example.com/title.mp4",
+      title: "Old title",
+      caption: "",
+      mime_type: "video/mp4",
+      size_bytes: 2000,
+      is_featured: true,
+      status: "active",
+      created_at: "2026-05-25T11:00:00.000Z",
+      updated_at: "2026-05-25T11:00:00.000Z",
+    },
+  ];
+
+  const response = await propertyReelsRoute.PATCH(
+    new Request("http://localhost/api/host/property-reels", {
+      method: "PATCH",
+      body: JSON.stringify({
+        familyId: "family-1",
+        reelId: "reel-title",
+        action: "update_metadata",
+        title: "Evening on our terrace",
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+  const payload = (await response.json()) as { reel?: { title?: string } };
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.reel?.title, "Evening on our terrace");
+  assert.equal(routeState.db.host_property_reels?.[0]?.title, "Evening on our terrace");
 });
 
 test("resolver returns featured canonical reel first for public home page", async () => {

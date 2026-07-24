@@ -37,6 +37,7 @@ import {
 
 import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { fetchGuestSessionSnapshot } from "@/lib/guest-session-client";
 import { isGuestProfileComplete } from "@/lib/user-profile";
 import type { HomeCardRecord } from "@/lib/discovery";
 import { getTodayInIndia } from "@/lib/booking-time";
@@ -791,11 +792,10 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
     setAuthReady(false);
 
     try {
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
+      const { snapshot } = await fetchGuestSessionSnapshot(supabase);
+      const resolvedUser = snapshot.user;
 
-      if (!user) {
+      if (!resolvedUser?.id) {
         setCurrentUserId(null);
         setCurrentUserEmail(null);
         setGuestName(null);
@@ -805,34 +805,14 @@ export function HomeBookingFlow({ home, existingBookings = [], stayUnits = [] }:
         return { userId: null, profileComplete: false };
       }
 
-      const { data: userRow } = await supabase
-        .from("users")
-        .select("name, phone, email, city, state, about, date_of_birth, gender")
-        .eq("id", user.id)
-        .maybeSingle();
-      const nextProfileComplete = isGuestProfileComplete({
-        id: user.id,
-        name: typeof userRow?.name === "string" ? userRow.name : null,
-        phone: typeof userRow?.phone === "string" ? userRow.phone : user.phone ?? null,
-        email: typeof userRow?.email === "string" ? userRow.email : user.email ?? null,
-        city: typeof userRow?.city === "string" ? userRow.city : null,
-        state: typeof userRow?.state === "string" ? userRow.state : null,
-        onboarding_completed: false,
-        avatar_url: null,
-        about: typeof userRow?.about === "string" ? userRow.about : null,
-        date_of_birth: typeof userRow?.date_of_birth === "string" ? userRow.date_of_birth : null,
-        gender: typeof userRow?.gender === "string" ? userRow.gender : null,
-        kyc_status: null,
-        id_document_url: null,
-        id_document_type: null,
-      });
-      setCurrentUserId(user.id);
-      setCurrentUserEmail(user.email ?? null);
-      setGuestName(typeof userRow?.name === "string" ? userRow.name : null);
-      setGuestCity(typeof userRow?.city === "string" ? userRow.city : null);
+      const nextProfileComplete = snapshot.profileComplete || isGuestProfileComplete(snapshot.profile);
+      setCurrentUserId(resolvedUser.id);
+      setCurrentUserEmail(resolvedUser.email ?? null);
+      setGuestName(snapshot.profile?.name ?? null);
+      setGuestCity(snapshot.profile?.city ?? snapshot.profile?.last_location_label ?? null);
       setProfileComplete(nextProfileComplete);
-      setStep(resolveNextStep(user.id, nextProfileComplete));
-      return { userId: user.id, profileComplete: nextProfileComplete };
+      setStep(resolveNextStep(resolvedUser.id, nextProfileComplete));
+      return { userId: resolvedUser.id, profileComplete: nextProfileComplete };
     } catch (error) {
       console.error("[booking.flow] failed to sync auth state", error);
       setCurrentUserId(null);

@@ -9,6 +9,7 @@ import {
   buildPhotosFromAllPhotos,
   buildProfileFromFamily,
   buildScheduleFromFamily,
+  loadFamilyProfileWorkspace,
   parseFamilyMeta,
   saveFamilyProfileWorkspace,
 } from "@/lib/family-profile-editor";
@@ -210,6 +211,11 @@ export function HostDashboardEditor({
   const [propertyReels, setPropertyReels] = useState<PropertyReelItem[]>(
     () => propertyReelsByFamilyId[initialFamilyId] ?? []
   );
+  const [activeTab, setActiveTab] = useState(() => normalizeDashboardTab(initialTab));
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // FIX 1 + 2 + 6 — reset ALL state when active listing changes or props refresh
   useEffect(() => {
@@ -221,11 +227,39 @@ export function HostDashboardEditor({
     setPropertyReels(propertyReelsByFamilyId[activeFamilyId] ?? []);
   }, [activeFamilyId, activeFamily, meta, allPhotos, hostTaxDetails, propertyReelsByFamilyId]); 
 
-  const [activeTab, setActiveTab] = useState(() => normalizeDashboardTab(initialTab));
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadFamilyProfileWorkspace(activeFamilyId)
+      .then((workspace) => {
+        if (cancelled) return;
+        setProfile((current) => ({
+          ...workspace.profile,
+          email: current.email,
+          mobileNumber: current.mobileNumber,
+          hostCatchphrase: current.hostCatchphrase,
+        }));
+        setListing((current) => ({
+          ...workspace.listing,
+          priceMorning: current.priceMorning,
+          priceAfternoon: current.priceAfternoon,
+          priceEvening: current.priceEvening,
+          priceFullday: current.priceFullday,
+        }));
+        setPhotos(workspace.photos);
+        setPropertyReels(workspace.reels);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setMessage({
+          type: "error",
+          text: error instanceof Error ? error.message : "Unable to load the saved listing profile.",
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFamilyId]);
+
   const [localBookingRows, setLocalBookingRows] = useState<Array<Record<string, unknown>>>(bookingRows);
   const [bookingRowsLoading, setBookingRowsLoading] = useState(false);
   const [bookingRowsRequestedForFamilyId, setBookingRowsRequestedForFamilyId] = useState<string | null>(
@@ -430,11 +464,23 @@ export function HostDashboardEditor({
 
         if (result.ok) {
           setMessage({ type: "success", text: "Listing updated live!" });
-          if (options?.updatedSchedule) setSchedule(options.updatedSchedule);
-          if (options?.updatedListing) setListing(options.updatedListing);
-          if (options?.updatedProfile) setProfile(options.updatedProfile);
-          if (options?.updatedPhotos) setPhotos(options.updatedPhotos);
-          if (options?.updatedCompliance) setCompliance(options.updatedCompliance);
+          setProfile({
+            ...result.workspace.profile,
+            email: finalProfile.email,
+            mobileNumber: finalProfile.mobileNumber,
+            hostCatchphrase: finalProfile.hostCatchphrase,
+          });
+          setListing({
+            ...result.workspace.listing,
+            priceMorning: finalListing.priceMorning,
+            priceAfternoon: finalListing.priceAfternoon,
+            priceEvening: finalListing.priceEvening,
+            priceFullday: finalListing.priceFullday,
+          });
+          setPhotos(result.workspace.photos);
+          setPropertyReels(result.workspace.reels);
+          setSchedule(finalSchedule);
+          setCompliance(finalCompliance);
         } else {
           setMessage({ type: "error", text: result.error });
         }
@@ -446,7 +492,7 @@ export function HostDashboardEditor({
         setTimeout(() => setMessage(null), 5000);
       }
     },
-    [activeFamilyId, photos, schedule, listing, profile]
+    [activeFamilyId, listing, photos, profile, schedule]
   );
 
   const revenueBookings = useMemo(

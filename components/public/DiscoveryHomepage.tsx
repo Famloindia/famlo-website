@@ -8,9 +8,14 @@ import { useRouter } from "next/navigation";
 import { useUser } from "@/components/auth/UserContext";
 import type { HomeCardRecord, CompanionRecord, AdRecord, StoryRecord, HomepageReelRecord } from "@/lib/discovery";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
+import { recordPublicReelView } from "@/lib/public-reel-view";
 import { buildHomestayPath } from "@/lib/slug";
 import { readRecentViews, type RecentViewItem } from "@/lib/recent-views";
 import { HomePageCard } from "@/components/public/HomePageCard";
+import DestinationAutocomplete from "@/components/public/DestinationAutocomplete";
+import { buildDiscoverySearchHref, type DestinationSuggestion } from "@/lib/destination-autocomplete";
+import { DISCOVERY_STAY_FILTERS, matchesDiscoveryStayFilter, type DiscoveryStayFilter } from "@/lib/discovery-filters";
+import { matchesDiscoveryQuery } from "@/lib/discovery-search";
 import {
   buildPopularDestinationCards,
   getDestinationImage,
@@ -220,18 +225,6 @@ function isAdLive(ad: AdRecord): boolean {
   return isNowInDailyWindow(zoned.minutes, ad.daily_start_time, ad.daily_end_time);
 }
 
-const STAY_FILTERS = [
-  "All",
-  "Homestay",
-  "Beachside",
-  "With pool",
-  "Pet friendly",
-  "Under ₹2500",
-  "Instant book",
-] as const;
-
-type StayFilter = (typeof STAY_FILTERS)[number];
-
 const FALLBACK_HERO_GRADIENT = "linear-gradient(135deg, #052e2b 0%, #14532d 38%, #0f172a 100%)";
 
 function getLocalDateInputValue(date: Date): string {
@@ -261,40 +254,6 @@ function dedupeHomes(homes: HomeCardRecord[]): HomeCardRecord[] {
     seen.add(key);
     return true;
   });
-}
-
-function getHomeSearchText(home: HomeCardRecord): string {
-  return [
-    home.name,
-    home.listingTitle,
-    home.city,
-    home.state,
-    home.village,
-    home.description,
-    home.culturalOffering,
-    ...home.amenities,
-    ...home.houseRules,
-    ...home.includedItems,
-  ]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .join(" ")
-    .toLowerCase();
-}
-
-function matchesStayFilter(home: HomeCardRecord, filter: StayFilter): boolean {
-  if (filter === "All") return true;
-  if (filter === "Homestay") return true;
-
-  const text = getHomeSearchText(home);
-  if (filter === "Beachside") return /\b(beach|beachside|sea|coast|coastal|goa)\b/.test(text);
-  if (filter === "With pool") return /\b(pool|swimming)\b/.test(text);
-  if (filter === "Pet friendly") return /\b(pet|pets|dog|cat)\b/.test(text);
-  if (filter === "Under ₹2500") {
-    const price = minPrice(home);
-    return price > 0 && price <= 2500;
-  }
-  if (filter === "Instant book") return home.isActive !== false && home.isAccepting !== false && home.bookingRequiresHostApproval !== true;
-  return true;
 }
 
 function sortTopRatedHomes(homes: HomeCardRecord[]): HomeCardRecord[] {
@@ -527,8 +486,8 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
 /* ═══════════════════════════════════════════════════════════════
    SECTION WRAPPER — full width content
 ═══════════════════════════════════════════════════════════════ */
-function Section({ title, subtitle, seeAllHref, dark = false, id, children }: {
-  title: string; subtitle?: string; seeAllHref?: string; dark?: boolean; id?: string; children: React.ReactNode;
+function Section({ title, subtitle, seeAllHref, titleHref, dark = false, id, children }: {
+  title: string; subtitle?: string; seeAllHref?: string; titleHref?: string; dark?: boolean; id?: string; children: React.ReactNode;
 }) {
   return (
     <section id={id} className="homepage-section" style={{
@@ -543,7 +502,7 @@ function Section({ title, subtitle, seeAllHref, dark = false, id, children }: {
               fontSize: "clamp(16px, 2.5vw, 22px)", fontWeight: 700,
               color: dark ? "#fff" : "#0f172a", margin: 0, letterSpacing: "0",
               fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
-            }}>{title}</h2>
+            }}>{titleHref ? <Link href={titleHref} style={{ color: "inherit", textDecoration: "none" }}>{title}</Link> : title}</h2>
             {subtitle ? <p>{subtitle}</p> : null}
           </div>
           {seeAllHref && (
@@ -794,11 +753,11 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
   const [showAuth, setShowAuth] = useState(false);
   const [pending, setPending] = useState<(() => void) | null>(null);
   const [query, setQuery] = useState("");
-  const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
+  const [selectedDestination, setSelectedDestination] = useState<DestinationSuggestion | null>(null);
   const [checkInDate, setCheckInDate] = useState("");
   const [checkOutDate, setCheckOutDate] = useState("");
   const [guestCount, setGuestCount] = useState("2");
-  const [selectedStayFilter, setSelectedStayFilter] = useState<StayFilter>("All");
+  const [selectedStayFilter, setSelectedStayFilter] = useState<DiscoveryStayFilter>("All");
   const [selectedReel, setSelectedReel] = useState<HomepageReelRecord | null>(null);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [searchCoords, setSearchCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -813,15 +772,7 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
   const safeHeroBanners = useMemo(() => {
     return (heroBanners ?? []).filter((banner) => isSafeHomepageImageUrl(banner.imageUrl));
   }, [heroBanners]);
-  const listingHeroImage = useMemo(() => {
-    const matchedHome = homes.find((home) => isSafeHomepageImageUrl(getDestinationImage(home)));
-    return matchedHome ? getDestinationImage(matchedHome) : null;
-  }, [homes]);
-  const banners = safeHeroBanners.length
-    ? safeHeroBanners
-    : listingHeroImage
-      ? [{ imageUrl: listingHeroImage, alt: "Famlo homestay" }]
-      : [];
+  const banners = safeHeroBanners;
   const safeBannerIdx = banners.length > 0 ? bannerIdx % banners.length : 0;
   const userId = user?.id;
   const mounted = useSyncExternalStore(
@@ -940,33 +891,6 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
 
   const activeHomes = useMemo(() => homes.filter((home) => home.isActive !== false && home.isAccepting !== false), [homes]);
 
-  const destinationSuggestions = useMemo(() => {
-    const seen = new Set<string>();
-    const suggestions: string[] = [];
-    const addSuggestion = (value?: string | null) => {
-      const clean = value?.trim();
-      if (!clean) return;
-      const key = clean.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      suggestions.push(clean);
-    };
-
-    POPULAR_DESTINATIONS.forEach((destination) => addSuggestion(destination.name));
-    activeHomes.forEach((home) => {
-      addSuggestion(home.city);
-      addSuggestion(home.state);
-      addSuggestion(home.village);
-      addSuggestion(home.listingTitle);
-      addSuggestion(home.name);
-    });
-
-    const needle = query.trim().toLowerCase();
-    return suggestions
-      .filter((suggestion) => !needle || suggestion.toLowerCase().includes(needle))
-      .slice(0, 8);
-  }, [activeHomes, query]);
-
   const homepageStats = useMemo(() => {
     const destinations = new Set<string>();
     for (const home of activeHomes) {
@@ -991,14 +915,11 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
   }, [activeHomes]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     if (!q) return sortedHomes;
 
     // Exact text matches (Village, City, State, Name)
-    const exactMatches = sortedHomes.filter(h =>
-      h.city?.toLowerCase().includes(q) || h.state?.toLowerCase().includes(q) ||
-      h.name?.toLowerCase().includes(q) || h.village?.toLowerCase().includes(q)
-    );
+    const exactMatches = sortedHomes.filter((home) => matchesDiscoveryQuery(home, q));
 
     if (exactMatches.length > 0) return exactMatches;
 
@@ -1039,7 +960,7 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
 
   const topRatedHomes = useMemo(() => {
     const source = dedupeHomes(filtered);
-    return sortTopRatedHomes(source).filter((home) => matchesStayFilter(home, selectedStayFilter)).slice(0, 10);
+    return sortTopRatedHomes(source).filter((home) => matchesDiscoveryStayFilter(home, selectedStayFilter)).slice(0, 10);
   }, [filtered, selectedStayFilter]);
 
   const destinationCards = useMemo(() => {
@@ -1068,7 +989,12 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
             image: roomImage,
             subtitle: [matchedHome.village, matchedHome.city].filter(Boolean).join(", ") || [matchedHome.city, matchedHome.state].filter(Boolean).join(", ") || "",
             hostName,
-            href: matchedHome.href || buildHomestayPath(matchedHome.name || rv.title, matchedHome.village, matchedHome.city, rv.id),
+            href: matchedHome.href || buildHomestayPath(
+              matchedHome.name || rv.title,
+              matchedHome.village,
+              matchedHome.city,
+              matchedHome.legacyFamilyId || matchedHome.id
+            ),
             priceLabel: getHomePriceLabel(matchedHome),
             roomLabel: matchedHome.roomCount != null && matchedHome.roomCount > 0 ? `${matchedHome.roomCount} room${matchedHome.roomCount === 1 ? "" : "s"}` : "",
             hostPhotoUrl: matchedHome.hostPhotoUrl || rv.hostPhotoUrl || null,
@@ -1109,7 +1035,7 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
         accent: pal(rv.id),
         href:
           rv.type === "home"
-            ? buildHomestayPath(rv.title || "Famlo homestay", null, null, rv.id)
+            ? "/homestays"
             : `/hommies/${rv.id}`
       };
     });
@@ -1120,33 +1046,17 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
   };
 
   const submitSearch = useCallback(() => {
-    const params = new URLSearchParams();
-    const normalizedQuery = query.trim();
-    const normalizedGuests = guestCount.trim();
-
-    if (normalizedQuery) {
-      params.set("q", normalizedQuery);
-    }
-
-    if (checkInDate) {
-      params.set("date", checkInDate);
-    }
-
-    if (checkOutDate) {
-      params.set("date_to", checkOutDate);
-    }
-
-    if (normalizedGuests) {
-      params.set("guests", normalizedGuests);
-    }
-
-    if (userCoords) {
-      params.set("lat", userCoords.lat.toFixed(6));
-      params.set("lng", userCoords.lng.toFixed(6));
-    }
-
-    router.push(params.size > 0 ? `/homestays?${params.toString()}` : "/homestays");
-  }, [checkInDate, checkOutDate, guestCount, query, router, userCoords]);
+    router.push(
+      buildDiscoverySearchHref({
+        query,
+        selectedDestination,
+        checkInDate,
+        checkOutDate,
+        guestCount,
+        userCoords,
+      })
+    );
+  }, [checkInDate, checkOutDate, guestCount, query, router, selectedDestination, userCoords]);
 
   return (
     <div style={{ background: "#f7f9fc", minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "'DM Sans','Segoe UI',sans-serif" }}>
@@ -1180,46 +1090,18 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
               submitSearch();
             }}
           >
-            <label className="homepage-search-field homepage-search-destination">
-              <span>City / destination</span>
-              <input
-                name="q"
-                placeholder="Manali, Goa, Jaipur..."
-                value={query}
-                autoComplete="off"
-                onBlur={() => {
-                  window.setTimeout(() => setShowDestinationSuggestions(false), 120);
-                }}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setShowDestinationSuggestions(true);
-                }}
-                onFocus={() => setShowDestinationSuggestions(true)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    setShowDestinationSuggestions(false);
-                  }
-                }}
-                type="search"
-              />
-              {showDestinationSuggestions && destinationSuggestions.length > 0 ? (
-                <div className="destination-suggestions" role="listbox" aria-label="Destination suggestions">
-                  {destinationSuggestions.map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        setQuery(suggestion);
-                        setShowDestinationSuggestions(false);
-                      }}
-                    >
-                      <span>{suggestion}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </label>
+            <DestinationAutocomplete
+              homes={activeHomes}
+              value={query}
+              onValueChange={(value) => {
+                setQuery(value);
+                setSelectedDestination(null);
+              }}
+              onSuggestionSelect={(suggestion) => {
+                setQuery(suggestion.name);
+                setSelectedDestination(suggestion);
+              }}
+            />
             <label
               className="homepage-search-field homepage-date-field"
               onClick={() => openNativeDatePicker(checkInInputRef.current)}
@@ -1485,7 +1367,7 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
       {/* ══ TOP RATED HOMES ══ */}
       <Section title="Top-rated stays near you" seeAllHref="/homestays">
         <div className="stay-filter-row" aria-label="Stay filters">
-          {STAY_FILTERS.map((filter) => {
+          {DISCOVERY_STAY_FILTERS.map((filter) => {
             const isSelected = selectedStayFilter === filter;
             return (
               <button
@@ -1541,9 +1423,9 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
       )}
 
       {showDeferredSections && visibleHostReels.length > 0 ? (
-        <Section title="Host reels" subtitle="Watch real glimpses from Famlo homes and hosts.">
+        <Section title="Most viewed host reels" titleHref="/homestay-reel" seeAllHref="/homestay-reel" subtitle="Watch real glimpses from Famlo homes and hosts.">
           <div className="host-reels-rail">
-            {visibleHostReels.map((reel) => (
+            {visibleHostReels.map((reel, index) => (
               <button
                 key={reel.id}
                 type="button"
@@ -1558,10 +1440,11 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
                       : "linear-gradient(135deg, #1688f0, #16a34a)",
                   }}
                 >
+                  {index === 0 ? <span className="host-reel-rank">Most viewed</span> : null}
                   <span className="host-reel-play" aria-hidden="true">▶</span>
                 </div>
                 <span>{reel.title}</span>
-                {reel.location ? <small>{reel.location}</small> : null}
+                <small>{[reel.location, `${reel.viewCount.toLocaleString("en-IN")} views`].filter(Boolean).join(" · ")}</small>
               </button>
             ))}
           </div>
@@ -1732,6 +1615,7 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
               autoPlay
               playsInline
               preload="metadata"
+              onPlay={() => void recordPublicReelView(selectedReel)}
             />
             <div>
               <strong>{selectedReel.title}</strong>
@@ -1916,7 +1800,15 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
           box-shadow: 0 18px 42px rgba(15,23,42,0.16);
           backdrop-filter: blur(14px);
         }
-        .destination-suggestions button {
+        .destination-suggestions-group {
+          padding: 4px 8px 2px;
+          color: #64748b;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+        .destination-suggestion {
           border: 0;
           border-radius: 12px;
           background: transparent;
@@ -1925,14 +1817,58 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 10px;
           padding: 10px 11px;
           text-align: left;
-          font-size: 14px;
-          font-weight: 850;
+          font: inherit;
         }
-        .destination-suggestions button:hover {
+        .destination-suggestion:hover,
+        .destination-suggestion.is-active {
           background: #eff6ff;
           color: #1A56DB;
+        }
+        .destination-suggestion:focus-visible {
+          outline: none;
+          box-shadow: inset 0 0 0 2px rgba(29,78,216,0.28);
+        }
+        .destination-suggestion-icon {
+          width: 18px;
+          height: 18px;
+          flex-shrink: 0;
+          color: currentColor;
+        }
+        .destination-suggestion-copy {
+          min-width: 0;
+          flex: 1;
+          display: grid;
+          gap: 3px;
+        }
+        .destination-suggestion-title {
+          color: #0f172a;
+          font-size: 14px;
+          font-weight: 850;
+          line-height: 1.2;
+        }
+        .destination-suggestion-meta {
+          color: #64748b;
+          font-size: 12px;
+          font-weight: 700;
+          line-height: 1.3;
+        }
+        .destination-suggestion-count {
+          flex-shrink: 0;
+          color: #1d4ed8;
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1.2;
+        }
+        .destination-suggestions-empty {
+          padding: 12px;
+          border-radius: 12px;
+          color: #475569;
+          font-size: 13px;
+          font-weight: 700;
+          background: rgba(248,250,252,0.92);
         }
         .homepage-search-button,
         .homepage-location-button {
@@ -2182,6 +2118,19 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
           font-size: 12px;
           font-weight: 750;
           margin-top: -5px;
+        }
+        .host-reel-rank {
+          position: absolute;
+          top: 10px;
+          left: 10px;
+          z-index: 2;
+          padding: 5px 8px;
+          border-radius: 6px;
+          background: rgba(255,255,255,0.94);
+          color: #165dcc;
+          font-size: 9px;
+          font-weight: 900;
+          text-transform: uppercase;
         }
         .host-reel-modal {
           position: fixed;

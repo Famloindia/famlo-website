@@ -53,6 +53,7 @@ var link_1 = require("next/link");
 var react_1 = require("react");
 var ProfileCompletionForm_1 = require("@/components/account/ProfileCompletionForm");
 var AuthModal_1 = require("@/components/auth/AuthModal");
+var guest_session_client_1 = require("@/lib/guest-session-client");
 var supabase_1 = require("@/lib/supabase");
 var user_profile_1 = require("@/lib/user-profile");
 function getToday() {
@@ -122,16 +123,16 @@ function HommieBookingFlow(_a) {
         return "need";
     }
     var syncAuthState = (0, react_1.useCallback)(function () { return __awaiter(_this, void 0, void 0, function () {
-        var user, userRow, nextProfileComplete;
-        var _a, _b;
+        var snapshot, resolvedUser, nextProfileComplete;
         return __generator(this, function (_c) {
             switch (_c.label) {
                 case 0:
                     setLoadingAuth(true);
-                    return [4 /*yield*/, supabase.auth.getUser()];
+                    return [4 /*yield*/, (0, guest_session_client_1.fetchGuestSessionSnapshot)(supabase)];
                 case 1:
-                    user = (_c.sent()).data.user;
-                    if (!user) {
+                    snapshot = (_c.sent()).snapshot;
+                    resolvedUser = snapshot.user;
+                    if (!(resolvedUser === null || resolvedUser === void 0 ? void 0 : resolvedUser.id)) {
                         setCurrentUserId(null);
                         setGuestName(null);
                         setGuestCity(null);
@@ -140,36 +141,14 @@ function HommieBookingFlow(_a) {
                         setLoadingAuth(false);
                         return [2 /*return*/, { userId: null, profileComplete: false }];
                     }
-                    return [4 /*yield*/, supabase
-                            .from("users")
-                            .select("name, phone, email, city, state, about, date_of_birth, gender")
-                            .eq("id", user.id)
-                            .maybeSingle()];
-                case 2:
-                    userRow = (_c.sent()).data;
-                    nextProfileComplete = (0, user_profile_1.isGuestProfileComplete)({
-                        id: user.id,
-                        name: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.name) === "string" ? userRow.name : null,
-                        phone: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.phone) === "string" ? userRow.phone : (_a = user.phone) !== null && _a !== void 0 ? _a : null,
-                        email: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.email) === "string" ? userRow.email : (_b = user.email) !== null && _b !== void 0 ? _b : null,
-                        city: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.city) === "string" ? userRow.city : null,
-                        state: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.state) === "string" ? userRow.state : null,
-                        onboarding_completed: false,
-                        avatar_url: null,
-                        about: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.about) === "string" ? userRow.about : null,
-                        date_of_birth: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.date_of_birth) === "string" ? userRow.date_of_birth : null,
-                        gender: typeof (userRow === null || userRow === void 0 ? void 0 : userRow.gender) === "string" ? userRow.gender : null,
-                        kyc_status: null,
-                        id_document_url: null,
-                        id_document_type: null,
-                    });
-                    setCurrentUserId(user.id);
-                    setGuestName(typeof (userRow === null || userRow === void 0 ? void 0 : userRow.name) === "string" ? userRow.name : null);
-                    setGuestCity(typeof (userRow === null || userRow === void 0 ? void 0 : userRow.city) === "string" ? userRow.city : null);
+                    nextProfileComplete = snapshot.profileComplete || (0, user_profile_1.isGuestProfileComplete)(snapshot.profile);
+                    setCurrentUserId(resolvedUser.id);
+                    setGuestName((snapshot.profile === null || snapshot.profile === void 0 ? void 0 : snapshot.profile.name) || null);
+                    setGuestCity((snapshot.profile === null || snapshot.profile === void 0 ? void 0 : snapshot.profile.city) || ((snapshot.profile === null || snapshot.profile === void 0 ? void 0 : snapshot.profile.last_location_label) || null));
                     setProfileComplete(nextProfileComplete);
-                    setStep(resolveNextStep(user.id, nextProfileComplete));
+                    setStep(resolveNextStep(resolvedUser.id, nextProfileComplete));
                     setLoadingAuth(false);
-                    return [2 /*return*/, { userId: user.id, profileComplete: nextProfileComplete }];
+                    return [2 /*return*/, { userId: resolvedUser.id, profileComplete: nextProfileComplete }];
             }
         });
     }); }, [supabase]);

@@ -81,7 +81,7 @@ function readJsonOrText(response) {
 function ProfileCompletionForm(_a) {
     var _b;
     var _c = _a.title, title = _c === void 0 ? "Complete your guest profile" : _c, _d = _a.description, description = _d === void 0 ? "Add your details once so Famlo hosts know who is arriving before you book." : _d, _e = _a.buttonLabel, buttonLabel = _e === void 0 ? "Save profile" : _e, _f = _a.compact, compact = _f === void 0 ? false : _f, onSuccess = _a.onSuccess;
-    var _g = (0, UserContext_1.useUser)(), user = _g.user, profile = _g.profile, refreshProfile = _g.refreshProfile;
+    var _g = (0, UserContext_1.useUser)(), user = _g.user, profile = _g.profile, refreshAuth = _g.refreshAuth;
     var supabase = (0, react_1.useMemo)(function () { return (0, supabase_1.createBrowserSupabaseClient)(); }, []);
     var avatarInputRef = (0, react_1.useRef)(null);
     var _h = (0, react_1.useState)(false), manualEditMode = _h[0], setManualEditMode = _h[1];
@@ -184,7 +184,7 @@ function ProfileCompletionForm(_a) {
     }
     function handleSubmit(event) {
         return __awaiter(this, void 0, void 0, function () {
-            var session, response, data, error_2;
+            var session, response, data, savedProfile, returnedName, returnedCity, returnedState, error_2;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
@@ -229,7 +229,19 @@ function ProfileCompletionForm(_a) {
                         if (!response.ok || data.error) {
                             throw new Error(typeof data.error === "string" ? data.error : "Profile save failed.");
                         }
-                        return [4 /*yield*/, refreshProfile()];
+                        savedProfile = data.profile || null;
+                        if (!savedProfile || typeof savedProfile.id !== "string") {
+                            throw new Error("Profile save could not be verified.");
+                        }
+                        returnedName = typeof savedProfile.name === "string" ? savedProfile.name.trim() : "";
+                        returnedCity = typeof savedProfile.city === "string" ? savedProfile.city.trim() : "";
+                        returnedState = typeof savedProfile.state === "string" ? savedProfile.state.trim() : "";
+                        if (returnedName !== resolvedForm.name.trim() ||
+                            returnedCity !== resolvedForm.city.trim() ||
+                            returnedState !== resolvedForm.state.trim()) {
+                            throw new Error("Profile save could not be verified. Please try again.");
+                        }
+                        return [4 /*yield*/, refreshAuth()];
                     case 5:
                         _a.sent();
                         if (!onSuccess) return [3 /*break*/, 7];

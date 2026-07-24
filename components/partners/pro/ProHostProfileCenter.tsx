@@ -11,15 +11,18 @@ import type {
   FamilyProfileDraft,
   FamilyScheduleDraft,
 } from "@/lib/family-profile-editor";
-import { saveFamilyProfileWorkspace } from "@/lib/family-profile-editor";
+import { loadFamilyProfileWorkspace, saveFamilyProfileWorkspace } from "@/lib/family-profile-editor";
 import {
   AMENITY_OPTIONS,
   BATHROOM_TYPE_OPTIONS,
   FOOD_OFFERING_OPTIONS,
+  FAMILY_TYPE_OPTIONS,
+  HOME_TYPE_OPTIONS,
   parseMultiValueList,
   serializeMultiValueList,
   toggleListValue,
 } from "@/lib/home-listing-options";
+import { buildHomestayPath } from "@/lib/slug";
 import {
   MAX_GALLERY_IMAGE_UPLOAD_BYTES,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -30,7 +33,6 @@ import { HOST_REEL_ACCEPT_ATTRIBUTE, MAX_HOST_REEL_UPLOAD_BYTES } from "@/lib/ho
 import styles from "./pro-dashboard.module.css";
 
 const HOBBY_OPTIONS = ["Cooking", "Music", "Gardening", "Reading", "Yoga", "Art", "Travel", "Dance", "Photography"];
-const HOUSE_TYPE_OPTIONS = ["Joint family", "Nuclear family", "Couple", "Solo host", "Shared household"];
 const INTERACTION_TYPE_OPTIONS = ["Friendly and available", "Extrovert", "Introvert", "Quiet and helpful", "Highly social", "Flexible"];
 const HOUSE_RULE_OPTIONS = ["No smoking", "No pets", "No alcohol", "Quiet after 10 PM"];
 
@@ -167,6 +169,38 @@ export default function ProHostProfileCenter({
   }, [familyId, initialCompliance, initialListing, initialPhotos, initialProfile, initialSchedule]);
 
   useEffect(() => {
+    let cancelled = false;
+    loadFamilyProfileWorkspace(familyId)
+      .then((workspace) => {
+        if (cancelled) return;
+        setProfile((current) => ({
+          ...workspace.profile,
+          email: current.email,
+          mobileNumber: current.mobileNumber,
+          hostCatchphrase: current.hostCatchphrase,
+        }));
+        setListing((current) => ({
+          ...workspace.listing,
+          priceMorning: current.priceMorning,
+          priceAfternoon: current.priceAfternoon,
+          priceEvening: current.priceEvening,
+          priceFullday: current.priceFullday,
+        }));
+        setPhotos(workspace.photos);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setFeedback({
+          type: "error",
+          text: error instanceof Error ? error.message : "Unable to load the saved listing profile.",
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [familyId]);
+
+  useEffect(() => {
     fetch("/api/locations/search")
       .then((response) => response.json() as Promise<LocationResponse>)
       .then((payload) => {
@@ -186,7 +220,12 @@ export default function ProHostProfileCenter({
   const selectedHouseRules = useMemo(() => parseMultiValueList(listing.houseRules || ""), [listing.houseRules]);
   const coverPhoto = profile.hostSelfieUrl || photos.find((photo) => photo.isPrimary)?.url || photos[0]?.url || "";
   const locationBits = [profile.cityNeighbourhood, profile.city, profile.state].filter(Boolean);
-  const listingPreviewUrl = `/homes/${familyId}`;
+  const listingPreviewUrl = buildHomestayPath(
+    listing.listingTitle || listing.propertyName || profile.hostDisplayName || propertyName || "Homestay",
+    profile.cityNeighbourhood || null,
+    profile.city || null,
+    familyId
+  );
   const hostReelUrl = listing.hostReelPublicUrl || "";
 
   const updateHobbies = (nextHobbies: string[]) => {
@@ -468,6 +507,13 @@ export default function ProHostProfileCenter({
                   <label className={styles.proProfileFieldLabel}>Full property name</label>
                   <input className={styles.proProfileInput} value={listing.propertyName} onChange={(event) => setListing((current) => ({ ...current, propertyName: event.target.value }))} />
                 </div>
+                <div className={styles.proProfileField}>
+                  <label className={styles.proProfileFieldLabel}>Family type</label>
+                  <select className={styles.proProfileInput} value={profile.familyComposition} onChange={(event) => setProfile((current) => ({ ...current, familyComposition: event.target.value }))}>
+                    <option value="">Select family type</option>
+                    {FAMILY_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                </div>
                 <div className={styles.proProfileFieldWide}>
                   <label className={styles.proProfileFieldLabel}>Host bio</label>
                   <textarea className={styles.proProfileTextarea} value={listing.hostBio} onChange={(event) => setListing((current) => ({ ...current, hostBio: event.target.value }))} />
@@ -639,7 +685,7 @@ export default function ProHostProfileCenter({
                   <label className={styles.proProfileFieldLabel}>Home type</label>
                   <select className={styles.proProfileInput} value={listing.houseType} onChange={(event) => setListing((current) => ({ ...current, houseType: event.target.value }))}>
                     <option value="">Select home type</option>
-                    {HOUSE_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                    {HOME_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                   </select>
                 </div>
                 <div className={styles.proProfileField}>

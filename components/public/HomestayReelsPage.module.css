@@ -1,0 +1,284 @@
+.reelsPage {
+  min-height: 100vh;
+  padding-bottom: 64px;
+  overflow-x: clip;
+  background: #f5f8fd;
+  color: #0f172a;
+}
+
+.reelsToolbar {
+  width: min(92vw, 1480px);
+  margin: 0 auto;
+  padding: 42px 0 28px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.reelsToolbar h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 44px);
+  letter-spacing: 0;
+}
+
+.reelsToolbar p {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 15px;
+}
+
+.reelsActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.browseHomesLink {
+  white-space: nowrap;
+  color: #165dcc;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.reelsSearch {
+  box-sizing: border-box;
+  width: min(100%, 420px);
+  height: 50px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 8px;
+  color: #64748b;
+}
+
+.reelsSearch:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.reelsSearch input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+}
+
+.reelsGrid {
+  width: min(92vw, 1480px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.reelCard {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.reelMedia {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  display: block;
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: #0f172a;
+  cursor: pointer;
+}
+
+.reelMedia video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.reelShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 55%, rgba(15, 23, 42, 0.78));
+}
+
+.reelPlay {
+  position: absolute;
+  inset: 0;
+  width: 48px;
+  height: 48px;
+  margin: auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: #165dcc;
+}
+
+.reelViews {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.reelCopy {
+  padding: 13px;
+  display: grid;
+  gap: 5px;
+}
+
+.reelCopy strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.reelCopy span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reelCopy small {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.reelCopy a,
+.reelDialogCopy a {
+  margin-top: 3px;
+  color: #165dcc;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.reelsEmpty {
+  width: min(92vw, 1480px);
+  margin: 0 auto;
+  padding: 56px 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #64748b;
+  text-align: center;
+}
+
+.reelModal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  padding: 20px;
+  display: grid;
+  place-items: center;
+}
+
+.reelBackdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(2, 6, 23, 0.82);
+}
+
+.reelDialog {
+  position: relative;
+  width: min(92vw, 430px);
+  max-height: 92vh;
+  overflow: hidden;
+  display: grid;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.reelDialog > video {
+  width: 100%;
+  max-height: 76vh;
+  aspect-ratio: 9 / 16;
+  object-fit: contain;
+  background: #020617;
+}
+
+.reelClose {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  right: 10px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.reelDialogCopy {
+  padding: 14px 16px;
+  display: grid;
+  gap: 5px;
+}
+
+.reelDialogCopy span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+@media (max-width: 1180px) {
+  .reelsGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 880px) {
+  .reelsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .reelsToolbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding-top: 28px;
+  }
+
+  .reelsActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reelsSearch {
+    width: 100%;
+  }
+
+  .browseHomesLink {
+    align-self: flex-start;
+  }
+
+  .reelsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+}

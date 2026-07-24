@@ -28,6 +28,7 @@
     "db:reset:staging-preserve-data": "node scripts/db/reset-staging-schema-preserve-data.mjs",
     "admin:supabase-check": "node scripts/check-admin-supabase-access.mjs",
     "admin:supabase-check:local": "node --env-file=.env.local scripts/check-admin-supabase-access.mjs",
+    "guest:identity:audit": "tsx scripts/guest-identity-audit.ts",
     "r2:write-test": "node scripts/test-r2-write-access.mjs",
     "r2:write-test:local": "node --env-file=.env.local scripts/test-r2-write-access.mjs",
     "test:channels": "tsx --test tests/channel-provider-lifecycle.test.ts",
@@ -38,6 +39,7 @@
     "images:backfill": "node scripts/backfill-image-variants.mjs",
     "images:cache-backfill": "node scripts/backfill-r2-cache-control.mjs",
     "reels:backfill": "node scripts/backfill-host-property-reels.mjs",
+    "profiles:backfill": "node --env-file=.env.local --import tsx scripts/backfill-host-property-profiles.ts",
     "stay-units:scan": "node scripts/scan-stay-unit-integrity.cjs"
   },
   "dependencies": {

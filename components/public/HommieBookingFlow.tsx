@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { AuthModal } from "@/components/auth/AuthModal";
 import type { CompanionRecord } from "@/lib/discovery";
+import { fetchGuestSessionSnapshot } from "@/lib/guest-session-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import { isGuestProfileComplete } from "@/lib/user-profile";
 
@@ -95,11 +96,10 @@ export function HommieBookingFlow({
   const syncAuthState = useCallback(async (): Promise<{ userId: string | null; profileComplete: boolean }> => {
     setLoadingAuth(true);
 
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
+    const { snapshot } = await fetchGuestSessionSnapshot(supabase);
+    const resolvedUser = snapshot.user;
 
-    if (!user) {
+    if (!resolvedUser?.id) {
       setCurrentUserId(null);
       setGuestName(null);
       setGuestCity(null);
@@ -109,35 +109,14 @@ export function HommieBookingFlow({
       return { userId: null, profileComplete: false };
     }
 
-    const { data: userRow } = await supabase
-      .from("users")
-      .select("name, phone, email, city, state, about, date_of_birth, gender")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    const nextProfileComplete = isGuestProfileComplete({
-      id: user.id,
-      name: typeof userRow?.name === "string" ? userRow.name : null,
-      phone: typeof userRow?.phone === "string" ? userRow.phone : user.phone ?? null,
-      email: typeof userRow?.email === "string" ? userRow.email : user.email ?? null,
-      city: typeof userRow?.city === "string" ? userRow.city : null,
-      state: typeof userRow?.state === "string" ? userRow.state : null,
-      onboarding_completed: false,
-      avatar_url: null,
-      about: typeof userRow?.about === "string" ? userRow.about : null,
-      date_of_birth: typeof userRow?.date_of_birth === "string" ? userRow.date_of_birth : null,
-      gender: typeof userRow?.gender === "string" ? userRow.gender : null,
-      kyc_status: null,
-      id_document_url: null,
-      id_document_type: null,
-    });
-    setCurrentUserId(user.id);
-    setGuestName(typeof userRow?.name === "string" ? userRow.name : null);
-    setGuestCity(typeof userRow?.city === "string" ? userRow.city : null);
+    const nextProfileComplete = snapshot.profileComplete || isGuestProfileComplete(snapshot.profile);
+    setCurrentUserId(resolvedUser.id);
+    setGuestName(snapshot.profile?.name ?? null);
+    setGuestCity(snapshot.profile?.city ?? snapshot.profile?.last_location_label ?? null);
     setProfileComplete(nextProfileComplete);
-    setStep(resolveNextStep(user.id, nextProfileComplete));
+    setStep(resolveNextStep(resolvedUser.id, nextProfileComplete));
     setLoadingAuth(false);
-    return { userId: user.id, profileComplete: nextProfileComplete };
+    return { userId: resolvedUser.id, profileComplete: nextProfileComplete };
   }, [supabase]);
 
   useEffect(() => {

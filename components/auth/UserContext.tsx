@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 import { type SupabaseClient, type User } from "@supabase/supabase-js";
+import type { GuestSessionSnapshot } from "@/lib/guest-session";
+import { fetchGuestSessionSnapshot } from "@/lib/guest-session-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import { type UserProfileRecord } from "@/lib/user-profile";
 
@@ -11,8 +13,8 @@ interface UserContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  refreshProfile: () => Promise<void>;
-  refreshAuth: () => Promise<void>;
+  refreshProfile: () => Promise<GuestSessionSnapshot | null>;
+  refreshAuth: () => Promise<GuestSessionSnapshot | null>;
   signOut: () => Promise<void>;
 }
 
@@ -24,78 +26,32 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const supabase = useMemo<SupabaseClient>(() => createBrowserSupabaseClient(), []);
 
-  const fetchProfile = useCallback(async (userId: string, email?: string | null) => {
+  const loadSessionSnapshot = useCallback(async (): Promise<GuestSessionSnapshot | null> => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      const response = await fetch("/api/user/profile", {
-        cache: "no-store",
-        headers: {
-          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-          ...(userId ? { "x-famlo-user-id": userId } : {}),
-          ...(email ? { "x-famlo-user-email": email } : {}),
-        },
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(typeof data?.error === "string" ? data.error : "Failed to load profile.");
-      }
-
-      setProfile((data?.profile as UserProfile | null) ?? null);
+      const { snapshot, user: nextUser } = await fetchGuestSessionSnapshot(supabase);
+      setUser(nextUser);
+      setProfile(snapshot.profile);
+      return snapshot;
     } catch (err) {
-      console.error("Error fetching user profile:", err);
+      console.error("Error loading auth session:", err);
+      setUser(null);
       setProfile(null);
+      return null;
     }
   }, [supabase]);
 
   const refreshProfile = useCallback(async () => {
-    if (user) {
-      await fetchProfile(user.id, user.email ?? null);
-    }
-  }, [user, fetchProfile]);
+    return loadSessionSnapshot();
+  }, [loadSessionSnapshot]);
 
   const loadAuthState = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (session?.user) {
-      setUser(session.user);
-      await fetchProfile(session.user.id, session.user.email ?? null);
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/auth/session", { cache: "no-store" });
-      const data = await response.json();
-      if (data?.user?.id) {
-        const fallbackUser = {
-          id: data.user.id,
-          email: data.user.email,
-          phone: data.user.phone,
-          user_metadata: {},
-          app_metadata: { provider: "phone" },
-          aud: "authenticated",
-          created_at: new Date(0).toISOString(),
-        } as User;
-
-        setUser(fallbackUser);
-        await fetchProfile(fallbackUser.id, fallbackUser.email ?? null);
-        return;
-      }
-    } catch (err) {
-      console.error("Error loading fallback auth session:", err);
-    }
-
-    setUser(null);
-    setProfile(null);
-  }, [fetchProfile, supabase]);
+    return loadSessionSnapshot();
+  }, [loadSessionSnapshot]);
 
   const refreshAuth = useCallback(async () => {
     setLoading(true);
     try {
-      await loadAuthState();
+      return await loadAuthState();
     } finally {
       setLoading(false);
     }

@@ -12,11 +12,15 @@ import {
 } from "@/lib/upload-limits";
 import {
   parseMultiValueList,
+  FAMILY_TYPE_OPTIONS,
   serializeMultiValueList,
   toggleListValue,
 } from "@/lib/home-listing-options";
+import { buildHomestayPath } from "@/lib/slug";
+import { COMMON_LANGUAGE_OPTIONS, INDIAN_STATES } from "@/lib/india";
 
 const HOBBY_OPTIONS = ["Cooking", "Music", "Gardening", "Reading", "Yoga", "Art", "Travel", "Dance", "Photography"];
+const LANGUAGE_OPTIONS = COMMON_LANGUAGE_OPTIONS.filter((option) => option !== "Other");
 
 export default function ProfileTab({ 
   profile, setProfile, listing, setListing, photos, setPhotos,
@@ -26,6 +30,7 @@ export default function ProfileTab({
   const [uploadingSelfie, setUploadingSelfie] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [customHobby, setCustomHobby] = useState("");
+  const [customLanguage, setCustomLanguage] = useState("");
 
   const readUploadResponse = async (response: Response) => {
     const raw = await response.text();
@@ -103,9 +108,22 @@ export default function ProfileTab({
   };
 
   const selectedHobbies = useMemo(() => parseMultiValueList(profile.hostHobbies || ""), [profile.hostHobbies]);
+  const selectedLanguages = useMemo(() => parseMultiValueList(profile.languages || ""), [profile.languages]);
+  const customHobbies = useMemo(
+    () => selectedHobbies.filter((item) => !HOBBY_OPTIONS.some((option) => option.toLowerCase() === item.toLowerCase())),
+    [selectedHobbies]
+  );
+  const customLanguages = useMemo(
+    () => selectedLanguages.filter((item) => !LANGUAGE_OPTIONS.some((option) => option.toLowerCase() === item.toLowerCase())),
+    [selectedLanguages]
+  );
 
   const updateHobbies = (nextHobbies: string[]) => {
     setProfile((current: any) => ({ ...current, hostHobbies: serializeMultiValueList(nextHobbies) }));
+  };
+
+  const updateLanguages = (nextLanguages: string[]) => {
+    setProfile((current: any) => ({ ...current, languages: serializeMultiValueList(nextLanguages) }));
   };
 
   const saveProfile = () =>
@@ -117,7 +135,12 @@ export default function ProfileTab({
       updatedPhotos: photos,
       updatedCompliance: compliance,
     });
-  const listingPreviewUrl = `/homes/${familyId}`;
+  const listingPreviewUrl = buildHomestayPath(
+    listing.listingTitle || listing.propertyName || profile.hostDisplayName || "Homestay",
+    profile.cityNeighbourhood || null,
+    profile.city || null,
+    familyId
+  );
 
   return (
     <div className={`${styles.flexCol} ${styles.animateIn}`} style={{ gap: '40px', paddingBottom: '80px' }}>
@@ -138,7 +161,7 @@ export default function ProfileTab({
             View listing
           </Link>
           <button className={styles.primaryBtn} style={{ width: 'auto' }} onClick={() => saveProfile()} disabled={saving}>
-             {saving ? "Saving DB..." : "Update Web & App"}
+             {saving ? "Saving profile..." : "Save profile"}
           </button>
         </div>
       </div>
@@ -161,6 +184,15 @@ export default function ProfileTab({
                 </label>
               </div>
             </div>
+            {profile.hostSelfieUrl ? (
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                onClick={() => setProfile((current: any) => ({ ...current, hostSelfieUrl: "" }))}
+              >
+                Remove photo
+              </button>
+            ) : null}
             <div style={{ padding: '14px 16px', borderRadius: '14px', background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '12px', fontWeight: 700, color: '#475569' }}>
               Save the profile first if you change your host identity photo or name.
             </div>
@@ -180,12 +212,25 @@ export default function ProfileTab({
               </div>
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 800, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>State</label>
-                <input list="state-list" className={styles.inputField} placeholder="Start typing..." value={profile.state} onChange={e => setProfile((c: any) => ({...c, state: e.target.value}))}/>
+                <select className={styles.inputField} value={profile.state || ""} onChange={e => setProfile((c: any) => ({...c, state: e.target.value}))}>
+                  <option value="">Select state</option>
+                  {profile.state && !INDIAN_STATES.some((state) => state.toLowerCase() === profile.state.toLowerCase()) ? (
+                    <option value={profile.state}>{profile.state}</option>
+                  ) : null}
+                  {INDIAN_STATES.map((state) => <option key={state} value={state}>{state}</option>)}
+                </select>
               </div>
               <div style={{ gridColumn: '1 / -1' }}>
                 <label style={{ fontSize: '12px', fontWeight: 800, color: '#165dcc', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Area Near The City (Neighborhood / Locality)</label>
                 <input list="village-list" className={styles.inputField} style={{ border: '2px solid #bfdbfe', background: '#eff6ff' }} placeholder="E.g., Malviya Nagar, Jodhpur" value={profile.cityNeighbourhood} onChange={e => setProfile((c: any) => ({...c, cityNeighbourhood: e.target.value}))}/>
                 <p style={{ fontSize: '11px', color: '#64748b', marginTop: '6px', fontWeight: 600 }}>This helps us list your property on maps without disclosing its exact street location.</p>
+              </div>
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 800, color: "rgba(14,43,87,0.6)", textTransform: "uppercase", marginBottom: "8px", display: "block" }}>Family Type</label>
+                <select className={styles.inputField} value={profile.familyComposition || ""} onChange={(event) => setProfile((current: any) => ({ ...current, familyComposition: event.target.value }))}>
+                  <option value="">Select family type</option>
+                  {FAMILY_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
               </div>
               <div style={{ gridColumn: '1 / -1' }}>
                 <label style={{ fontSize: '12px', fontWeight: 800, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Hobbies & Interests</label>
@@ -196,6 +241,7 @@ export default function ProfileTab({
                       <button
                         key={option}
                         type="button"
+                        aria-pressed={active}
                         onClick={() => updateHobbies(toggleListValue(selectedHobbies, option))}
                         style={{
                           borderRadius: '999px',
@@ -212,6 +258,27 @@ export default function ProfileTab({
                       </button>
                     );
                   })}
+                  {customHobbies.map((hobby) => (
+                    <button
+                      key={hobby}
+                      type="button"
+                      aria-pressed="true"
+                      onClick={() => updateHobbies(toggleListValue(selectedHobbies, hobby))}
+                      title="Remove custom hobby"
+                      style={{
+                        borderRadius: '999px',
+                        border: '1px solid #165dcc',
+                        background: '#dbeafe',
+                        color: '#0b4db1',
+                        padding: '9px 14px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {hobby} x
+                    </button>
+                  ))}
                 </div>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <input
@@ -227,8 +294,83 @@ export default function ProfileTab({
                     onClick={() => {
                       const next = customHobby.trim();
                       if (!next) return;
-                      updateHobbies(toggleListValue(selectedHobbies, next));
+                      if (!selectedHobbies.some((item) => item.toLowerCase() === next.toLowerCase())) {
+                        updateHobbies([...selectedHobbies, next]);
+                      }
                       setCustomHobby("");
+                    }}
+                    style={{ width: 'auto', minWidth: 'auto' }}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ fontSize: '12px', fontWeight: 800, color: 'rgba(14,43,87,0.6)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Languages Spoken</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                  {LANGUAGE_OPTIONS.map((option) => {
+                    const active = selectedLanguages.some((item) => item.toLowerCase() === option.toLowerCase());
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => updateLanguages(toggleListValue(selectedLanguages, option))}
+                        style={{
+                          borderRadius: '999px',
+                          border: active ? '1px solid #165dcc' : '1px solid rgba(14,43,87,0.12)',
+                          background: active ? '#dbeafe' : 'white',
+                          color: active ? '#0b4db1' : '#0e2b57',
+                          padding: '9px 14px',
+                          fontSize: '12px',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {option}
+                      </button>
+                    );
+                  })}
+                  {customLanguages.map((language) => (
+                    <button
+                      key={language}
+                      type="button"
+                      aria-pressed="true"
+                      onClick={() => updateLanguages(toggleListValue(selectedLanguages, language))}
+                      title="Remove custom language"
+                      style={{
+                        borderRadius: '999px',
+                        border: '1px solid #165dcc',
+                        background: '#dbeafe',
+                        color: '#0b4db1',
+                        padding: '9px 14px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {language} x
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    className={styles.inputField}
+                    style={{ flex: 1 }}
+                    placeholder="Add a language"
+                    value={customLanguage}
+                    onChange={(event) => setCustomLanguage(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => {
+                      const next = customLanguage.trim();
+                      if (!next) return;
+                      if (!selectedLanguages.some((item) => item.toLowerCase() === next.toLowerCase())) {
+                        updateLanguages([...selectedLanguages, next]);
+                      }
+                      setCustomLanguage("");
                     }}
                     style={{ width: 'auto', minWidth: 'auto' }}
                   >

@@ -27,9 +27,13 @@ export type HomeOnboardingFlowState = {
 
   familyComposition: string;
   hostProfession: string;
+  hobbies: string;
 
   propertyName: string;
+  listingTitle: string;
   propertyAddress: string;
+  homeType: string;
+  interactionType: string;
   roomType: string;
   maxGuests: string;
   googleMapsLink: string;
@@ -39,10 +43,17 @@ export type HomeOnboardingFlowState = {
   hostBio: string;
   languages: string;
   culturalActivity: string;
+  journeyStory: string;
+  specialExperience: string;
+  localExperience: string;
   amenities: string;
+  commonAreas: string;
+  foodTypes: string;
   includedItems: string;
   customRules: string;
   bathroomType: string;
+  checkInTime: string;
+  checkOutTime: string;
 
   baseNightlyRate: string;
   morningRate: string;
@@ -79,9 +90,13 @@ const initialState: HomeOnboardingFlowState = {
 
   familyComposition: "Joint family",
   hostProfession: "",
+  hobbies: "",
 
   propertyName: "",
+  listingTitle: "",
   propertyAddress: "",
+  homeType: "",
+  interactionType: "",
   roomType: "Standard room",
   maxGuests: "2",
   googleMapsLink: "",
@@ -91,10 +106,17 @@ const initialState: HomeOnboardingFlowState = {
   hostBio: "",
   languages: "English, Hindi",
   culturalActivity: "",
+  journeyStory: "",
+  specialExperience: "",
+  localExperience: "",
   amenities: "",
+  commonAreas: "",
+  foodTypes: "",
   includedItems: "",
   customRules: "",
   bathroomType: "Private Attached",
+  checkInTime: "12:00",
+  checkOutTime: "10:00",
 
   baseNightlyRate: "",
   morningRate: "",
@@ -138,7 +160,7 @@ const STEP_TITLES = [
 
 function splitList(value: string): string[] {
   return value
-    .split(",")
+    .split(/[\n,]/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -191,9 +213,13 @@ export function HomeOnboardingForm(): React.JSX.Element {
 
       familyComposition: flow.familyComposition.trim(),
       hostProfession: flow.hostProfession.trim(),
+      hobbies: splitList(flow.hobbies),
 
       propertyName: flow.propertyName.trim(),
+      listingTitle: flow.listingTitle.trim(),
       propertyAddress: flow.propertyAddress.trim(),
+      houseType: flow.homeType.trim(),
+      interactionType: flow.interactionType.trim(),
       roomType: flow.roomType.trim(),
       maxGuests: toNumberOrNull(flow.maxGuests),
       googleMapsLink: flow.googleMapsLink.trim(),
@@ -203,10 +229,17 @@ export function HomeOnboardingForm(): React.JSX.Element {
       hostBio: flow.hostBio.trim(),
       languages: splitList(flow.languages),
       culturalActivity: flow.culturalActivity.trim(),
+      journeyStory: flow.journeyStory.trim(),
+      specialExperience: flow.specialExperience.trim(),
+      localExperience: flow.localExperience.trim(),
       amenities: splitList(flow.amenities),
+      commonAreas: splitList(flow.commonAreas),
+      foodTypes: splitList(flow.foodTypes),
       includedItems: splitList(flow.includedItems),
       customRules: splitList(flow.customRules),
       bathroomType: flow.bathroomType.trim(),
+      checkInTime: flow.checkInTime,
+      checkOutTime: flow.checkOutTime,
 
       baseNightlyRate: toNumberOrNull(flow.baseNightlyRate),
       morningRate: toNumberOrNull(flow.morningRate),

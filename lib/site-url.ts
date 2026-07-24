@@ -6,6 +6,12 @@ function normalizeBaseUrl(value: string): string {
 
 export function getPublicSiteUrl(): string {
   const value = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (typeof window !== "undefined") {
+    const currentOrigin = window.location.origin?.trim();
+    if (currentOrigin) {
+      return normalizeBaseUrl(currentOrigin);
+    }
+  }
   if (!value) {
     return DEFAULT_PUBLIC_SITE_URL;
   }

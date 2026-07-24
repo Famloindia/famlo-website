@@ -1,5 +1,6 @@
 import { parseHostListingMeta } from "@/lib/host-listing-meta";
 import { canListOnMarketplace } from "@/lib/host-access-policy";
+import { resolveHomeRoute } from "@/lib/home-route-resolution";
 import { getPublicCoordinates, parseGoogleMapsCoordinates } from "@/lib/location-utils";
 import { buildHomestayPath, buildListingSlug } from "@/lib/slug";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -119,11 +120,18 @@ export interface StoryRecord {
 
 export interface HomepageReelRecord {
   id: string;
+  familyId: string;
   videoUrl: string;
   thumbnailUrl: string | null;
   title: string;
+  hostName: string;
   propertyName: string | null;
   location: string | null;
+  locality: string | null;
+  city: string | null;
+  state: string | null;
+  listingHref: string;
+  viewCount: number;
   isFeatured: boolean;
   source: "host_property_reels" | "family_legacy_reel";
 }
@@ -307,6 +315,81 @@ function pickHostProfilePhoto(
   return explicitProfile ?? normalized[0] ?? null;
 }
 
+async function applyCanonicalHomeProfiles(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  homes: HomeCardRecord[]
+): Promise<HomeCardRecord[]> {
+  const familyIds = Array.from(new Set(homes.map((home) => home.legacyFamilyId).filter((id): id is string => Boolean(id))));
+  if (familyIds.length === 0) return homes;
+
+  const familiesResult = await supabase
+    .from("families")
+    .select("id,user_id,listing_profile_version,property_name,listing_title,city,state,village")
+    .in("id", familyIds);
+  if (familiesResult.error) {
+    console.warn("[discovery] canonical family profile enrichment failed", { message: familiesResult.error.message });
+    return homes;
+  }
+
+  const familyById = new Map<string, Record<string, unknown>>();
+  const userIds = new Set<string>();
+  for (const row of (familiesResult.data ?? []) as Array<Record<string, unknown>>) {
+    const familyId = asOptionalString(row.id);
+    const userId = asOptionalString(row.user_id);
+    if (familyId) familyById.set(familyId, row);
+    if (userId) userIds.add(userId);
+  }
+  homes.forEach((home) => {
+    if (home.hostUserId) userIds.add(home.hostUserId);
+  });
+
+  const usersResult = userIds.size > 0
+    ? await supabase.from("users").select("id,name,avatar_url,host_profile_version").in("id", Array.from(userIds))
+    : { data: [] as Array<Record<string, unknown>>, error: null };
+  if (usersResult.error) {
+    console.warn("[discovery] canonical host identity enrichment failed", { message: usersResult.error.message });
+  }
+  const userById = new Map<string, Record<string, unknown>>();
+  for (const row of (usersResult.data ?? []) as Array<Record<string, unknown>>) {
+    const userId = asOptionalString(row.id);
+    if (userId) userById.set(userId, row);
+  }
+
+  return homes.map((home) => {
+    const familyId = home.legacyFamilyId;
+    const family = familyId ? familyById.get(familyId) : null;
+    if (!familyId || !family) return home;
+    const userId = asOptionalString(family.user_id) ?? home.hostUserId;
+    const user = userId ? userById.get(userId) : null;
+    const hostCanonical = Number(user?.host_profile_version ?? 0) >= 1;
+    const propertyCanonical = Number(family.listing_profile_version ?? 0) >= 1;
+    const hostName = hostCanonical ? asOptionalString(user?.name) : null;
+    const hostPhotoUrl = hostCanonical ? asOptionalString(user?.avatar_url) : null;
+    const propertyName = propertyCanonical ? asOptionalString(family.property_name) : null;
+    const listingTitle = propertyCanonical ? asOptionalString(family.listing_title) : null;
+    const city = propertyCanonical ? asOptionalString(family.city) : null;
+    const state = propertyCanonical ? asOptionalString(family.state) : null;
+    const village = propertyCanonical ? asOptionalString(family.village) : null;
+    const nextName = propertyName ?? home.name;
+    const nextTitle = listingTitle ?? propertyName ?? home.listingTitle;
+    const nextCity = city ?? home.city;
+    const nextVillage = village ?? home.village;
+
+    return {
+      ...home,
+      hostUserId: userId ?? home.hostUserId,
+      hostName: hostName ?? home.hostName,
+      hostPhotoUrl: hostCanonical ? hostPhotoUrl : home.hostPhotoUrl,
+      name: nextName,
+      listingTitle: nextTitle,
+      city: nextCity,
+      state: state ?? home.state,
+      village: nextVillage,
+      href: buildHomestayPath(nextTitle ?? nextName, nextVillage, nextCity, familyId),
+    };
+  });
+}
+
 function dedupeUrls(values: Array<string | null | undefined>): string[] {
   return Array.from(
     new Set(
@@ -415,8 +498,10 @@ function buildStayUnitImageMap(rows: StayUnitSummaryRow[], key: "host_id" | "leg
 
 async function loadHomepageReels(
   supabase: ReturnType<typeof createAdminSupabaseClient>,
-  homes: HomeCardRecord[]
+  homes: HomeCardRecord[],
+  options: { limit?: number } = {}
 ): Promise<HomepageReelRecord[]> {
+  const resultLimit = Math.max(1, Math.min(options.limit ?? 8, 120));
   const homesByFamilyId = new Map<string, HomeCardRecord>();
   const homesByHostId = new Map<string, HomeCardRecord>();
   const homesById = new Map<string, HomeCardRecord>();
@@ -430,19 +515,25 @@ async function loadHomepageReels(
     homesById.set(home.id, home);
   }
 
-  const [canonicalResult, draftsResult] = await Promise.all([
+  const [canonicalResult, draftsResult, publicFamiliesResult] = await Promise.all([
     supabase
       .from("host_property_reels")
       .select("*")
       .neq("status", "deleted")
       .order("is_featured", { ascending: false })
       .order("created_at", { ascending: false })
-      .limit(48),
+      .limit(Math.max(48, resultLimit)),
     supabase
       .from("host_onboarding_drafts")
       .select("family_id,payload,listing_status,updated_at")
       .eq("listing_status", "approved")
       .order("updated_at", { ascending: false })
+      .limit(120),
+    supabase
+      .from("families")
+      .select("*")
+      .eq("is_active", true)
+      .eq("is_accepting", true)
       .limit(120),
   ]);
 
@@ -473,6 +564,8 @@ async function loadHomepageReels(
     addId(familyIds, row.property_id);
     addId(hostIds, row.host_id);
   });
+  homes.forEach((home) => addId(familyIds, home.legacyFamilyId));
+  ((publicFamiliesResult.data ?? []) as Array<Record<string, unknown>>).forEach((row) => addId(familyIds, row.id));
   draftRows.forEach((row) => {
     if (payloadHasHostReel(pickObject(row.payload))) {
       addId(familyIds, row.family_id);
@@ -522,9 +615,25 @@ async function loadHomepageReels(
   }
 
   const familyById = new Map<string, Record<string, unknown>>();
+  ((publicFamiliesResult.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+    const familyId = asOptionalString(row.id);
+    if (familyId) familyById.set(familyId, row);
+  });
   ((familiesResult.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
     const familyId = asOptionalString(row.id);
     if (familyId) familyById.set(familyId, row);
+  });
+
+  const reelUserIds = Array.from(new Set(Array.from(familyById.values())
+    .map((family) => asOptionalString(family.user_id))
+    .filter((id): id is string => Boolean(id))));
+  const reelUsersResult = reelUserIds.length > 0
+    ? await supabase.from("users").select("id,name,avatar_url,host_profile_version").in("id", reelUserIds)
+    : { data: [] as Array<Record<string, unknown>>, error: null };
+  const reelUserById = new Map<string, Record<string, unknown>>();
+  ((reelUsersResult.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+    const userId = asOptionalString(row.id);
+    if (userId) reelUserById.set(userId, row);
   });
 
   const publicCardByFamilyId = new Map<string, Record<string, unknown>>();
@@ -565,7 +674,8 @@ async function loadHomepageReels(
     const family = familyId ? familyById.get(familyId) ?? null : null;
     const publicCard = familyId ? publicCardByFamilyId.get(familyId) ?? null : null;
     const host = hostId ? hostById.get(hostId) ?? null : null;
-    return { familyId, hostId, home, family, publicCard, host };
+    const user = family ? reelUserById.get(asOptionalString(family.user_id) ?? "") ?? null : null;
+    return { familyId, hostId, home, family, publicCard, host, user };
   };
 
   const isPublicRelation = (relation: ReturnType<typeof getRelation>): boolean => {
@@ -584,6 +694,9 @@ async function loadHomepageReels(
 
   const buildTitle = (relation: ReturnType<typeof getRelation>, fallback = "Famlo host reel"): string => {
     return pickFirstString(
+      Number(relation.user?.host_profile_version ?? 0) >= 1 && relation.user?.name
+        ? `${relation.user.name}'s Famlo reel`
+        : null,
       relation.home?.hostName ? `${relation.home.hostName}'s Famlo reel` : null,
       relation.publicCard?.display_name ? `${relation.publicCard.display_name}'s Famlo reel` : null,
       relation.family?.primary_host_name ? `${relation.family.primary_host_name}'s Famlo reel` : null,
@@ -598,9 +711,10 @@ async function loadHomepageReels(
     return pickFirstString(
       relation.home?.listingTitle,
       relation.home?.name,
-      relation.publicCard?.display_name,
       relation.family?.listing_title,
+      relation.family?.property_name,
       relation.family?.name,
+      relation.publicCard?.display_name,
       relation.host?.display_name
     );
   };
@@ -609,16 +723,27 @@ async function loadHomepageReels(
     const parts = [
       relation.home?.village,
       relation.home?.city,
-      relation.publicCard?.locality,
-      relation.publicCard?.city,
       relation.family?.village,
       relation.family?.city,
+      relation.family?.state,
+      relation.publicCard?.locality,
+      relation.publicCard?.city,
       relation.host?.city,
     ]
       .map((value) => asOptionalString(value))
       .filter((value, index, list): value is string => Boolean(value) && list.indexOf(value) === index);
     return parts.slice(0, 2).join(", ") || pickFirstString(relation.home?.state, relation.publicCard?.state, relation.family?.state, relation.host?.state);
   };
+
+  const buildHostName = (relation: ReturnType<typeof getRelation>): string => pickFirstString(
+    Number(relation.user?.host_profile_version ?? 0) >= 1 ? relation.user?.name : null,
+    relation.home?.hostName,
+    relation.publicCard?.display_name,
+    relation.family?.primary_host_name,
+    relation.family?.host_name,
+    relation.host?.display_name,
+    "Famlo host"
+  ) ?? "Famlo host";
 
   const buildThumbnail = (row: Record<string, unknown>, relation: ReturnType<typeof getRelation>): string | null => {
     const familyPhotos = relation.familyId ? familyPhotosById.get(relation.familyId) ?? [] : [];
@@ -686,11 +811,23 @@ async function loadHomepageReels(
 
     return {
       id: pickFirstString(row.id, fallbackId) ?? fallbackId,
+      familyId: relation.familyId ?? "",
       videoUrl,
       thumbnailUrl: buildThumbnail(row, relation),
-      title: buildTitle(relation),
+      title: pickFirstString(row.title, buildTitle(relation)) ?? buildTitle(relation),
+      hostName: buildHostName(relation),
       propertyName: buildPropertyName(relation),
       location: buildLocation(relation),
+      locality: pickFirstString(relation.home?.village, relation.family?.village, relation.publicCard?.locality),
+      city: pickFirstString(relation.home?.city, relation.family?.city, relation.publicCard?.city, relation.host?.city),
+      state: pickFirstString(relation.home?.state, relation.family?.state, relation.publicCard?.state, relation.host?.state),
+      listingHref: relation.home?.href ?? buildHomestayPath(
+        buildPropertyName(relation) ?? buildHostName(relation),
+        pickFirstString(relation.family?.village, relation.publicCard?.locality),
+        pickFirstString(relation.family?.city, relation.publicCard?.city),
+        relation.familyId ?? relation.hostId ?? fallbackId
+      ),
+      viewCount: 0,
       isFeatured: row.is_featured === true,
       source,
     };
@@ -709,6 +846,31 @@ async function loadHomepageReels(
   }
 
   const legacyRows: Record<string, unknown>[] = [];
+  for (const [familyId, family] of familyById.entries()) {
+    const meta = parseHostListingMeta(asOptionalString(family.admin_notes));
+    const savedReels = Array.isArray(meta.hostReels) ? meta.hostReels : [];
+    savedReels.forEach((item, index) => {
+      legacyRows.push({
+        ...item,
+        id: pickFirstString(item.id, `family-${familyId}-${index + 1}`),
+        family_id: familyId,
+        public_url: pickFirstString(item.publicUrl),
+        storage_key: pickFirstString(item.storageKey),
+        title: pickFirstString(item.title),
+        is_featured: item.isFeatured === true,
+      });
+    });
+    if (savedReels.length === 0 && meta.hostReelPublicUrl) {
+      legacyRows.push({
+        id: `legacy-reel-1`,
+        family_id: familyId,
+        public_url: meta.hostReelPublicUrl,
+        storage_key: meta.hostReelStorageKey,
+        title: "Host reel",
+        is_featured: true,
+      });
+    }
+  }
   for (const [familyId, draft] of latestDraftByFamilyId.entries()) {
     const payload = pickObject(draft.payload);
     const hostReels = Array.isArray(payload.hostReels) ? payload.hostReels : [];
@@ -742,12 +904,26 @@ async function loadHomepageReels(
 
   const legacyReels = legacyRows
     .map((row, index) => toReel(row, "family_legacy_reel", `legacy-reel-${index + 1}`))
-    .filter((reel): reel is HomepageReelRecord => reel !== null)
-    .slice(0, 8);
+    .filter((reel): reel is HomepageReelRecord => reel !== null);
 
-  const reels = [...canonicalReels, ...legacyReels]
-    .sort((left, right) => Number(right.isFeatured) - Number(left.isFeatured))
-    .slice(0, 8);
+  const unresolvedReels = [...canonicalReels, ...legacyReels];
+  const reelFamilyIds = Array.from(new Set(unresolvedReels.map((reel) => reel.familyId).filter(Boolean)));
+  const countsResult = reelFamilyIds.length > 0
+    ? await supabase.from("reel_view_counts").select("family_id,reel_key,view_count").in("family_id", reelFamilyIds)
+    : { data: [] as Array<Record<string, unknown>>, error: null };
+  const viewCountByKey = new Map<string, number>();
+  if (!countsResult.error) {
+    ((countsResult.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+      const familyId = asOptionalString(row.family_id);
+      const reelKey = asOptionalString(row.reel_key);
+      if (familyId && reelKey) viewCountByKey.set(`${familyId}:${reelKey}`, Math.max(0, Number(row.view_count ?? 0)));
+    });
+  }
+
+  const reels = unresolvedReels
+    .map((reel) => ({ ...reel, viewCount: viewCountByKey.get(`${reel.familyId}:${reel.id}`) ?? 0 }))
+    .sort((left, right) => right.viewCount - left.viewCount || Number(right.isFeatured) - Number(left.isFeatured))
+    .slice(0, resultLimit);
 
   if (process.env.NODE_ENV !== "production") {
     console.info("[homepage.discovery] host reels", {
@@ -874,6 +1050,10 @@ function mapHostV2(
   roomStats?: { roomCount: number; startingRoomPrice: number | null },
   roomImageUrls: string[] = []
 ): HomeCardRecord {
+  const familyId = typeof row.legacy_family_id === "string" ? row.legacy_family_id.trim() : "";
+  if (!familyId) {
+    throw new Error("Published host card is missing its canonical family id.");
+  }
   const meta = parseHostListingMeta(typeof row.admin_notes === "string" ? row.admin_notes : null);
   const hostName =
     typeof row.display_name === "string"
@@ -915,12 +1095,12 @@ function mapHostV2(
     seed: String(row.id),
   });
   return {
-    id: String(row.id),
+    id: familyId,
     href: buildHomestayPath(
       String(row.display_name ?? row.id),
       typeof row.locality === "string" ? row.locality : null,
       typeof row.city === "string" ? row.city : null,
-      String(row.id)
+      familyId
     ),
     hostId: typeof row.id === "string" ? row.id : null,
     hostUserId: typeof row.user_id === "string" ? row.user_id : null,
@@ -973,8 +1153,27 @@ function mapHostV2(
   };
 }
 
-function mapPublicHomeCardViewRow(row: PublicHomeCardViewRow): HomeCardRecord {
+function mapPublicHomeCardViewRow(
+  row: PublicHomeCardViewRow,
+  familyRow: Record<string, unknown> | null = null
+): HomeCardRecord | null {
+  const familyId = typeof row.legacy_family_id === "string" ? row.legacy_family_id.trim() : "";
+  if (!familyId) return null;
+
   const meta = parseHostListingMeta(typeof row.admin_notes === "string" ? row.admin_notes : null);
+  const familyMeta = parseHostListingMeta(typeof familyRow?.admin_notes === "string" ? familyRow.admin_notes : null);
+  const canonicalPathName =
+    asOptionalString(familyRow?.listing_title) ??
+    familyMeta.listingTitle ??
+    asOptionalString(familyRow?.property_name) ??
+    asOptionalString(familyRow?.name) ??
+    asOptionalString(row.display_name) ??
+    familyId;
+  const canonicalLocality =
+    asOptionalString(familyRow?.village) ??
+    asOptionalString(familyRow?.locality) ??
+    asOptionalString(row.locality);
+  const canonicalCity = asOptionalString(familyRow?.city) ?? asOptionalString(row.city);
   const hostName =
     typeof row.display_name === "string"
       ? row.display_name
@@ -996,16 +1195,16 @@ function mapPublicHomeCardViewRow(row: PublicHomeCardViewRow): HomeCardRecord {
   });
 
   return {
-    id: String(row.id),
+    id: familyId,
     href: buildHomestayPath(
-      String(row.display_name ?? row.id),
-      typeof row.locality === "string" ? row.locality : null,
-      typeof row.city === "string" ? row.city : null,
-      String(row.id)
+      canonicalPathName,
+      canonicalLocality,
+      canonicalCity,
+      familyId
     ),
     hostId: typeof row.id === "string" ? row.id : null,
     hostUserId: typeof row.user_id === "string" ? row.user_id : null,
-    legacyFamilyId: typeof row.legacy_family_id === "string" ? row.legacy_family_id : null,
+    legacyFamilyId: familyId,
     name: typeof row.display_name === "string" ? row.display_name : "Famlo host",
     hostName,
     city: typeof row.city === "string" ? row.city : null,
@@ -1089,6 +1288,34 @@ function mapHommieV2(
   };
 }
 
+async function loadPublicCardFamilies(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  rows: PublicHomeCardViewRow[]
+): Promise<Map<string, Record<string, unknown>>> {
+  const familyIds = Array.from(
+    new Set(
+      rows
+        .map((row) => asOptionalString(row.legacy_family_id))
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+  if (familyIds.length === 0) return new Map();
+
+  const { data, error } = await supabase.from("families").select("*").in("id", familyIds);
+  if (error) {
+    console.warn("[homepage.discovery] canonical family slug data unavailable", {
+      message: error.message,
+    });
+    return new Map();
+  }
+
+  return new Map(
+    ((data ?? []) as Record<string, unknown>[])
+      .map((row) => [asOptionalString(row.id), row] as const)
+      .filter((entry): entry is readonly [string, Record<string, unknown>] => Boolean(entry[0]))
+  );
+}
+
 async function loadHomepageDataV2(
   supabase: ReturnType<typeof createAdminSupabaseClient>
 ): Promise<HomepageData | null> {
@@ -1130,6 +1357,7 @@ async function loadHomepageDataV2(
   }
 
   const publicHomeRows = (publicHomesResult.data ?? []) as PublicHomeCardViewRow[];
+  const familyById = await loadPublicCardFamilies(supabase, publicHomeRows);
   const hommieRows = (hommiesResult.data ?? []) as Record<string, unknown>[];
   const storyRows = storiesResult.error ? [] : ((storiesResult.data ?? []) as Record<string, unknown>[]);
   const hommieIds = hommieRows.map((row) => String(row.id));
@@ -1159,7 +1387,8 @@ async function loadHomepageDataV2(
 
   const homes = publicHomeRows
     .filter((row) => canListOnMarketplace(row).allowed)
-    .map((row) => mapPublicHomeCardViewRow(row));
+    .map((row) => mapPublicHomeCardViewRow(row, familyById.get(asOptionalString(row.legacy_family_id) ?? "") ?? null))
+    .filter((home): home is HomeCardRecord => Boolean(home));
   const companions = hommieRows.map((row) => mapHommieV2(row, (hommieMediaMap.get(String(row.id)) ?? [])[0] ?? null));
   const stories = storyRows
     .sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
@@ -1224,9 +1453,7 @@ async function loadHomepageDataV2(
       alt: typeof row.alt_text === "string" ? row.alt_text : undefined,
     }))
     .filter((row) => row.imageUrl);
-  const hostReels = await loadHomepageReels(supabase, homes);
-
-  return { homes, companions, stories, ads, heroBanners, hostReels };
+  return { homes, companions, stories, ads, heroBanners, hostReels: [] };
 }
 
 async function loadHomesDiscoveryDataV2(
@@ -1244,9 +1471,11 @@ async function loadHomesDiscoveryDataV2(
   }
 
   const publicHomeRows = (publicHomesResult.data ?? []) as PublicHomeCardViewRow[];
+  const familyById = await loadPublicCardFamilies(supabase, publicHomeRows);
   return publicHomeRows
     .filter((row) => canListOnMarketplace(row).allowed)
-    .map((row) => mapPublicHomeCardViewRow(row));
+    .map((row) => mapPublicHomeCardViewRow(row, familyById.get(asOptionalString(row.legacy_family_id) ?? "") ?? null))
+    .filter((home): home is HomeCardRecord => Boolean(home));
 }
 
 async function loadHomepageDataLegacy(
@@ -1317,7 +1546,7 @@ async function loadHomepageDataLegacy(
         alt: typeof row.alt_text === "string" ? row.alt_text : undefined,
       }))
       .filter((row) => row.imageUrl),
-    hostReels,
+    hostReels: [],
   };
 }
 
@@ -1390,12 +1619,12 @@ async function loadHomepageDataCompatibility(): Promise<HomepageData> {
   }
 
   const result = {
-    homes: Array.from(mergedHomes.values()),
+    homes: await applyCanonicalHomeProfiles(supabase, Array.from(mergedHomes.values())),
     companions: v2Data.companions.length > 0 ? v2Data.companions : legacyData.companions,
     stories: v2Data.stories,
     ads: v2Data.ads,
     heroBanners: legacyData.heroBanners,
-    hostReels: v2Data.hostReels.length > 0 ? v2Data.hostReels : legacyData.hostReels,
+    hostReels: [],
   };
   return result;
 }
@@ -1420,21 +1649,34 @@ const getCachedHomepageData = unstable_cache(
       };
     }
   },
-  ["homepage-discovery"],
+  ["homepage-discovery-v4-canonical-profile"],
   { revalidate: 300, tags: ["homepage-discovery"] }
 );
 
 const getCachedHomepageReelsData = unstable_cache(
   async (): Promise<HomepageReelRecord[]> => {
     try {
-      return loadHomepageReels(createAdminSupabaseClient(), []);
+      return loadHomepageReels(createAdminSupabaseClient(), [], { limit: 8 });
     } catch (error) {
       console.error("Homepage reels discovery error:", error);
       return [];
     }
   },
-  ["homepage-reels-discovery"],
-  { revalidate: 300, tags: ["homepage-discovery", "homepage-reels-discovery"] }
+  ["homepage-reels-discovery-v3-canonical-property"],
+  { revalidate: 60, tags: ["homepage-discovery", "homepage-reels-discovery"] }
+);
+
+const getCachedHomestayReelsData = unstable_cache(
+  async (): Promise<HomepageReelRecord[]> => {
+    try {
+      return loadHomepageReels(createAdminSupabaseClient(), [], { limit: 120 });
+    } catch (error) {
+      console.error("Homestay reels discovery error:", error);
+      return [];
+    }
+  },
+  ["homestay-reels-discovery-v2-canonical-property"],
+  { revalidate: 60, tags: ["homepage-discovery", "homepage-reels-discovery"] }
 );
 
 export async function getHomepageData(): Promise<HomepageData> {
@@ -1443,6 +1685,10 @@ export async function getHomepageData(): Promise<HomepageData> {
 
 export async function getHomepageReelsData(): Promise<HomepageReelRecord[]> {
   return getCachedHomepageReelsData();
+}
+
+export async function getHomestayReelsData(): Promise<HomepageReelRecord[]> {
+  return getCachedHomestayReelsData();
 }
 
 export async function getHomepageDataUncached(): Promise<HomepageData> {
@@ -1483,8 +1729,7 @@ async function loadHomesDiscoveryDataCompatibility(): Promise<HomeCardRecord[]> 
     }
   }
 
-  const result = Array.from(mergedHomes.values());
-  return result;
+  return applyCanonicalHomeProfiles(supabase, Array.from(mergedHomes.values()));
 }
 
 const getCachedHomesDiscoveryData = unstable_cache(
@@ -1496,7 +1741,7 @@ const getCachedHomesDiscoveryData = unstable_cache(
       return [];
     }
   },
-  ["homes-discovery"],
+  ["homes-discovery-v4-canonical-profile"],
   { revalidate: 300, tags: ["homepage-discovery", "homes-discovery"] }
 );
 
@@ -1520,28 +1765,22 @@ export async function getHomesDiscoveryDataUncached(): Promise<HomeCardRecord[]>
 export async function getHomeDetail(id: string): Promise<HomeCardRecord | null> {
   try {
     const supabase = createAdminSupabaseClient();
-    const v2HostResult = await supabase
-      .from("hosts")
-      .select("*")
-      .or(`id.eq.${id},legacy_family_id.eq.${id}`)
-      .eq("status", "published")
-      .eq("is_accepting", true)
-      .maybeSingle();
+    const resolved = await resolveHomeRoute(supabase, id);
+    if (resolved.kind !== "family" || !resolved.familyId || !resolved.familyRow) return null;
+    if (resolved.familyRow.is_active === false || resolved.familyRow.is_accepting === false) return null;
 
-    if (!v2HostResult.error && v2HostResult.data) {
-      const resolvedHostId = String((v2HostResult.data as Record<string, unknown>).id);
-      const legacyFamilyId = String((v2HostResult.data as Record<string, unknown>).legacy_family_id ?? "").trim();
+    if (resolved.hostRow) {
+      const resolvedHostId = String(resolved.hostRow.id);
+      const familyId = resolved.familyId;
       const [mediaResult, familyPhotoResult] = await Promise.all([
         supabase
           .from("host_media")
           .select("host_id, media_url, is_primary")
           .eq("host_id", resolvedHostId),
-        legacyFamilyId
-          ? supabase
-              .from("family_photos")
-              .select("family_id, url, is_primary")
-              .eq("family_id", legacyFamilyId)
-          : Promise.resolve({ data: [] as Array<{ family_id?: string | null; url?: string | null; is_primary?: boolean | null }> }),
+        supabase
+          .from("family_photos")
+          .select("family_id, url, is_primary")
+          .eq("family_id", familyId),
       ]);
 
       const propertyBackedMedia =
@@ -1553,30 +1792,18 @@ export async function getHomeDetail(id: string): Promise<HomeCardRecord | null> 
           : ((mediaResult.data ?? []) as HostMediaRow[]);
 
       return mapHostV2(
-        v2HostResult.data as Record<string, unknown>,
+        resolved.hostRow,
         propertyBackedMedia
       );
-    }
-
-    const { data, error } = await supabase
-      .from("families")
-      .select("*")
-      .eq("id", id)
-      .eq("is_active", true)
-      .eq("is_accepting", true)
-      .maybeSingle();
-
-    if (error || !data) {
-      return null;
     }
 
     const photosResult = await supabase
       .from("family_photos")
       .select("family_id, url, is_primary")
-      .eq("family_id", id);
+      .eq("family_id", resolved.familyId);
 
     return mapFamily(
-      data as Record<string, unknown>,
+      resolved.familyRow,
       (photosResult.data ?? []) as Array<{ url?: string | null; is_primary?: boolean | null }>
     );
   } catch {

@@ -1,4 +1,5 @@
 import { parseHostListingMeta, type HostListingMeta } from "@/lib/host-listing-meta";
+import type { HostPropertyListingProfile } from "@/lib/host-property-profile";
 
 export type FamilyProfileDraft = {
   hostDisplayName: string;
@@ -90,6 +91,13 @@ export type FamilyPhotoItem = {
   family_id?: string;
 };
 
+export type FamilyProfileWorkspace = {
+  profile: FamilyProfileDraft;
+  listing: FamilyListingDraft;
+  photos: FamilyPhotoItem[];
+  reels: HostPropertyListingProfile["reels"];
+};
+
 function joinList(values: unknown): string {
   if (Array.isArray(values)) return values.join(", ");
   if (typeof values === "string") return values;
@@ -138,6 +146,74 @@ function parsePrice(value: unknown): string {
   if (value === null || value === undefined || value === "") return "";
   const numeric = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numeric) ? String(numeric) : "";
+}
+
+export function buildWorkspaceFromCanonicalProfile(
+  canonical: HostPropertyListingProfile
+): FamilyProfileWorkspace {
+  return {
+    profile: {
+      hostDisplayName: canonical.identity.displayName,
+      email: "",
+      hostHobbies: canonical.identity.hobbies.join(", "),
+      familyComposition: canonical.property.familyType,
+      city: canonical.property.city,
+      state: canonical.property.state,
+      cityNeighbourhood: canonical.property.locality,
+      hostCatchphrase: "",
+      hostSelfieUrl: canonical.identity.profilePhotoUrl,
+      mobileNumber: "",
+      languages: canonical.identity.languages.join(", "),
+    },
+    listing: {
+      propertyName: canonical.property.propertyName,
+      hostBio: canonical.property.hostBio,
+      listingTitle: canonical.property.listingTitle,
+      culturalOffering: canonical.property.culturalOffering,
+      journeyStory: canonical.property.journeyStory,
+      specialExperience: canonical.property.specialExperience,
+      localExperience: canonical.property.localExperience,
+      interactionType: canonical.property.interactionType,
+      houseType: canonical.property.homeType,
+      checkInTime: canonical.property.checkInTime,
+      checkOutTime: canonical.property.checkOutTime,
+      bathroomType: canonical.property.bathroomType,
+      propertyAddress: canonical.property.streetAddress,
+      commonAreas: canonical.property.commonAreas.join(", "),
+      amenities: canonical.property.amenities.join(", "),
+      includedItems: canonical.property.includedItems.join(", "),
+      houseRules: canonical.property.houseRules.join("\n"),
+      googleMapsLink: canonical.property.googleMapsLink,
+      priceMorning: "",
+      priceAfternoon: "",
+      priceEvening: "",
+      priceFullday: "",
+      foodType: canonical.property.foodTypes.join(", "),
+      hostReelStorageKey: canonical.reels.find((item) => item.isFeatured)?.storageKey ?? canonical.reels[0]?.storageKey ?? "",
+      hostReelPublicUrl: canonical.reels.find((item) => item.isFeatured)?.publicUrl ?? canonical.reels[0]?.publicUrl ?? "",
+      hostReelMimeType: canonical.reels.find((item) => item.isFeatured)?.mimeType ?? canonical.reels[0]?.mimeType ?? "",
+      hostReelSizeBytes: canonical.reels.find((item) => item.isFeatured)?.sizeBytes ?? canonical.reels[0]?.sizeBytes ?? null,
+      hostReelUploadedAt: canonical.reels.find((item) => item.isFeatured)?.updatedAt ?? canonical.reels[0]?.updatedAt ?? "",
+    },
+    photos: canonical.photos.map((photo) => ({
+      id: photo.id,
+      url: photo.url,
+      isPrimary: photo.isPrimary,
+      family_id: canonical.property.familyId,
+    })),
+    reels: canonical.reels,
+  };
+}
+
+export async function loadFamilyProfileWorkspace(familyId: string): Promise<FamilyProfileWorkspace> {
+  const response = await fetch(`/api/host/listing-profile?familyId=${encodeURIComponent(familyId)}`, {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as { error?: string; profile?: HostPropertyListingProfile };
+  if (!response.ok || !payload.profile) {
+    throw new Error(payload.error ?? "Unable to load the saved listing profile.");
+  }
+  return buildWorkspaceFromCanonicalProfile(payload.profile);
 }
 
 export function parseFamilyMeta(adminNotes: unknown): HostListingMeta {
@@ -333,23 +409,45 @@ export async function saveFamilyProfileWorkspace(params: {
   schedule: FamilyScheduleDraft;
   photos: FamilyPhotoItem[];
   compliance: FamilyComplianceDraft;
-}): Promise<{ ok: true; warnings?: string[] } | { ok: false; error: string }> {
-  const response = await fetch("/api/onboarding/home/dashboard-save", {
-    method: "POST",
+}): Promise<{ ok: true; workspace: FamilyProfileWorkspace; warnings?: string[] } | { ok: false; error: string }> {
+  const response = await fetch("/api/host/listing-profile", {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       familyId: params.familyId,
-      profile: params.profile,
-      listing: params.listing,
+      identity: {
+        displayName: params.profile.hostDisplayName,
+        profilePhotoUrl: params.profile.hostSelfieUrl,
+        hobbies: params.profile.hostHobbies,
+        languages: params.profile.languages,
+      },
+      property: {
+        propertyName: params.listing.propertyName,
+        listingTitle: params.listing.listingTitle,
+        hostBio: params.listing.hostBio,
+        city: params.profile.city,
+        state: params.profile.state,
+        locality: params.profile.cityNeighbourhood,
+        journeyStory: params.listing.journeyStory,
+        specialExperience: params.listing.specialExperience,
+        localExperience: params.listing.localExperience,
+        culturalOffering: params.listing.culturalOffering,
+        homeType: params.listing.houseType,
+        interactionType: params.listing.interactionType,
+        houseRules: params.listing.houseRules,
+        amenities: params.listing.amenities,
+        foodTypes: params.listing.foodType,
+        includedItems: params.listing.includedItems,
+        bathroomType: params.listing.bathroomType,
+        checkInTime: params.listing.checkInTime,
+        checkOutTime: params.listing.checkOutTime,
+        commonAreas: params.listing.commonAreas,
+        streetAddress: params.listing.propertyAddress,
+        googleMapsLink: params.listing.googleMapsLink,
+        familyType: params.profile.familyComposition,
+      },
       schedule: params.schedule,
-      photos: [
-        ...params.photos.filter((photo) => photo.isPrimary),
-        ...params.photos.filter((photo) => !photo.isPrimary),
-      ].map((photo) => ({
-        url: photo.url,
-        isPrimary: photo.isPrimary,
-      })),
-      compliancePatch: {
+      compliance: {
         pccFileName: params.compliance.pccFileName,
         propertyProofFileName: params.compliance.propertyProofFileName,
         formCFileName: params.compliance.formCFileName,
@@ -361,21 +459,31 @@ export async function saveFamilyProfileWorkspace(params: {
         idDocumentType: params.compliance.idDocumentType,
         idDocumentUrl: params.compliance.idDocumentUrl,
         liveSelfieUrl: params.compliance.liveSelfieUrl,
-        panNumber: params.compliance.panNumber,
-        panHolderName: params.compliance.panHolderName,
-        panDateOfBirth: params.compliance.panDateOfBirth,
-        panConsentGiven: params.compliance.panConsentGiven,
         gstin: params.compliance.gstin,
         platformAgreementAcceptedAt: params.compliance.platformAgreementAcceptedAt,
         adminNotes: params.compliance.adminNotes,
       },
+      pricing: {
+        priceMorning: params.listing.priceMorning,
+        priceAfternoon: params.listing.priceAfternoon,
+        priceEvening: params.listing.priceEvening,
+        priceFullday: params.listing.priceFullday,
+      },
     }),
   });
 
-  const payload = (await response.json()) as { error?: string; warnings?: string[] };
-  if (!response.ok) {
+  const payload = (await response.json()) as { error?: string; profile?: HostPropertyListingProfile };
+  if (!response.ok || !payload.profile) {
     return { ok: false, error: payload.error ?? "Sync failed. Connection error." };
   }
 
-  return { ok: true, warnings: Array.isArray(payload.warnings) ? payload.warnings : undefined };
+  const workspace = buildWorkspaceFromCanonicalProfile(payload.profile);
+  workspace.profile.email = params.profile.email;
+  workspace.profile.mobileNumber = params.profile.mobileNumber;
+  workspace.profile.hostCatchphrase = params.profile.hostCatchphrase;
+  workspace.listing.priceMorning = params.listing.priceMorning;
+  workspace.listing.priceAfternoon = params.listing.priceAfternoon;
+  workspace.listing.priceEvening = params.listing.priceEvening;
+  workspace.listing.priceFullday = params.listing.priceFullday;
+  return { ok: true, workspace };
 }

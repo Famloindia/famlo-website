@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { loadGuestBookingsCompatibility } from "@/lib/booking-compat";
 import { getTodayInIndia } from "@/lib/booking-time";
 import { getGuestCookieName, readGuestSessionToken } from "@/lib/guest-auth";
-import { resolveAuthenticatedUser } from "@/lib/request-user";
+import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -196,7 +196,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   try {
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
+    const authUser = await resolveStrictAuthenticatedUser(supabase, request);
     if (!authUser) {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
@@ -212,7 +212,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     const effectiveAuthUser = guestSession
       ? { ...authUser, id: guestSession.userId, phone: guestSession.phone }
       : authUser;
-    const bookingsUserId = requestedUserId ?? (bearerToken ? authUser.id : guestSession?.userId) ?? headerUserId ?? authUser.id;
+    const bookingsUserId = requestedUserId ?? (bearerToken ? authUser.id : guestSession?.userId) ?? authUser.id;
 
     console.info("[guest.bookings.route] load:before_compatibility", {
       url: request.url,

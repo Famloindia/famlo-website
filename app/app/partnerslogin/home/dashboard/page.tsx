@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import { HostDashboardEditor } from "@/components/partners/HostDashboardEditor";
 import { isHostBookingVisibleToPartner } from "@/lib/host-booking-state";
 import { createAdminSupabaseClient } from "@/lib/supabase";
+import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 
 type JsonRecord = Record<string, unknown>;
 type FamilyDashboardRow = JsonRecord & {
@@ -48,18 +49,22 @@ export default async function HostDashboardPage({
   searchParams
 }: Readonly<HostDashboardPageProps>): Promise<React.JSX.Element> {
   const params = await searchParams;
-  const cookieStore = await cookies();
-  const familyId = params?.family ?? cookieStore.get("famlo_host_family_id")?.value ?? "";
+  const supabase = createAdminSupabaseClient();
+  const hostSession = await resolveAuthorizedHostSession(supabase);
+  if (!hostSession?.hostUserId) redirect("/partners/login");
+  const familyId = params?.family ?? hostSession.familyId ?? "";
   const hostCodeParam = params?.hostCode ?? "";
   const initialTab = params?.tab ?? "dashboard";
   const shouldPreloadBookingRows = !["messages", "support", "profile", "compliance"].includes(initialTab);
-  const supabase = createAdminSupabaseClient();
 
   const { data: primaryFamily } = familyId
     ? await supabase.from("families").select("id,host_id,user_id").eq("id", familyId).maybeSingle()
     : hostCodeParam 
       ? await supabase.from("families").select("id,host_id,user_id").ilike("host_id", hostCodeParam).maybeSingle()
       : { data: null };
+  if (!primaryFamily || primaryFamily.user_id !== hostSession.hostUserId) {
+    redirect("/partners/login");
+  }
 
   const hostCode = primaryFamily?.host_id;
 

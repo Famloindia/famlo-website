@@ -1,262 +1,241 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getHomesDiscoveryData } from "@/lib/discovery";
-import { buildListingSlug, slugify } from "@/lib/slug";
-import { createAdminSupabaseClient } from "@/lib/supabase";
 import { unstable_cache } from "next/cache";
+
+import { getPublicListingProfile } from "@/lib/host-property-profile";
+import { buildHomestayPath } from "@/lib/slug";
+import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type JsonRecord = Record<string, unknown>;
 
+export type HomeRouteKind =
+  | "family"
+  | "legacy-host"
+  | "ambiguous-legacy-host"
+  | "not-found";
+
 export type ResolvedHomeRoute = {
+  kind: HomeRouteKind;
+  requestedId: string;
+  legacyHostId: string | null;
   hostId: string | null;
   familyId: string | null;
   hostUserId: string | null;
   hostRow: JsonRecord | null;
   familyRow: JsonRecord | null;
+  legacyPublicFamilyIds: string[];
+};
+
+export type HomeRouteRepository = {
+  loadFamilyById: (familyId: string) => Promise<JsonRecord | null>;
+  loadHostById: (hostId: string) => Promise<JsonRecord | null>;
+  loadHostByFamilyId: (familyId: string) => Promise<JsonRecord | null>;
+  loadPublicFamiliesByUserId: (userId: string) => Promise<JsonRecord[]>;
 };
 
 function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-async function loadHostByRouteId(
-  supabase: SupabaseClient,
-  routeId: string
-): Promise<JsonRecord | null> {
-  const { data, error } = await supabase
-    .from("hosts")
-    .select("*")
-    .or(`id.eq.${routeId},slug.eq.${routeId}`)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Failed to resolve host by route id", error);
-    return null;
-  }
-
-  return (data as JsonRecord | null) ?? null;
+function emptyResolution(requestedId: string): ResolvedHomeRoute {
+  return {
+    kind: "not-found",
+    requestedId,
+    legacyHostId: null,
+    hostId: null,
+    familyId: null,
+    hostUserId: null,
+    hostRow: null,
+    familyRow: null,
+    legacyPublicFamilyIds: [],
+  };
 }
 
-async function loadFamilyByRouteId(
-  supabase: SupabaseClient,
-  routeId: string
-): Promise<JsonRecord | null> {
-  const { data, error } = await supabase
-    .from("families")
-    .select("*")
-    .eq("id", routeId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Failed to resolve family by route id", error);
-    return null;
-  }
-
-  return (data as JsonRecord | null) ?? null;
+function isPublicFamilyRow(row: JsonRecord): boolean {
+  return row.is_active !== false && row.is_accepting !== false;
 }
 
-async function loadHostById(
-  supabase: SupabaseClient,
-  hostId: string
-): Promise<JsonRecord | null> {
-  const { data, error } = await supabase
-    .from("hosts")
-    .select("*")
-    .eq("id", hostId)
-    .maybeSingle();
+export function createHomeRouteRepository(supabase: SupabaseClient): HomeRouteRepository {
+  const repository: HomeRouteRepository = {
+    async loadFamilyById(familyId) {
+      const { data, error } = await supabase
+        .from("families")
+        .select("*")
+        .eq("id", familyId)
+        .maybeSingle();
 
-  if (error) {
-    console.error("Failed to load host by id", error);
-    return null;
-  }
+      if (error) {
+        console.error("Failed to resolve family route id", error);
+        return null;
+      }
+      return (data as JsonRecord | null) ?? null;
+    },
 
-  return (data as JsonRecord | null) ?? null;
-}
+    async loadHostById(hostId) {
+      const { data, error } = await supabase
+        .from("hosts")
+        .select("*")
+        .eq("id", hostId)
+        .maybeSingle();
 
-async function loadFamilyById(
-  supabase: SupabaseClient,
-  familyId: string
-): Promise<JsonRecord | null> {
-  const { data, error } = await supabase
-    .from("families")
-    .select("*")
-    .eq("id", familyId)
-    .maybeSingle();
+      if (error) {
+        console.error("Failed to resolve legacy host route id", error);
+        return null;
+      }
+      return (data as JsonRecord | null) ?? null;
+    },
 
-  if (error) {
-    console.error("Failed to load family by id", error);
-    return null;
-  }
+    async loadHostByFamilyId(familyId) {
+      const { data, error } = await supabase
+        .from("hosts")
+        .select("*")
+        .eq("legacy_family_id", familyId)
+        .maybeSingle();
 
-  return (data as JsonRecord | null) ?? null;
-}
+      if (error) {
+        console.error("Failed to resolve host for family route", error);
+        return null;
+      }
+      return (data as JsonRecord | null) ?? null;
+    },
 
-function matchesGeneratedSlug(row: JsonRecord | null, routeId: string): boolean {
-  if (!row) return false;
+    async loadPublicFamiliesByUserId(userId) {
+      // This view already applies marketplace approval and trust filtering. A host
+      // UUID is allowed to redirect only when the owner's public property set is
+      // unambiguous; legacy_family_id remains the family foreign key in the view.
+      const { data, error } = await supabase
+        .from("public_home_cards_v1")
+        .select("legacy_family_id")
+        .eq("user_id", userId)
+        .eq("status", "published")
+        .eq("is_accepting", true);
 
-  const candidates = [
-    typeof row.slug === "string" ? row.slug : null,
-    typeof row.display_name === "string" ? slugify(row.display_name) : null,
-    typeof row.name === "string" ? slugify(row.name) : null,
-    typeof row.host_display_name === "string" ? slugify(row.host_display_name) : null,
-    typeof row.display_name === "string"
-      ? buildListingSlug(
-          row.display_name,
-          typeof row.locality === "string" ? row.locality : null,
-          typeof row.city === "string" ? row.city : null
+      if (error) {
+        console.error("Failed to resolve public families for legacy host route", error);
+        return [];
+      }
+
+      const familyIds = Array.from(
+        new Set(
+          ((data ?? []) as JsonRecord[])
+            .map((row) => asString(row.legacy_family_id))
+            .filter((value): value is string => Boolean(value))
         )
-      : null,
-    typeof row.name === "string"
-      ? buildListingSlug(
-          row.name,
-          typeof row.locality === "string" ? row.locality : null,
-          typeof row.city === "string" ? row.city : null
-        )
-      : null,
-  ].filter((value): value is string => Boolean(value));
-
-  return candidates.includes(routeId);
+      );
+      const families = await Promise.all(familyIds.map((familyId) => repository.loadFamilyById(familyId)));
+      return families.filter((row): row is JsonRecord => Boolean(row && isPublicFamilyRow(row)));
+    },
+  };
+  return repository;
 }
 
-function matchCachedHomeRoute(
-  routeId: string,
-  homes: Array<{
-    id: string;
-    href: string;
-    hostId: string | null;
-    legacyFamilyId: string | null;
-    listingTitle: string | null;
-    name: string;
-    village: string | null;
-    city: string | null;
-  }>
-): { hostId: string | null; familyId: string | null } | null {
-  for (const home of homes) {
-    const hrefParts = home.href.split("/").filter(Boolean);
-    const hrefSlug = hrefParts[1] ?? null;
-    const hrefCode = hrefParts[2] ?? null;
-    const generatedSlug = buildListingSlug(
-      home.listingTitle ?? home.name,
-      home.village,
-      home.city
-    );
+export async function resolveHomeRouteWithRepository(
+  repository: HomeRouteRepository,
+  routeId: string
+): Promise<ResolvedHomeRoute> {
+  const requestedId = routeId.trim();
+  if (!requestedId) return emptyResolution(requestedId);
 
-    const candidates = new Set(
-      [
-        home.id,
-        home.hostId,
-        home.legacyFamilyId,
-        hrefSlug,
-        hrefCode,
-        generatedSlug,
-      ].filter((value): value is string => Boolean(value && value.trim().length > 0))
-    );
-
-    if (!candidates.has(routeId)) continue;
-
+  const familyRow = await repository.loadFamilyById(requestedId);
+  if (familyRow) {
+    const hostRow = await repository.loadHostByFamilyId(requestedId);
     return {
-      hostId: home.hostId,
-      familyId: home.legacyFamilyId,
+      kind: "family",
+      requestedId,
+      legacyHostId: null,
+      hostId: asString(hostRow?.id),
+      familyId: requestedId,
+      hostUserId: asString(hostRow?.user_id) ?? asString(familyRow.user_id),
+      hostRow,
+      familyRow,
+      legacyPublicFamilyIds: [],
     };
   }
 
-  return null;
+  const legacyHostRow = await repository.loadHostById(requestedId);
+  if (!legacyHostRow) return emptyResolution(requestedId);
+
+  const userId = asString(legacyHostRow.user_id);
+  if (!userId) return emptyResolution(requestedId);
+
+  const publicFamilies = await repository.loadPublicFamiliesByUserId(userId);
+  const publicFamilyIds = Array.from(
+    new Set(
+      publicFamilies
+        .map((row) => asString(row.id))
+        .filter((value): value is string => Boolean(value))
+    )
+  ).sort();
+
+  if (publicFamilyIds.length !== 1) {
+    return {
+      ...emptyResolution(requestedId),
+      kind: publicFamilyIds.length > 1 ? "ambiguous-legacy-host" : "not-found",
+      legacyHostId: requestedId,
+      hostUserId: userId,
+      legacyPublicFamilyIds: publicFamilyIds,
+    };
+  }
+
+  const canonicalFamilyId = publicFamilyIds[0];
+  const canonicalFamilyRow =
+    publicFamilies.find((row) => asString(row.id) === canonicalFamilyId) ?? null;
+  if (!canonicalFamilyRow) return emptyResolution(requestedId);
+
+  const canonicalHostRow = await repository.loadHostByFamilyId(canonicalFamilyId);
+  return {
+    kind: "legacy-host",
+    requestedId,
+    legacyHostId: requestedId,
+    hostId: asString(canonicalHostRow?.id),
+    familyId: canonicalFamilyId,
+    hostUserId: asString(canonicalHostRow?.user_id) ?? asString(canonicalFamilyRow.user_id) ?? userId,
+    hostRow: canonicalHostRow,
+    familyRow: canonicalFamilyRow,
+    legacyPublicFamilyIds: publicFamilyIds,
+  };
 }
 
 export async function resolveHomeRoute(
   supabase: SupabaseClient,
   routeId: string
 ): Promise<ResolvedHomeRoute> {
-  const directHost = await loadHostByRouteId(supabase, routeId);
+  return resolveHomeRouteWithRepository(createHomeRouteRepository(supabase), routeId);
+}
 
-  if (directHost) {
-    const familyId = asString(directHost.legacy_family_id);
-    let familyRow: JsonRecord | null = null;
+export async function getCanonicalHomestayPath(
+  supabase: SupabaseClient,
+  resolved: ResolvedHomeRoute
+): Promise<string | null> {
+  if (!resolved.familyId || !resolved.familyRow) return null;
 
-    if (familyId) {
-      familyRow = await loadFamilyById(supabase, familyId);
-    }
+  const profile = await getPublicListingProfile(supabase, {
+    familyId: resolved.familyId,
+    familyRow: resolved.familyRow,
+    hostRow: resolved.hostRow,
+  });
+  const title =
+    profile.property.listingTitle ||
+    profile.property.propertyName ||
+    profile.identity.displayName ||
+    resolved.familyId;
 
-    return {
-      hostId: asString(directHost.id),
-      familyId,
-      hostUserId: asString(directHost.user_id) ?? asString(familyRow?.user_id),
-      hostRow: directHost,
-      familyRow,
-    };
-  }
+  return buildHomestayPath(
+    title,
+    profile.property.locality,
+    profile.property.city,
+    resolved.familyId
+  );
+}
 
-  const cachedHomes = await getHomesDiscoveryData();
-  const cachedMatch = matchCachedHomeRoute(routeId, cachedHomes);
-  if (cachedMatch) {
-    const hostRow = cachedMatch.hostId ? await loadHostById(supabase, cachedMatch.hostId) : null;
-    const familyId = cachedMatch.familyId;
-    let familyRow: JsonRecord | null = null;
-
-    if (familyId) {
-      familyRow = await loadFamilyById(supabase, familyId);
-    }
-
-    return {
-      hostId: asString(hostRow?.id) ?? cachedMatch.hostId,
-      familyId,
-      hostUserId: asString(hostRow?.user_id) ?? asString(familyRow?.user_id),
-      hostRow,
-      familyRow,
-    };
-  }
-
-  const { data: generatedHostRows, error: generatedHostError } = await supabase
-    .from("hosts")
-    .select("*");
-
-  if (generatedHostError) {
-    console.error("Failed to scan hosts for generated slug", generatedHostError);
-  }
-
-  const generatedHost = (generatedHostRows ?? []).find((row) => matchesGeneratedSlug(row as JsonRecord, routeId)) as JsonRecord | null | undefined;
-  if (generatedHost) {
-    const familyId = asString(generatedHost.legacy_family_id);
-    const familyRow = familyId ? await loadFamilyById(supabase, familyId) : null;
-
-    return {
-      hostId: asString(generatedHost.id),
-      familyId,
-      hostUserId: asString(generatedHost.user_id) ?? asString(familyRow?.user_id),
-      hostRow: generatedHost,
-      familyRow,
-    };
-  }
-
-  const familyRow = await loadFamilyByRouteId(supabase, routeId);
-  if (!familyRow) {
-    return {
-      hostId: null,
-      familyId: null,
-      hostUserId: null,
-      hostRow: null,
-      familyRow: null,
-    };
-  }
-
-  const { data: hostRowData, error: hostError } = await supabase
-    .from("hosts")
-    .select("*")
-    .eq("legacy_family_id", routeId)
-    .maybeSingle();
-
-  if (hostError) {
-    console.error("Failed to resolve host from legacy family id", hostError);
-  }
-
-  const hostRow = (hostRowData as JsonRecord | null) ?? null;
-
-  return {
-    hostId: asString(hostRow?.id),
-    familyId: routeId,
-    hostUserId: asString(hostRow?.user_id) ?? asString(familyRow.user_id),
-    hostRow,
-    familyRow,
-  };
+export function getHomestayCanonicalRedirect(
+  resolved: ResolvedHomeRoute,
+  requestedSlug: string,
+  canonicalPath: string
+): string | null {
+  const canonicalSlug = canonicalPath.split("/").filter(Boolean)[1] ?? "";
+  return resolved.kind === "legacy-host" || requestedSlug !== canonicalSlug
+    ? canonicalPath
+    : null;
 }
 
 export const getCachedHomeRouteResolution = unstable_cache(
@@ -264,6 +243,6 @@ export const getCachedHomeRouteResolution = unstable_cache(
     const supabase = createAdminSupabaseClient();
     return resolveHomeRoute(supabase, routeId);
   },
-  ["home-route-resolution"],
+  ["home-route-resolution-v2-family-canonical"],
   { revalidate: 60, tags: ["home-route-resolution"] }
 );

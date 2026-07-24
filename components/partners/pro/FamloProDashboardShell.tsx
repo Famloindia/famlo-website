@@ -4893,6 +4893,7 @@ export default function FamloProDashboardShell({
           storageKey: uploadedAsset.storageKey,
           mimeType: file.type,
           sizeBytes: file.size,
+          title: file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim() || "Host reel",
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
@@ -4907,6 +4908,8 @@ export default function FamloProDashboardShell({
         id: String(payload.reel.id ?? `reel-${Date.now()}`),
         publicUrl: String(payload.reel.publicUrl ?? uploadedAsset.publicUrl),
         storageKey: String(payload.reel.storageKey ?? uploadedAsset.storageKey ?? ""),
+        title: String(payload.reel.title ?? "Host reel"),
+        caption: String(payload.reel.caption ?? ""),
         mimeType: String(payload.reel.mimeType ?? file.type),
         sizeBytes: typeof payload.reel.sizeBytes === "number" ? payload.reel.sizeBytes : file.size,
         durationSeconds: typeof payload.reel.durationSeconds === "number" ? payload.reel.durationSeconds : null,

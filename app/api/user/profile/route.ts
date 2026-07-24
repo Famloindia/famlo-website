@@ -1,20 +1,21 @@
 import { NextResponse } from "next/server";
 
-import { resolveAuthenticatedUser } from "@/lib/request-user";
+import { loadGuestSessionSnapshot } from "@/lib/guest-session";
+import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { loadUserProfileCompatibility, upsertUserProfileCompatibility } from "@/lib/user-profile";
 
 export async function GET(request: Request) {
   try {
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
+    const authUser = await resolveStrictAuthenticatedUser(supabase, request);
 
     if (!authUser) {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
 
-    const profile = await loadUserProfileCompatibility(supabase, authUser.id);
-    return NextResponse.json({ profile });
+    const session = await loadGuestSessionSnapshot(supabase, authUser);
+    return NextResponse.json({ profile: session.profile, profileComplete: session.profileComplete });
   } catch (error: any) {
     console.error("Profile load failed:", error);
     return NextResponse.json({ error: error.message || "Failed to load profile" }, { status: 500 });
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
     }
 
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
+    const authUser = await resolveStrictAuthenticatedUser(supabase, request);
     if (!authUser) {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "You can only update your own profile." }, { status: 403 });
     }
 
-    await upsertUserProfileCompatibility(supabase, {
+    const profile = await upsertUserProfileCompatibility(supabase, {
       userId: authUser.id,
       name,
       email,
@@ -51,9 +52,17 @@ export async function POST(request: Request) {
       avatarUrl
     });
 
+    const verifiedProfile = profile ?? (await loadUserProfileCompatibility(supabase, authUser.id));
+
+    if (!verifiedProfile) {
+      throw new Error("Profile save could not be verified.");
+    }
+
     return NextResponse.json({ 
       success: true, 
-      message: "Profile updated successfully" 
+      message: "Profile updated successfully",
+      profile: verifiedProfile,
+      profileComplete: true
     });
   } catch (error: any) {
     console.error("Profile update failed:", error);

@@ -4,9 +4,15 @@ import Image from "next/image";
 import HomestaysSearchBar from "@/components/public/HomestaysSearchBar";
 import { HomePageCard } from "@/components/public/HomePageCard";
 import { getHomesDiscoveryData, type HomeCardRecord } from "@/lib/discovery";
+import {
+  getDiscoveryQueryScore,
+  isHomeAvailableForDateRange,
+  matchesDiscoveryQuery,
+  resolveDiscoveryDateRange,
+  supportsGuestCount,
+} from "@/lib/discovery-search";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { calculateDistance } from "@/lib/location-utils";
-import { enumerateDateRange } from "@/lib/platform-utils";
 import { getMostInteractedHostScores } from "@/lib/host-interactions";
 
 interface HomestaysPageProps {
@@ -15,6 +21,8 @@ interface HomestaysPageProps {
     guests?: string | string[];
     from?: string | string[];
     to?: string | string[];
+    date?: string | string[];
+    date_to?: string | string[];
     lat?: string | string[];
     lng?: string | string[];
     near?: string | string[];
@@ -38,37 +46,6 @@ function asSearchGuests(value: string | string[] | undefined): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
 }
 
-function matchesQuery(home: HomeCardRecord, query: string): boolean {
-  if (!query) return true;
-  const haystack = [
-    home.listingTitle,
-    home.name,
-    home.village,
-    home.city,
-    home.state,
-    home.hostPhotoUrl,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  return haystack.includes(query);
-}
-
-function isAvailableForDateRange(home: HomeCardRecord, fromDate: string, toDate: string): boolean {
-  if (!fromDate) return true;
-  const end = toDate || fromDate;
-  for (const date of enumerateDateRange(fromDate, end)) {
-    if (
-      home.blockedDates.includes(date) ||
-      home.blockedDates.includes(`${date}::fullday`) ||
-      home.blockedDates.some((slot) => slot.startsWith(`${date}::`))
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
 function prettyDate(value: string): string {
   if (!value) return "";
   const parsed = new Date(`${value}T00:00:00`);
@@ -85,8 +62,7 @@ export default async function HomestaysPage({ searchParams }: HomestaysPageProps
   const rawQuery = asSearchString(params.q);
   const query = rawQuery.toLowerCase();
   const guests = asSearchGuests(params.guests);
-  const fromDate = asSearchString(params.from);
-  const toDate = asSearchString(params.to);
+  const { fromDate, toDate } = resolveDiscoveryDateRange(params);
   const searchLat = asSearchNumber(params.lat);
   const searchLng = asSearchNumber(params.lng);
   const nearOnly = asSearchString(params.near) === "1";
@@ -103,10 +79,10 @@ export default async function HomestaysPage({ searchParams }: HomestaysPageProps
     : new Map();
 
   const filteredHomes = enrichedHomes.filter((home) => {
-    if (guests != null && (home.maxGuests ?? 0) < guests) return false;
-    if (!matchesQuery(home, query)) return false;
+    if (!supportsGuestCount(home, guests)) return false;
+    if (!matchesDiscoveryQuery(home, query)) return false;
     if (openOnly && (!home.isActive || !home.isAccepting)) return false;
-    if (!isAvailableForDateRange(home, fromDate, toDate)) return false;
+    if (!isHomeAvailableForDateRange(home, fromDate, toDate)) return false;
 
     if (nearOnly && searchLat != null && searchLng != null && home.lat != null && home.lng != null) {
       return calculateDistance(searchLat, searchLng, home.lat, home.lng) <= NEAR_RADIUS_KM;
@@ -120,13 +96,9 @@ export default async function HomestaysPage({ searchParams }: HomestaysPageProps
     const rightLive = right.isActive && right.isAccepting;
     if (leftLive !== rightLive) return leftLive ? -1 : 1;
 
-    const leftQuery =
-      query && [left.listingTitle, left.name, left.village, left.city, left.state].filter(Boolean).join(" ").toLowerCase();
-    const rightQuery =
-      query && [right.listingTitle, right.name, right.village, right.city, right.state].filter(Boolean).join(" ").toLowerCase();
-    const leftExact = leftQuery && (leftQuery === query || left.name?.toLowerCase() === query || left.listingTitle?.toLowerCase() === query);
-    const rightExact = rightQuery && (rightQuery === query || right.name?.toLowerCase() === query || right.listingTitle?.toLowerCase() === query);
-    if (Boolean(leftExact) !== Boolean(rightExact)) return leftExact ? -1 : 1;
+    const leftQueryScore = getDiscoveryQueryScore(left, query);
+    const rightQueryScore = getDiscoveryQueryScore(right, query);
+    if (leftQueryScore !== rightQueryScore) return rightQueryScore - leftQueryScore;
 
     if (searchLat != null && searchLng != null && left.lat != null && left.lng != null && right.lat != null && right.lng != null) {
       const leftDistance = calculateDistance(searchLat, searchLng, left.lat, left.lng);
@@ -140,17 +112,6 @@ export default async function HomestaysPage({ searchParams }: HomestaysPageProps
 
     if ((left.featured ? 1 : 0) !== (right.featured ? 1 : 0)) {
       return left.featured ? -1 : 1;
-    }
-
-    if (query) {
-      const leftHaystack = [left.listingTitle, left.name, left.village, left.city, left.state].filter(Boolean).join(" ").toLowerCase();
-      const rightHaystack = [right.listingTitle, right.name, right.village, right.city, right.state].filter(Boolean).join(" ").toLowerCase();
-      const leftStarts = leftHaystack.startsWith(query);
-      const rightStarts = rightHaystack.startsWith(query);
-      if (leftStarts !== rightStarts) return leftStarts ? -1 : 1;
-      const leftIncludes = leftHaystack.includes(query);
-      const rightIncludes = rightHaystack.includes(query);
-      if (leftIncludes !== rightIncludes) return leftIncludes ? -1 : 1;
     }
 
     return (left.listingTitle ?? left.name).localeCompare(right.listingTitle ?? right.name);
@@ -283,7 +244,7 @@ export default async function HomestaysPage({ searchParams }: HomestaysPageProps
           <div style={{ display: "grid", gap: "4px" }}>
             <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 900 }}>All homestays</h2>
             <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
-              {openCount} open stay{openCount === 1 ? "" : "s"} and {closedCount} closed
+              {scoredHomes.length} stay{scoredHomes.length === 1 ? "" : "s"} match your place, date, and guest filters. {openCount} open and {closedCount} closed.
             </p>
           </div>
           <Link href="/joinfamlo" style={{ color: "#1d4ed8", fontWeight: 800, textDecoration: "none", fontSize: "14px" }}>

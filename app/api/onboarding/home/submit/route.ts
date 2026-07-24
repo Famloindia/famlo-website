@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { derivePlatformAgreementState, normalizeGstin } from "@/lib/host-onboarding-legal";
 import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
 import { maskCoordinates } from "@/lib/location-utils";
+import { updateHostPropertyListingProfile } from "@/lib/host-property-profile";
 import {
   resolveVerifiedAuthPhone,
   seedHostWhatsappSettings,
@@ -30,8 +31,12 @@ function asNumber(value: unknown): number | null {
 }
 
 function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[\n,]/)
+      : [];
+  return values
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter((item) => item.length > 0);
 }
@@ -178,6 +183,17 @@ type DraftInput = {
   google_maps_link?: string | null;
   rooms?: Array<Record<string, unknown>>;
   nearby_places?: Array<Record<string, unknown>>;
+  host_hobbies: string[];
+  listing_title: string;
+  journey_story: string;
+  special_experience: string;
+  local_experience: string;
+  interaction_type: string;
+  house_type: string;
+  food_types: string[];
+  check_in_time: string;
+  check_out_time: string;
+  family_type: string;
 };
 
 function normalizeDraftRow(row: JsonRecord): DraftInput {
@@ -206,7 +222,7 @@ function normalizeDraftRow(row: JsonRecord): DraftInput {
   const photo_urls = Array.from(
     new Set(
       [
-        ...(Array.isArray(photoUrlsRaw) ? photoUrlsRaw : []),
+        ...asStringArray(photoUrlsRaw),
         ...asStringArray(getValue(payload, ["photos", "photo_urls", "hostGalleryPhotos"])),
         ...rooms.flatMap((room) => asStringArray(getValue(room, ["roomPhotos", "room_photos", "photos", "photo_urls"]))),
       ].filter((value): value is string => typeof value === "string" && value.trim().length > 0)
@@ -244,7 +260,7 @@ function normalizeDraftRow(row: JsonRecord): DraftInput {
     upi_id: asString(row.upi_id) || asString(getValue(payload, ["upiId"])) || asString(getValue(compliance, ["upiId"])),
     password: asString(row.password),
     included_items: asStringArray(getValue(payload, ["includedItems"])),
-    house_rules: asStringArray(getValue(payload, ["customRules"])),
+    house_rules: asStringArray(getValue(payload, ["houseRules", "customRules", "houseRulesText"])),
     amenities: Array.isArray(row.amenities) ? row.amenities : asStringArray(getValue(payload, ["amenities"])),
     room_type: asNullableString(getValue(payload, ["roomType"])) ?? undefined,
     price_morning:
@@ -329,7 +345,10 @@ function normalizeDraftRow(row: JsonRecord): DraftInput {
       asNullableString(getValue(compliance, ["hostReelUploadedAt"])),
     
     bathroom_type: asString(row.bathroom_type) || asString(getValue(payload, ["bathroomType"])),
-    common_areas: Array.isArray(row.common_areas) ? row.common_areas : asStringArray(getValue(payload, ["commonAreas"])),
+    common_areas:
+      Array.isArray(row.common_areas) && row.common_areas.length > 0
+        ? row.common_areas
+        : asStringArray(getValue(payload, ["commonAreas"])),
     latitude: asNumber(row.lat_exact) ?? asNumber(row.latitude) ?? asNumber(getValue(payload, ["latitude"])),
     longitude: asNumber(row.lng_exact) ?? asNumber(row.longitude) ?? asNumber(getValue(payload, ["longitude"])),
     lat: asNumber(row.lat),
@@ -343,6 +362,17 @@ function normalizeDraftRow(row: JsonRecord): DraftInput {
         : Array.isArray(row.landmarks)
           ? (row.landmarks as Array<Record<string, unknown>>)
           : [],
+    host_hobbies: asStringArray(getValue(payload, ["hostHobbies", "hobbies"])),
+    listing_title: asString(getValue(payload, ["listingTitle"])),
+    journey_story: asString(getValue(payload, ["journeyStory"])),
+    special_experience: asString(getValue(payload, ["specialExperience"])),
+    local_experience: asString(getValue(payload, ["localExperience"])),
+    interaction_type: asString(getValue(payload, ["interactionType"])),
+    house_type: asString(getValue(payload, ["houseType", "homeType"])),
+    food_types: asStringArray(getValue(payload, ["foodTypes", "foodType"])),
+    check_in_time: asString(getValue(payload, ["checkInTime"])),
+    check_out_time: asString(getValue(payload, ["checkOutTime"])),
+    family_type: asString(getValue(payload, ["familyType"])) || asString(row.family_composition),
   };
 }
 
@@ -397,7 +427,10 @@ async function ensurePublicUser(
   supabase: ReturnType<typeof createAdminSupabaseClient>,
   payload: JsonRecord
 ): Promise<void> {
-  const { error } = await supabase.from("users").upsert(payload as never);
+  const compactPayload = Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined)
+  );
+  const { error } = await supabase.from("users").upsert(compactPayload as never);
   if (error) throw error;
 }
 
@@ -405,15 +438,42 @@ async function ensureFamilyProfile(
   supabase: ReturnType<typeof createAdminSupabaseClient>,
   application: DraftInput,
   userId: string,
-  password: string | null
+  password: string | null,
+  requestedFamilyId: string | null
 ): Promise<{ profileId: string | null; profileCode: string | null }> {
-  const { data: existing, error: existingError } = await supabase
-    .from("families")
-    .select("id,host_id")
-    .eq("user_id", userId)
-    .maybeSingle();
+  let existing: JsonRecord | null = null;
+  if (requestedFamilyId) {
+    const { data, error } = await supabase
+      .from("families")
+      .select("id,host_id,user_id,property_name,name,city,state,village")
+      .eq("id", requestedFamilyId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data || data.user_id !== userId) {
+      throw new Error("The onboarding draft is not authorized for its selected property.");
+    }
+    existing = data as JsonRecord;
+  } else {
+    const { data, error } = await supabase
+      .from("families")
+      .select("id,host_id,user_id,property_name,name,city,state,village")
+      .eq("user_id", userId);
+    if (error) throw error;
 
-  if (existingError) throw existingError;
+    const normalizedPropertyName = application.property_name.trim().toLowerCase();
+    const normalizedCity = application.city.trim().toLowerCase();
+    const normalizedState = application.state.trim().toLowerCase();
+    const normalizedLocality = (application.locality ?? "").trim().toLowerCase();
+    existing =
+      ((data ?? []).find((family) => {
+        const familyName = asString(family.property_name || family.name).toLowerCase();
+        const cityMatches = !normalizedCity || asString(family.city).toLowerCase() === normalizedCity;
+        const stateMatches = !normalizedState || asString(family.state).toLowerCase() === normalizedState;
+        const localityMatches =
+          !normalizedLocality || asString(family.village).toLowerCase() === normalizedLocality;
+        return Boolean(normalizedPropertyName) && familyName === normalizedPropertyName && cityMatches && stateMatches && localityMatches;
+      }) as JsonRecord | undefined) ?? null;
+  }
 
   const profileCode =
     existing && typeof existing.host_id === "string" ? existing.host_id : generateProfileCode("FAM");
@@ -506,7 +566,8 @@ type ProvisionedSubmissionAccess = {
 
 async function provisionSubmissionAccess(
   supabase: ReturnType<typeof createAdminSupabaseClient>,
-  application: DraftInput
+  application: DraftInput,
+  requestedFamilyId: string | null
 ): Promise<ProvisionedSubmissionAccess> {
   const email = application.email.trim().toLowerCase();
   if (!email) {
@@ -555,12 +616,18 @@ async function provisionSubmissionAccess(
     city: application.city,
     state: application.state,
     about: application.host_bio,
-    avatar_url: application.host_photo_url,
+    avatar_url: application.host_photo_url ?? undefined,
     role: "family",
     onboarding_completed: false,
   });
 
-  const profile = await ensureFamilyProfile(supabase, application, userId, partnerPassword);
+  const profile = await ensureFamilyProfile(
+    supabase,
+    application,
+    userId,
+    partnerPassword,
+    requestedFamilyId
+  );
   const proDashboardEnabled = isFamloProDashboardEnabled();
   const proAccess =
     proDashboardEnabled && profile.profileId
@@ -661,6 +728,17 @@ async function upsertFamilyApplication(
       longitude: input.longitude ?? null,
       bathroomType: input.bathroom_type ?? null,
       commonAreas: input.common_areas ?? [],
+      hostHobbies: input.host_hobbies,
+      listingTitle: input.listing_title,
+      journeyStory: input.journey_story,
+      specialExperience: input.special_experience,
+      localExperience: input.local_experience,
+      interactionType: input.interaction_type,
+      houseType: input.house_type,
+      foodTypes: input.food_types,
+      checkInTime: input.check_in_time,
+      checkOutTime: input.check_out_time,
+      familyType: input.family_type,
       rooms: Array.isArray(input.rooms) ? input.rooms : [],
     },
     status,
@@ -696,6 +774,72 @@ async function upsertFamilyApplication(
   }
 
   throw firstAttempt.error;
+}
+
+async function syncSubmittedListingMedia(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  input: { familyId: string; profile: DraftInput }
+): Promise<void> {
+  const { data: existingPhotos, error: photoLoadError } = await supabase
+    .from("family_photos")
+    .select("url,is_primary,sort_order")
+    .eq("family_id", input.familyId);
+  if (photoLoadError) throw photoLoadError;
+  const existingUrls = new Set(
+    (existingPhotos ?? []).map((photo) => asString(photo.url)).filter(Boolean)
+  );
+  const hasPrimary = (existingPhotos ?? []).some((photo) => photo.is_primary === true);
+  const missingPhotos = input.profile.photo_urls.filter((url) => !existingUrls.has(url));
+  if (missingPhotos.length > 0) {
+    const startOrder = existingPhotos?.length ?? 0;
+    const { error } = await supabase.from("family_photos").insert(
+      missingPhotos.map((url, index) => ({
+        family_id: input.familyId,
+        url,
+        image_url: url,
+        is_primary: !hasPrimary && index === 0,
+        sort_order: startOrder + index,
+      })) as never
+    );
+    if (error) throw error;
+  }
+
+  if (!input.profile.host_reel_public_url) return;
+  const { data: existingReel, error: reelLoadError } = await supabase
+    .from("host_property_reels")
+    .select("id")
+    .eq("family_id", input.familyId)
+    .eq("public_url", input.profile.host_reel_public_url)
+    .neq("status", "deleted")
+    .limit(1)
+    .maybeSingle();
+  if (reelLoadError) throw reelLoadError;
+  if (existingReel?.id) return;
+
+  const { data: host, error: hostError } = await supabase
+    .from("hosts")
+    .select("id,user_id")
+    .eq("legacy_family_id", input.familyId)
+    .maybeSingle();
+  if (hostError) throw hostError;
+  if (!host?.id) return;
+  const { count } = await supabase
+    .from("host_property_reels")
+    .select("id", { count: "exact", head: true })
+    .eq("family_id", input.familyId)
+    .eq("status", "active");
+  const { error } = await supabase.from("host_property_reels").insert({
+    family_id: input.familyId,
+    host_id: host.id,
+    user_id: host.user_id,
+    storage_key: input.profile.host_reel_storage_key ?? input.profile.host_reel_public_url,
+    public_url: input.profile.host_reel_public_url,
+    mime_type: input.profile.host_reel_mime_type ?? "video/mp4",
+    size_bytes: input.profile.host_reel_size_bytes ?? null,
+    is_featured: (count ?? 0) === 0,
+    status: "active",
+  } as never);
+  if (error) throw error;
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -757,7 +901,51 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const nextMode = publishCheck.missing.length > 0 ? "missing_details" : "review_required";
     const provisionedAccess =
-      nextMode === "missing_details" ? null : await provisionSubmissionAccess(supabase, normalized);
+      nextMode === "missing_details"
+        ? null
+        : await provisionSubmissionAccess(supabase, normalized, asNullableString(draft.family_id));
+    if (provisionedAccess?.familyId) {
+      await updateHostPropertyListingProfile(supabase, {
+        familyId: provisionedAccess.familyId,
+        identityPatch: {
+          displayName: normalized.full_name,
+          ...(normalized.host_photo_url ? { profilePhotoUrl: normalized.host_photo_url } : {}),
+          hobbies: normalized.host_hobbies,
+          languages: normalized.languages,
+          biography: normalized.host_bio,
+        },
+        propertyPatch: {
+          propertyName: normalized.property_name,
+          listingTitle: normalized.listing_title,
+          hostBio: normalized.host_bio,
+          city: normalized.city,
+          state: normalized.state,
+          locality: normalized.locality,
+          journeyStory: normalized.journey_story,
+          specialExperience: normalized.special_experience,
+          localExperience: normalized.local_experience,
+          culturalOffering: normalized.famlo_experience,
+          homeType: normalized.house_type,
+          interactionType: normalized.interaction_type,
+          houseRules: normalized.house_rules,
+          amenities: normalized.amenities,
+          foodTypes: normalized.food_types,
+          includedItems: normalized.included_items,
+          bathroomType: normalized.bathroom_type,
+          checkInTime: normalized.check_in_time,
+          checkOutTime: normalized.check_out_time,
+          commonAreas: normalized.common_areas,
+          streetAddress: normalized.street_address,
+          googleMapsLink: normalized.google_maps_link,
+          nearbyPlaces: normalized.nearby_places,
+          familyType: normalized.family_type,
+        },
+      });
+      await syncSubmittedListingMedia(supabase, {
+        familyId: provisionedAccess.familyId,
+        profile: normalized,
+      });
+    }
     const nextReviewNote =
       publishCheck.missing.length > 0
         ? `Pending review. Missing: ${publishCheck.missing.join(", ")}`

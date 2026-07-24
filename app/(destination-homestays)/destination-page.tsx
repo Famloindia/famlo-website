@@ -3,11 +3,14 @@ import Link from "next/link";
 
 import { HomePageCard } from "@/components/public/HomePageCard";
 import { getHomesDiscoveryData } from "@/lib/discovery";
+import { resolveDiscoveryDateRange } from "@/lib/discovery-search";
 import { getDestinationHomes, POPULAR_DESTINATIONS } from "@/lib/public-destinations";
 
 export type DestinationSearchParams = {
   from?: string | string[];
   to?: string | string[];
+  date?: string | string[];
+  date_to?: string | string[];
   guests?: string | string[];
 };
 
@@ -49,8 +52,7 @@ export async function DestinationHomestaysPage({
   const resolvedSearchParams: DestinationSearchParams = searchParams ? await searchParams : {};
   const homes = await getHomesDiscoveryData();
   const destinationHomes = getDestinationHomes(homes, destinationName);
-  const fromDate = asSearchString(resolvedSearchParams.from);
-  const toDate = asSearchString(resolvedSearchParams.to);
+  const { fromDate, toDate } = resolveDiscoveryDateRange(resolvedSearchParams);
   const guests = asSearchString(resolvedSearchParams.guests);
   const relatedDestinations = POPULAR_DESTINATIONS.filter((destination) => destination.name !== destinationName);
 

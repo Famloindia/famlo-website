@@ -8,7 +8,7 @@ import { appendLedgerEntryIfMissing } from "@/lib/finance/runtime";
 import { computeRefundAllocationBreakdown } from "@/lib/finance/refunds";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { recordBookingInventoryTransition } from "@/lib/payment-booking-finalization";
-import { resolveAuthenticatedUser } from "@/lib/request-user";
+import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -462,7 +462,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
+    const authUser = await resolveStrictAuthenticatedUser(supabase, request);
     if (!authUser) {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
