@@ -130,5 +130,5 @@ as $$
     scored.property_count desc,
     scored.name asc,
     scored.state asc nulls last
-  limit input.lim;
+  limit (select lim from input);
 $$;

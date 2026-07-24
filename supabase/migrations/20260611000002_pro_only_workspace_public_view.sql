@@ -45,8 +45,6 @@ select
   h.legacy_family_id,
   h.slug,
   h.status,
-  coalesce(h.property_marketplace_status, f.property_marketplace_status, 'under_review') as property_marketplace_status,
-  coalesce(h.trust_status, f.trust_status, 'normal') as trust_status,
   h.display_name,
   h.city,
   h.state,
@@ -79,7 +77,9 @@ select
   coalesce(family_media.image_urls, media.image_urls, '{}'::text[]) as image_urls,
   coalesce(units.room_image_urls, '{}'::text[]) as room_image_urls,
   units.room_count,
-  units.starting_room_price
+  units.starting_room_price,
+  coalesce(h.property_marketplace_status, f.property_marketplace_status, 'under_review') as property_marketplace_status,
+  coalesce(h.trust_status, f.trust_status, 'normal') as trust_status
 from public.hosts h
 left join public.families f on f.id = h.legacy_family_id
 left join lateral (
