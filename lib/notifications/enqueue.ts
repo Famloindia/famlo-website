@@ -4,8 +4,12 @@ import { asString } from "@/lib/platform-utils";
 
 import type { NotificationEnqueueInput } from "@/lib/notifications/types";
 
-function isDedupeError(message: string): boolean {
-  return message.includes("notification_queue_dedupe_idx");
+function isDedupeError(error: { code?: string | null; message?: string | null }): boolean {
+  return (
+    error.code === "23505" ||
+    String(error.message ?? "").includes("notification_queue_dedupe_idx") ||
+    String(error.message ?? "").toLowerCase().includes("duplicate key")
+  );
 }
 
 function isSchemaCompatibilityError(message: string): boolean {
@@ -45,7 +49,7 @@ export async function enqueueNotificationRecord(
     return "inserted";
   }
 
-  if (isDedupeError(asString(error.message) ?? "")) {
+  if (isDedupeError(error)) {
     return "deduped";
   }
 

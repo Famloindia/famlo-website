@@ -1,99 +1,67 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { renderEmailTemplate } from "@/lib/document-templates";
 import { attachBookingWhatsAppMessageId } from "@/lib/booking-whatsapp-actions";
-import { loadUserProfileCompatibility } from "@/lib/user-profile";
-import { asString, type JsonRecord } from "@/lib/platform-utils";
-import { sendEmail } from "@/lib/resend";
-
+import { renderEmailTemplate } from "@/lib/document-templates";
 import {
-  sendWhatsAppInteractiveButtons,
-  sendWhatsAppNotification,
   sendWhatsAppTemplateNotification,
 } from "@/lib/notifications/providers/whatsapp";
-import { buildNotificationContent, buildWhatsAppBody } from "@/lib/notifications/templates";
+import { buildNotificationContent } from "@/lib/notifications/templates";
 import type { NotificationDeliveryResult, NotificationQueueRow } from "@/lib/notifications/types";
+import { asString, type JsonRecord } from "@/lib/platform-utils";
 import { syncHostProInvoiceWhatsappDelivery } from "@/lib/pro-billing/whatsapp";
+import { sendEmail } from "@/lib/resend";
+import { loadUserProfileCompatibility } from "@/lib/user-profile";
+import {
+  getBookingTemplateParameterOrder,
+  getWhatsAppRuntimeConfig,
+  type WhatsAppTemplateKind,
+} from "@/lib/whatsapp-config";
 
-const BASE_SELECT =
-  "id,event_type,channel,user_id,booking_id,payout_id,subject,payload,scheduled_for,status,processed_at,error_message";
-const EXTENDED_SELECT =
-  `${BASE_SELECT},recipient_role,recipient_phone,template_name,provider_message_id,attempts`;
+const MAX_ATTEMPTS = 5;
+const DEFAULT_BATCH_SIZE = 25;
+const LEASE_SECONDS = 120;
 
-function isSchemaCompatibilityError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return lower.includes("column") || lower.includes("schema cache") || lower.includes("does not exist") || lower.includes("relation");
+const CLAIM_SELECT =
+  "id,event_type,channel,user_id,booking_id,payout_id,subject,payload,scheduled_for,status,processed_at,error_message," +
+  "recipient_role,recipient_phone,template_name,provider_message_id,attempts,next_attempt_at,processing_started_at," +
+  "lease_expires_at,completed_at,last_error,provider_status,provider_status_at";
+
+function retryDelaySeconds(attempts: number): number {
+  return Math.min(3600, 30 * 2 ** Math.max(0, attempts - 1));
 }
 
-async function loadPendingNotificationRows(
+async function claimRows(
   supabase: SupabaseClient,
-  now: string
+  batchSize: number
 ): Promise<NotificationQueueRow[]> {
-  const extendedResult = await supabase
-    .from("notification_queue")
-    .select(EXTENDED_SELECT)
-    .eq("status", "pending")
-    .lte("scheduled_for", now)
-    .order("scheduled_for", { ascending: true })
-    .limit(50);
-
-  if (extendedResult.error && isSchemaCompatibilityError(extendedResult.error.message)) {
-    const fallbackResult = await supabase
-      .from("notification_queue")
-      .select(BASE_SELECT)
-      .eq("status", "pending")
-      .lte("scheduled_for", now)
-      .order("scheduled_for", { ascending: true })
-      .limit(50);
-
-    if (fallbackResult.error) {
-      throw fallbackResult.error;
-    }
-
-    return (fallbackResult.data ?? []) as NotificationQueueRow[];
-  }
-
-  if (extendedResult.error) {
-    throw extendedResult.error;
-  }
-
-  return (extendedResult.data ?? []) as NotificationQueueRow[];
+  const { data, error } = await supabase.rpc("claim_notification_queue_batch", {
+    p_batch_size: Math.max(1, Math.min(batchSize, 100)),
+    p_lease_seconds: LEASE_SECONDS,
+  });
+  if (error) throw error;
+  return (data ?? []) as NotificationQueueRow[];
 }
 
 async function resolveUserContact(
   supabase: SupabaseClient,
   userId: string | null
 ): Promise<{ email: string | null; phone: string | null }> {
-  if (!userId) {
-    return { email: null, phone: null };
-  }
-
+  if (!userId) return { email: null, phone: null };
   const profile = await loadUserProfileCompatibility(supabase, userId);
-  return {
-    email: asString(profile?.email),
-    phone: asString(profile?.phone),
-  };
+  return { email: asString(profile?.email), phone: asString(profile?.phone) };
 }
 
-async function deliverEmailNotification(
+async function deliverEmail(
   supabase: SupabaseClient,
   row: NotificationQueueRow
 ): Promise<NotificationDeliveryResult> {
   const payload = (row.payload as JsonRecord | null) ?? {};
-  const directTo = asString(payload.to);
-  const userContact = await resolveUserContact(supabase, asString(row.user_id));
-  const emailTo = directTo ?? userContact.email;
-
-  if (!emailTo) {
-    return {
-      status: "skipped",
-      errorMessage: "Recipient email not found.",
-    };
-  }
-
+  const contact = await resolveUserContact(supabase, asString(row.user_id));
+  const to = asString(payload.to) ?? contact.email;
+  if (!to) return { status: "skipped", errorMessage: "Recipient email not found.", retryable: false };
   const content = buildNotificationContent(row);
-  const emailResult = await sendEmail({
-    to: emailTo,
+  const result = await sendEmail({
+    to,
     subject: content.subject,
     html: renderEmailTemplate({
       eyebrow: "Famlo Update",
@@ -103,242 +71,198 @@ async function deliverEmailNotification(
       ctaUrl: content.ctaUrl ?? undefined,
     }),
   });
-
-  if (!emailResult.success) {
-    return {
-      status: "failed",
-      errorMessage: emailResult.error ?? "Email delivery failed.",
-    };
-  }
-
-  return {
-    status: "processed",
-    providerMessageId: emailResult.id ?? null,
-  };
+  return result.success
+    ? { status: "processed", providerMessageId: result.id ?? null, retryable: false }
+    : { status: "failed", errorMessage: result.error ?? "Email delivery failed.", retryable: true };
 }
 
-async function deliverWhatsAppNotification(
+function templateKindForEvent(eventType: string): WhatsAppTemplateKind | null {
+  if (eventType === "booking_host_action_required") return "bookingApproval";
+  if (eventType === "host_whatsapp_test") return "test";
+  if (eventType === "guest_message_sent") return "guestMessage";
+  return null;
+}
+
+function orderedBookingVariables(payload: JsonRecord): string[] {
+  const parameters =
+    payload.template_parameters && typeof payload.template_parameters === "object"
+      ? (payload.template_parameters as JsonRecord)
+      : {};
+  return getBookingTemplateParameterOrder().map((key) => asString(parameters[key]) ?? "");
+}
+
+async function deliverWhatsApp(
   supabase: SupabaseClient,
   row: NotificationQueueRow
 ): Promise<NotificationDeliveryResult> {
   const payload = (row.payload as JsonRecord | null) ?? {};
-  const directPhone = asString(payload.phone) ?? asString(row.recipient_phone);
-  const userContact = await resolveUserContact(supabase, asString(row.user_id));
-  const phone = directPhone ?? userContact.phone;
-
+  const phone = asString(row.recipient_phone);
   if (!phone) {
     return {
-      status: "skipped",
-      errorMessage: "Recipient phone not found.",
+      status: "failed",
+      errorMessage: "Canonical WhatsApp recipient is missing.",
+      errorCode: "missing_recipient",
+      errorCategory: "recipient",
+      retryable: false,
+    };
+  }
+  const eventType = asString(row.event_type) ?? "";
+  const kind = templateKindForEvent(eventType);
+  if (!kind) {
+    return {
+      status: "failed",
+      errorMessage: "This WhatsApp event has no approved template mapping.",
+      errorCode: "template_mapping_missing",
+      errorCategory: "configuration",
+      retryable: false,
+    };
+  }
+  const config = getWhatsAppRuntimeConfig();
+  if (!config.enabled) {
+    return {
+      status: "failed",
+      errorMessage: "WhatsApp notifications are disabled.",
+      errorCode: "provider_not_configured",
+      errorCategory: "configuration",
+      retryable: false,
+    };
+  }
+  const templateName = config.templates[kind];
+  if (!templateName) {
+    return {
+      status: "failed",
+      errorMessage: `The approved ${kind} template is not configured.`,
+      errorCode: "template_missing",
+      errorCategory: "configuration",
+      retryable: false,
     };
   }
 
-  const content = buildNotificationContent(row);
-  const interactiveButtons = Array.isArray(payload.buttons)
-    ? payload.buttons
-        .map((button) => {
-          const record = button as JsonRecord;
-          const id = asString(record.id);
-          const title = asString(record.title);
-          if (!id || !title) return null;
-          return { id, title };
-        })
-        .filter((button): button is { id: string; title: string } => Boolean(button))
-    : [];
-  const templateName = asString(row.template_name);
-  const templateVariables = Array.isArray(payload.template_variables)
-    ? payload.template_variables
-        .map((value) => asString(value))
-        .filter((value): value is string => Boolean(value))
-    : [];
-
-  if (templateName === "host_booking_approval_request" && interactiveButtons.length >= 2 && templateVariables.length >= 6) {
-    const result = await sendWhatsAppTemplateNotification({
-      phone,
-      templateName,
-      languageCode: asString(payload.template_language) ?? "en",
-      bodyVariables: templateVariables.slice(0, 6),
-      quickReplyButtons: interactiveButtons.slice(0, 2).map((button, index) => ({
-        index,
-        payload: button.id,
-      })),
-    });
-
-    const actionToken = asString(payload.action_token);
-    if (result.status === "processed" && actionToken && result.providerMessageId) {
-      await attachBookingWhatsAppMessageId(supabase, {
-        actionToken,
-        providerMessageId: result.providerMessageId,
-      });
+  const buttons: Array<{ index: number; type: "quick_reply" | "url"; payload?: string; urlSuffix?: string }> = [];
+  if (kind === "bookingApproval") {
+    const actionButtons = Array.isArray(payload.buttons) ? payload.buttons : [];
+    for (const [index, raw] of actionButtons.slice(0, 2).entries()) {
+      const button = raw && typeof raw === "object" ? (raw as JsonRecord) : {};
+      const opaquePayload = asString(button.id);
+      if (opaquePayload) buttons.push({ index, type: "quick_reply", payload: opaquePayload });
     }
-
-    return result;
+  } else if (kind === "guestMessage") {
+    const chatUrl = asString(payload.chat_url);
+    if (chatUrl) buttons.push({ index: 0, type: "url", urlSuffix: chatUrl });
   }
 
-  if (interactiveButtons.length > 0) {
-    const result = await sendWhatsAppInteractiveButtons({
-      phone,
-      bodyText: asString(payload.body_text) ?? buildWhatsAppBody(content),
-      buttons: interactiveButtons,
-      templateName: content.templateName,
-    });
-
-    const actionToken = asString(payload.action_token);
-    if (result.status === "processed" && actionToken && result.providerMessageId) {
-      await attachBookingWhatsAppMessageId(supabase, {
-        actionToken,
-        providerMessageId: result.providerMessageId,
-      });
-    }
-
-    return result;
-  }
-
-  const actionLines = [
-    asString(payload.accept_url) ? `Accept: ${asString(payload.accept_url)}` : null,
-    asString(payload.reject_url) ? `Reject: ${asString(payload.reject_url)}` : null,
-  ].filter((value): value is string => Boolean(value));
-
-  return sendWhatsAppNotification({
+  const bodyVariables =
+    kind === "bookingApproval"
+      ? orderedBookingVariables(payload)
+      : Array.isArray(payload.template_variables)
+        ? payload.template_variables.map((item) => asString(item) ?? "")
+        : [];
+  const result = await sendWhatsAppTemplateNotification({
     phone,
-    message: [buildWhatsAppBody(content), ...actionLines].join(actionLines.length > 0 ? "\n\n" : ""),
-    templateName: content.templateName,
+    templateKind: kind,
+    templateName,
+    languageCode: asString(payload.template_language) ?? config.templateLanguage,
+    bodyVariables,
+    buttons,
   });
+
+  const actionToken = asString(payload.action_token);
+  if (result.status === "processed" && actionToken && result.providerMessageId) {
+    await attachBookingWhatsAppMessageId(supabase, {
+      actionToken,
+      providerMessageId: result.providerMessageId,
+    });
+  }
+  return result;
 }
 
-async function updateNotificationRow(
-  supabase: SupabaseClient,
-  rowId: string,
-  patch: {
-    status: "processed" | "failed" | "skipped";
-    processedAt: string;
-    errorMessage?: string | null;
-    providerMessageId?: string | null;
-    attempts?: number | null;
-  }
-): Promise<void> {
-  const extendedUpdate = {
-    status: patch.status,
-    processed_at: patch.processedAt,
-    error_message: patch.errorMessage ?? null,
-    provider_message_id: patch.providerMessageId ?? null,
-    ...(typeof patch.attempts === "number" ? { attempts: patch.attempts } : {}),
-  };
-
-  let error = (
-    await supabase
-      .from("notification_queue")
-      .update(extendedUpdate as never)
-      .eq("id", rowId)
-  ).error;
-
-  if (error && isSchemaCompatibilityError(error.message)) {
-    const fallbackUpdate = {
-      status: patch.status,
-      processed_at: patch.processedAt,
-      error_message: patch.errorMessage ?? null,
-    };
-    error = (
-      await supabase
-        .from("notification_queue")
-        .update(fallbackUpdate as never)
-        .eq("id", rowId)
-    ).error;
-  }
-
-  if (error) {
-    throw error;
-  }
-}
-
-async function handleNotificationRow(
+async function completeRow(
   supabase: SupabaseClient,
   row: NotificationQueueRow,
-  now: string
-): Promise<NotificationDeliveryResult> {
-  const channel = asString(row.channel) ?? "email";
-  const nextAttempts = typeof row.attempts === "number" && Number.isFinite(row.attempts) ? row.attempts + 1 : 1;
-
-  if (channel === "email") {
-    const result = await deliverEmailNotification(supabase, row);
-    await updateNotificationRow(supabase, asString(row.id) ?? "", {
-      status: result.status,
-      processedAt: now,
-      errorMessage: result.errorMessage ?? null,
-      providerMessageId: result.providerMessageId ?? null,
-      attempts: nextAttempts,
-    });
-    return result;
-  }
-
-  if (channel === "whatsapp") {
-    const result = await deliverWhatsAppNotification(supabase, row);
-    await updateNotificationRow(supabase, asString(row.id) ?? "", {
-      status: result.status,
-      processedAt: now,
-      errorMessage: result.errorMessage ?? null,
-      providerMessageId: result.providerMessageId ?? null,
-      attempts: nextAttempts,
-    });
-    const payload = (row.payload as JsonRecord | null) ?? {};
-    const invoiceId = asString(payload.invoice_id);
-    if ((asString(row.event_type) ?? "") === "host_pro_invoice_receipt" && invoiceId) {
-      await syncHostProInvoiceWhatsappDelivery(supabase, {
-        invoiceId,
-        status: result.status,
-        errorMessage: result.errorMessage ?? null,
-      });
-    }
-    return result;
-  }
-
-  const skipped: NotificationDeliveryResult = {
-    status: "skipped",
-    errorMessage: `Notification channel '${channel}' is not supported yet.`,
+  result: NotificationDeliveryResult
+): Promise<"processed" | "failed" | "skipped" | "retried"> {
+  const rowId = asString(row.id);
+  if (!rowId) throw new Error("Claimed notification is missing an ID.");
+  const attempts = typeof row.attempts === "number" ? row.attempts : 1;
+  const now = new Date();
+  const retry = result.status === "failed" && result.retryable === true && attempts < MAX_ATTEMPTS;
+  const status = retry ? "retry_scheduled" : result.status;
+  const patch: JsonRecord = {
+    status,
+    lease_expires_at: null,
+    processing_started_at: null,
+    error_message: result.errorMessage ?? null,
+    last_error: result.errorMessage ?? null,
+    provider_error_code: result.errorCode ?? null,
+    provider_error_category: result.errorCategory ?? null,
   };
-  await updateNotificationRow(supabase, asString(row.id) ?? "", {
-    status: skipped.status,
-    processedAt: now,
-    errorMessage: skipped.errorMessage,
-    attempts: nextAttempts,
-  });
-  return skipped;
+  if (retry) {
+    patch.next_attempt_at = new Date(now.getTime() + retryDelaySeconds(attempts) * 1000).toISOString();
+    patch.processed_at = null;
+    patch.completed_at = null;
+  } else {
+    patch.processed_at = now.toISOString();
+    patch.completed_at = now.toISOString();
+  }
+  if (result.providerMessageId) {
+    patch.provider_message_id = result.providerMessageId;
+    patch.provider_status = result.providerStatus ?? "submitted";
+    patch.provider_status_at = now.toISOString();
+  }
+  const { error } = await supabase
+    .from("notification_queue")
+    .update(patch as never)
+    .eq("id", rowId)
+    .eq("status", "processing");
+  if (error) throw error;
+  return retry ? "retried" : result.status;
 }
 
 export async function processNotificationQueueBatch(
-  supabase: SupabaseClient
-): Promise<{ processed: number; failed: number; skipped: number }> {
-  const now = new Date().toISOString();
-  const rows = await loadPendingNotificationRows(supabase, now);
-
-  let processed = 0;
-  let failed = 0;
-  let skipped = 0;
-
+  supabase: SupabaseClient,
+  options: { batchSize?: number; maxDurationMs?: number } = {}
+): Promise<{ processed: number; failed: number; skipped: number; retried: number; claimed: number }> {
+  const rows = await claimRows(supabase, options.batchSize ?? DEFAULT_BATCH_SIZE);
+  const deadline = Date.now() + (options.maxDurationMs ?? 20_000);
+  const metrics = { processed: 0, failed: 0, skipped: 0, retried: 0, claimed: rows.length };
   for (const row of rows) {
-    const rowId = asString(row.id);
-    if (!rowId) continue;
-
+    if (Date.now() >= deadline) break;
+    let result: NotificationDeliveryResult;
     try {
-      const result = await handleNotificationRow(supabase, row, now);
-      if (result.status === "processed") {
-        processed += 1;
-      } else if (result.status === "skipped") {
-        skipped += 1;
-      } else {
-        failed += 1;
-      }
-    } catch (notificationError) {
-      await updateNotificationRow(supabase, rowId, {
+      result =
+        asString(row.channel) === "email"
+          ? await deliverEmail(supabase, row)
+          : asString(row.channel) === "whatsapp"
+            ? await deliverWhatsApp(supabase, row)
+            : { status: "skipped", errorMessage: "Unsupported notification channel.", retryable: false };
+    } catch {
+      result = {
         status: "failed",
-        processedAt: now,
-        errorMessage: notificationError instanceof Error ? notificationError.message : "Unknown notification error",
-        attempts:
-          typeof row.attempts === "number" && Number.isFinite(row.attempts) ? row.attempts + 1 : 1,
+        errorMessage: "Notification worker encountered an internal delivery error.",
+        errorCode: "worker_error",
+        errorCategory: "internal",
+        retryable: true,
+      };
+    }
+    const outcome = await completeRow(supabase, row, result);
+    metrics[outcome] += 1;
+
+    const payload = (row.payload as JsonRecord | null) ?? {};
+    const invoiceId = asString(payload.invoice_id);
+    if (asString(row.event_type) === "host_pro_invoice_receipt" && invoiceId && outcome !== "retried") {
+      await syncHostProInvoiceWhatsappDelivery(supabase, {
+        invoiceId,
+        status: outcome,
+        errorMessage: result.errorMessage ?? null,
       });
-      failed += 1;
     }
   }
-
-  return { processed, failed, skipped };
+  return metrics;
 }
+
+export const notificationWorkerInternals = {
+  retryDelaySeconds,
+  templateKindForEvent,
+  orderedBookingVariables,
+  claimSelect: CLAIM_SELECT,
+};

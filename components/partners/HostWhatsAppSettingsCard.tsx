@@ -65,6 +65,19 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    if (!settings.deliveryGloballyEnabled) return;
+    const interval = window.setInterval(() => {
+      void fetch("/api/host/whatsapp-settings", { cache: "no-store" })
+        .then(async (response) => {
+          const payload = (await response.json()) as { settings?: Settings };
+          if (response.ok && payload.settings) setSettings(payload.settings);
+        })
+        .catch(() => undefined);
+    }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [settings.deliveryGloballyEnabled]);
+
   function openEditor(): void {
     setPhone("");
     setConsent(settings.optedIn);
@@ -152,9 +165,9 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
     setMessage(null);
     try {
       const response = await fetch("/api/host/whatsapp-settings/test", { method: "POST" });
-      const payload = (await response.json()) as { message?: string; error?: string };
+      const payload = (await response.json()) as { message?: string; error?: string; status?: string };
       if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Unable to send a test message.");
-      setMessage(payload.message ?? "Test message queued.");
+      setMessage(payload.status === "queued" ? "Test message queued." : payload.message ?? "Test message queued.");
     } catch (testError) {
       setError(testError instanceof Error ? testError.message : "Unable to send a test message.");
     } finally {
@@ -171,6 +184,9 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
         : settings.hasPhone
           ? "Verification required"
           : "No number";
+  const deliveryLabel = settings.lastDeliveryStatus
+    ? settings.lastDeliveryStatus.charAt(0).toUpperCase() + settings.lastDeliveryStatus.slice(1).toLowerCase()
+    : null;
 
   return (
     <>
@@ -218,7 +234,7 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
             ) : null}
             {settings.lastDeliveryStatus ? (
               <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: "12px" }}>
-                Latest delivery: {settings.lastDeliveryStatus}
+                Latest delivery: {deliveryLabel}
               </p>
             ) : (
               <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: "12px" }}>Latest delivery: No delivery yet</p>
@@ -245,7 +261,13 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
           <button
             type="button"
             className="button-like secondary"
-            disabled={!settings.deliveryGloballyEnabled || !settings.enabled || saving}
+            disabled={
+              !settings.deliveryGloballyEnabled ||
+              !settings.enabled ||
+              !settings.verified ||
+              !settings.optedIn ||
+              saving
+            }
             title={!settings.deliveryGloballyEnabled ? "WhatsApp delivery is not active yet." : undefined}
             onClick={() => void sendTestMessage()}
           >
