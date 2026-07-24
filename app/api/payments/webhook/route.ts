@@ -75,6 +75,15 @@ function asNumber(value: unknown): number {
   return 0;
 }
 
+function resolveErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = asString((error as { message?: unknown }).message);
+    if (message) return message;
+  }
+  return fallback;
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const rawBody = await req.text();
@@ -552,22 +561,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           },
         });
       } catch (error) {
+        const errorMessage = resolveErrorMessage(error, "inventory_conflict_after_payment");
+        console.error("[payments.webhook] captured payment finalization failed", {
+          bookingId: payment.booking_id,
+          paymentId: payment.id,
+          providerEventId,
+          error: errorMessage,
+        });
         await markBookingPaymentInventoryConflict(supabase, {
           booking: booking as Record<string, unknown> | null | undefined,
           paymentId: payment.id,
           provider: "razorpay",
           reason: "inventory_conflict_after_payment",
-          conflictSummary:
-            error instanceof Error
-              ? `${error.message} Payment captured after the slot was no longer available.`
-              : null,
+          conflictSummary: `${errorMessage} Payment captured after the slot was no longer available.`,
         });
         await updatePaymentProviderEventStatus(supabase, {
           provider: "RAZORPAY",
           eventId: providerEventId,
           processingStatus: "failed",
           processedAt: now,
-          errorMessage: error instanceof Error ? error.message : "inventory_conflict_after_payment",
+          errorMessage,
         });
         return NextResponse.json({ received: true, paymentId: payment.id, bookingId: payment.booking_id, conflict: true });
       }
