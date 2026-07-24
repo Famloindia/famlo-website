@@ -54,6 +54,12 @@ process.env.FAMLO_LEGAL_ENTITY_NAME ??= "Famlo Private Limited";
 process.env.FAMLO_GSTIN ??= "08ABCDE1234F1Z5";
 process.env.FAMLO_LEGAL_ADDRESS ??= "Jaipur, Rajasthan";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function isoDaysFrom(timestamp: number, days: number): string {
+  return new Date(timestamp + days * DAY_MS).toISOString();
+}
+
 function createProBillingSupabase() {
   const state = {
     families: [] as Row[],
@@ -1227,6 +1233,7 @@ test("admin stop deactivates Famlo Pro access immediately", async () => {
 
 test("trust blocked property blocks Famlo Pro access even with active subscription", async () => {
   const { client, state } = createProBillingSupabase();
+  const now = Date.now();
 
   state.families.push({
     id: "fam-trust-blocked",
@@ -1238,10 +1245,10 @@ test("trust blocked property blocks Famlo Pro access even with active subscripti
     family_id: "fam-trust-blocked",
     host_user_id: "host-trust-blocked",
     status: "active",
-    current_period_start: "2026-05-24T10:00:00.000Z",
-    current_period_end: "2026-07-23T10:00:00.000Z",
-    grace_until: "2026-07-30T10:00:00.000Z",
-    created_at: "2026-05-24T10:00:00.000Z",
+    current_period_start: isoDaysFrom(now, -30),
+    current_period_end: isoDaysFrom(now, 30),
+    grace_until: isoDaysFrom(now, 37),
+    created_at: isoDaysFrom(now, -30),
     metadata: {},
   });
 
@@ -1270,21 +1277,22 @@ test("prorated room add-on uses remaining active days", () => {
 
 test("active subscription add-on quote uses plan metadata for property proration", async () => {
   const { client, state } = createProBillingSupabase();
+  const now = Date.now();
   state.host_pro_subscriptions.push({
     id: "sub-addon",
     family_id: "fam-addon",
     host_user_id: "host-addon",
     status: "active",
-    current_period_start: "2026-05-01T00:00:00.000Z",
-    current_period_end: "2026-06-30T00:00:00.000Z",
+    current_period_start: isoDaysFrom(now, -70),
+    current_period_end: isoDaysFrom(now, 20),
     metadata: { duration_months: 3 },
-    created_at: "2026-05-01T00:00:00.000Z",
+    created_at: isoDaysFrom(now, -70),
   });
 
   const quote = await buildHostProAddonQuote(client, {
     familyId: "fam-addon",
     addonType: "property",
-    nowIso: "2026-06-10T00:00:00.000Z",
+    nowIso: new Date(now).toISOString(),
   });
 
   assert.equal(quote.totalPlanDays, 90);
@@ -1297,15 +1305,16 @@ test("active subscription add-on quote uses plan metadata for property proration
 
 test("room add-on checkout verifies and is consumed once before creation", async () => {
   const { client, state } = createProBillingSupabase();
+  const now = Date.now();
   state.host_pro_subscriptions.push({
     id: "sub-addon",
     family_id: "fam-addon",
     host_user_id: "host-addon",
     status: "active",
-    current_period_start: "2026-05-24T00:00:00.000Z",
-    current_period_end: "2026-07-23T00:00:00.000Z",
+    current_period_start: isoDaysFrom(now, -10),
+    current_period_end: isoDaysFrom(now, 20),
     metadata: { duration_months: 1 },
-    created_at: "2026-05-24T00:00:00.000Z",
+    created_at: isoDaysFrom(now, -10),
   });
 
   const checkout = await createHostProAddonCheckout(
@@ -1453,17 +1462,18 @@ test("backend guard rejects unpaid or already-consumed add-on orders before prop
 
 test("add-on verify keeps subscription expiry dates unchanged", async () => {
   const { client, state } = createProBillingSupabase();
+  const now = Date.now();
   state.host_pro_subscriptions.push({
     id: "sub-addon-stable",
     family_id: "fam-addon-stable",
     host_user_id: "host-addon-stable",
     status: "active",
-    current_period_start: "2026-05-24T10:00:00.000Z",
-    current_period_end: "2026-07-23T10:00:00.000Z",
-    grace_until: "2026-07-30T10:00:00.000Z",
-    next_charge_at: "2026-07-23T10:00:00.000Z",
+    current_period_start: isoDaysFrom(now, -10),
+    current_period_end: isoDaysFrom(now, 20),
+    grace_until: isoDaysFrom(now, 27),
+    next_charge_at: isoDaysFrom(now, 20),
     metadata: { duration_months: 1 },
-    created_at: "2026-05-24T10:00:00.000Z",
+    created_at: isoDaysFrom(now, -10),
   });
 
   const checkout = await createHostProAddonCheckout(
