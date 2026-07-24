@@ -317,3 +317,11 @@ test("disabled finance pipeline skips optional folio schema reads", () => {
   assert.ok(reservationRead > disabledGuard);
   assert.match(financeWriter.slice(disabledGuard, reservationRead), /return \{/);
 });
+
+test("booking receipt uses the canonical payment gateway column", () => {
+  const bookingPlatform = readFileSync("lib/booking-platform.ts", "utf8");
+
+  assert.match(bookingPlatform, /\.select\("status,gateway,created_at"\)/);
+  assert.doesNotMatch(bookingPlatform, /\.select\("status,gateway,payment_method,created_at"\)/);
+  assert.match(bookingPlatform, /payment_method: asString\(payment\?\.gateway\) \?\? "Online"/);
+});
