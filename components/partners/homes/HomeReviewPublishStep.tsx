@@ -23,6 +23,7 @@ export function HomeReviewPublishStep({
           <li>Host: {showText(flow.fullName)}</li>
           <li>Email: {showText(flow.email)}</li>
           <li>Phone: {showText(flow.mobileNumber)}</li>
+          <li>WhatsApp updates: {flow.whatsappConsent ? "Requested; verification required" : "Not enabled"}</li>
           <li>Home name: {showText(flow.propertyName)}</li>
           <li>Address: {showText(flow.propertyAddress)}</li>
           <li>City / state: {[flow.cityName, flow.state].filter(Boolean).join(", ") || "Pending"}</li>

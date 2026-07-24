@@ -8,6 +8,7 @@ import {
 import type { StayUnitRecord } from "@/lib/stay-units";
 import { buildHomestayPath } from "@/lib/slug";
 import HostRoomsManager, { type RoomFormState } from "../rooms/HostRoomsManager";
+import { HostWhatsAppSettingsCard } from "../HostWhatsAppSettingsCard";
 
 interface DashboardTabProps {
   profile: any;
@@ -128,6 +129,8 @@ export default function DashboardTab({
   const [roomDrafts, setRoomDrafts] = useState<RoomFormState[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsLoadedOnce, setRoomsLoadedOnce] = useState(false);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
 
   const roomStats = useMemo(() => {
     const activeRooms = roomDrafts.filter((room) => room.isActive).length;
@@ -270,6 +273,39 @@ export default function DashboardTab({
     };
   }, [familyId, isRoomsView]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadBookingApproval(): Promise<void> {
+      setApprovalLoading(true);
+      setApprovalError(null);
+      try {
+        const response = await fetch(`/api/host/booking-approval?familyId=${encodeURIComponent(familyId)}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as { bookingRequiresHostApproval?: boolean; error?: string };
+        if (!response.ok || typeof payload.bookingRequiresHostApproval !== "boolean") {
+          throw new Error(payload.error ?? "Unable to load booking approval setting.");
+        }
+        if (!cancelled) {
+          setSchedule((current: typeof schedule) => ({
+            ...current,
+            bookingRequiresHostApproval: payload.bookingRequiresHostApproval,
+          }));
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setApprovalError(loadError instanceof Error ? loadError.message : "Unable to load booking approval setting.");
+        }
+      } finally {
+        if (!cancelled) setApprovalLoading(false);
+      }
+    }
+    void loadBookingApproval();
+    return () => {
+      cancelled = true;
+    };
+  }, [familyId, setSchedule]);
+
   const persistVisibility = async (patch: Partial<typeof schedule>) => {
     const updatedSchedule = { ...schedule, ...patch };
     setSchedule(updatedSchedule);
@@ -282,9 +318,27 @@ export default function DashboardTab({
     });
   };
   const toggleHostApproval = async (nextValue: boolean) => {
-    await persistVisibility({
-      bookingRequiresHostApproval: nextValue,
-    });
+    const previousValue = Boolean(schedule.bookingRequiresHostApproval);
+    setSchedule({ ...schedule, bookingRequiresHostApproval: nextValue });
+    setApprovalLoading(true);
+    setApprovalError(null);
+    try {
+      const response = await fetch("/api/host/booking-approval", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ familyId, enabled: nextValue }),
+      });
+      const payload = (await response.json()) as { bookingRequiresHostApproval?: boolean; error?: string };
+      if (!response.ok || typeof payload.bookingRequiresHostApproval !== "boolean") {
+        throw new Error(payload.error ?? "Unable to update booking approval setting.");
+      }
+      setSchedule({ ...schedule, bookingRequiresHostApproval: payload.bookingRequiresHostApproval });
+    } catch (toggleError) {
+      setSchedule({ ...schedule, bookingRequiresHostApproval: previousValue });
+      setApprovalError(toggleError instanceof Error ? toggleError.message : "Unable to update booking approval setting.");
+    } finally {
+      setApprovalLoading(false);
+    }
   };
 
   const toggleRoomActive = async (roomId: string, nextActive: boolean): Promise<void> => {
@@ -425,13 +479,21 @@ export default function DashboardTab({
                className={styles.iosToggleInput}
                checked={Boolean(schedule.bookingRequiresHostApproval)}
                onChange={(event) => void toggleHostApproval(event.target.checked)}
-               disabled={saving}
+               disabled={approvalLoading}
+               aria-label="Require host approval for new bookings"
              />
              <div className={styles.iosToggleTrack}>
              <div className={styles.iosToggleThumb} />
            </div>
          </label>
         </div>
+        {approvalError ? (
+          <p role="alert" style={{ margin: "8px 0 0", color: "#b91c1c", fontSize: "12px", fontWeight: 700 }}>
+            {approvalError}
+          </p>
+        ) : null}
+
+        <HostWhatsAppSettingsCard />
 
       </div>
 

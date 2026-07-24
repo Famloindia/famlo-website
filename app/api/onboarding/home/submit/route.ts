@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { derivePlatformAgreementState, normalizeGstin } from "@/lib/host-onboarding-legal";
 import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
 import { maskCoordinates } from "@/lib/location-utils";
+import {
+  resolveVerifiedAuthPhone,
+  seedHostWhatsappSettings,
+} from "@/lib/host-whatsapp-settings";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type JsonRecord = Record<string, unknown>;
@@ -131,6 +135,7 @@ type DraftInput = {
   property_name: string;
   locality?: string;
   phone_verified: boolean;
+  whatsapp_consent: boolean;
   upi_id: string;
   password?: string;
   included_items: string[];
@@ -234,7 +239,8 @@ function normalizeDraftRow(row: JsonRecord): DraftInput {
     locality:
       asString(getValue(payload, ["cityNeighbourhood", "areaName", "villageName"])) ||
       asString(getValue(row, ["city_neighbourhood"])),
-    phone_verified: true, // If they reached submit, they are verified
+    phone_verified: false,
+    whatsapp_consent: asBoolean(getValue(payload, ["whatsappConsent"])),
     upi_id: asString(row.upi_id) || asString(getValue(payload, ["upiId"])) || asString(getValue(compliance, ["upiId"])),
     password: asString(row.password),
     included_items: asStringArray(getValue(payload, ["includedItems"])),
@@ -610,6 +616,8 @@ async function upsertFamilyApplication(
       fullName: input.full_name,
       email: input.email,
       mobileNumber: input.phone,
+      phoneVerified: input.phone_verified,
+      whatsappConsent: input.whatsapp_consent,
       city: input.city,
       state: input.state,
       country: input.country,
@@ -715,9 +723,37 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const normalized = normalizeDraftRow((draft as JsonRecord) ?? {});
+    const authUsers = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (authUsers.error) throw authUsers.error;
+    const matchingAuthUser = authUsers.data.users.find(
+      (user) => user.email?.trim().toLowerCase() === normalized.email.trim().toLowerCase()
+    );
+    const verifiedAuthPhone = matchingAuthUser
+      ? await resolveVerifiedAuthPhone(supabase, {
+          hostUserId: matchingAuthUser.id,
+          expectedPhone: normalized.phone,
+        })
+      : null;
+    normalized.phone_verified = Boolean(verifiedAuthPhone);
     const publishCheck = getPublishCheck(normalized);
 
     const application = await upsertFamilyApplication(supabase, draftId, normalized, publishCheck);
+    if (matchingAuthUser) {
+      const { data: publicUser } = await supabase
+        .from("users")
+        .select("id")
+        .eq("id", matchingAuthUser.id)
+        .maybeSingle();
+      if (publicUser) {
+        await seedHostWhatsappSettings(supabase, {
+          hostUserId: matchingAuthUser.id,
+          phone: normalized.phone,
+          verifiedAt: verifiedAuthPhone?.verifiedAt ?? null,
+          consent: normalized.whatsapp_consent,
+          source: normalized.whatsapp_consent ? "onboarding_consent" : verifiedAuthPhone ? "auth_phone_verified" : "users_phone",
+        });
+      }
+    }
 
     const nextMode = publishCheck.missing.length > 0 ? "missing_details" : "review_required";
     const provisionedAccess =

@@ -19,6 +19,7 @@ export type HomeOnboardingFlowState = {
   fullName: string;
   email: string;
   mobileNumber: string;
+  whatsappConsent: boolean;
   state: string;
   cityName: string;
   villageName: string;
@@ -70,6 +71,7 @@ const initialState: HomeOnboardingFlowState = {
   fullName: "",
   email: "",
   mobileNumber: "",
+  whatsappConsent: false,
   state: "",
   cityName: "",
   villageName: "",
@@ -181,6 +183,7 @@ export function HomeOnboardingForm(): React.JSX.Element {
       fullName: flow.fullName.trim(),
       email: flow.email.trim(),
       mobileNumber: flow.mobileNumber.trim(),
+      whatsappConsent: flow.whatsappConsent,
       state: flow.state.trim(),
       cityName: flow.cityName.trim(),
       villageName: flow.villageName.trim(),
