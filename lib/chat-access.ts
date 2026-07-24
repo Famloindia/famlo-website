@@ -1,9 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
 
 import { resolveMessageThread, type MessageThreadResolution } from "@/lib/chat-thread";
+import { resolveVerifiedHostSession } from "@/lib/host-session";
 import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
-import { HOST_SESSION_COOKIE, readHostSessionToken } from "@/lib/host-session-token";
 
 type ConversationRecord = {
   id: string;
@@ -384,14 +383,13 @@ export async function resolveAuthorizedHostSession(
     }
   }
 
-  const cookieStore = await cookies();
-  const signedSession = readHostSessionToken(cookieStore.get(HOST_SESSION_COOKIE)?.value);
+  const signedSession = await resolveVerifiedHostSession(request);
   if (!signedSession) return null;
   const cookieFamilyId = signedSession.familyId;
 
   const hostRecord = await fetchHostRecord(supabase, { familyId: cookieFamilyId });
   const resolvedHostUserId = normalizeString(hostRecord?.user_id);
-  if (hostRecord?.id || resolvedHostUserId) {
+  if (resolvedHostUserId === signedSession.hostUserId) {
     return {
       familyId: normalizeString(hostRecord?.legacy_family_id) ?? cookieFamilyId,
       hostId: normalizeString(hostRecord?.id),
@@ -401,6 +399,7 @@ export async function resolveAuthorizedHostSession(
   }
 
   const familyRecord = await fetchFamilyRecord(supabase, cookieFamilyId, null);
+  if (normalizeString(familyRecord?.user_id) !== signedSession.hostUserId) return null;
 
   return {
     familyId: normalizeString(familyRecord?.id) ?? cookieFamilyId,

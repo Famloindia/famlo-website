@@ -159,13 +159,16 @@ export default function ProHostProfileCenter({
   const [photos, setPhotos] = useState(initialPhotos);
 
   useEffect(() => {
-    setProfile(initialProfile);
-    setListing(initialListing);
-    setSchedule(initialSchedule);
-    setCompliance(initialCompliance);
-    setPhotos(initialPhotos);
-    setFeedback(null);
-    setIsEditing(false);
+    const timer = window.setTimeout(() => {
+      setProfile(initialProfile);
+      setListing(initialListing);
+      setSchedule(initialSchedule);
+      setCompliance(initialCompliance);
+      setPhotos(initialPhotos);
+      setFeedback(null);
+      setIsEditing(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [familyId, initialCompliance, initialListing, initialPhotos, initialProfile, initialSchedule]);
 
   useEffect(() => {

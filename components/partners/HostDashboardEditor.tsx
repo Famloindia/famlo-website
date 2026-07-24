@@ -352,7 +352,10 @@ export function HostDashboardEditor({
     ) {
       return;
     }
-    void loadBookingRows(activeFamilyId);
+    const timer = window.setTimeout(() => {
+      void loadBookingRows(activeFamilyId);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [
     activeFamilyId,
     bookingRowsLoading,
@@ -399,7 +402,10 @@ export function HostDashboardEditor({
 
   useEffect(() => {
     if (!needsBookingSummary || bookingSummaryLoading || bookingSummary) return;
-    void loadBookingSummary(activeFamilyId);
+    const timer = window.setTimeout(() => {
+      void loadBookingSummary(activeFamilyId);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [activeFamilyId, bookingSummary, bookingSummaryLoading, loadBookingSummary, needsBookingSummary]);
 
   useEffect(() => {

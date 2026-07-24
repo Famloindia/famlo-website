@@ -1,10 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import { HOST_SESSION_COOKIE_NAME } from "@/lib/host-session";
 import { isFamloProDashboardEnabled, loadHostProAccess, resolveHostDashboardHref } from "@/lib/host-pro-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { resolveAuthorizedHostSession } from "@/lib/chat-access";
-import { HOST_SESSION_COOKIE } from "@/lib/host-session-token";
+
+const LEGACY_HOST_SESSION_COOKIE = "famlo_host_session";
 
 export async function GET(): Promise<NextResponse> {
   const cookieStore = await cookies();
@@ -83,7 +85,13 @@ export async function DELETE(): Promise<NextResponse> {
     path: "/",
     maxAge: 0,
   });
-  response.cookies.set(HOST_SESSION_COOKIE, "", {
+  response.cookies.set(HOST_SESSION_COOKIE_NAME, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+  response.cookies.set(LEGACY_HOST_SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
     path: "/",

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
+import {
+  createHostSessionToken,
+  getHostSessionMaxAge,
+  HOST_SESSION_COOKIE_NAME,
+} from "@/lib/host-session";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
-import { createHostSessionToken, HOST_SESSION_COOKIE } from "@/lib/host-session-token";
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json()) as {
@@ -43,12 +47,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     });
-    response.cookies.set(HOST_SESSION_COOKIE, createHostSessionToken({ familyId: family.id, userId: family.user_id }), {
+    response.cookies.set(HOST_SESSION_COOKIE_NAME, createHostSessionToken({
+      familyId: family.id,
+      hostUserId: family.user_id,
+    }), {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
-      maxAge: 60 * 60 * 24 * 30,
+      maxAge: getHostSessionMaxAge(),
     });
 
     return response;

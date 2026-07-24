@@ -262,6 +262,7 @@ test("Phase 2 staging settings, OTP, isolation and property preference integrati
       .select("phone")
       .eq("id", fixture.hostUserId)
       .single();
+    assert.ok(publicUser);
     assert.notEqual(publicUser.phone, newPhone);
 
     assert.equal(
