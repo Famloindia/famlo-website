@@ -92,14 +92,14 @@ export function Navbar() {
           </div>
 
           <Link
-            href="/admin"
+            href="/?auth=login"
             className="hidden rounded-[8px] border-[0.5px] border-[#E8EEF5] px-4 py-2 text-[14px] font-medium text-[#1A1A2E] transition hover:border-[#1A6EBB] sm:inline-flex"
           >
             Log in
           </Link>
 
           <Link
-            href="/home/partoffamlo"
+            href="/?auth=signup"
             className="hidden rounded-[8px] bg-[#1A6EBB] px-4 py-2 text-[14px] font-medium text-white transition hover:bg-[#155d9f] sm:inline-flex"
           >
             Sign up

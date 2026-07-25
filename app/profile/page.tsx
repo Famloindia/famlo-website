@@ -1,10 +1,12 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { useUser } from "@/components/auth/UserContext";
 import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
+import { PasswordManagementCard } from "@/components/account/PasswordManagementCard";
 import { SavedHomesSection } from "@/components/account/SavedHomesSection";
 import { getSafeReturnPath } from "@/lib/site-url";
 import { isGuestProfileComplete } from "@/lib/user-profile";
@@ -47,9 +49,13 @@ function ProfileSummaryCard(): React.JSX.Element | null {
           }}
         >
           {profile?.avatar_url ? (
-            <img
+            <Image
               src={profile.avatar_url}
               alt={profile?.name || "Profile"}
+              width={144}
+              height={144}
+              sizes="72px"
+              unoptimized
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
           ) : (
@@ -60,6 +66,7 @@ function ProfileSummaryCard(): React.JSX.Element | null {
         <div style={{ display: "grid", gap: "6px" }}>
           <h2 style={{ margin: 0, fontSize: "clamp(24px, 4vw, 32px)" }}>Welcome</h2>
           {profile?.name ? <p style={{ margin: 0, color: "#0f172a", fontWeight: 700 }}>{profile.name}</p> : null}
+          {profile?.username ? <p style={{ margin: 0, color: "#1d4ed8", fontWeight: 700 }}>@{profile.username}</p> : null}
           <p style={{ margin: 0, color: "#475569", fontWeight: 600 }}>{contactLine}</p>
           <p style={{ margin: 0, color: "#64748b" }}>{locationLine}</p>
         </div>
@@ -86,7 +93,12 @@ function ProfileSummaryCard(): React.JSX.Element | null {
         </div>
         <div style={{ padding: "14px 16px", borderRadius: "16px", background: "#fff", border: "1px solid #e2e8f0" }}>
           <span style={{ display: "block", fontSize: "11px", fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: "#64748b" }}>Date of birth</span>
-          <strong style={{ display: "block", marginTop: "8px", color: "#0f172a" }}>{profile?.date_of_birth || "Not added"}</strong>
+          <strong style={{ display: "block", marginTop: "8px", color: "#0f172a" }}>
+            {profile?.date_of_birth
+              ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" })
+                  .format(new Date(`${profile.date_of_birth}T00:00:00Z`))
+              : "Not added"}
+          </strong>
         </div>
       </div>
     </section>
@@ -185,8 +197,8 @@ export default function ProfilePage(): React.JSX.Element {
           title={isGoogleOnboarding ? "Complete your profile" : "Guest profile"}
           description={
             isGoogleOnboarding
-              ? "Add your name, contact details, location, gender, date of birth, and about section before continuing."
-              : "Fill in your name, contact details, location, gender, date of birth, and about section to unlock booking."
+              ? "Add your photo, username, contact details, location, gender, date of birth, and about section before continuing."
+              : "Fill in your professional guest profile to unlock booking."
           }
           buttonLabel={isGoogleOnboarding ? "Save and continue" : "Save profile"}
           onSuccess={async () => {
@@ -196,6 +208,7 @@ export default function ProfilePage(): React.JSX.Element {
           }}
         />
 
+        {isGoogleOnboarding ? null : <PasswordManagementCard />}
         {isGoogleOnboarding ? null : <SavedHomesSection />}
       </section>
     </main>

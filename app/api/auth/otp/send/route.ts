@@ -1,22 +1,11 @@
 import { NextResponse } from "next/server";
+import {
+  normalizeIndianOtpPhone,
+  OTP_RESEND_COOLDOWN_SECONDS,
+  requireTwoFactorApiKey,
+} from "@/lib/auth/guest-otp";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { buildOAuthCallbackUrl } from "@/lib/site-url";
-
-function normalizeIndianMobile(input: unknown): string {
-  const clean = typeof input === "string" ? input.replace(/[^\d+]/g, "").trim() : "";
-  if (!clean) {
-    throw new Error("Mobile number is required");
-  }
-
-  const withoutPlus = clean.startsWith("+") ? clean.slice(1) : clean;
-  const normalized = withoutPlus.startsWith("91") ? withoutPlus : `91${withoutPlus}`;
-
-  if (!/^91\d{10}$/.test(normalized)) {
-    throw new Error("Please enter a valid Indian mobile number.");
-  }
-
-  return normalized;
-}
 
 async function callTwoFactor(url: string): Promise<any> {
   const postResponse = await fetch(url, { method: "POST", cache: "no-store" });
@@ -36,7 +25,7 @@ async function callTwoFactor(url: string): Promise<any> {
 
 export async function POST(request: Request) {
   try {
-    const { type, value } = await request.json();
+    const { type, value, intent } = await request.json();
 
     if (!value || !type) {
       return NextResponse.json({ error: "Type and value are required" }, { status: 400 });
@@ -45,12 +34,12 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
 
     if (type === "email") {
-      // Use Supabase native OTP for email
+      const emailIntent = intent === "signup" ? "signup" : "login";
       const { error } = await supabase.auth.signInWithOtp({
         email: value,
         options: {
-          shouldCreateUser: true,
-          emailRedirectTo: buildOAuthCallbackUrl("/app")
+          shouldCreateUser: emailIntent === "signup",
+          emailRedirectTo: buildOAuthCallbackUrl("/")
         }
       });
 
@@ -59,12 +48,23 @@ export async function POST(request: Request) {
     } 
     
     if (type === "phone") {
-      const cleanPhone = normalizeIndianMobile(value);
-      const apiKey = process.env.TWO_FACTOR_API_KEY;
+      const phoneIntent = intent === "signup" ? "signup" : "login";
+      const cleanPhone = normalizeIndianOtpPhone(value);
+      const apiKey = requireTwoFactorApiKey();
+      const cooldownStart = new Date(Date.now() - OTP_RESEND_COOLDOWN_SECONDS * 1000).toISOString();
+      const { data: recentChallenges, error: cooldownError } = await supabase
+        .from("phone_otps")
+        .select("id")
+        .eq("phone", cleanPhone)
+        .gte("created_at", cooldownStart)
+        .limit(1);
 
-      if (!apiKey) {
-        console.warn("[OTP Mock] TWO_FACTOR_API_KEY missing - simulating phone send");
-        return NextResponse.json({ success: true, message: "Mock Phone OTP sent", mock: true });
+      if (cooldownError) throw cooldownError;
+      if ((recentChallenges?.length ?? 0) > 0) {
+        return NextResponse.json(
+          { error: "Please wait before requesting another verification code." },
+          { status: 429 }
+        );
       }
 
       // Call 2Factor.in API
@@ -73,11 +73,11 @@ export async function POST(request: Request) {
 
       const sessionId = data.Details;
 
-      // Track in phone_otps table
       const { error } = await supabase.from("phone_otps").insert({
         phone: cleanPhone,
         otp: "2FACTOR_MANAGED",
         otp_session_id: sessionId,
+        purpose: phoneIntent === "signup" ? "guest_phone_signup" : "guest_phone_login",
         expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
         verified: false
       });
@@ -89,7 +89,16 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: "Invalid auth type" }, { status: 400 });
   } catch (error: any) {
-    console.error("OTP send failed:", error);
-    return NextResponse.json({ error: error.message || "Failed to send OTP" }, { status: 500 });
+    console.error("OTP send failed", {
+      name: error instanceof Error ? error.name : "Error",
+      providerConfigured: Boolean(process.env.TWO_FACTOR_API_KEY),
+    });
+    const message =
+      error instanceof Error && error.message.includes("valid Indian mobile")
+        ? error.message
+        : error instanceof Error && error.message.includes("temporarily unavailable")
+          ? error.message
+          : "Unable to send a verification code. Please try again.";
+    return NextResponse.json({ error: message }, { status: 503 });
   }
 }

@@ -37,6 +37,7 @@ import {
 
 import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { getCurrentInternalPath, redirectForIncompleteBookingProfile } from "@/lib/booking-profile-gate-client";
 import { fetchGuestSessionSnapshot } from "@/lib/guest-session-client";
 import { isGuestProfileComplete } from "@/lib/user-profile";
 import type { HomeCardRecord } from "@/lib/discovery";
@@ -1104,10 +1105,12 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
           welcomeMessage,
           requestPaymentIntent: true,
           gateway: "razorpay",
+          returnTo: getCurrentInternalPath(),
         }),
       });
 
       const payload = await response.json();
+      if (redirectForIncompleteBookingProfile(payload)) return;
       if (!response.ok || payload.error) {
         throw new Error(payload.error ?? "Could not create booking.");
       }

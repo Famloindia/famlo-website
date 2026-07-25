@@ -6,7 +6,7 @@ import { AuthModal } from "@/components/auth/AuthModal";
 import { isGuestProfileComplete } from "@/lib/user-profile";
 
 export function AuthBubble() {
-  const { user, profile, loading, signOut } = useUser();
+  const { user, profile, loading, signingOut, signOut } = useUser();
   const [showModal, setShowModal] = useState(false);
 
   if (loading) return null;
@@ -22,7 +22,9 @@ export function AuthBubble() {
                 <span className="auth-warning">Complete profile to book</span>
               )}
             </div>
-            <button onClick={signOut} className="auth-btn logout">Sign Out</button>
+            <button disabled={signingOut} onClick={() => void signOut()} className="auth-btn logout">
+              {signingOut ? "Signing out..." : "Sign Out"}
+            </button>
           </div>
         ) : (
           <button 

@@ -209,10 +209,12 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     const cookieStore = await cookies();
     const guestSession = readGuestSessionToken(cookieStore.get(getGuestCookieName())?.value);
-    const effectiveAuthUser = guestSession
-      ? { ...authUser, id: guestSession.userId, phone: guestSession.phone }
+    const matchingGuestSession = guestSession?.userId === authUser.id ? guestSession : null;
+    const effectiveAuthUser = matchingGuestSession
+      ? { ...authUser, id: matchingGuestSession.userId, phone: matchingGuestSession.phone }
       : authUser;
-    const bookingsUserId = requestedUserId ?? (bearerToken ? authUser.id : guestSession?.userId) ?? authUser.id;
+    const bookingsUserId =
+      requestedUserId ?? (bearerToken ? authUser.id : matchingGuestSession?.userId) ?? authUser.id;
 
     console.info("[guest.bookings.route] load:before_compatibility", {
       url: request.url,

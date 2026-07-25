@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { getCurrentInternalPath, redirectForIncompleteBookingProfile } from "@/lib/booking-profile-gate-client";
 import type { CompanionRecord } from "@/lib/discovery";
 import { fetchGuestSessionSnapshot } from "@/lib/guest-session-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
@@ -303,10 +304,12 @@ export function HommieBookingFlow({
           guestCity,
           listingName: companion.title,
           guideUserId: receiverId,
+          returnTo: getCurrentInternalPath(),
         }),
       });
 
       const payload = await response.json();
+      if (redirectForIncompleteBookingProfile(payload)) return;
       if (!response.ok || payload.error) {
         throw new Error(payload.error ?? "Could not create hommie booking.");
       }

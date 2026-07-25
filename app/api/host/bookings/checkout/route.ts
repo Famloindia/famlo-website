@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { resolveMessageThread } from "@/lib/chat-thread";
+import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { syncReservationFromBooking } from "@/lib/reservations";
-import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 function isCheckoutEligible(status: unknown): boolean {
@@ -20,8 +20,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
-    if (!authUser) {
+    const hostSession = await resolveAuthorizedHostSession(supabase, request);
+    if (!hostSession?.hostUserId) {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
     const now = new Date().toISOString();
@@ -33,7 +33,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       .maybeSingle();
     if (hostError) throw hostError;
 
-    if (!host?.id || !host?.user_id || host.user_id !== authUser.id) {
+    if (!host?.id || !host?.user_id || host.user_id !== hostSession.hostUserId) {
       return NextResponse.json({ error: "Host profile not found." }, { status: 404 });
     }
 

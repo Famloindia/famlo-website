@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 
 import {
@@ -430,4 +430,59 @@ export async function uploadFileToR2(file: File, folder: string): Promise<string
   await uploadBufferToR2(buffer, key, file.type || "application/octet-stream", diagnostics);
   logUploadDiagnostics("success", diagnostics);
   return `${publicBase}/${key}`;
+}
+
+const PROFILE_PHOTO_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "image/avif",
+]);
+
+const PROFILE_PHOTO_FORMATS = new Set(["jpeg", "png", "webp", "heif", "avif"]);
+
+export async function validateGuestProfilePhoto(file: File, maxBytes: number): Promise<void> {
+  if (!PROFILE_PHOTO_MIME_TYPES.has(file.type.toLowerCase())) {
+    throw new Error("Please upload a JPEG, PNG, WebP, HEIC, or AVIF image.");
+  }
+  if (file.size <= 0 || file.size > maxBytes) {
+    throw new Error("The profile photo is too large.");
+  }
+
+  try {
+    const metadata = await sharp(Buffer.from(await file.arrayBuffer()), { failOn: "error" }).metadata();
+    if (!metadata.format || !PROFILE_PHOTO_FORMATS.has(metadata.format)) {
+      throw new Error("Unsupported image format.");
+    }
+  } catch {
+    throw new Error("The uploaded file is not a valid image.");
+  }
+}
+
+export async function uploadGuestProfilePhotoToR2(file: File, userId: string): Promise<string> {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    throw new Error("Invalid authenticated user.");
+  }
+  return uploadFileToR2(file, `guest-profile/${userId}`);
+}
+
+export async function deleteR2ObjectByPublicUrl(
+  publicUrl: string,
+  requiredKeyPrefix: string
+): Promise<boolean> {
+  const publicBase = requireEnv("R2_PUBLIC_URL").replace(/\/$/, "");
+  if (!publicUrl.startsWith(`${publicBase}/`)) return false;
+
+  const key = decodeURIComponent(publicUrl.slice(publicBase.length + 1));
+  if (!key.startsWith(requiredKeyPrefix)) return false;
+
+  await getR2Client().send(
+    new DeleteObjectCommand({
+      Bucket: requireEnv("R2_BUCKET_NAME"),
+      Key: key,
+    })
+  );
+  return true;
 }

@@ -1,11 +1,16 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { type SupabaseClient, type User } from "@supabase/supabase-js";
 import type { GuestSessionSnapshot } from "@/lib/guest-session";
 import { fetchGuestSessionSnapshot } from "@/lib/guest-session-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import { type UserProfileRecord } from "@/lib/user-profile";
+import {
+  clearGuestBrowserSession,
+  getBrowserSupabaseProjectRef,
+  performGuestLogout,
+} from "@/lib/auth/guest-logout-client";
 
 type UserProfile = UserProfileRecord;
 
@@ -13,9 +18,10 @@ interface UserContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  signingOut: boolean;
   refreshProfile: () => Promise<GuestSessionSnapshot | null>;
   refreshAuth: () => Promise<GuestSessionSnapshot | null>;
-  signOut: () => Promise<void>;
+  signOut: (options?: { clearHostSession?: boolean }) => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -24,6 +30,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [signingOut, setSigningOut] = useState(false);
+  const signOutInFlight = useRef(false);
   const supabase = useMemo<SupabaseClient>(() => createBrowserSupabaseClient(), []);
 
   const loadSessionSnapshot = useCallback(async (): Promise<GuestSessionSnapshot | null> => {
@@ -57,11 +65,46 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
   }, [loadAuthState]);
 
-  const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-    await fetch("/api/auth/session", { method: "DELETE" }).catch(() => null);
-    setUser(null);
-    setProfile(null);
+  const signOut = useCallback(async (options?: { clearHostSession?: boolean }) => {
+    if (signOutInFlight.current) return;
+    signOutInFlight.current = true;
+    setSigningOut(true);
+
+    const result = await performGuestLogout({
+      signOutSupabase: async () => {
+        const { error } = await supabase.auth.signOut({ scope: "local" });
+        if (error) throw error;
+      },
+      clearServerSessions: async () => {
+        const guestResponse = await fetch("/api/auth/session", { method: "DELETE", cache: "no-store" });
+        if (!guestResponse.ok) throw new Error("Guest session cleanup failed.");
+        if (options?.clearHostSession) {
+          const hostResponse = await fetch("/api/app/session", { method: "DELETE", cache: "no-store" });
+          if (!hostResponse.ok) throw new Error("Host session cleanup failed.");
+        }
+      },
+      clearBrowserSession: () => {
+        clearGuestBrowserSession({
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+          supabaseProjectRef: getBrowserSupabaseProjectRef(),
+        });
+        setUser(null);
+        setProfile(null);
+      },
+      redirectHome: () => window.location.replace("/"),
+    });
+
+    if (result.supabaseError) {
+      console.error("Supabase sign-out failed; continuing local cleanup.", {
+        name: result.supabaseError instanceof Error ? result.supabaseError.name : "Error",
+      });
+    }
+    if (result.serverError) {
+      console.error("Server session cleanup failed; continuing local cleanup.", {
+        name: result.serverError instanceof Error ? result.serverError.name : "Error",
+      });
+    }
   }, [supabase]);
 
   useEffect(() => {
@@ -98,7 +141,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [supabase, loadAuthState]);
 
   return (
-    <UserContext.Provider value={{ user, profile, loading, refreshProfile, refreshAuth, signOut }}>
+    <UserContext.Provider value={{ user, profile, loading, signingOut, refreshProfile, refreshAuth, signOut }}>
       {children}
     </UserContext.Provider>
   );

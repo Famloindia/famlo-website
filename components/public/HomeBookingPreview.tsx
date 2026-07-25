@@ -38,6 +38,7 @@ interface HomeBookingPreviewProps {
 import { useRouter } from "next/navigation";
 import { useUser } from "@/components/auth/UserContext";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { getCurrentInternalPath, redirectForIncompleteBookingProfile } from "@/lib/booking-profile-gate-client";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 
@@ -320,9 +321,6 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         "Content-Type": "application/json",
       };
       if (session?.access_token) authHeaders.Authorization = `Bearer ${session.access_token}`;
-      if (user.id) authHeaders["x-famlo-user-id"] = user.id;
-      if (user.email) authHeaders["x-famlo-user-email"] = user.email;
-
       const bookingResponse = await fetch("/api/bookings/create", {
         method: "POST",
         headers: authHeaders,
@@ -348,10 +346,12 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
           welcomeMessage,
           requestPaymentIntent: true,
           gateway: "razorpay",
+          returnTo: getCurrentInternalPath(),
         }),
       });
 
       const bookingPayload = await bookingResponse.json();
+      if (redirectForIncompleteBookingProfile(bookingPayload)) return;
       if (!bookingResponse.ok || bookingPayload.error) {
         throw new Error(bookingPayload.error ?? "Could not create booking.");
       }

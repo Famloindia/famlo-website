@@ -14339,11 +14339,7 @@ export default function FamloProDashboardShell({
                       disabled={isLoggingOut}
                       onClick={() => {
                         startLoggingOut(async () => {
-                          try {
-                            await signOut();
-                          } finally {
-                            window.location.assign("/");
-                          }
+                          await signOut({ clearHostSession: true });
                         });
                       }}
                     >

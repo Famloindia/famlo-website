@@ -22,7 +22,7 @@ export default function Header() {
 }
 
 function HeaderContent() {
-  const { user, profile, loading, signOut } = useUser();
+  const { user, profile, loading, signingOut, signOut } = useUser();
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -30,11 +30,18 @@ function HeaderContent() {
   const isJoinPage = pathname === "/joinfamlo";
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [dismissedAuthToken, setDismissedAuthToken] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const authToken = `${pathname}?${searchParams.toString()}`;
-  const urlWantsAuth = !loading && !user && (searchParams.get("auth") === "true" || searchParams.get("verify") === "true");
+  const requestedAuthMode = searchParams.get("auth") === "signup" ? "signup" : "login";
+  const urlWantsAuth = !loading && !user && (
+    searchParams.get("auth") === "true" ||
+    searchParams.get("auth") === "login" ||
+    searchParams.get("auth") === "signup" ||
+    searchParams.get("verify") === "true"
+  );
   const autoAuthOpen = urlWantsAuth && dismissedAuthToken !== authToken;
   const isAuthOpen = authModalOpen || autoAuthOpen;
 
@@ -177,7 +184,11 @@ function HeaderContent() {
                         </button>
                          <button
                            className="logout-btn"
-                           onClick={() => { signOut(); setDropdownOpen(false); }}
+                           disabled={signingOut}
+                           onClick={() => {
+                             setDropdownOpen(false);
+                             void signOut();
+                           }}
                            style={{
                              width: "100%",
                              textAlign: "left",
@@ -193,7 +204,7 @@ function HeaderContent() {
                              marginTop: "2px"
                            }}
                          >
-                           Log out
+                           {signingOut ? "Logging out..." : "Log out"}
                          </button>
                       </div>
                     </div>
@@ -202,7 +213,24 @@ function HeaderContent() {
               </div>
             ) : (
               <div className="auth-btns">
-                <button className="btn-primary" onClick={() => setAuthModalOpen(true)}>Log in / Sign up</button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthModalOpen(true);
+                  }}
+                >
+                  Log in
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    setAuthMode("signup");
+                    setAuthModalOpen(true);
+                  }}
+                >
+                  Sign up
+                </button>
               </div>
             )
           )}
@@ -212,6 +240,8 @@ function HeaderContent() {
       {isAuthOpen ? (
         <AuthModal
           isOpen={isAuthOpen}
+          initialMode={autoAuthOpen ? requestedAuthMode : authMode}
+          returnTo={`${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}
           onClose={() => {
             setAuthModalOpen(false);
             if (urlWantsAuth) setDismissedAuthToken(authToken);

@@ -19,21 +19,25 @@ export function getPublicSiteUrl(): string {
   return normalizeBaseUrl(value);
 }
 
-export function getSafeReturnPath(input: string | null | undefined): string {
+export function getSafeReturnPath(input: string | null | undefined, fallback = "/app"): string {
   if (!input) {
-    return "/app";
+    return fallback;
   }
 
   if (!input.startsWith("/") || input.startsWith("//")) {
-    return "/app";
+    return fallback;
   }
 
   return input;
 }
 
+export function getSafeGuestAuthReturnPath(input: string | null | undefined): string {
+  return getSafeReturnPath(input, "/");
+}
+
 export function buildOAuthCallbackUrl(nextPath?: string): string {
   const callbackUrl = new URL("/auth/callback", getPublicSiteUrl());
-  callbackUrl.searchParams.set("next", getSafeReturnPath(nextPath));
+  callbackUrl.searchParams.set("next", getSafeGuestAuthReturnPath(nextPath));
   return callbackUrl.toString();
 }
 

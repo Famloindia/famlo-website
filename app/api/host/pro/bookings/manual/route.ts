@@ -4,7 +4,6 @@ import { triggerQueuedChannexSyncWorker } from "@/lib/channex-ari-jobs";
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { isFamloProDashboardEnabled, loadHostProAccess } from "@/lib/host-pro-access";
 import { canCreateManualPmsBooking, createManualPmsBooking } from "@/lib/manual-pms-bookings";
-import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type ManualBookingRequest = {
@@ -35,13 +34,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
-    if (!authUser) {
-      return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
-    }
-
     const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
-    if (!authorizedResource?.familyId || authorizedResource.familyId !== familyId || !authorizedResource.hostId) {
+    if (
+      !authorizedResource?.familyId ||
+      authorizedResource.familyId !== familyId ||
+      !authorizedResource.hostId ||
+      !authorizedResource.hostUserId
+    ) {
       return NextResponse.json({ error: "You do not have access to this property." }, { status: 403 });
     }
 
@@ -68,7 +67,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const result = await createManualPmsBooking(supabase, {
-      actorUserId: authUser.id,
+      actorUserId: authorizedResource.hostUserId,
       actorRole: authorizedResource.isAdmin ? "admin" : "host",
       familyId,
       hostId: authorizedResource.hostId,

@@ -306,8 +306,8 @@ function isSafeHomepageImageUrl(value?: string | null): value is string {
 /* ═══════════════════════════════════════════════════════════════
    HEADER
 ═══════════════════════════════════════════════════════════════ */
-function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
-  const { user, profile, signOut } = useUser();
+function SiteHeader({ onAuthOpen }: { onAuthOpen: (mode: "login" | "signup") => void }) {
+  const { user, profile, signingOut, signOut } = useUser();
   const [scrolled, setScrolled] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -432,7 +432,11 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
                   ))}
                   <button
                     className="profile-dropdown-item logout-btn"
-                    onClick={() => { signOut(); setDropOpen(false); }}
+                    disabled={signingOut}
+                    onClick={() => {
+                      setDropOpen(false);
+                      void signOut();
+                    }}
                     style={{
                       width: "100%",
                       padding: "4px 8px",
@@ -457,26 +461,16 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: () => void }) {
                       e.currentTarget.style.transform = "translateY(0)";
                       e.currentTarget.style.boxShadow = "none";
                     }}
-                  >Log out</button>
+                  >{signingOut ? "Logging out..." : "Log out"}</button>
                 </div>
               </div>
             )}
           </>
         ) : (
-          <button onClick={onAuthOpen} style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: "40px", height: "40px", borderRadius: "50%",
-            background: "#eff6ff", border: "1.5px solid #dbeafe",
-            cursor: "pointer", color: "#1A56DB", transition: "all 0.15s",
-          }}
-            onMouseEnter={e => (e.currentTarget.style.background = "#dbeafe")}
-            onMouseLeave={e => (e.currentTarget.style.background = "#eff6ff")}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button className="homepage-auth-login" type="button" onClick={() => onAuthOpen("login")}>Log in</button>
+            <button className="homepage-auth-signup" type="button" onClick={() => onAuthOpen("signup")}>Sign up</button>
+          </div>
         )}
       </div>
     </header>
@@ -751,6 +745,7 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
   const router = useRouter();
   const { user, profile } = useUser();
   const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [pending, setPending] = useState<(() => void) | null>(null);
   const [query, setQuery] = useState("");
   const [selectedDestination, setSelectedDestination] = useState<DestinationSuggestion | null>(null);
@@ -1042,7 +1037,11 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
   }, [companions, homes, recentViews]);
 
   const guard = (fn: () => void) => {
-    if (!user) { setPending(() => fn); setShowAuth(true); } else fn();
+    if (!user) {
+      setPending(() => fn);
+      setAuthMode("login");
+      setShowAuth(true);
+    } else fn();
   };
 
   const submitSearch = useCallback(() => {

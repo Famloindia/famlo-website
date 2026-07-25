@@ -30,6 +30,15 @@
     ],
     "baseUrl": ".",
     "paths": {
+      "@/lib/user-profile": [
+        "./lib/user-profile.ts"
+      ],
+      "@/components/account/ProfileCompletionForm": [
+        "./components/account/ProfileCompletionForm.tsx"
+      ],
+      "@/components/auth/AuthModal": [
+        "./components/auth/AuthModal.tsx"
+      ],
       "@/*": [
         "./*"
       ]

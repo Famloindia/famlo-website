@@ -21,6 +21,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
 export async function DELETE(): Promise<NextResponse> {
   const response = NextResponse.json({ success: true });
+  response.headers.set("Cache-Control", "no-store");
   response.cookies.set(getGuestCookieName(), "", {
     httpOnly: true,
     sameSite: "lax",

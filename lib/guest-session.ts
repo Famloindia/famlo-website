@@ -1,11 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import {
-  getGuestPhoneLookupVariants,
-  mergeGuestProfileCandidates,
-  normalizeGuestEmail,
-  normalizeGuestPhone,
-} from "@/lib/guest-identity";
+import { normalizeGuestEmail, normalizeGuestPhone } from "@/lib/guest-identity";
 import { isGuestProfileComplete, loadUserProfileCompatibility, type UserProfileRecord, upsertUserProfileCompatibility } from "@/lib/user-profile";
 
 export type AuthenticatedGuestUser = {
@@ -27,64 +22,6 @@ export type GuestSessionSnapshot = {
   profile: UserProfileRecord | null;
   profileComplete: boolean;
 };
-
-type GuestUserRow = {
-  id: string;
-  name: string | null;
-  phone: string | null;
-  email: string | null;
-  city: string | null;
-  state: string | null;
-  onboarding_completed: boolean | null;
-  avatar_url: string | null;
-  about: string | null;
-  date_of_birth: string | null;
-  gender: string | null;
-  updated_at: string | null;
-};
-
-const USER_PROFILE_SELECT =
-  "id, name, phone, email, city, state, onboarding_completed, avatar_url, about, date_of_birth, gender, updated_at";
-
-function dedupeRows(rows: GuestUserRow[]): GuestUserRow[] {
-  const byId = new Map<string, GuestUserRow>();
-
-  for (const row of rows) {
-    if (!row?.id) continue;
-    byId.set(row.id, row);
-  }
-
-  return Array.from(byId.values());
-}
-
-async function loadGuestIdentityRows(
-  supabase: SupabaseClient,
-  authUser: AuthenticatedGuestUser
-): Promise<GuestUserRow[]> {
-  const normalizedEmail = normalizeGuestEmail(authUser.email);
-  const phoneVariants = getGuestPhoneLookupVariants(authUser.phone);
-  const rows: GuestUserRow[] = [];
-  const currentUserResult = await supabase.from("users").select(USER_PROFILE_SELECT).eq("id", authUser.id).maybeSingle();
-  if (!currentUserResult.error && currentUserResult.data) {
-    rows.push(currentUserResult.data as GuestUserRow);
-  }
-
-  if (normalizedEmail) {
-    const emailResult = await supabase.from("users").select(USER_PROFILE_SELECT).ilike("email", normalizedEmail).limit(20);
-    if (!emailResult.error && Array.isArray(emailResult.data)) {
-      rows.push(...(emailResult.data as GuestUserRow[]));
-    }
-  }
-
-  if (phoneVariants.length > 0) {
-    const phoneResult = await supabase.from("users").select(USER_PROFILE_SELECT).in("phone", phoneVariants).limit(20);
-    if (!phoneResult.error && Array.isArray(phoneResult.data)) {
-      rows.push(...(phoneResult.data as GuestUserRow[]));
-    }
-  }
-
-  return dedupeRows(rows);
-}
 
 export function createGuestSessionSnapshot(
   user: GuestSessionSnapshot["user"],
@@ -108,20 +45,28 @@ export async function loadGuestSessionSnapshot(
   let profile = await loadUserProfileCompatibility(supabase, authUser.id);
 
   if (authUser.authKind !== "guest_cookie") {
-    const candidateRows = await loadGuestIdentityRows(supabase, authUser);
-    const mergedCandidate = mergeGuestProfileCandidates(candidateRows, authUser.id);
-
+    let confirmedEmailAt = profile?.email_verified_at ?? null;
+    let confirmedPhoneAt = profile?.phone_verified_at ?? null;
+    const authRecord =
+      supabase.auth?.admin?.getUserById
+        ? (await supabase.auth.admin.getUserById(authUser.id)).data
+        : null;
+    if (authRecord?.user) {
+      const authEmail = normalizeGuestEmail(authRecord.user.email);
+      const authPhone = normalizeGuestPhone(authRecord.user.phone);
+      if (authEmail && authEmail === normalizeGuestEmail(authUser.email)) {
+        confirmedEmailAt = authRecord.user.email_confirmed_at ?? confirmedEmailAt;
+      }
+      if (authPhone && authPhone === normalizeGuestPhone(authUser.phone)) {
+        confirmedPhoneAt = authRecord.user.phone_confirmed_at ?? confirmedPhoneAt;
+      }
+    }
     await upsertUserProfileCompatibility(supabase, {
       userId: authUser.id,
-      email: normalizeGuestEmail(authUser.email) ?? mergedCandidate?.email ?? null,
-      phone: normalizeGuestPhone(authUser.phone) ?? mergedCandidate?.phone ?? null,
-      name: mergedCandidate?.name ?? null,
-      city: mergedCandidate?.city ?? null,
-      state: mergedCandidate?.state ?? null,
-      about: mergedCandidate?.about ?? null,
-      dob: mergedCandidate?.date_of_birth ?? null,
-      gender: mergedCandidate?.gender ?? null,
-      avatarUrl: mergedCandidate?.avatar_url ?? null,
+      email: normalizeGuestEmail(authUser.email) ?? profile?.email ?? null,
+      phone: normalizeGuestPhone(authUser.phone) ?? profile?.phone ?? null,
+      emailVerifiedAt: confirmedEmailAt,
+      phoneVerifiedAt: confirmedPhoneAt,
     });
 
     profile = await loadUserProfileCompatibility(supabase, authUser.id);

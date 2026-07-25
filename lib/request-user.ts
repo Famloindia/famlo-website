@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { getGuestCookieName, readGuestSessionToken } from "@/lib/guest-auth";
 import { getSupabaseAccessTokenCookieName } from "@/lib/auth-constants";
+import { normalizeGuestPhone } from "@/lib/guest-identity";
 
 type ResolvedAuthUser = {
   id: string;
@@ -37,11 +38,20 @@ export async function resolveStrictAuthenticatedUser(
     if (!guestSession) {
       return null;
     }
+    const { data, error } = await supabase.auth.admin.getUserById(guestSession.userId);
+    const canonicalAuthUser = data?.user ?? null;
+    if (
+      error ||
+      !canonicalAuthUser ||
+      normalizeGuestPhone(canonicalAuthUser.phone) !== normalizeGuestPhone(guestSession.phone)
+    ) {
+      return null;
+    }
 
     return {
-      id: guestSession.userId,
-      email: null,
-      phone: guestSession.phone,
+      id: canonicalAuthUser.id,
+      email: canonicalAuthUser.email ?? null,
+      phone: canonicalAuthUser.phone ?? guestSession.phone,
       provider: "guest_cookie",
       authKind: "guest_cookie",
     };
@@ -74,22 +84,5 @@ export async function resolveAuthenticatedUser(
   supabase: SupabaseClient,
   request?: Request
 ): Promise<ResolvedAuthUser | null> {
-  const fallbackUserId = request?.headers.get("x-famlo-user-id")?.trim() || null;
-  const fallbackEmail = request?.headers.get("x-famlo-user-email")?.trim() || null;
-  const strictUser = await resolveStrictAuthenticatedUser(supabase, request);
-  if (strictUser) {
-    return strictUser;
-  }
-
-  if (fallbackUserId) {
-    return {
-      id: fallbackUserId,
-      email: fallbackEmail,
-      phone: null,
-      provider: "header_fallback",
-      authKind: "header_fallback",
-    };
-  }
-
-  return null;
+  return resolveStrictAuthenticatedUser(supabase, request);
 }

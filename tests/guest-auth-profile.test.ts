@@ -82,13 +82,14 @@ test("profile patch merge preserves saved values during partial updates", () => 
   const merged = mergeUserProfilePatch(
     {
       id: "guest-1",
+      username: "aryan_krishan",
       name: "Aryan Krishan",
       phone: "+917404477395",
       email: "aryankrishan143@gmail.com",
       city: "Hisar",
       state: "Haryana",
       onboarding_completed: true,
-      avatar_url: null,
+      avatar_url: "https://images.example.test/guest-1.webp",
       about: "Returning guest",
       date_of_birth: "2000-01-01",
       gender: "male",
@@ -112,13 +113,14 @@ test("guest profile completion uses one shared deterministic rule", () => {
   assert.equal(
     isGuestProfileComplete({
       id: "guest-1",
+      username: "aryan_krishan",
       name: "Aryan Krishan",
       phone: "+917404477395",
       email: "aryankrishan143@gmail.com",
       city: "Hisar",
       state: "Haryana",
       onboarding_completed: false,
-      avatar_url: null,
+      avatar_url: "https://images.example.test/guest-1.webp",
       about: "Returning guest",
       date_of_birth: "2000-01-01",
       gender: "male",
@@ -132,6 +134,7 @@ test("guest profile completion uses one shared deterministic rule", () => {
   assert.equal(
     isGuestProfileComplete({
       id: "guest-2",
+      username: null,
       name: "Aryan Krishan",
       phone: "+917404477395",
       email: null,
@@ -161,13 +164,14 @@ test("guest session snapshot returns completion state from the canonical profile
     },
     {
       id: "guest-1",
+      username: "aryan_krishan",
       name: "Aryan Krishan",
       phone: "+917404477395",
       email: "aryankrishan143@gmail.com",
       city: "Hisar",
       state: "Haryana",
       onboarding_completed: false,
-      avatar_url: null,
+      avatar_url: "https://images.example.test/guest-1.webp",
       about: "Returning guest",
       date_of_birth: "2000-01-01",
       gender: "male",

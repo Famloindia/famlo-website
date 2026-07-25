@@ -8,6 +8,12 @@ export async function POST(req: Request) {
     const file = formData.get("file") as File;
     const rawFolder = formData.get("folder");
     const folder = typeof rawFolder === "string" && rawFolder.trim() ? rawFolder.trim() : "host-profiles";
+    if (folder === "guest-profile" || folder.startsWith("guest-profile/")) {
+      return NextResponse.json(
+        { error: "Guest profile photos must use the authenticated profile-photo endpoint." },
+        { status: 403 }
+      );
+    }
     
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });

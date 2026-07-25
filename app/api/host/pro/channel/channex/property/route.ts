@@ -9,7 +9,6 @@ import { resolveChannexPropertyCreateContext } from "@/lib/channel-providers/cha
 import { resolveAuthorizedHostResource } from "@/lib/host-access";
 import { loadHostProAccess } from "@/lib/host-pro-access";
 import { loadHostProSettings } from "@/lib/host-pro-settings";
-import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 type CreateBody = {
@@ -425,7 +424,14 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const supabase = createAdminSupabaseClient();
     const authorizedResource = await resolveAuthorizedHostResource(supabase, request, { familyId });
-    const authUser = await resolveAuthenticatedUser(supabase, request);
+    const authUser = authorizedResource?.hostUserId
+      ? {
+          id: authorizedResource.hostUserId,
+          email: null,
+          phone: null,
+          provider: authorizedResource.isAdmin ? "admin" : "host_session",
+        }
+      : null;
 
     if (!authorizedResource?.familyId) {
       return NextResponse.json(

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronRight, IndianRupee, MapPin, ShieldCheck, Users } from "lucide-react";
 
 import { AuthModal } from "@/components/auth/AuthModal";
+import { getCurrentInternalPath, redirectForIncompleteBookingProfile } from "@/lib/booking-profile-gate-client";
 import { isGuestProfileComplete } from "@/lib/user-profile";
 import { useUser } from "@/components/auth/UserContext";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
@@ -493,9 +494,6 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         "Content-Type": "application/json",
       };
       if (authSession?.access_token) authHeaders.Authorization = `Bearer ${authSession.access_token}`;
-      if (user?.id) authHeaders["x-famlo-user-id"] = user.id;
-      if (user?.email) authHeaders["x-famlo-user-email"] = user.email;
-
       const response = await fetch("/api/bookings/create", {
         method: "POST",
         headers: authHeaders,
@@ -520,10 +518,12 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           welcomeMessage: `Welcome to ${home.listingTitle ?? home.name}. Booking created from the room page.`,
           requestPaymentIntent: true,
           gateway: "razorpay",
+          returnTo: getCurrentInternalPath(),
         }),
       });
 
       const payload = await response.json();
+      if (redirectForIncompleteBookingProfile(payload)) return;
       if (!response.ok || payload.error) {
         throw new Error(payload.error ?? "Could not create booking.");
       }

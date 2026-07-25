@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { getTodayInIndia } from "@/lib/booking-time";
+import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { projectInventoryRangeIfStayUnitExists } from "@/lib/reservation-assignment-guards";
 import { syncReservationFromBooking } from "@/lib/reservations";
-import { resolveAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 function asString(value: unknown): string | null {
@@ -28,8 +28,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
-    if (!authUser) {
+    const hostSession = await resolveAuthorizedHostSession(supabase, request);
+    if (!hostSession?.hostUserId) {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
 
@@ -39,7 +39,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       .eq("legacy_family_id", cleanFamilyId)
       .maybeSingle();
     if (hostError) throw hostError;
-    if (!host?.id || host.user_id !== authUser.id) {
+    if (!host?.id || host.user_id !== hostSession.hostUserId) {
       return NextResponse.json({ error: "Host profile not found." }, { status: 404 });
     }
 
@@ -77,7 +77,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         end_date: targetCheckoutDate,
         status: "completed",
         checked_out_at: now,
-        checked_out_by_host_user_id: authUser.id,
+        checked_out_by_host_user_id: hostSession.hostUserId,
         updated_at: now,
       } as never)
       .eq("id", cleanBookingId);
@@ -94,7 +94,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       booking_id: cleanBookingId,
       old_status: booking.status ?? null,
       new_status: "completed",
-      changed_by_user_id: authUser.id,
+      changed_by_user_id: hostSession.hostUserId,
       reason: "early_checkout",
       created_at: now,
     } as never);
@@ -102,7 +102,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     await syncReservationFromBooking(supabase, {
       bookingId: cleanBookingId,
       source: "early_checkout",
-      actorUserId: authUser.id,
+      actorUserId: hostSession.hostUserId,
       actorRole: "host",
       eventType: "early_checkout_applied",
       payload: {

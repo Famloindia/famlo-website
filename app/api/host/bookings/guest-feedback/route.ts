@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { resolveAuthenticatedUser } from "@/lib/request-user";
+import { resolveAuthorizedHostSession } from "@/lib/chat-access";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -21,8 +21,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const supabase = createAdminSupabaseClient();
-    const authUser = await resolveAuthenticatedUser(supabase, request);
-    if (!authUser) {
+    const hostSession = await resolveAuthorizedHostSession(supabase, request);
+    if (!hostSession?.hostUserId) {
       return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
     }
 
@@ -32,7 +32,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       .eq("legacy_family_id", cleanFamilyId)
       .maybeSingle();
     if (hostError) throw hostError;
-    if (!host?.id || !host.user_id || host.user_id !== authUser.id) {
+    if (!host?.id || !host.user_id || host.user_id !== hostSession.hostUserId) {
       return NextResponse.json({ error: "Host profile not found." }, { status: 404 });
     }
 

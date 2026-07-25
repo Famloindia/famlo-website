@@ -1,485 +1,321 @@
 "use client";
 
+import { Eye, EyeOff, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+
 import { createBrowserSupabaseClient } from "@/lib/supabase";
+import { buildOAuthCallbackUrl, getSafeGuestAuthReturnPath } from "@/lib/site-url";
 import { useUser } from "./UserContext";
-import { ProfileCompletionForm } from "@/components/account/ProfileCompletionForm";
-import { isGuestProfileComplete } from "@/lib/user-profile";
-import { buildOAuthCallbackUrl } from "@/lib/site-url";
+
+type AuthMode = "login" | "signup";
+type AuthStep = "main" | "email_signup" | "phone" | "phone_verify" | "email_sent";
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialMode?: AuthMode;
+  returnTo?: string;
   skipProfileStep?: boolean;
 }
 
-export function AuthModal({ isOpen, onClose, skipProfileStep = false }: AuthModalProps) {
-  const { user, profile, refreshAuth } = useUser();
+const GENERIC_AUTH_ERROR = "Authentication could not be completed. Check your details and try again.";
+
+export function AuthModal({
+  isOpen,
+  onClose,
+  initialMode = "login",
+  returnTo,
+  skipProfileStep = false,
+}: AuthModalProps): React.JSX.Element | null {
+  const { refreshAuth } = useUser();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
-  const [type, setType] = useState<"phone" | "email">("phone");
-  const [value, setValue] = useState("");
+  const [mode, setMode] = useState<AuthMode>(initialMode);
+  const [step, setStep] = useState<AuthStep>("main");
+  const [identifier, setIdentifier] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<"enter" | "verify" | "profile">("enter");
+  const [sessionId, setSessionId] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [sessionId, setSessionId] = useState("");
+  const safeReturnTo = getSafeGuestAuthReturnPath(
+    returnTo ?? (typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "/")
+  );
 
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "unset";
-    }
+    if (!isOpen) return;
+    document.body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = "unset";
+      document.body.style.overflow = "";
     };
-  }, [isOpen]);
+  }, [initialMode, isOpen]);
 
   if (!isOpen) return null;
 
-  const currentStep = skipProfileStep
-    ? step
-    : (user && !isGuestProfileComplete(profile)) ? "profile" : step;
-
-  const handleGoogleAuth = async () => {
-    setLoading(true);
+  function closeModal(): void {
+    setMode(initialMode);
+    setStep("main");
     setError("");
+    setOtp("");
+    setSessionId("");
+    onClose();
+  }
 
-    try {
-      const nextPath = `${window.location.pathname}${window.location.search}`;
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: buildOAuthCallbackUrl(nextPath),
-        },
-      });
+  function switchMode(nextMode: AuthMode): void {
+    setMode(nextMode);
+    setStep("main");
+    setError("");
+    setOtp("");
+    setSessionId("");
+  }
 
-      if (oauthError) throw oauthError;
-    } catch (err: any) {
-      setError(err.message);
-      setLoading(false);
+  async function completeAuthentication(): Promise<void> {
+    const snapshot = await refreshAuth();
+    if (!skipProfileStep && !snapshot?.profileComplete) {
+      const profileUrl = new URL("/profile", window.location.origin);
+      profileUrl.searchParams.set("next", safeReturnTo);
+      window.location.replace(`${profileUrl.pathname}${profileUrl.search}`);
+      return;
     }
-  };
+    window.location.replace(safeReturnTo);
+  }
 
-  const handleSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  async function handlePasswordLogin(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
     setLoading(true);
     setError("");
-
     try {
-      const res = await fetch("/api/auth/otp/send", {
+      const response = await fetch("/api/auth/password/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, value }),
+        body: JSON.stringify({ identifier, password }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-
-      setSessionId(data.sessionId || "");
-      setStep("verify");
-    } catch (err: any) {
-      setError(err.message);
+      const payload = await response.json();
+      if (!response.ok || !payload.session) throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
+      const { error: sessionError } = await supabase.auth.setSession(payload.session);
+      if (sessionError) throw sessionError;
+      await completeAuthentication();
+    } catch {
+      setError("The email, username, or password is incorrect.");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  async function handleEmailSignup(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
     setLoading(true);
     setError("");
-
     try {
-      const res = await fetch("/api/auth/otp/verify", {
+      const response = await fetch("/api/auth/signup/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, value, otp, sessionId }),
+        body: JSON.stringify({ email, password, confirmPassword, returnTo: safeReturnTo }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-
-      if (data.session) {
-        await supabase.auth.setSession(data.session);
-      } else if (data.sessionCredentials?.phone && data.sessionCredentials?.password) {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          phone: data.sessionCredentials.phone,
-          password: data.sessionCredentials.password,
-        });
-
-        if (signInError) throw signInError;
-      } else if (data.sessionCredentials?.email && data.sessionCredentials?.password) {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: data.sessionCredentials.email,
-          password: data.sessionCredentials.password,
-        });
-
-        if (signInError) throw signInError;
-      }
-
-      const snapshot = await refreshAuth();
-      if (skipProfileStep) {
-        onClose();
-      } else if (snapshot?.profileComplete) {
-        onClose();
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
+      if (payload.session) {
+        const { error: sessionError } = await supabase.auth.setSession(payload.session);
+        if (sessionError) throw sessionError;
+        await completeAuthentication();
       } else {
-        setStep("profile");
+        setStep("email_sent");
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : GENERIC_AUTH_ERROR);
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  async function handleGoogle(): Promise<void> {
+    setLoading(true);
+    setError("");
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: buildOAuthCallbackUrl(safeReturnTo) },
+    });
+    if (oauthError) {
+      setError(GENERIC_AUTH_ERROR);
+      setLoading(false);
+    }
+  }
+
+  async function handleSendPhoneOtp(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/otp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "phone", value: phone, intent: mode }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.sessionId) throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
+      setSessionId(payload.sessionId);
+      setStep("phone_verify");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : GENERIC_AUTH_ERROR);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerifyPhoneOtp(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "phone",
+          value: phone,
+          otp,
+          sessionId,
+          intent: mode,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
+      await completeAuthentication();
+    } catch {
+      setError("The verification code is invalid or expired.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const title = mode === "login" ? "Log in to Famlo" : "Create your Famlo account";
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <button className="close-btn" onClick={onClose}>&times;</button>
-        
-        {currentStep === "enter" && (
-          <form className="auth-form" onSubmit={handleSendOtp}>
-            <h2>{type === "phone" ? "Enter Mobile Number" : "Enter Email Address"}</h2>
-            <p className="auth-subtitle">
-              We will send a 6-digit OTP to verify your account.
-            </p>
+    <div className="auth-overlay" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) closeModal();
+    }}>
+      <section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="guest-auth-title">
+        <button type="button" className="icon-close" aria-label="Close" onClick={closeModal}>
+          <X size={18} />
+        </button>
+        <header>
+          <span className="auth-kicker">{mode === "login" ? "Welcome back" : "Join Famlo"}</span>
+          <h2 id="guest-auth-title">{title}</h2>
+        </header>
 
-            <button type="button" className="google-btn" disabled={loading} onClick={() => void handleGoogleAuth()}>
-              {loading ? "Opening Google..." : "Continue with Google"}
-            </button>
-
-            <div className="auth-divider"><span>or</span></div>
-            
-            <div className="type-toggle">
-              <button 
-                type="button" 
-                className={type === "phone" ? "active" : ""} 
-                onClick={() => setType("phone")}
-              >Phone</button>
-              <button 
-                type="button" 
-                className={type === "email" ? "active" : ""} 
-                onClick={() => setType("email")}
-              >Email</button>
-            </div>
-
-            <input 
-              type={type === "phone" ? "tel" : "email"} 
-              placeholder={type === "phone" ? "+91 XXXXX XXXXX" : "name@example.com"}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="auth-input"
-              required
-            />
-            
-            {error && <p className="error-msg">{error}</p>}
-            
-            <button type="submit" disabled={loading} className="submit-btn">
-              {loading ? "Please wait..." : "Send OTP"}
-            </button>
+        {step === "main" && mode === "login" ? (
+          <form className="auth-stack" onSubmit={(event) => void handlePasswordLogin(event)}>
+            <label>
+              <span>Email or username</span>
+              <input autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} required />
+            </label>
+            <label>
+              <span>Password</span>
+              <div className="password-field">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+                <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </label>
+            <a className="text-link align-right" href="/auth/forgot-password">Forgot password?</a>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={loading}>{loading ? "Logging in..." : "Log in"}</button>
+            <button className="secondary-action" type="button" disabled={loading} onClick={() => void handleGoogle()}>Continue with Google</button>
+            <button className="secondary-action" type="button" onClick={() => { setStep("phone"); setError(""); }}>Log in with phone OTP</button>
+            <p className="switch-copy">New to Famlo? <button type="button" onClick={() => switchMode("signup")}>Sign up</button></p>
           </form>
-        )}
+        ) : null}
 
-        {currentStep === "verify" && (
-          <form className="auth-form" onSubmit={handleVerifyOtp}>
-            <h2>Verify code</h2>
-            <p className="auth-subtitle">Sent to {value}</p>
-            {type === "phone" ? <p className="auth-note">OTP may arrive on a phone call as well.</p> : null}
-            
-            <input 
-              type="text" 
-              placeholder="123 456"
-              maxLength={6}
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-              className="auth-input otp-input"
-              required
-            />
+        {step === "main" && mode === "signup" ? (
+          <div className="auth-stack">
+            <button className="primary-action" type="button" onClick={() => setStep("email_signup")}>Continue with email</button>
+            <button className="secondary-action" type="button" onClick={() => setStep("phone")}>Continue with phone</button>
+            <button className="secondary-action" type="button" disabled={loading} onClick={() => void handleGoogle()}>Continue with Google</button>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <p className="switch-copy">Already have an account? <button type="button" onClick={() => switchMode("login")}>Log in</button></p>
+          </div>
+        ) : null}
 
-            {error && <p className="error-msg">{error}</p>}
-            
-            <button type="submit" disabled={loading} className="submit-btn">
-              {loading ? "Verifying..." : "Confirm & Login"}
-            </button>
-            <button 
-              type="button" 
-              className="back-btn" 
-              onClick={() => setStep("enter")}
-            >Change Phone/Email</button>
+        {step === "email_signup" ? (
+          <form className="auth-stack" onSubmit={(event) => void handleEmailSignup(event)}>
+            <label><span>Email</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+            <label><span>Password</span><input type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+            <label><span>Confirm password</span><input type={showPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>
+            <label className="show-password"><input type="checkbox" checked={showPassword} onChange={(event) => setShowPassword(event.target.checked)} /> Show passwords</label>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={loading}>{loading ? "Creating account..." : "Create account"}</button>
+            <button className="text-action" type="button" onClick={() => setStep("main")}>Back</button>
           </form>
-        )}
+        ) : null}
 
-        {currentStep === "profile" && (
-          <ProfileCompletionForm
-            compact
-            title="Complete your profile"
-            description="Save your guest profile before you continue to booking."
-            buttonLabel="Save and continue"
-            onSuccess={onClose}
-          />
-        )}
-      </div>
+        {step === "phone" ? (
+          <form className="auth-stack" onSubmit={(event) => void handleSendPhoneOtp(event)}>
+            <p className="auth-note">{mode === "login" ? "Use the phone number already linked to your account." : "We will verify your phone before creating the account."}</p>
+            <label><span>Phone number</span><input type="tel" autoComplete="tel" placeholder="+91 98765 43210" value={phone} onChange={(event) => setPhone(event.target.value)} required /></label>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={loading}>{loading ? "Sending..." : "Send verification code"}</button>
+            <button className="text-action" type="button" onClick={() => setStep("main")}>Back</button>
+          </form>
+        ) : null}
+
+        {step === "phone_verify" ? (
+          <form className="auth-stack" onSubmit={(event) => void handleVerifyPhoneOtp(event)}>
+            <p className="auth-note">Enter the code sent to {phone}.</p>
+            <label><span>Verification code</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ""))} required /></label>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={loading}>{loading ? "Verifying..." : mode === "login" ? "Verify and log in" : "Verify and sign up"}</button>
+            <button className="text-action" type="button" onClick={() => setStep("phone")}>Change phone number</button>
+          </form>
+        ) : null}
+
+        {step === "email_sent" ? (
+          <div className="auth-stack">
+            <p className="auth-success">Check your email and use the verification link to finish creating your account.</p>
+            <button className="primary-action" type="button" onClick={closeModal}>Done</button>
+          </div>
+        ) : null}
+      </section>
 
       <style jsx>{`
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(15, 23, 42, 0.6);
-          backdrop-filter: blur(8px);
-          z-index: 9999;
-          overflow-y: auto;
-          overscroll-behavior: contain;
-          display: grid;
-          place-items: center;
-          min-height: 100dvh;
-          padding:
-            max(16px, env(safe-area-inset-top))
-            16px
-            max(16px, env(safe-area-inset-bottom));
-        }
-
-        .modal-content {
-          background: #fff;
-          width: min(100%, 500px);
-          max-width: 500px;
-          max-height: calc(100dvh - 32px);
-          border-radius: 24px;
-          padding: 1.75rem;
-          position: relative;
-          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-          overflow-y: auto;
-          scrollbar-width: thin;
-          scrollbar-color: #e2e8f0 transparent;
-          animation: modal-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-
-        @keyframes modal-pop {
-          from { opacity: 0; transform: translateY(12px) scale(0.98); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
-        .modal-content::-webkit-scrollbar {
-          width: 4px;
-        }
-
-        .modal-content::-webkit-scrollbar-thumb {
-          background-color: #e2e8f0;
-          border-radius: 10px;
-        }
-
-        .close-btn {
-          position: absolute;
-          top: 1.25rem;
-          right: 1.25rem;
-          z-index: 10;
-          background: #f1f5f9;
-          border: none;
-          font-size: 1.25rem;
-          width: 28px;
-          height: 28px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 50%;
-          cursor: pointer;
-          color: #64748b;
-          transition: all 0.2s;
-        }
-
-        .close-btn:hover {
-          color: #0f172a;
-          background: #e2e8f0;
-          transform: rotate(90deg);
-        }
-
-        .auth-form h2 {
-          font-size: 1.5rem;
-          font-weight: 800;
-          margin-bottom: 0.5rem;
-          letter-spacing: -0.02em;
-          color: #0f172a;
-          padding-right: 32px;
-        }
-
-        .auth-subtitle {
-          color: #64748b;
-          margin-bottom: 1.5rem;
-          font-size: 0.9rem;
-          font-weight: 500;
-          max-width: 80%;
-        }
-
-        .auth-note {
-          color: #1e40af;
-          background: #eff6ff;
-          padding: 8px 12px;
-          border-radius: 10px;
-          margin: -0.5rem 0 1.25rem;
-          font-size: 0.82rem;
-          line-height: 1.4;
-          font-weight: 600;
-        }
-
-        .type-toggle {
-          display: flex;
-          background: #f1f5f9;
-          border-radius: 12px;
-          padding: 4px;
-          margin-bottom: 1.25rem;
-        }
-
-        .type-toggle button {
-          flex: 1;
-          border: none;
-          background: none;
-          padding: 8px;
-          border-radius: 8px;
-          font-weight: 700;
-          font-size: 0.9rem;
-          cursor: pointer;
-          transition: all 0.2s;
-          color: #64748b;
-        }
-
-        .type-toggle button.active {
-          background: #fff;
-          color: #0f172a;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-
-        .google-btn {
-          width: 100%;
-          border: 1px solid #e2e8f0;
-          background: #fff;
-          color: #0f172a;
-          border-radius: 12px;
-          padding: 12px;
-          font-size: 0.95rem;
-          font-weight: 700;
-          cursor: pointer;
-          margin-bottom: 1rem;
-          transition: all 0.2s;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-        }
-
-        .google-btn:hover {
-          background: #f8fafc;
-        }
-
-        .auth-divider {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          color: #cbd5e1;
-          font-size: 0.8rem;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-bottom: 1rem;
-        }
-
-        .auth-divider::before,
-        .auth-divider::after {
-          content: "";
-          flex: 1;
-          height: 1px;
-          background: #f1f5f9;
-        }
-
-        .auth-input {
-          width: 100%;
-          padding: 12px 16px;
-          border-radius: 12px;
-          border: 2px solid #f1f5f9;
-          font-size: 1rem;
-          margin-bottom: 1.25rem;
-          outline: none;
-          transition: all 0.2s;
-          background: #f8fafc;
-          box-sizing: border-box;
-        }
-
-        .auth-input:focus {
-          border-color: #3b82f6;
-          background: #fff;
-          box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.06);
-        }
-
-        .otp-input {
-          text-align: center;
-          letter-spacing: 0.4rem;
-          font-weight: 800;
-          font-size: 1.75rem;
-        }
-
-        @media (max-width: 520px) {
-          .modal-overlay {
-            padding:
-              max(12px, env(safe-area-inset-top))
-              12px
-              max(12px, env(safe-area-inset-bottom));
-          }
-
-          .modal-content {
-            max-height: calc(100dvh - 24px);
-          }
-        }
-
-        @media (max-height: 720px) {
-          .modal-content {
-            max-height: calc(100dvh - 20px);
-          }
-        }
-
-        .submit-btn {
-          width: 100%;
-          padding: 14px;
-          border-radius: 12px;
-          background: #0f172a;
-          color: #fff;
-          border: none;
-          font-weight: 700;
-          font-size: 1rem;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-
-        .submit-btn:hover {
-          background: #1e293b;
-          transform: translateY(-1px);
-        }
-
-        .submit-btn:disabled {
-          background: #cbd5e1;
-          cursor: not-allowed;
-        }
-
-        .error-msg {
-          color: #b91c1c;
-          margin-bottom: 1rem;
-          font-size: 0.85rem;
-          font-weight: 600;
-          background: #fef2f2;
-          padding: 10px;
-          border-radius: 8px;
-        }
-
-        .back-btn {
-          width: 100%;
-          background: none;
-          border: none;
-          color: #64748b;
-          margin-top: 1rem;
-          font-size: 0.85rem;
-          font-weight: 600;
-          text-decoration: underline;
-          cursor: pointer;
-        }
+        .auth-overlay { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 16px; background: rgba(15, 23, 42, .62); backdrop-filter: blur(8px); overflow-y: auto; }
+        .auth-dialog { position: relative; width: min(100%, 460px); max-height: calc(100dvh - 32px); overflow-y: auto; background: #fff; border: 1px solid #dbeafe; border-radius: 8px; box-shadow: 0 24px 70px rgba(15, 23, 42, .24); padding: 28px; }
+        .icon-close { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; display: grid; place-items: center; border: 0; background: #f1f5f9; color: #334155; cursor: pointer; }
+        header { display: grid; gap: 5px; margin-bottom: 22px; padding-right: 38px; }
+        h2 { margin: 0; font-size: 25px; color: #0f2650; }
+        .auth-kicker { color: #2563eb; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+        .auth-stack { display: grid; gap: 13px; }
+        label { display: grid; gap: 6px; color: #334155; font-size: 12px; font-weight: 800; }
+        input { width: 100%; height: 46px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 12px; font: inherit; font-size: 14px; color: #0f172a; box-sizing: border-box; }
+        input:focus { outline: 2px solid #bfdbfe; border-color: #2563eb; }
+        .password-field { position: relative; }
+        .password-field input { padding-right: 48px; }
+        .password-field button { position: absolute; right: 4px; top: 4px; width: 38px; height: 38px; border: 0; background: transparent; color: #475569; cursor: pointer; }
+        .primary-action, .secondary-action, .text-action { min-height: 46px; border-radius: 6px; font-weight: 800; cursor: pointer; }
+        .primary-action { border: 1px solid #1769e0; background: #1769e0; color: #fff; }
+        .secondary-action { border: 1px solid #bfdbfe; background: #fff; color: #174ea6; }
+        .text-action { border: 0; background: transparent; color: #2563eb; }
+        button:disabled { opacity: .6; cursor: not-allowed; }
+        .text-link { color: #1d4ed8; font-size: 12px; font-weight: 700; text-decoration: none; }
+        .align-right { justify-self: end; }
+        .switch-copy { margin: 3px 0 0; text-align: center; color: #64748b; font-size: 13px; }
+        .switch-copy button { border: 0; background: transparent; color: #1d4ed8; font-weight: 800; cursor: pointer; }
+        .auth-error, .auth-success, .auth-note { margin: 0; border-radius: 6px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+        .auth-error { background: #fef2f2; color: #b91c1c; }
+        .auth-success { background: #ecfdf5; color: #166534; }
+        .auth-note { background: #eff6ff; color: #1e40af; }
+        .show-password { display: flex; align-items: center; gap: 8px; }
+        .show-password input { width: 16px; height: 16px; }
+        @media (max-width: 520px) { .auth-overlay { padding: 0; align-items: end; } .auth-dialog { width: 100%; max-height: 94dvh; border-radius: 8px 8px 0 0; padding: 24px 18px max(24px, env(safe-area-inset-bottom)); } }
       `}</style>
     </div>
   );

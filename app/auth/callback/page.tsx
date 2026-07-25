@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 
 import { createBrowserSupabaseClient } from "@/lib/supabase";
@@ -15,7 +16,7 @@ export default function AuthCallbackPage(): React.JSX.Element {
     void (async () => {
       const currentUrl = new URL(window.location.href);
       const hashParams = new URLSearchParams(currentUrl.hash.replace(/^#/, ""));
-      const nextPath = getSafeReturnPath(currentUrl.searchParams.get("next"));
+      const nextPath = getSafeReturnPath(currentUrl.searchParams.get("next"), "/");
       const profileUrl = new URL("/profile", window.location.origin);
       const code = currentUrl.searchParams.get("code");
       const oauthError =
@@ -25,7 +26,7 @@ export default function AuthCallbackPage(): React.JSX.Element {
         hashParams.get("error");
 
       if (oauthError) {
-        window.location.replace(`${nextPath}${nextPath.includes("?") ? "&" : "?"}auth_error=${encodeURIComponent(oauthError)}`);
+        window.location.replace(`${nextPath}${nextPath.includes("?") ? "&" : "?"}auth_error=authentication_failed`);
         return;
       }
 
@@ -47,9 +48,8 @@ export default function AuthCallbackPage(): React.JSX.Element {
         profileUrl.searchParams.set("next", nextPath);
         profileUrl.searchParams.set("auth_return", "google");
         window.location.replace(`${profileUrl.pathname}${profileUrl.search}${profileUrl.hash}`);
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : "Login failed";
-        window.location.replace(`${nextPath}${nextPath.includes("?") ? "&" : "?"}auth_error=${encodeURIComponent(detail)}`);
+      } catch {
+        window.location.replace(`${nextPath}${nextPath.includes("?") ? "&" : "?"}auth_error=authentication_failed`);
       }
     })();
 
@@ -75,4 +75,3 @@ export default function AuthCallbackPage(): React.JSX.Element {
     </main>
   );
 }
-import Image from "next/image";

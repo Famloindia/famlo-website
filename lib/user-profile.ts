@@ -1,11 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeGuestEmail, normalizeGuestPhone } from "@/lib/guest-identity";
+import { normalizeGuestUsername, validateGuestUsername } from "@/lib/guest-username";
 
 export interface UserProfileRecord {
   id: string;
+  username?: string | null;
   name: string | null;
   phone: string | null;
   email: string | null;
+  phone_verified_at?: string | null;
+  email_verified_at?: string | null;
+  profile_completed_at?: string | null;
   city: string | null;
   state: string | null;
   onboarding_completed: boolean;
@@ -46,9 +51,13 @@ function mapLegacyUserRow(userId: string, row: JsonRecord | null): UserProfileRe
 
   return {
     id: userId,
+    username: asString(row.username),
     name: asString(row.name),
     phone: normalizeGuestPhone(asString(row.phone)),
     email: normalizeGuestEmail(asString(row.email)),
+    phone_verified_at: asString(row.phone_verified_at),
+    email_verified_at: asString(row.email_verified_at),
+    profile_completed_at: asString(row.profile_completed_at),
     city: asString(row.city),
     state: asString(row.state),
     onboarding_completed: asBoolean(row.onboarding_completed),
@@ -66,9 +75,13 @@ function mapLegacyUserRow(userId: string, row: JsonRecord | null): UserProfileRe
 export function createEmptyUserProfile(userId: string): UserProfileRecord {
   return {
     id: userId,
+    username: null,
     name: null,
     phone: null,
     email: null,
+    phone_verified_at: null,
+    email_verified_at: null,
+    profile_completed_at: null,
     city: null,
     state: null,
     onboarding_completed: false,
@@ -84,15 +97,17 @@ export function createEmptyUserProfile(userId: string): UserProfileRecord {
 
 export function isGuestProfileComplete(profile: UserProfileRecord | null | undefined): boolean {
   if (!profile) return false;
-  const hasContact = Boolean(profile.phone || profile.email);
   return Boolean(
+    profile.avatar_url &&
+    profile.username &&
     profile.name &&
+    profile.phone &&
+    profile.email &&
     profile.city &&
     profile.state &&
     profile.gender &&
     profile.date_of_birth &&
-    profile.about &&
-    hasContact
+    profile.about
   );
 }
 
@@ -116,9 +131,13 @@ function mergeUserProfile(
 
   return {
     id: userId,
+    username: base?.username ?? null,
     name: base?.name ?? asString(v2Row?.display_name) ?? null,
     phone: base?.phone ?? normalizeGuestPhone(asString(v2Row?.phone)) ?? null,
     email: base?.email ?? normalizeGuestEmail(asString(v2Row?.email)) ?? null,
+    phone_verified_at: base?.phone_verified_at ?? null,
+    email_verified_at: base?.email_verified_at ?? null,
+    profile_completed_at: base?.profile_completed_at ?? null,
     city: base?.city ?? asString(v2Row?.home_city) ?? null,
     state: base?.state ?? asString(v2Row?.home_state) ?? null,
     onboarding_completed: Boolean(base?.onboarding_completed) || isGuestProfileComplete(base),
@@ -143,7 +162,7 @@ export async function loadUserProfileCompatibility(
     supabase
       .from("users")
       .select(
-        "id, name, phone, email, city, state, onboarding_completed, avatar_url, about, date_of_birth, gender, kyc_status, kyc_submitted_at, id_document_url, id_document_type, verification_url, verification_type"
+        "id, username, name, phone, email, phone_verified_at, email_verified_at, profile_completed_at, city, state, onboarding_completed, avatar_url, about, date_of_birth, gender, kyc_status, kyc_submitted_at, id_document_url, id_document_type, verification_url, verification_type"
       )
       .eq("id", userId)
       .maybeSingle(),
@@ -164,6 +183,7 @@ export async function loadUserProfileCompatibility(
 
 type UserProfilePatch = {
   userId: string;
+  username?: string | null;
   name?: string | null;
   email?: string | null;
   phone?: string | null;
@@ -173,7 +193,49 @@ type UserProfilePatch = {
   dob?: string | null;
   gender?: string | null;
   avatarUrl?: string | null;
+  emailVerifiedAt?: string | null;
+  phoneVerifiedAt?: string | null;
 };
+
+export type GuestProfileFieldErrors = Partial<
+  Record<"avatarUrl" | "username" | "name" | "email" | "phone" | "city" | "state" | "about" | "dob" | "gender", string>
+>;
+
+export function validateGuestProfileInput(input: UserProfilePatch): GuestProfileFieldErrors {
+  const errors: GuestProfileFieldErrors = {};
+  const avatarUrl = typeof input.avatarUrl === "string" ? input.avatarUrl.trim() : "";
+  const username = normalizeGuestUsername(input.username);
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  const email = typeof input.email === "string" ? input.email.trim() : "";
+  const phone = typeof input.phone === "string" ? input.phone.trim() : "";
+  const city = typeof input.city === "string" ? input.city.trim() : "";
+  const state = typeof input.state === "string" ? input.state.trim() : "";
+  const about = typeof input.about === "string" ? input.about.trim() : "";
+  const dob = typeof input.dob === "string" ? input.dob.trim() : "";
+  const gender = typeof input.gender === "string" ? input.gender.trim() : "";
+
+  if (!avatarUrl) errors.avatarUrl = "Add a profile photo.";
+  const usernameError = validateGuestUsername(username);
+  if (usernameError) errors.username = usernameError;
+  if (name.length < 2 || name.length > 100) errors.name = "Enter your full name.";
+  if (!email) errors.email = "Add your email address.";
+  if (!phone) errors.phone = "Add your phone number.";
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = "Enter a valid email address.";
+  if (phone && !normalizeGuestPhone(phone)) errors.phone = "Enter a valid phone number.";
+  if (!city || city.length > 100) errors.city = "Enter your city.";
+  if (!state || state.length > 100) errors.state = "Enter your state.";
+  if (!about || about.length > 2000) errors.about = "Tell hosts a little about yourself.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(`${dob}T00:00:00Z`))) {
+    errors.dob = "Enter a valid date of birth.";
+  } else if (dob > new Date().toISOString().slice(0, 10)) {
+    errors.dob = "Date of birth cannot be in the future.";
+  }
+  if (!["female", "male", "non_binary", "prefer_not_to_say"].includes(gender)) {
+    errors.gender = "Select a gender option.";
+  }
+
+  return errors;
+}
 
 function preserveExistingValue(incoming: string | null | undefined, existing: string | null): string | null {
   if (typeof incoming !== "string") {
@@ -192,6 +254,10 @@ export function mergeUserProfilePatch(
   const merged: UserProfileRecord = {
     ...base,
     id: patch.userId,
+    username: preserveExistingValue(
+      typeof patch.username === "string" ? normalizeGuestUsername(patch.username) : patch.username,
+      base.username ?? null
+    ),
     name: preserveExistingValue(patch.name, base.name),
     phone: normalizeGuestPhone(patch.phone) ?? base.phone,
     email: normalizeGuestEmail(patch.email) ?? base.email,
@@ -201,9 +267,24 @@ export function mergeUserProfilePatch(
     date_of_birth: preserveExistingValue(patch.dob, base.date_of_birth),
     gender: preserveExistingValue(patch.gender, base.gender),
     avatar_url: preserveExistingValue(patch.avatarUrl, base.avatar_url),
+    email_verified_at:
+      patch.emailVerifiedAt !== undefined
+        ? patch.emailVerifiedAt
+        : normalizeGuestEmail(patch.email) === base.email
+          ? base.email_verified_at
+          : null,
+    phone_verified_at:
+      patch.phoneVerifiedAt !== undefined
+        ? patch.phoneVerifiedAt
+        : normalizeGuestPhone(patch.phone) === base.phone
+          ? base.phone_verified_at
+          : null,
   };
 
   merged.onboarding_completed = isGuestProfileComplete(merged);
+  merged.profile_completed_at = merged.onboarding_completed
+    ? base.profile_completed_at ?? new Date().toISOString()
+    : null;
   return merged;
 }
 
@@ -219,6 +300,7 @@ export async function upsertUserProfileCompatibility(
       : null;
 
   const userUpdate: Record<string, unknown> = {
+    username: mergedProfile.username,
     name: mergedProfile.name,
     city: mergedProfile.city,
     state: mergedProfile.state,
@@ -226,6 +308,9 @@ export async function upsertUserProfileCompatibility(
     date_of_birth: mergedProfile.date_of_birth,
     gender: mergedProfile.gender,
     avatar_url: normalizedAvatarUrl,
+    email_verified_at: mergedProfile.email_verified_at,
+    phone_verified_at: mergedProfile.phone_verified_at,
+    profile_completed_at: mergedProfile.profile_completed_at,
     onboarding_completed: mergedProfile.onboarding_completed,
     updated_at: new Date().toISOString(),
   };
@@ -280,4 +365,56 @@ export async function upsertUserProfileCompatibility(
   }
 
   return loadUserProfileCompatibility(supabase, params.userId);
+}
+
+export async function updateUserProfileAvatarCompatibility(
+  supabase: SupabaseClient,
+  userId: string,
+  avatarUrl: string
+): Promise<UserProfileRecord | null> {
+  const existingProfile = await loadUserProfileCompatibility(supabase, userId);
+  const previousAvatarUrl = existingProfile?.avatar_url ?? null;
+  const updatedAt = new Date().toISOString();
+  let v2Updated = false;
+
+  const { error: v2Error } = await supabase.from("user_profiles_v2").upsert(
+    {
+      user_id: userId,
+      avatar_url: avatarUrl,
+      updated_at: updatedAt,
+    },
+    { onConflict: "user_id" }
+  );
+
+  if (v2Error) {
+    const message = v2Error.message.toLowerCase();
+    const isMissingTable =
+      message.includes("does not exist") || message.includes("relation") || message.includes("schema cache");
+    if (!isMissingTable) throw v2Error;
+  } else {
+    v2Updated = true;
+  }
+
+  const { error: userError } = await supabase.from("users").upsert(
+    {
+      id: userId,
+      email: existingProfile?.email ?? null,
+      phone: existingProfile?.phone ?? null,
+      avatar_url: avatarUrl,
+      updated_at: updatedAt,
+    } as never,
+    { onConflict: "id" }
+  );
+
+  if (userError) {
+    if (v2Updated) {
+      await supabase
+        .from("user_profiles_v2")
+        .update({ avatar_url: previousAvatarUrl, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+    }
+    throw userError;
+  }
+
+  return loadUserProfileCompatibility(supabase, userId);
 }
