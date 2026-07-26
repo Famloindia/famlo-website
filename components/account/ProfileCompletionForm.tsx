@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Calendar, Camera, ChevronDown, Upload } from "lucide-react";
 import Image from "next/image";
+import type { User } from "@supabase/supabase-js";
 
 import { useUser } from "@/components/auth/UserContext";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import {
   isGuestProfileComplete,
   type GuestProfileFieldErrors,
+  type UserProfileRecord,
   validateGuestProfileInput,
 } from "@/lib/user-profile";
 import { normalizeGuestEmail, normalizeGuestPhone } from "@/lib/guest-identity";
@@ -21,6 +23,7 @@ interface ProfileCompletionFormProps {
   buttonLabel?: string;
   compact?: boolean;
   onSuccess?: () => Promise<void> | void;
+  onPhoneConflictChange?: (hasConflict: boolean) => void;
 }
 
 type ProfileDraft = {
@@ -35,6 +38,21 @@ type ProfileDraft = {
   gender: string;
   avatarUrl: string;
 };
+
+function createProfileDraft(profile: UserProfileRecord | null, user: User | null): ProfileDraft {
+  return {
+    username: profile?.username ?? "",
+    email: profile?.email ?? user?.email ?? "",
+    phone: profile?.phone ?? user?.phone ?? "",
+    name: profile?.name ?? "",
+    city: profile?.city ?? "",
+    state: profile?.state ?? "",
+    about: profile?.about ?? "",
+    dob: profile?.date_of_birth ?? "",
+    gender: profile?.gender ?? "",
+    avatarUrl: profile?.avatar_url ?? "",
+  };
+}
 
 async function readJsonOrText(response: Response): Promise<Record<string, unknown>> {
   const raw = await response.text();
@@ -55,23 +73,15 @@ export function ProfileCompletionForm({
   buttonLabel = "Save profile",
   compact = false,
   onSuccess,
+  onPhoneConflictChange,
 }: Readonly<ProfileCompletionFormProps>): React.JSX.Element {
-  const { user, profile, refreshAuth } = useUser();
+  const { user, profile, applyProfile, refreshAuth, signOut } = useUser();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const [draft, setDraft] = useState<ProfileDraft>({
-    username: "",
-    email: "",
-    phone: "",
-    name: "",
-    city: "",
-    state: "",
-    about: "",
-    dob: "",
-    gender: "",
-    avatarUrl: "",
-  });
+  const initializedUserId = useRef<string | null>(null);
+  const [editMode, setEditMode] = useState(() => !isGuestProfileComplete(profile));
+  const [draft, setDraft] = useState<ProfileDraft>(() => createProfileDraft(profile, user));
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
@@ -80,22 +90,12 @@ export function ProfileCompletionForm({
   const [phoneOtpState, setPhoneOtpState] = useState<"idle" | "sending" | "sent" | "verifying">("idle");
   const [phoneOtp, setPhoneOtp] = useState("");
   const [phoneOtpSessionId, setPhoneOtpSessionId] = useState("");
+  const [phoneConflict, setPhoneConflict] = useState<string | null>(null);
   const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<GuestProfileFieldErrors>({});
 
-  const resolvedForm = {
-    username: draft.username || profile?.username || "",
-    email: draft.email || profile?.email || user?.email || "",
-    phone: draft.phone || profile?.phone || user?.phone || "",
-    name: draft.name || profile?.name || "",
-    city: draft.city || profile?.city || "",
-    state: draft.state || profile?.state || "",
-    about: draft.about || profile?.about || "",
-    dob: draft.dob || profile?.date_of_birth || "",
-    gender: draft.gender || profile?.gender || "",
-    avatarUrl: draft.avatarUrl || profile?.avatar_url || "",
-  };
+  const resolvedForm = draft;
 
   const profileComplete = isGuestProfileComplete(profile);
   const emailVerified =
@@ -106,6 +106,13 @@ export function ProfileCompletionForm({
     normalizeGuestPhone(profile?.phone) === normalizeGuestPhone(resolvedForm.phone);
   const savedAvatarUrl = getSafeAvatarUrl(resolvedForm.avatarUrl);
   const displayedAvatarUrl = photoPreviewUrl || (!avatarPreviewFailed ? savedAvatarUrl : null);
+
+  useEffect(() => {
+    if (!user?.id || initializedUserId.current === user.id) return;
+    initializedUserId.current = user.id;
+    setDraft(createProfileDraft(profile, user));
+    setEditMode(!isGuestProfileComplete(profile));
+  }, [profile, user]);
 
   useEffect(() => {
     return () => {
@@ -156,10 +163,12 @@ export function ProfileCompletionForm({
       }
 
       setDraft((current) => ({ ...current, avatarUrl: data.url as string }));
+      if (data.profile && typeof data.profile === "object") {
+        applyProfile(data.profile as UserProfileRecord);
+      }
       setSelectedPhoto(null);
       if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
       setPhotoPreviewUrl("");
-      await refreshAuth();
     } catch (error) {
       setMessage({
         type: "error",
@@ -249,11 +258,25 @@ export function ProfileCompletionForm({
         }),
       });
       const payload = await response.json();
+      if (!response.ok && payload.code === "PHONE_ALREADY_LINKED" && payload.ownershipVerified === true) {
+        setPhoneConflict(resolvedForm.phone);
+        setPhoneOtp("");
+        setPhoneOtpSessionId("");
+        setPhoneOtpState("idle");
+        setFieldErrors((current) => ({ ...current, phone: undefined }));
+        onPhoneConflictChange?.(true);
+        return;
+      }
       if (!response.ok) throw new Error(payload.error ?? "The verification code is invalid or expired.");
+      if (payload.profile && typeof payload.profile === "object") {
+        applyProfile(payload.profile as UserProfileRecord);
+      }
       await refreshAuth();
       setPhoneOtp("");
       setPhoneOtpSessionId("");
       setPhoneOtpState("idle");
+      setPhoneConflict(null);
+      onPhoneConflictChange?.(false);
       setFieldErrors((current) => ({ ...current, phone: undefined }));
       setMessage({ type: "success", text: "Phone verified successfully." });
     } catch (error) {
@@ -263,6 +286,46 @@ export function ProfileCompletionForm({
         text: error instanceof Error ? error.message : "The verification code is invalid or expired.",
       });
     }
+  }
+
+  function useAnotherPhone(): void {
+    const persistedVerifiedPhone = profile?.phone_verified_at ? profile.phone ?? "" : "";
+    setDraft((current) => ({ ...current, phone: persistedVerifiedPhone }));
+    setPhoneOtp("");
+    setPhoneOtpSessionId("");
+    setPhoneOtpState("idle");
+    setPhoneConflict(null);
+    setMessage(null);
+    setFieldErrors((current) => ({ ...current, phone: undefined }));
+    onPhoneConflictChange?.(false);
+  }
+
+  async function logInWithLinkedPhone(): Promise<void> {
+    if (!phoneConflict) return;
+    const confirmed = window.confirm(
+      "You will be logged out of this Famlo account and switch to the account linked to this phone number."
+    );
+    if (!confirmed) return;
+    window.sessionStorage.setItem("famlo:account-switch-phone", phoneConflict);
+    await signOut({
+      redirectTo: "/?auth=login&auth_step=phone&account_switch=phone",
+    });
+  }
+
+  function cancelEditing(): void {
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setDraft(createProfileDraft(profile, user));
+    setSelectedPhoto(null);
+    setPhotoPreviewUrl("");
+    setUsernameStatus("idle");
+    setPhoneOtp("");
+    setPhoneOtpSessionId("");
+    setPhoneOtpState("idle");
+    setPhoneConflict(null);
+    setFieldErrors({});
+    setMessage(null);
+    onPhoneConflictChange?.(false);
+    setEditMode(false);
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -344,11 +407,17 @@ export function ProfileCompletionForm({
         throw new Error("Profile save could not be verified. Please try again.");
       }
 
+      const canonicalProfile = savedProfile as unknown as UserProfileRecord;
+      applyProfile(canonicalProfile);
+      setDraft(createProfileDraft(canonicalProfile, user));
       await refreshAuth();
       if (onSuccess) await onSuccess();
+      setPhoneConflict(null);
+      onPhoneConflictChange?.(false);
+      setEditMode(false);
       setMessage({
         type: "success",
-        text: "Profile saved. You can continue to booking now.",
+        text: profileComplete ? "Profile changes saved." : "Profile saved. You can continue to booking now.",
       });
     } catch (error) {
       setMessage({
@@ -358,6 +427,128 @@ export function ProfileCompletionForm({
     } finally {
       setSaving(false);
     }
+  }
+
+  if (!editMode && profileComplete) {
+    const persistedAvatarUrl = getSafeAvatarUrl(profile?.avatar_url);
+    const formattedDateOfBirth = profile?.date_of_birth
+      ? new Intl.DateTimeFormat("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          timeZone: "UTC",
+        }).format(new Date(`${profile.date_of_birth}T00:00:00Z`))
+      : "Not added";
+
+    return (
+      <section className="profile-view-card">
+        <div className="form-heading">
+          <div>
+            <h2>{title}</h2>
+            <p>{description}</p>
+          </div>
+          <span>Complete</span>
+        </div>
+
+        <div className="profile-view-layout">
+          <aside className="profile-view-avatar">
+            <div className="account-avatar-picker">
+              {persistedAvatarUrl && !avatarPreviewFailed ? (
+                <Image
+                  src={persistedAvatarUrl}
+                  alt={profile?.name || "Guest profile"}
+                  width={240}
+                  height={240}
+                  sizes="120px"
+                  unoptimized
+                  onError={() => setAvatarPreviewFailed(true)}
+                  className="account-avatar-preview"
+                />
+              ) : (
+                <div className="account-avatar-fallback">
+                  {(profile?.name || user?.email || "U").charAt(0).toUpperCase()}
+                </div>
+              )}
+            </div>
+          </aside>
+
+          <div className="profile-view-grid">
+            <div><span>Username</span><strong>@{profile?.username}</strong></div>
+            <div><span>Full name</span><strong>{profile?.name}</strong></div>
+            <div><span>Gender</span><strong>{profile?.gender?.replace(/_/g, " ")}</strong></div>
+            <div><span>Date of birth</span><strong>{formattedDateOfBirth}</strong></div>
+            <div><span>City</span><strong>{profile?.city}</strong></div>
+            <div><span>State</span><strong>{profile?.state}</strong></div>
+            <div>
+              <span>Phone</span>
+              <strong>{profile?.phone}</strong>
+              <small>{profile?.phone_verified_at ? "Verified" : "Not verified"}</small>
+            </div>
+            <div>
+              <span>Email</span>
+              <strong>{profile?.email}</strong>
+              <small>{profile?.email_verified_at ? "Verified" : "Not verified"}</small>
+            </div>
+            <div className="full-span">
+              <span>About you</span>
+              <strong className="about-value">{profile?.about || "Not added"}</strong>
+            </div>
+          </div>
+        </div>
+
+        {message ? <p className={message.type}>{message.text}</p> : null}
+        <button
+          type="button"
+          className="button-like edit-profile"
+          onClick={() => {
+            setDraft(createProfileDraft(profile, user));
+            setMessage(null);
+            setEditMode(true);
+          }}
+        >
+          Edit profile
+        </button>
+
+        <style jsx>{`
+          .profile-view-card {
+            padding: clamp(22px, 4vw, 32px);
+            display: grid;
+            gap: 24px;
+            border: 1px solid #e5eaf2;
+            border-radius: 20px;
+            background: #fff;
+            box-shadow: 0 14px 40px rgba(15, 23, 42, 0.06);
+          }
+          .form-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+          .form-heading h2 { margin: 0; color: #0f172a; font-size: 21px; }
+          .form-heading p { margin: 6px 0 0; color: #64748b; font-size: 14px; line-height: 1.55; }
+          .form-heading > span { padding: 7px 11px; border-radius: 999px; color: #166534; background: #dcfce7; font-size: 11px; font-weight: 800; }
+          .profile-view-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: clamp(24px, 4vw, 42px); align-items: start; }
+          .profile-view-avatar { display: grid; justify-items: center; padding: 10px 0; }
+          .profile-view-avatar :global(.account-avatar-picker) { width: 120px; height: 120px; border: 3px solid #dbeafe; box-shadow: 0 12px 28px rgba(37, 99, 235, 0.12); }
+          .profile-view-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px; }
+          .profile-view-grid > div { display: grid; gap: 5px; min-width: 0; }
+          .profile-view-grid span { color: #64748b; font-size: 11px; font-weight: 700; }
+          .profile-view-grid strong { color: #172033; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; text-transform: none; }
+          .profile-view-grid small { width: max-content; padding: 3px 7px; border-radius: 999px; color: #166534; background: #dcfce7; font-size: 10px; font-weight: 800; }
+          .profile-view-grid .full-span { grid-column: 1 / -1; }
+          .about-value { white-space: pre-wrap; line-height: 1.6; }
+          p.success, p.error { margin: 0; padding: 11px 13px; border-radius: 11px; font-size: 13px; font-weight: 700; }
+          p.success { color: #166534; background: #dcfce7; }
+          p.error { color: #b91c1c; background: #fee2e2; }
+          .edit-profile { width: max-content; min-width: 140px; min-height: 44px; border-radius: 12px; }
+          @media (max-width: 760px) {
+            .profile-view-layout { grid-template-columns: 1fr; }
+            .profile-view-avatar { justify-items: start; }
+          }
+          @media (max-width: 640px) {
+            .profile-view-grid { grid-template-columns: 1fr; }
+            .profile-view-grid .full-span { grid-column: auto; }
+            .edit-profile { width: 100%; }
+          }
+        `}</style>
+      </section>
+    );
   }
 
   return (
@@ -379,8 +570,8 @@ export function ProfileCompletionForm({
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
-        <span className={profileComplete ? "complete" : "incomplete"}>
-          {profileComplete ? "Complete" : "Required"}
+        <span className={profileComplete && !phoneConflict ? "complete" : "incomplete"}>
+          {profileComplete && !phoneConflict ? "Complete" : "Required"}
         </span>
       </div>
 
@@ -554,6 +745,10 @@ export function ProfileCompletionForm({
               setPhoneOtp("");
               setPhoneOtpSessionId("");
               setPhoneOtpState("idle");
+              if (phoneConflict) {
+                setPhoneConflict(null);
+                onPhoneConflictChange?.(false);
+              }
             }}
             placeholder="+91 XXXXX XXXXX"
           />
@@ -583,6 +778,20 @@ export function ProfileCompletionForm({
               <button type="button" disabled={phoneOtp.length !== 6 || phoneOtpState === "verifying"} onClick={() => void verifyPhoneOtp()}>
                 {phoneOtpState === "verifying" ? "Checking..." : "Verify"}
               </button>
+            </div>
+          ) : null}
+          {phoneConflict ? (
+            <div className="phone-conflict" role="alert">
+              <strong>This phone number is already linked to another Famlo account.</strong>
+              <p>Log in with this phone number to access that account, or use a different number for this profile.</p>
+              <div>
+                <button type="button" className="conflict-primary" onClick={() => void logInWithLinkedPhone()}>
+                  Log in with this phone
+                </button>
+                <button type="button" className="conflict-secondary" onClick={useAnotherPhone}>
+                  Use another number
+                </button>
+              </div>
             </div>
           ) : null}
         </label>
@@ -631,9 +840,16 @@ export function ProfileCompletionForm({
         </div>
       ) : null}
 
-      <button className="button-like account-submit-btn compact-btn" disabled={saving || uploading} type="submit">
-        {saving ? "Saving..." : buttonLabel}
-      </button>
+      <div className="profile-form-actions">
+        <button className="button-like account-submit-btn compact-btn" disabled={saving || uploading || Boolean(phoneConflict)} type="submit">
+          {saving ? "Saving..." : profileComplete ? "Save changes" : buttonLabel}
+        </button>
+        {profileComplete ? (
+          <button className="cancel-edit" disabled={saving || uploading} type="button" onClick={cancelEditing}>
+            Cancel
+          </button>
+        ) : null}
+      </div>
 
       <style jsx>{`
         .form-heading {
@@ -755,6 +971,28 @@ export function ProfileCompletionForm({
           font-weight: 800;
           cursor: pointer;
         }
+        .phone-conflict {
+          display: grid;
+          gap: 8px;
+          padding: 14px;
+          border: 1px solid #f8d58b;
+          border-radius: 13px;
+          background: #fffaf0;
+          color: #7c4208;
+        }
+        .phone-conflict > strong { font-size: 13px; line-height: 1.4; }
+        .phone-conflict p { margin: 0; color: #7c5a32; font-size: 12px; line-height: 1.5; }
+        .phone-conflict > div { display: flex; gap: 8px; flex-wrap: wrap; }
+        .phone-conflict button {
+          min-height: 38px;
+          padding: 0 12px;
+          border-radius: 10px;
+          font-size: 11px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .conflict-primary { border: 1px solid #1d4ed8; background: #1d4ed8; color: #fff; }
+        .conflict-secondary { border: 1px solid #d8b36a; background: #fff; color: #7c4208; }
 
         .username-row {
           display: grid;
@@ -873,6 +1111,24 @@ export function ProfileCompletionForm({
           font-weight: 800;
           justify-self: end;
         }
+        .profile-form-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .cancel-edit {
+          min-width: 110px;
+          min-height: 44px;
+          padding: 10px 18px;
+          border: 1px solid #dbe2ea;
+          border-radius: 12px;
+          background: #fff;
+          color: #475569;
+          font-size: 14px;
+          font-weight: 800;
+          cursor: pointer;
+        }
 
         @media (max-width: 760px) {
           .profile-editor-layout {
@@ -904,6 +1160,12 @@ export function ProfileCompletionForm({
           .compact-btn {
             width: 100%;
             justify-self: stretch;
+          }
+          .profile-form-actions {
+            display: grid;
+          }
+          .cancel-edit {
+            width: 100%;
           }
         }
       `}</style>

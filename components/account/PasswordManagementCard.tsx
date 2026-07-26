@@ -1,7 +1,7 @@
 "use client";
 
 import { Eye, EyeOff, KeyRound } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 
@@ -20,6 +20,32 @@ export function PasswordManagementCard({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch("/api/auth/password/change", {
+        cache: "no-store",
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      });
+      const payload = await response.json().catch(() => null);
+      if (active && response.ok && typeof payload?.hasPassword === "boolean") {
+        setHasPassword(payload.hasPassword);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [supabase]);
+
+  function closeForm(): void {
+    setFormOpen(false);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowPasswords(false);
+  }
+
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     if (newPassword !== confirmPassword) {
@@ -28,6 +54,7 @@ export function PasswordManagementCard({
     }
     setSaving(true);
     setMessage(null);
+    const wasPasswordSet = hasPassword;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch("/api/auth/password/change", {
@@ -44,7 +71,12 @@ export function PasswordManagementCard({
       setNewPassword("");
       setConfirmPassword("");
       setHasPassword(true);
-      setMessage({ type: "success", text: "Password updated securely." });
+      setFormOpen(false);
+      setShowPasswords(false);
+      setMessage({
+        type: "success",
+        text: wasPasswordSet ? "Password updated securely." : "Password set securely.",
+      });
     } catch (error) {
       setMessage({ type: "error", text: error instanceof Error ? error.message : "Password could not be changed." });
     } finally {
@@ -91,12 +123,20 @@ export function PasswordManagementCard({
             {showPasswords ? <EyeOff size={16} /> : <Eye size={16} />}
             {showPasswords ? "Hide passwords" : "Show passwords"}
           </button>
-          {message ? <p role="status" className={message.type}>{message.text}</p> : null}
-          <button type="submit" className="button-like submit-password" disabled={saving}>
-            {saving ? "Saving..." : hasPassword ? "Change password" : "Set password"}
-          </button>
+          <div className="password-form-actions">
+            <button type="submit" className="button-like submit-password" disabled={saving}>
+              {saving ? "Saving..." : hasPassword ? "Change password" : "Set password"}
+            </button>
+            <button type="button" className="cancel-password" disabled={saving} onClick={() => {
+              closeForm();
+              setMessage(null);
+            }}>
+              Cancel
+            </button>
+          </div>
         </form>
       ) : null}
+      {message ? <p role="status" className={message.type}>{message.text}</p> : null}
       <style jsx>{`
         .password-card {
           padding: 24px;
@@ -147,11 +187,22 @@ export function PasswordManagementCard({
         input { height: 44px; border: 1px solid #dbe2ea; border-radius: 12px; padding: 0 12px; font-size: 14px; }
         input:focus { outline: 3px solid rgba(59, 130, 246, 0.12); border-color: #3b82f6; }
         .password-visibility { width: max-content; display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: #1d4ed8; font-weight: 700; cursor: pointer; }
-        p.success, p.error { grid-column: 1 / -1; padding: 11px 13px; border-radius: 11px; }
+        p.success, p.error { padding: 11px 13px; border-radius: 11px; }
         p.success { color: #166534; background: #dcfce7; }
         p.error { color: #b91c1c; background: #fee2e2; }
         .submit-password { width: max-content; min-width: 150px; min-height: 42px; border-radius: 12px; }
-        .password-action:focus-visible, .password-visibility:focus-visible, .submit-password:focus-visible {
+        .password-form-actions { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; }
+        .cancel-password {
+          min-height: 42px;
+          padding: 0 16px;
+          border: 1px solid #dbe2ea;
+          border-radius: 12px;
+          background: #fff;
+          color: #475569;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .password-action:focus-visible, .password-visibility:focus-visible, .submit-password:focus-visible, .cancel-password:focus-visible {
           outline: 3px solid rgba(59, 130, 246, 0.2);
           outline-offset: 2px;
         }
@@ -168,6 +219,9 @@ export function PasswordManagementCard({
           }
           .submit-password {
             width: 100%;
+          }
+          .password-form-actions {
+            display: grid;
           }
         }
       `}</style>

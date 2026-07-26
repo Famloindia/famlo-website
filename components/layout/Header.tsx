@@ -39,6 +39,8 @@ function HeaderContent() {
 
   const authToken = `${pathname}?${searchParams.toString()}`;
   const requestedAuthMode = searchParams.get("auth") === "signup" ? "signup" : "login";
+  const requestedAuthStep = searchParams.get("auth_step") === "phone" ? "phone" : "main";
+  const isPhoneAccountSwitch = searchParams.get("account_switch") === "phone";
   const urlWantsAuth = !loading && !user && (
     searchParams.get("auth") === "true" ||
     searchParams.get("auth") === "login" ||
@@ -239,10 +241,13 @@ function HeaderContent() {
 
       {isAuthOpen ? (
         <AuthModal
-          key={`header-auth-${autoAuthOpen ? requestedAuthMode : authMode}`}
+          key={`header-auth-${autoAuthOpen ? `${requestedAuthMode}-${requestedAuthStep}` : authMode}`}
           isOpen={isAuthOpen}
           initialMode={autoAuthOpen ? requestedAuthMode : authMode}
-          returnTo={`${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}
+          initialStep={autoAuthOpen ? requestedAuthStep : "main"}
+          initialPhoneIntent={isPhoneAccountSwitch ? "login" : "signup"}
+          accountSwitch={isPhoneAccountSwitch}
+          returnTo={isPhoneAccountSwitch ? "/" : `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}
           onClose={() => {
             setAuthModalOpen(false);
             if (urlWantsAuth) setDismissedAuthToken(authToken);

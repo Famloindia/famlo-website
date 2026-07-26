@@ -25,6 +25,9 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialMode?: AuthMode;
+  initialStep?: "main" | "phone";
+  initialPhoneIntent?: "signup" | "login";
+  accountSwitch?: boolean;
   returnTo?: string;
   skipProfileStep?: boolean;
 }
@@ -35,6 +38,9 @@ export function AuthModal({
   isOpen,
   onClose,
   initialMode = "login",
+  initialStep = "main",
+  initialPhoneIntent = "signup",
+  accountSwitch = false,
   returnTo,
   skipProfileStep = false,
 }: AuthModalProps): React.JSX.Element | null {
@@ -59,11 +65,15 @@ export function AuthModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    const accountSwitchPhone =
+      accountSwitch && typeof window !== "undefined"
+        ? window.sessionStorage.getItem("famlo:account-switch-phone") ?? ""
+        : "";
     setMode(initialMode);
-    setStep("main");
+    setStep(initialStep);
     setIdentifier("");
     setEmail("");
-    setPhone("");
+    setPhone(accountSwitchPhone);
     setPassword("");
     setConfirmPassword("");
     setOtp("");
@@ -72,17 +82,20 @@ export function AuthModal({
     setLoading(false);
     setError("");
     setMessage("");
+    if (accountSwitchPhone) {
+      window.sessionStorage.removeItem("famlo:account-switch-phone");
+    }
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [initialMode, isOpen]);
+  }, [accountSwitch, initialMode, initialStep, isOpen]);
 
   if (!isOpen) return null;
 
   function closeModal(): void {
     setMode(initialMode);
-    setStep("main");
+    setStep(initialStep);
     setError("");
     setMessage("");
     setOtp("");
@@ -179,7 +192,7 @@ export function AuthModal({
       const response = await fetch("/api/auth/otp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "phone", value: phone, intent: "signup" }),
+        body: JSON.stringify({ type: "phone", value: phone, intent: initialPhoneIntent }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.sessionId) throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
@@ -205,7 +218,7 @@ export function AuthModal({
           value: phone,
           otp,
           sessionId,
-          intent: "signup",
+          intent: initialPhoneIntent,
         }),
       });
       const payload = await response.json();
@@ -400,7 +413,11 @@ export function AuthModal({
 
         {step === "phone" ? (
           <form className="auth-stack" onSubmit={(event) => void handleSendPhoneOtp(event)}>
-            <p className="auth-note">We will verify your phone and reopen or create your Famlo account.</p>
+            <p className="auth-note">
+              {accountSwitch
+                ? "You are switching Famlo accounts. Verify this phone to open the account already linked to it."
+                : "We will verify your phone and reopen or create your Famlo account."}
+            </p>
             <label><span>Phone number</span><input type="tel" autoComplete="tel" placeholder="+91 98765 43210" value={phone} onChange={(event) => setPhone(event.target.value)} required /></label>
             {error ? <p className="auth-error">{error}</p> : null}
             <button className="primary-action" type="submit" disabled={loading}>{loading ? "Sending..." : "Send verification code"}</button>

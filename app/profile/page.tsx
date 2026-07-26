@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, CheckCircle2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { useUser } from "@/components/auth/UserContext";
@@ -19,7 +19,11 @@ export default function ProfilePage(): React.JSX.Element {
   const authReturn = searchParams.get("auth_return");
   const isGoogleOnboarding = authReturn === "google";
   const profileComplete = isGuestProfileComplete(profile);
-  const missingRequiredFields = getMissingGuestProfileRequirements(profile);
+  const [phoneConflict, setPhoneConflict] = useState(false);
+  const displayedProfileComplete = profileComplete && !phoneConflict;
+  const missingRequiredFields = phoneConflict
+    ? ["Verified phone"]
+    : getMissingGuestProfileRequirements(profile);
   const accountHasPassword = user?.app_metadata?.provider === "email";
 
   useEffect(() => {
@@ -34,7 +38,7 @@ export default function ProfilePage(): React.JSX.Element {
     router.replace(nextPath);
   }, [isGoogleOnboarding, loading, nextPath, profileComplete, router]);
 
-  if (isGoogleOnboarding && loading) {
+  if (loading && !user && !profile) {
     return (
       <main
         className="shell account-page-shell"
@@ -69,13 +73,13 @@ export default function ProfilePage(): React.JSX.Element {
           <p>Keep your guest details accurate so hosts know who is arriving.</p>
         </header>
 
-        <section className={`profile-status ${profileComplete ? "complete" : "incomplete"}`} role="status">
+        <section className={`profile-status ${displayedProfileComplete ? "complete" : "incomplete"}`} role="status">
           <div className="profile-status-icon">
-            {profileComplete ? <CheckCircle2 size={22} /> : <AlertCircle size={22} />}
+            {displayedProfileComplete ? <CheckCircle2 size={22} /> : <AlertCircle size={22} />}
           </div>
           <div>
-            <h2>{profileComplete ? "Profile complete. You can now book stays." : "Complete your profile to book stays"}</h2>
-            {!profileComplete ? (
+            <h2>{displayedProfileComplete ? "Profile complete. You can now book stays." : "Complete your profile to book stays"}</h2>
+            {!displayedProfileComplete ? (
               <>
                 <p>Booking is blocked until your required details and contact verification are complete.</p>
                 {missingRequiredFields.length > 0 ? (
@@ -92,6 +96,7 @@ export default function ProfilePage(): React.JSX.Element {
           title="Profile details"
           description="Your verified contact details help Famlo keep every booking secure."
           buttonLabel={isGoogleOnboarding ? "Save and continue" : "Save profile"}
+          onPhoneConflictChange={setPhoneConflict}
           onSuccess={async () => {
             if (isGoogleOnboarding) {
               router.replace(nextPath);

@@ -19,9 +19,10 @@ interface UserContextType {
   profile: UserProfile | null;
   loading: boolean;
   signingOut: boolean;
+  applyProfile: (profile: UserProfile) => void;
   refreshProfile: () => Promise<GuestSessionSnapshot | null>;
   refreshAuth: () => Promise<GuestSessionSnapshot | null>;
-  signOut: (options?: { clearHostSession?: boolean }) => Promise<void>;
+  signOut: (options?: { clearHostSession?: boolean; redirectTo?: string }) => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -65,10 +66,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
   }, [loadAuthState]);
 
-  const signOut = useCallback(async (options?: { clearHostSession?: boolean }) => {
+  const applyProfile = useCallback((nextProfile: UserProfile) => {
+    setProfile(nextProfile);
+  }, []);
+
+  const signOut = useCallback(async (options?: { clearHostSession?: boolean; redirectTo?: string }) => {
     if (signOutInFlight.current) return;
     signOutInFlight.current = true;
     setSigningOut(true);
+    const redirectTo =
+      options?.redirectTo?.startsWith("/") && !options.redirectTo.startsWith("//")
+        ? options.redirectTo
+        : "/";
 
     const result = await performGuestLogout({
       signOutSupabase: async () => {
@@ -92,7 +101,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setProfile(null);
       },
-      redirectHome: () => window.location.replace("/"),
+      redirectHome: () => window.location.replace(redirectTo),
     });
 
     if (result.supabaseError) {
@@ -141,7 +150,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [supabase, loadAuthState]);
 
   return (
-    <UserContext.Provider value={{ user, profile, loading, signingOut, refreshProfile, refreshAuth, signOut }}>
+    <UserContext.Provider value={{ user, profile, loading, signingOut, applyProfile, refreshProfile, refreshAuth, signOut }}>
       {children}
     </UserContext.Provider>
   );

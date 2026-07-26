@@ -5,6 +5,28 @@ import { normalizeGuestPhone } from "@/lib/guest-identity";
 import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient, createEphemeralPublicSupabaseClient } from "@/lib/supabase";
 
+export async function GET(request: Request): Promise<NextResponse> {
+  try {
+    const admin = createAdminSupabaseClient();
+    const authUser = await resolveStrictAuthenticatedUser(admin, request);
+    if (!authUser) {
+      return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
+    }
+    const { data, error } = await admin.auth.admin.getUserById(authUser.id);
+    if (error || !data.user) {
+      return NextResponse.json({ error: "Password status could not be loaded." }, { status: 400 });
+    }
+    const providers = new Set((data.user.identities ?? []).map((identity) => identity.provider));
+    return NextResponse.json({
+      hasPassword:
+        providers.has("email") ||
+        data.user.user_metadata?.famlo_password_configured === true,
+    });
+  } catch {
+    return NextResponse.json({ error: "Password status could not be loaded." }, { status: 400 });
+  }
+}
+
 export async function PATCH(request: Request): Promise<NextResponse> {
   try {
     const body = (await request.json()) as {
@@ -60,7 +82,13 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       );
     }
 
-    const { error: updateError } = await admin.auth.admin.updateUserById(authUser.id, { password });
+    const { error: updateError } = await admin.auth.admin.updateUserById(authUser.id, {
+      password,
+      user_metadata: {
+        ...(authRecord.user.user_metadata ?? {}),
+        famlo_password_configured: true,
+      },
+    });
     if (updateError) throw updateError;
     return NextResponse.json({ success: true, message: "Password updated." });
   } catch (error) {
