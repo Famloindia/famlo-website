@@ -27,6 +27,29 @@ export function requireTwoFactorApiKey(env: NodeJS.ProcessEnv = process.env): st
   return apiKey;
 }
 
+export async function sendTwoFactorOtp(input: {
+  apiKey: string;
+  phone: string;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const url =
+    `https://2factor.in/API/V1/${encodeURIComponent(input.apiKey)}/SMS/` +
+    `${encodeURIComponent(input.phone)}/AUTOGEN`;
+  const postResponse = await fetchImpl(url, { method: "POST", cache: "no-store" });
+  const postJson = await postResponse.json().catch(() => null);
+  if (postResponse.ok && postJson?.Status === "Success" && typeof postJson.Details === "string") {
+    return postJson.Details;
+  }
+
+  const getResponse = await fetchImpl(url, { method: "GET", cache: "no-store" });
+  const getJson = await getResponse.json().catch(() => null);
+  if (getResponse.ok && getJson?.Status === "Success" && typeof getJson.Details === "string") {
+    return getJson.Details;
+  }
+  throw new Error("Phone verification is temporarily unavailable.");
+}
+
 export function isUsableOtpChallenge(
   challenge: { otp_session_id?: unknown; expires_at?: unknown; verified?: unknown } | null,
   expectedSessionId: string,

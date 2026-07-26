@@ -36,7 +36,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(
         {
           error: "Complete your guest profile before booking.",
-          code: "profile_incomplete",
+          code: "PROFILE_INCOMPLETE",
           profileUrl: `${profileUrl.pathname}${profileUrl.search}`,
         },
         { status: 428 }

@@ -6,7 +6,7 @@ export function getCurrentInternalPath(): string {
 export function redirectForIncompleteBookingProfile(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
   const record = payload as { code?: unknown; profileUrl?: unknown };
-  if (record.code !== "profile_incomplete") return false;
+  if (record.code !== "PROFILE_INCOMPLETE" && record.code !== "profile_incomplete") return false;
   const target =
     typeof record.profileUrl === "string" && record.profileUrl.startsWith("/") && !record.profileUrl.startsWith("//")
       ? record.profileUrl

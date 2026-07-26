@@ -185,7 +185,9 @@ export default function ProfilePage(): React.JSX.Element {
           >
             Account
           </span>
-          <h1 style={{ margin: 0 }}>Your Profile</h1>
+          <h1 style={{ margin: 0 }}>
+            {profileComplete ? "Your Profile" : "Complete your profile to book stays"}
+          </h1>
           <p style={{ margin: 0, color: "#5A6A85", fontSize: "16px", maxWidth: "72ch" }}>
             Save your guest profile once here. Hosts will see these details when you book a stay.
           </p>
@@ -194,10 +196,10 @@ export default function ProfilePage(): React.JSX.Element {
         {isGoogleOnboarding ? null : <ProfileSummaryCard />}
 
         <ProfileCompletionForm
-          title={isGoogleOnboarding ? "Complete your profile" : "Guest profile"}
+          title={!profileComplete ? "Complete your profile to book stays" : "Guest profile"}
           description={
             isGoogleOnboarding
-              ? "Add your photo, username, contact details, location, gender, date of birth, and about section before continuing."
+              ? "Confirm your username, required personal details, and verified phone before continuing."
               : "Fill in your professional guest profile to unlock booking."
           }
           buttonLabel={isGoogleOnboarding ? "Save and continue" : "Save profile"}

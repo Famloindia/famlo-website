@@ -98,17 +98,33 @@ export function createEmptyUserProfile(userId: string): UserProfileRecord {
 export function isGuestProfileComplete(profile: UserProfileRecord | null | undefined): boolean {
   if (!profile) return false;
   return Boolean(
-    profile.avatar_url &&
     profile.username &&
     profile.name &&
     profile.phone &&
+    profile.phone_verified_at &&
     profile.email &&
+    profile.email_verified_at &&
     profile.city &&
     profile.state &&
     profile.gender &&
-    profile.date_of_birth &&
-    profile.about
+    profile.date_of_birth
   );
+}
+
+export function getMissingGuestProfileRequirements(
+  profile: UserProfileRecord | null | undefined
+): string[] {
+  if (!profile) return ["Username", "Full name", "Gender", "Date of birth", "City", "State", "Verified email", "Verified phone"];
+  const missing: string[] = [];
+  if (!profile.username) missing.push("Username");
+  if (!profile.name) missing.push("Full name");
+  if (!profile.gender) missing.push("Gender");
+  if (!profile.date_of_birth) missing.push("Date of birth");
+  if (!profile.city) missing.push("City");
+  if (!profile.state) missing.push("State");
+  if (!profile.email || !profile.email_verified_at) missing.push("Verified email");
+  if (!profile.phone || !profile.phone_verified_at) missing.push("Verified phone");
+  return missing;
 }
 
 export function hasGuestVerificationSubmission(profile: UserProfileRecord | null | undefined): boolean {
@@ -203,7 +219,6 @@ export type GuestProfileFieldErrors = Partial<
 
 export function validateGuestProfileInput(input: UserProfilePatch): GuestProfileFieldErrors {
   const errors: GuestProfileFieldErrors = {};
-  const avatarUrl = typeof input.avatarUrl === "string" ? input.avatarUrl.trim() : "";
   const username = normalizeGuestUsername(input.username);
   const name = typeof input.name === "string" ? input.name.trim() : "";
   const email = typeof input.email === "string" ? input.email.trim() : "";
@@ -214,7 +229,6 @@ export function validateGuestProfileInput(input: UserProfilePatch): GuestProfile
   const dob = typeof input.dob === "string" ? input.dob.trim() : "";
   const gender = typeof input.gender === "string" ? input.gender.trim() : "";
 
-  if (!avatarUrl) errors.avatarUrl = "Add a profile photo.";
   const usernameError = validateGuestUsername(username);
   if (usernameError) errors.username = usernameError;
   if (name.length < 2 || name.length > 100) errors.name = "Enter your full name.";
@@ -224,7 +238,7 @@ export function validateGuestProfileInput(input: UserProfilePatch): GuestProfile
   if (phone && !normalizeGuestPhone(phone)) errors.phone = "Enter a valid phone number.";
   if (!city || city.length > 100) errors.city = "Enter your city.";
   if (!state || state.length > 100) errors.state = "Enter your state.";
-  if (!about || about.length > 2000) errors.about = "Tell hosts a little about yourself.";
+  if (about.length > 2000) errors.about = "About you must be 2,000 characters or fewer.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(`${dob}T00:00:00Z`))) {
     errors.dob = "Enter a valid date of birth.";
   } else if (dob > new Date().toISOString().slice(0, 10)) {

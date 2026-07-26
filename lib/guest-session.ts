@@ -61,10 +61,25 @@ export async function loadGuestSessionSnapshot(
         confirmedPhoneAt = authRecord.user.phone_confirmed_at ?? confirmedPhoneAt;
       }
     }
+    const metadata = authRecord?.user?.user_metadata ?? {};
+    const googleName =
+      typeof metadata.full_name === "string"
+        ? metadata.full_name
+        : typeof metadata.name === "string"
+          ? metadata.name
+          : null;
+    const googleAvatar =
+      typeof metadata.avatar_url === "string"
+        ? metadata.avatar_url
+        : typeof metadata.picture === "string"
+          ? metadata.picture
+          : null;
     await upsertUserProfileCompatibility(supabase, {
       userId: authUser.id,
       email: normalizeGuestEmail(authUser.email) ?? profile?.email ?? null,
       phone: normalizeGuestPhone(authUser.phone) ?? profile?.phone ?? null,
+      name: profile?.name ?? googleName,
+      avatarUrl: profile?.avatar_url ?? googleAvatar,
       emailVerifiedAt: confirmedEmailAt,
       phoneVerifiedAt: confirmedPhoneAt,
     });

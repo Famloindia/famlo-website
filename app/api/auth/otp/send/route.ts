@@ -3,25 +3,10 @@ import {
   normalizeIndianOtpPhone,
   OTP_RESEND_COOLDOWN_SECONDS,
   requireTwoFactorApiKey,
+  sendTwoFactorOtp,
 } from "@/lib/auth/guest-otp";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 import { buildOAuthCallbackUrl } from "@/lib/site-url";
-
-async function callTwoFactor(url: string): Promise<any> {
-  const postResponse = await fetch(url, { method: "POST", cache: "no-store" });
-  const postJson = await postResponse.json().catch(() => null);
-  if (postResponse.ok && postJson?.Status === "Success") {
-    return postJson;
-  }
-
-  const getResponse = await fetch(url, { method: "GET", cache: "no-store" });
-  const getJson = await getResponse.json().catch(() => null);
-  if (getResponse.ok && getJson?.Status === "Success") {
-    return getJson;
-  }
-
-  throw new Error(postJson?.Details || getJson?.Details || "Failed to trigger 2Factor SMS");
-}
 
 export async function POST(request: Request) {
   try {
@@ -68,10 +53,7 @@ export async function POST(request: Request) {
       }
 
       // Call 2Factor.in API
-      const apiUrl = `https://2factor.in/API/V1/${apiKey}/SMS/${cleanPhone}/AUTOGEN`;
-      const data = await callTwoFactor(apiUrl);
-
-      const sessionId = data.Details;
+      const sessionId = await sendTwoFactorOtp({ apiKey, phone: cleanPhone });
 
       const { error } = await supabase.from("phone_otps").insert({
         phone: cleanPhone,

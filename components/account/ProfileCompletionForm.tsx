@@ -7,10 +7,12 @@ import Image from "next/image";
 import { useUser } from "@/components/auth/UserContext";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import {
+  getMissingGuestProfileRequirements,
   isGuestProfileComplete,
   type GuestProfileFieldErrors,
   validateGuestProfileInput,
 } from "@/lib/user-profile";
+import { normalizeGuestEmail, normalizeGuestPhone } from "@/lib/guest-identity";
 import { MAX_IMAGE_UPLOAD_BYTES, formatImageUploadLimitLabel } from "@/lib/upload-limits";
 
 interface ProfileCompletionFormProps {
@@ -76,6 +78,9 @@ export function ProfileCompletionForm({
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState("");
   const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "unavailable">("idle");
+  const [phoneOtpState, setPhoneOtpState] = useState<"idle" | "sending" | "sent" | "verifying">("idle");
+  const [phoneOtp, setPhoneOtp] = useState("");
+  const [phoneOtpSessionId, setPhoneOtpSessionId] = useState("");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<GuestProfileFieldErrors>({});
 
@@ -93,6 +98,13 @@ export function ProfileCompletionForm({
   };
 
   const profileComplete = isGuestProfileComplete(profile);
+  const emailVerified =
+    Boolean(profile?.email_verified_at) &&
+    normalizeGuestEmail(profile?.email) === normalizeGuestEmail(resolvedForm.email);
+  const phoneVerified =
+    Boolean(profile?.phone_verified_at) &&
+    normalizeGuestPhone(profile?.phone) === normalizeGuestPhone(resolvedForm.phone);
+  const missingRequiredFields = getMissingGuestProfileRequirements(profile);
 
   useEffect(() => {
     return () => {
@@ -183,6 +195,71 @@ export function ProfileCompletionForm({
     }
   }
 
+  async function sendPhoneVerificationOtp(): Promise<void> {
+    setPhoneOtpState("sending");
+    setPhoneOtp("");
+    setPhoneOtpSessionId("");
+    setMessage(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch("/api/user/profile/phone/send-otp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ phone: resolvedForm.phone }),
+      });
+      const payload = await response.json();
+      if (!response.ok || typeof payload.sessionId !== "string") {
+        throw new Error(payload.error ?? "Unable to send a verification code.");
+      }
+      setPhoneOtpSessionId(payload.sessionId);
+      setPhoneOtpState("sent");
+      setMessage({ type: "success", text: "Verification code sent." });
+    } catch (error) {
+      setPhoneOtpState("idle");
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Unable to send a verification code.",
+      });
+    }
+  }
+
+  async function verifyPhoneOtp(): Promise<void> {
+    setPhoneOtpState("verifying");
+    setMessage(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch("/api/user/profile/phone/verify-otp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          phone: resolvedForm.phone,
+          otp: phoneOtp,
+          sessionId: phoneOtpSessionId,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "The verification code is invalid or expired.");
+      await refreshAuth();
+      setPhoneOtp("");
+      setPhoneOtpSessionId("");
+      setPhoneOtpState("idle");
+      setFieldErrors((current) => ({ ...current, phone: undefined }));
+      setMessage({ type: "success", text: "Phone verified successfully." });
+    } catch (error) {
+      setPhoneOtpState("sent");
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "The verification code is invalid or expired.",
+      });
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
@@ -193,6 +270,15 @@ export function ProfileCompletionForm({
 
     if (!resolvedForm.phone || !resolvedForm.email) {
       setMessage({ type: "error", text: "Add both your phone number and email." });
+      return;
+    }
+    if (!emailVerified || !phoneVerified) {
+      setFieldErrors((current) => ({
+        ...current,
+        email: emailVerified ? undefined : "Use your verified account email.",
+        phone: phoneVerified ? undefined : "Verify this phone number before saving.",
+      }));
+      setMessage({ type: "error", text: "Verify your email and phone before completing your profile." });
       return;
     }
 
@@ -401,6 +487,17 @@ export function ProfileCompletionForm({
         </span>
       </div>
 
+      {!profileComplete ? (
+        <div className="profile-requirements" role="status">
+          <strong>Complete your profile to book stays</strong>
+          <span>Email: {emailVerified ? "Verified" : "Not verified"}</span>
+          <span>Phone: {phoneVerified ? "Verified" : "Not verified"}</span>
+          {missingRequiredFields.length > 0 ? (
+            <span>Missing: {missingRequiredFields.join(", ")}</span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="account-avatar-stage" style={{ padding: "0 2px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
         <div className="account-avatar-picker" style={{ width: "56px", height: "56px" }}>
           {photoPreviewUrl || resolvedForm.avatarUrl ? (
@@ -563,11 +660,42 @@ export function ProfileCompletionForm({
             type="tel"
             required
             value={resolvedForm.phone}
-            onChange={(event) => setDraft((current) => ({ ...current, phone: event.target.value }))}
+            onChange={(event) => {
+              setDraft((current) => ({ ...current, phone: event.target.value }));
+              setPhoneOtp("");
+              setPhoneOtpSessionId("");
+              setPhoneOtpState("idle");
+            }}
             placeholder="+91 XXXXX XXXXX"
           />
           {fieldErrors.phone ? <small className="field-error">{fieldErrors.phone}</small> : null}
-          <small className="verification-note">{profile?.phone_verified_at ? "Verified" : "Not verified"}</small>
+          <small className="verification-note">Phone: {phoneVerified ? "Verified" : "Not verified"}</small>
+          {!phoneVerified ? (
+            <button
+              className="verify-phone-action"
+              type="button"
+              disabled={!resolvedForm.phone || phoneOtpState === "sending" || phoneOtpState === "verifying"}
+              onClick={() => void sendPhoneVerificationOtp()}
+            >
+              {phoneOtpState === "sending" ? "Sending..." : phoneOtpState === "sent" ? "Resend OTP" : "Verify phone"}
+            </button>
+          ) : null}
+          {phoneOtpState === "sent" || phoneOtpState === "verifying" ? (
+            <div className="phone-otp-row">
+              <input
+                className="mini-input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={phoneOtp}
+                onChange={(event) => setPhoneOtp(event.target.value.replace(/\D/g, ""))}
+                placeholder="6-digit OTP"
+              />
+              <button type="button" disabled={phoneOtp.length !== 6 || phoneOtpState === "verifying"} onClick={() => void verifyPhoneOtp()}>
+                {phoneOtpState === "verifying" ? "Checking..." : "Verify"}
+              </button>
+            </div>
+          ) : null}
         </label>
 
         <label className="full-span">
@@ -581,14 +709,13 @@ export function ProfileCompletionForm({
             placeholder="name@example.com"
           />
           {fieldErrors.email ? <small className="field-error">{fieldErrors.email}</small> : null}
-          <small className="verification-note">{profile?.email_verified_at ? "Verified" : "Not verified"}</small>
+          <small className="verification-note">Email: {emailVerified ? "Verified" : "Not verified"}</small>
         </label>
 
         <label className="full-span">
           <span>About you</span>
           <textarea
             className="mini-input"
-            required
             rows={2}
             value={resolvedForm.about}
             onChange={(event) => setDraft((current) => ({ ...current, about: event.target.value }))}
@@ -653,6 +780,36 @@ export function ProfileCompletionForm({
         .verification-note {
           color: #64748b;
           font-size: 8px;
+        }
+
+        .profile-requirements {
+          display: grid;
+          gap: 3px;
+          padding: 8px 10px;
+          border: 1px solid #bfdbfe;
+          border-radius: 6px;
+          background: #eff6ff;
+          color: #1e3a8a;
+          font-size: 10px;
+          line-height: 1.4;
+        }
+
+        .phone-otp-row {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 6px;
+        }
+
+        .phone-otp-row button,
+        .verify-phone-action {
+          min-height: 28px;
+          border: 1px solid #bfdbfe;
+          border-radius: 4px;
+          background: #fff;
+          color: #1d4ed8;
+          font-size: 9px;
+          font-weight: 800;
+          cursor: pointer;
         }
 
         .username-row {
