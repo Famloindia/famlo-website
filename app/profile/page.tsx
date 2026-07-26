@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, CircleAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -71,7 +71,7 @@ export default function ProfilePage(): React.JSX.Element {
 
         <section className={`profile-status ${profileComplete ? "complete" : "incomplete"}`} role="status">
           <div className="profile-status-icon">
-            {profileComplete ? <CheckCircle2 size={22} /> : <CircleAlert size={22} />}
+            {profileComplete ? <CheckCircle2 size={22} /> : <AlertCircle size={22} />}
           </div>
           <div>
             <h2>{profileComplete ? "Profile complete. You can now book stays." : "Complete your profile to book stays"}</h2>
