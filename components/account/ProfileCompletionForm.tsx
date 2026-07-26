@@ -140,20 +140,16 @@ export function ProfileCompletionForm({
     setPhotoPreviewUrl(URL.createObjectURL(file));
   }
 
-  async function uploadSelectedPhoto(): Promise<void> {
-    if (!selectedPhoto) return;
+  async function uploadSelectedPhoto(accessToken?: string): Promise<string | null> {
+    if (!selectedPhoto) return null;
     setUploading(true);
-    setMessage(null);
     try {
       const formData = new FormData();
       formData.append("file", selectedPhoto);
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
       const response = await fetch("/api/user/profile/photo", {
         method: "POST",
-        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
         body: formData,
       });
 
@@ -161,23 +157,9 @@ export function ProfileCompletionForm({
       if (!response.ok || typeof data.url !== "string") {
         throw new Error(typeof data.error === "string" ? data.error : "Upload failed.");
       }
-
-      setDraft((current) => ({ ...current, avatarUrl: data.url as string }));
-      if (data.profile && typeof data.profile === "object") {
-        applyProfile(data.profile as UserProfileRecord);
-      }
-      setSelectedPhoto(null);
-      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
-      setPhotoPreviewUrl("");
-    } catch (error) {
-      setMessage({
-        type: "error",
-        text: error instanceof Error ? error.message : "Upload failed.",
-      });
+      return data.url;
     } finally {
       setUploading(false);
-      if (avatarInputRef.current) avatarInputRef.current.value = "";
-      if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
   }
 
@@ -368,6 +350,8 @@ export function ProfileCompletionForm({
       const {
         data: { session },
       } = await supabase.auth.getSession();
+      const uploadedAvatarUrl = await uploadSelectedPhoto(session?.access_token);
+      const avatarUrlToSave = uploadedAvatarUrl ?? (resolvedForm.avatarUrl || null);
 
       const response = await fetch("/api/user/profile", {
         method: "POST",
@@ -386,7 +370,7 @@ export function ProfileCompletionForm({
           about: resolvedForm.about,
           dob: resolvedForm.dob,
           gender: resolvedForm.gender,
-          avatarUrl: resolvedForm.avatarUrl || null,
+          avatarUrl: avatarUrlToSave,
         }),
       });
 
@@ -410,6 +394,11 @@ export function ProfileCompletionForm({
       const canonicalProfile = savedProfile as unknown as UserProfileRecord;
       applyProfile(canonicalProfile);
       setDraft(createProfileDraft(canonicalProfile, user));
+      setSelectedPhoto(null);
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+      setPhotoPreviewUrl("");
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
       await refreshAuth();
       if (onSuccess) await onSuccess();
       setPhoneConflict(null);
@@ -625,11 +614,6 @@ export function ProfileCompletionForm({
             <button className="photo-action mobile-camera" type="button" onClick={() => cameraInputRef.current?.click()}>
               <Camera size={15} /> Take photo
             </button>
-            {selectedPhoto ? (
-              <button className="photo-action upload-photo" type="button" disabled={uploading} onClick={() => void uploadSelectedPhoto()}>
-                {uploading ? "Uploading..." : "Use this photo"}
-              </button>
-            ) : null}
           </div>
           <p>JPG, PNG, WebP, HEIC or HEIF. {formatImageUploadLimitLabel()} maximum.</p>
           {fieldErrors.avatarUrl ? <small className="field-error">{fieldErrors.avatarUrl}</small> : null}
@@ -842,7 +826,7 @@ export function ProfileCompletionForm({
 
       <div className="profile-form-actions">
         <button className="button-like account-submit-btn compact-btn" disabled={saving || uploading || Boolean(phoneConflict)} type="submit">
-          {saving ? "Saving..." : profileComplete ? "Save changes" : buttonLabel}
+          {uploading ? "Uploading photo..." : saving ? "Saving..." : profileComplete ? "Save changes" : buttonLabel}
         </button>
         {profileComplete ? (
           <button className="cancel-edit" disabled={saving || uploading} type="button" onClick={cancelEditing}>
