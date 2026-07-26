@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { attachBookingWhatsAppMessageId } from "@/lib/booking-whatsapp-actions";
+import {
+  attachBookingWhatsAppMessageId,
+  parseBookingWhatsAppReplyPayload,
+} from "@/lib/booking-whatsapp-actions";
 import { renderEmailTemplate } from "@/lib/document-templates";
 import {
   sendWhatsAppTemplateNotification,
@@ -78,8 +81,12 @@ async function deliverEmail(
 
 function templateKindForEvent(eventType: string): WhatsAppTemplateKind | null {
   if (eventType === "booking_host_action_required") return "bookingApproval";
-  if (eventType === "host_whatsapp_test") return "test";
-  if (eventType === "guest_message_sent") return "guestMessage";
+  if (eventType === "host_whatsapp_test") return "setupConfirmation";
+  if (eventType === "booking_request") return "guestBookingPending";
+  if (eventType === "booking_confirmed") return "guestBookingConfirmed";
+  if (eventType === "booking_rejected") return "guestBookingDeclined";
+  if (eventType === "guest_refund_initiated") return "guestRefundInitiated";
+  if (eventType === "guest_message_sent") return "guestMessageReceivedHost";
   return null;
 }
 
@@ -89,6 +96,29 @@ function orderedBookingVariables(payload: JsonRecord): string[] {
       ? (payload.template_parameters as JsonRecord)
       : {};
   return getBookingTemplateParameterOrder().map((key) => asString(parameters[key]) ?? "");
+}
+
+function bookingApprovalButtons(
+  payload: JsonRecord
+): Array<{ index: number; type: "quick_reply"; payload: string }> | null {
+  const rawButtons = Array.isArray(payload.buttons) ? payload.buttons : [];
+  const expected = [
+    { action: "approve", title: "Approve Booking" },
+    { action: "reject", title: "Decline Booking" },
+  ] as const;
+  const buttons: Array<{ index: number; type: "quick_reply"; payload: string }> = [];
+  for (const [index, contract] of expected.entries()) {
+    const raw = rawButtons[index];
+    const button = raw && typeof raw === "object" ? (raw as JsonRecord) : {};
+    const opaquePayload = asString(button.id);
+    const title = asString(button.title);
+    const parsed = parseBookingWhatsAppReplyPayload(opaquePayload);
+    if (!opaquePayload || title !== contract.title || parsed?.action !== contract.action) {
+      return null;
+    }
+    buttons.push({ index, type: "quick_reply", payload: opaquePayload });
+  }
+  return buttons;
 }
 
 async function deliverWhatsApp(
@@ -140,13 +170,18 @@ async function deliverWhatsApp(
 
   const buttons: Array<{ index: number; type: "quick_reply" | "url"; payload?: string; urlSuffix?: string }> = [];
   if (kind === "bookingApproval") {
-    const actionButtons = Array.isArray(payload.buttons) ? payload.buttons : [];
-    for (const [index, raw] of actionButtons.slice(0, 2).entries()) {
-      const button = raw && typeof raw === "object" ? (raw as JsonRecord) : {};
-      const opaquePayload = asString(button.id);
-      if (opaquePayload) buttons.push({ index, type: "quick_reply", payload: opaquePayload });
+    const approvalButtons = bookingApprovalButtons(payload);
+    if (!approvalButtons) {
+      return {
+        status: "failed",
+        errorMessage: "Booking approval template buttons do not match the approved contract.",
+        errorCode: "booking_buttons_invalid",
+        errorCategory: "payload",
+        retryable: false,
+      };
     }
-  } else if (kind === "guestMessage") {
+    buttons.push(...approvalButtons);
+  } else if (kind === "guestMessageReceivedHost") {
     const chatUrl = asString(payload.chat_url);
     if (chatUrl) buttons.push({ index: 0, type: "url", urlSuffix: chatUrl });
   }
@@ -161,7 +196,7 @@ async function deliverWhatsApp(
     phone,
     templateKind: kind,
     templateName,
-    languageCode: asString(payload.template_language) ?? config.templateLanguage,
+    languageCode: config.templateLanguages[kind],
     bodyVariables,
     buttons,
   });
@@ -264,5 +299,6 @@ export const notificationWorkerInternals = {
   retryDelaySeconds,
   templateKindForEvent,
   orderedBookingVariables,
+  bookingApprovalButtons,
   claimSelect: CLAIM_SELECT,
 };

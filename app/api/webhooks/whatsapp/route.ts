@@ -22,8 +22,8 @@ type WebhookMessage = {
   id?: string;
   from?: string;
   type?: string;
-  button?: { payload?: string };
-  interactive?: { type?: string; button_reply?: { id?: string } };
+  button?: { payload?: string; text?: string };
+  interactive?: { type?: string; button_reply?: { id?: string; title?: string } };
 };
 
 type WebhookStatus = {
@@ -55,6 +55,14 @@ function replyPayload(message: WebhookMessage): string | null {
   if (message.type === "button") return asString(message.button?.payload);
   if (message.type === "interactive" && message.interactive?.type === "button_reply") {
     return asString(message.interactive.button_reply?.id);
+  }
+  return null;
+}
+
+function replyTitle(message: WebhookMessage): string | null {
+  if (message.type === "button") return asString(message.button?.text);
+  if (message.type === "interactive" && message.interactive?.type === "button_reply") {
+    return asString(message.interactive.button_reply?.title);
   }
   return null;
 }
@@ -130,6 +138,11 @@ async function processInteractive(
 
   const parsed = parseBookingWhatsAppReplyPayload(replyPayload(message));
   if (!parsed) {
+    await markWhatsAppWebhookEvent(supabase, eventKey, "ignored");
+    return;
+  }
+  const expectedTitle = parsed.action === "approve" ? "Approve Booking" : "Decline Booking";
+  if (replyTitle(message) !== expectedTitle) {
     await markWhatsAppWebhookEvent(supabase, eventKey, "ignored");
     return;
   }

@@ -34,7 +34,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
     const config = getWhatsAppRuntimeConfig();
-    if (!config.templates.test) {
+    if (!config.templates.setupConfirmation) {
       return NextResponse.json(
         { ok: false, code: "template_not_configured", message: "The WhatsApp test template is not configured." },
         { status: 503 }
@@ -64,9 +64,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       subject: "Famlo WhatsApp test",
       recipientRole: "host",
       recipientPhone: eligible.phoneE164,
-      templateName: config.templates.test,
+      templateName: config.templates.setupConfirmation,
       payload: {
-        template_language: eligible.language,
         template_variables: ["Famlo host"],
       },
     });

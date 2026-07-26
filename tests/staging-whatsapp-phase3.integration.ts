@@ -190,7 +190,7 @@ test("Phase 3 staging queue claims, retries, statuses and cleanup", async () => 
     );
 
     process.env.FAMLO_ENABLE_WHATSAPP_NOTIFICATIONS = "true";
-    process.env.WHATSAPP_GUEST_MESSAGE_TEMPLATE = "guest_message_fixture";
+    process.env.WHATSAPP_GUEST_MESSAGE_RECEIVED_HOST_TEMPLATE_NAME = "guest_message_fixture";
     const messageId = randomUUID();
     assert.equal(
       await enqueueGuestMessageWhatsAppAlert(supabase, {

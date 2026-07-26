@@ -11,6 +11,7 @@ import {
   getBookingTemplateParameterOrder,
   getWhatsAppRuntimeConfig,
   normalizeMetaPhone,
+  WHATSAPP_TEMPLATE_ENV,
 } from "@/lib/whatsapp-config";
 import {
   sanitizeMetaFailure,
@@ -25,10 +26,10 @@ const originalEnv = { ...process.env };
 function configureProvider(): void {
   process.env.APP_ENV = "local";
   process.env.FAMLO_ENABLE_WHATSAPP_NOTIFICATIONS = "true";
-  process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
+  process.env.WHATSAPP_API_KEY = "test-token";
   process.env.WHATSAPP_PHONE_NUMBER_ID = "phone-id";
-  process.env.WHATSAPP_TEST_TEMPLATE = "famlo_test";
-  process.env.WHATSAPP_TEMPLATE_LANGUAGE = "en_US";
+  process.env.WHATSAPP_SETUP_CONFIRMATION_TEMPLATE_NAME = "famlo_test";
+  process.env.WHATSAPP_SETUP_CONFIRMATION_TEMPLATE_LANGUAGE = "en_US";
 }
 
 test.afterEach(() => {
@@ -41,7 +42,7 @@ test("provider refuses delivery while feature flag is false", async () => {
   process.env.FAMLO_ENABLE_WHATSAPP_NOTIFICATIONS = "false";
   const result = await sendWhatsAppTemplateNotification({
     phone: "+919876543210",
-    templateKind: "test",
+    templateKind: "setupConfirmation",
     templateName: "famlo_test",
   });
   assert.equal(result.status, "failed");
@@ -51,10 +52,11 @@ test("provider refuses delivery while feature flag is false", async () => {
 
 test("provider refuses delivery without credentials", async () => {
   configureProvider();
+  delete process.env.WHATSAPP_API_KEY;
   delete process.env.WHATSAPP_ACCESS_TOKEN;
   const result = await sendWhatsAppTemplateNotification({
     phone: "+919876543210",
-    templateKind: "test",
+    templateKind: "setupConfirmation",
     templateName: "famlo_test",
   });
   assert.equal(result.status, "failed");
@@ -66,7 +68,7 @@ test("provider never returns a mock message ID", async () => {
   delete process.env.WHATSAPP_PHONE_NUMBER_ID;
   const result = await sendWhatsAppTemplateNotification({
     phone: "+919876543210",
-    templateKind: "test",
+    templateKind: "setupConfirmation",
     templateName: "famlo_test",
   });
   assert.doesNotMatch(JSON.stringify(result), /mock-whatsapp/);
@@ -81,7 +83,7 @@ test("provider records a real Meta message ID only from a successful response", 
     });
   const result = await sendWhatsAppTemplateNotification({
     phone: "+919876543210",
-    templateKind: "test",
+    templateKind: "setupConfirmation",
     templateName: "famlo_test",
   });
   assert.equal(result.providerMessageId, "wamid.real");
@@ -96,7 +98,7 @@ test("retryable Meta errors are classified for retry", async () => {
     });
   const result = await sendWhatsAppTemplateNotification({
     phone: "+919876543210",
-    templateKind: "test",
+    templateKind: "setupConfirmation",
     templateName: "famlo_test",
   });
   assert.equal(result.status, "failed");
@@ -112,7 +114,7 @@ test("permanent Meta errors do not retry", async () => {
     });
   const result = await sendWhatsAppTemplateNotification({
     phone: "+919876543210",
-    templateKind: "test",
+    templateKind: "setupConfirmation",
     templateName: "famlo_test",
   });
   assert.equal(result.retryable, false);
@@ -122,7 +124,7 @@ test("invalid phone is a permanent provider failure", async () => {
   configureProvider();
   const result = await sendWhatsAppTemplateNotification({
     phone: "123",
-    templateKind: "test",
+    templateKind: "setupConfirmation",
     templateName: "famlo_test",
   });
   assert.equal(result.errorCode, "invalid_recipient");
@@ -148,6 +150,44 @@ test("valid webhook signature is accepted", () => {
     verifyMetaWebhookSignature({ rawBody, signatureHeader: `sha256=${signature}`, appSecret: "secret" }),
     true
   );
+});
+
+test("webhook GET returns the challenge only for the configured verify token", async () => {
+  process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = "verify-token";
+  const [{ NextRequest }, route] = await Promise.all([
+    import("next/server"),
+    import("@/app/api/webhooks/whatsapp/route"),
+  ]);
+  const valid = await route.GET(
+    new NextRequest(
+      "https://staging.example/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=verify-token&hub.challenge=challenge-123"
+    )
+  );
+  assert.equal(valid.status, 200);
+  assert.equal(await valid.text(), "challenge-123");
+
+  const invalid = await route.GET(
+    new NextRequest(
+      "https://staging.example/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=challenge-123"
+    )
+  );
+  assert.equal(invalid.status, 403);
+});
+
+test("webhook POST rejects an invalid signature before processing the payload", async () => {
+  process.env.WHATSAPP_APP_SECRET = "app-secret";
+  const [{ NextRequest }, route] = await Promise.all([
+    import("next/server"),
+    import("@/app/api/webhooks/whatsapp/route"),
+  ]);
+  const response = await route.POST(
+    new NextRequest("https://staging.example/api/webhooks/whatsapp", {
+      method: "POST",
+      body: '{"entry":[]}',
+      headers: { "x-hub-signature-256": `sha256=${"0".repeat(64)}` },
+    })
+  );
+  assert.equal(response.status, 401);
 });
 
 test("raw body signature validation is byte exact", () => {
@@ -205,10 +245,44 @@ test("retry schedule uses bounded exponential backoff", () => {
   assert.equal(notificationWorkerInternals.retryDelaySeconds(20), 3600);
 });
 
-test("worker has approved mappings for the three Phase 3 templates", () => {
+test("worker maps only events with an existing product trigger", () => {
   assert.equal(notificationWorkerInternals.templateKindForEvent("booking_host_action_required"), "bookingApproval");
-  assert.equal(notificationWorkerInternals.templateKindForEvent("host_whatsapp_test"), "test");
-  assert.equal(notificationWorkerInternals.templateKindForEvent("guest_message_sent"), "guestMessage");
+  assert.equal(notificationWorkerInternals.templateKindForEvent("host_whatsapp_test"), "setupConfirmation");
+  assert.equal(notificationWorkerInternals.templateKindForEvent("booking_request"), "guestBookingPending");
+  assert.equal(notificationWorkerInternals.templateKindForEvent("booking_confirmed"), "guestBookingConfirmed");
+  assert.equal(notificationWorkerInternals.templateKindForEvent("booking_rejected"), "guestBookingDeclined");
+  assert.equal(notificationWorkerInternals.templateKindForEvent("guest_refund_initiated"), "guestRefundInitiated");
+  assert.equal(notificationWorkerInternals.templateKindForEvent("guest_message_sent"), "guestMessageReceivedHost");
+  assert.equal(notificationWorkerInternals.templateKindForEvent("host_payout_scheduled"), null);
+});
+
+test("booking approval buttons enforce Approve at index 0 and Decline at index 1", () => {
+  const valid = notificationWorkerInternals.bookingApprovalButtons({
+    buttons: [
+      { id: "APPROVE_BOOKING:opaque-token", title: "Approve Booking" },
+      { id: "REJECT_BOOKING:opaque-token", title: "Decline Booking" },
+    ],
+  });
+  assert.deepEqual(valid, [
+    { index: 0, type: "quick_reply", payload: "APPROVE_BOOKING:opaque-token" },
+    { index: 1, type: "quick_reply", payload: "REJECT_BOOKING:opaque-token" },
+  ]);
+  assert.equal(
+    notificationWorkerInternals.bookingApprovalButtons({
+      buttons: [
+        { id: "REJECT_BOOKING:opaque-token", title: "Decline Booking" },
+        { id: "APPROVE_BOOKING:opaque-token", title: "Approve Booking" },
+      ],
+    }),
+    null
+  );
+});
+
+test("every created template has a distinct environment-backed name and language", () => {
+  const contracts = Object.values(WHATSAPP_TEMPLATE_ENV);
+  assert.equal(contracts.length, 15);
+  assert.equal(new Set(contracts.map((contract) => contract.name)).size, contracts.length);
+  assert.equal(new Set(contracts.map((contract) => contract.language)).size, contracts.length);
 });
 
 test("booking template parameter order is configurable", () => {
@@ -285,6 +359,13 @@ test("webhook processing is protected by exact raw-body signature verification",
   assert.ok(source.indexOf("verifyMetaWebhookSignature") < source.indexOf("JSON.parse(rawBody)"));
 });
 
+test("webhook validates both booking callback payload and returned button title", () => {
+  const source = readFileSync(`${repo}/app/api/webhooks/whatsapp/route.ts`, "utf8");
+  assert.match(source, /replyTitle\(message\) !== expectedTitle/);
+  assert.match(source, /Approve Booking/);
+  assert.match(source, /Decline Booking/);
+});
+
 test("staging provider requires an explicit tester allowlist", async () => {
   configureProvider();
   process.env.APP_ENV = "staging";
@@ -292,7 +373,7 @@ test("staging provider requires an explicit tester allowlist", async () => {
   process.env.WHATSAPP_STAGING_TESTER_PHONE = "+919999999999";
   const result = await sendWhatsAppTemplateNotification({
     phone: "+919876543210",
-    templateKind: "test",
+    templateKind: "setupConfirmation",
     templateName: "famlo_test",
   });
   assert.equal(result.errorCode, "staging_recipient_blocked");

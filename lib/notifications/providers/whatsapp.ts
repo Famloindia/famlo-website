@@ -143,6 +143,14 @@ async function sendWhatsAppPayload(
 
   try {
     const config = requireWhatsAppDeliveryConfig(input.templateKind);
+    if (input.templateName && input.templateName !== config.templateName) {
+      throw new WhatsAppProviderError({
+        message: "WhatsApp template does not match the configured event template.",
+        code: "template_contract_mismatch",
+        category: "configuration",
+        retryable: false,
+      });
+    }
     validateRecipientForEnvironment(phone);
     const endpoint =
       `${config.graphBaseUrl}/${encodeURIComponent(config.graphVersion)}` +
@@ -218,7 +226,7 @@ export async function sendWhatsAppNotification(input: {
   templateName?: string | null;
 }): Promise<NotificationDeliveryResult> {
   return sendWhatsAppPayload(
-    { phone: input.phone, templateKind: "test", templateName: input.templateName },
+    { phone: input.phone, templateKind: "setupConfirmation", templateName: input.templateName },
     { type: "text", text: { preview_url: false, body: input.message } }
   );
 }
@@ -291,7 +299,7 @@ export async function sendWhatsAppTemplateNotification(input: {
       type: "template",
       template: {
         name: input.templateName,
-        language: { code: input.languageCode?.trim() || getWhatsAppRuntimeConfig().templateLanguage },
+        language: { code: getWhatsAppRuntimeConfig().templateLanguages[input.templateKind] },
         ...(components.length ? { components } : {}),
       },
     }

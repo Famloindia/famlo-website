@@ -6,6 +6,8 @@ import { updateHostBookingStatusCompatibility } from "@/lib/booking-compat";
 import { appendLedgerEntryIfMissing, ensureScheduledPayout } from "@/lib/finance/runtime";
 import { asString, type JsonRecord } from "@/lib/platform-utils";
 import { syncReservationFromBooking } from "@/lib/reservations";
+import { getWhatsAppRuntimeConfig } from "@/lib/whatsapp-config";
+import { resolveEligibleGuestWhatsApp } from "@/lib/whatsapp-eligibility";
 
 type HostBookingStatusMessageContext = {
   guestName?: string | null;
@@ -194,6 +196,14 @@ export async function applyHostBookingStatusUpdate(
     cta_label: "View booking",
     cta_url: "/bookings",
   };
+  const whatsappConfig = getWhatsAppRuntimeConfig();
+  const eligibleGuestWhatsApp = guestUserId
+    ? await resolveEligibleGuestWhatsApp(supabase, guestUserId)
+    : null;
+  const guestTemplate =
+    status === "rejected"
+      ? whatsappConfig.templates.guestBookingDeclined
+      : whatsappConfig.templates.guestBookingConfirmed;
 
   const historyReason = idempotencyKey
     ? `host_booking_decision:${source}:${idempotencyKey}`
@@ -246,17 +256,20 @@ export async function applyHostBookingStatusUpdate(
         payload: notificationPayload,
       });
 
-      await enqueueNotification(supabase, {
-        eventType: notificationEventType,
-        channel: "whatsapp",
-        userId: guestUserId,
-        bookingId: String(updated.id ?? bookingId),
-        dedupeKey: `${notificationEventType}:${String(updated.id ?? bookingId)}:${status}:whatsapp`,
-        subject: notificationSubject,
-        templateName: status === "rejected" ? "guest_booking_rejected" : "guest_booking_confirmed",
-        recipientRole: "guest",
-        payload: notificationPayload,
-      });
+      if (eligibleGuestWhatsApp && guestTemplate) {
+        await enqueueNotification(supabase, {
+          eventType: notificationEventType,
+          channel: "whatsapp",
+          userId: guestUserId,
+          bookingId: String(updated.id ?? bookingId),
+          dedupeKey: `${notificationEventType}:${String(updated.id ?? bookingId)}:${status}:whatsapp`,
+          subject: notificationSubject,
+          templateName: guestTemplate,
+          recipientRole: "guest",
+          recipientPhone: eligibleGuestWhatsApp.phoneE164,
+          payload: notificationPayload,
+        });
+      }
     }
 
     if (!v2Booking) {
@@ -327,17 +340,20 @@ export async function applyHostBookingStatusUpdate(
       payload: notificationPayload,
     });
 
-    await enqueueNotification(supabase, {
-      eventType: notificationEventType,
-      channel: "whatsapp",
-      userId: guestUserId,
-      bookingId: String(updated.id ?? bookingId),
-      dedupeKey: `${notificationEventType}:${String(updated.id ?? bookingId)}:${status}:whatsapp`,
-      subject: notificationSubject,
-      templateName: status === "rejected" ? "guest_booking_rejected" : "guest_booking_confirmed",
-      recipientRole: "guest",
-      payload: notificationPayload,
-    });
+    if (eligibleGuestWhatsApp && guestTemplate) {
+      await enqueueNotification(supabase, {
+        eventType: notificationEventType,
+        channel: "whatsapp",
+        userId: guestUserId,
+        bookingId: String(updated.id ?? bookingId),
+        dedupeKey: `${notificationEventType}:${String(updated.id ?? bookingId)}:${status}:whatsapp`,
+        subject: notificationSubject,
+        templateName: guestTemplate,
+        recipientRole: "guest",
+        recipientPhone: eligibleGuestWhatsApp.phoneE164,
+        payload: notificationPayload,
+      });
+    }
   }
 
   return updated as JsonRecord | null;

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { asString } from "@/lib/platform-utils";
+import { loadUserProfileCompatibility } from "@/lib/user-profile";
 import { getWhatsAppRuntimeConfig, normalizeMetaPhone } from "@/lib/whatsapp-config";
 
 export type EligibleHostWhatsApp = {
@@ -28,6 +29,18 @@ export async function resolveEligibleHostWhatsApp(
     phoneE164: `+${phone}`,
     language: asString(data.language) ?? config.templateLanguage,
   };
+}
+
+export async function resolveEligibleGuestWhatsApp(
+  supabase: SupabaseClient,
+  guestUserId: string
+): Promise<{ guestUserId: string; phoneE164: string } | null> {
+  const config = getWhatsAppRuntimeConfig();
+  if (!config.enabled) return null;
+  const profile = await loadUserProfileCompatibility(supabase, guestUserId);
+  const phone = normalizeMetaPhone(profile?.phone);
+  if (!profile?.phone_verified_at || !phone) return null;
+  return { guestUserId, phoneE164: `+${phone}` };
 }
 
 export function absoluteFamloUrl(path: string): string | null {

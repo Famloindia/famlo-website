@@ -16,7 +16,7 @@ export async function enqueueGuestMessageWhatsAppAlert(
   }
 ): Promise<"inserted" | "deduped" | "ineligible"> {
   const config = getWhatsAppRuntimeConfig();
-  if (!config.templates.guestMessage) return "ineligible";
+  if (!config.templates.guestMessageReceivedHost) return "ineligible";
   const eligible = await resolveEligibleHostWhatsApp(supabase, input.hostUserId);
   if (!eligible) return "ineligible";
 
@@ -42,9 +42,8 @@ export async function enqueueGuestMessageWhatsAppAlert(
     subject: "New Famlo guest message",
     recipientRole: "host",
     recipientPhone: eligible.phoneE164,
-    templateName: config.templates.guestMessage,
+    templateName: config.templates.guestMessageReceivedHost,
     payload: {
-      template_language: eligible.language,
       template_variables: [propertyName, bookingReference],
       chat_url: input.conversationId,
     },

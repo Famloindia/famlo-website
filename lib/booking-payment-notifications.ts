@@ -6,9 +6,11 @@ import {
 } from "@/lib/booking-whatsapp-actions";
 import { enqueueNotification } from "@/lib/booking-platform";
 import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
-import { loadUserProfileCompatibility } from "@/lib/user-profile";
 import { getWhatsAppRuntimeConfig } from "@/lib/whatsapp-config";
-import { resolveEligibleHostWhatsApp } from "@/lib/whatsapp-eligibility";
+import {
+  resolveEligibleGuestWhatsApp,
+  resolveEligibleHostWhatsApp,
+} from "@/lib/whatsapp-eligibility";
 
 function firstRecord(value: unknown): JsonRecord | null {
   if (Array.isArray(value)) {
@@ -81,6 +83,27 @@ export async function enqueuePostPaymentBookingNotifications(
     recipientRole: "guest",
     payload: { message: guestMessage },
   });
+  const whatsappConfig = getWhatsAppRuntimeConfig();
+  const eligibleGuestWhatsApp = guestUserId
+    ? await resolveEligibleGuestWhatsApp(supabase, guestUserId)
+    : null;
+  const guestTemplate = input.approvalRequired
+    ? whatsappConfig.templates.guestBookingPending
+    : whatsappConfig.templates.guestBookingConfirmed;
+  if (guestUserId && eligibleGuestWhatsApp && guestTemplate) {
+    await enqueueNotification(supabase, {
+      eventType: guestEventType,
+      channel: "whatsapp",
+      userId: guestUserId,
+      bookingId,
+      dedupeKey: `${guestEventType}:${bookingId}:whatsapp`,
+      subject: guestSubject,
+      recipientRole: "guest",
+      recipientPhone: eligibleGuestWhatsApp.phoneE164,
+      templateName: guestTemplate,
+      payload: { message: guestMessage },
+    });
+  }
   const host = firstRecord(input.booking.hosts);
   const hostUserId = asString(host?.user_id);
   if (!hostUserId) return;
@@ -97,7 +120,6 @@ export async function enqueuePostPaymentBookingNotifications(
     stayUnitName = asString(data?.name);
   }
 
-  const guestProfile = guestUserId ? await loadUserProfileCompatibility(supabase, guestUserId) : null;
   const hostPropertyLabel = asString(host?.display_name) ?? "your Famlo stay";
   const hostListingLabel = stayUnitName ?? hostPropertyLabel;
   const familyId = asString(host?.legacy_family_id);
@@ -111,7 +133,6 @@ export async function enqueuePostPaymentBookingNotifications(
 
   if (input.approvalRequired) {
     const eligibleWhatsApp = await resolveEligibleHostWhatsApp(supabase, hostUserId);
-    const whatsappConfig = getWhatsAppRuntimeConfig();
     const whatsappAction = eligibleWhatsApp && whatsappConfig.templates.bookingApproval
       ? await createOrReuseBookingWhatsAppAction(supabase, {
           bookingId,
@@ -167,7 +188,6 @@ export async function enqueuePostPaymentBookingNotifications(
         recipientPhone: eligibleWhatsApp.phoneE164,
         payload: {
           action_token: asString(whatsappAction.action_token),
-          template_language: eligibleWhatsApp.language,
           template_parameters: {
             property_name: hostPropertyLabel,
             booking_reference: bookingReference,

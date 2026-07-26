@@ -10,6 +10,8 @@ import {
 import { applyHostBookingStatusUpdate } from "@/lib/host-booking-status";
 import { recordBookingInventoryTransition } from "@/lib/payment-booking-finalization";
 import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
+import { getWhatsAppRuntimeConfig } from "@/lib/whatsapp-config";
+import { resolveEligibleGuestWhatsApp } from "@/lib/whatsapp-eligibility";
 
 export type HostBookingDecision = "approve" | "decline";
 export type HostBookingDecisionSource = "dashboard" | "signed_link" | "whatsapp";
@@ -316,6 +318,30 @@ async function reconcileDecision(
     idempotencyKey: input.idempotencyKey,
   });
   if (!updated) throw new Error("Booking outcome reconciliation did not return the booking.");
+
+  if (input.decision === "decline" && refundRequestId) {
+    const guestUserId = asString(booking.user_id);
+    const whatsappConfig = getWhatsAppRuntimeConfig();
+    const eligibleGuestWhatsApp = guestUserId
+      ? await resolveEligibleGuestWhatsApp(supabase, guestUserId)
+      : null;
+    if (guestUserId && eligibleGuestWhatsApp && whatsappConfig.templates.guestRefundInitiated) {
+      await enqueueNotification(supabase, {
+        eventType: "guest_refund_initiated",
+        channel: "whatsapp",
+        userId: guestUserId,
+        bookingId: input.bookingId,
+        dedupeKey: `guest_refund_initiated:${refundRequestId}:whatsapp`,
+        subject: "Your Famlo refund has been initiated",
+        recipientRole: "guest",
+        recipientPhone: eligibleGuestWhatsApp.phoneE164,
+        templateName: whatsappConfig.templates.guestRefundInitiated,
+        payload: {
+          message: "Your refund workflow has started. Famlo will keep you updated through your booking.",
+        },
+      });
+    }
+  }
 
   await enqueueNotification(supabase, {
     eventType: "booking_host_decision_recorded",
