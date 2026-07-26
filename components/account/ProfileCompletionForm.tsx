@@ -7,7 +7,6 @@ import Image from "next/image";
 import { useUser } from "@/components/auth/UserContext";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import {
-  getMissingGuestProfileRequirements,
   isGuestProfileComplete,
   type GuestProfileFieldErrors,
   validateGuestProfileInput,
@@ -61,7 +60,6 @@ export function ProfileCompletionForm({
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const [manualEditMode, setManualEditMode] = useState(false);
   const [draft, setDraft] = useState<ProfileDraft>({
     username: "",
     email: "",
@@ -106,7 +104,6 @@ export function ProfileCompletionForm({
   const phoneVerified =
     Boolean(profile?.phone_verified_at) &&
     normalizeGuestPhone(profile?.phone) === normalizeGuestPhone(resolvedForm.phone);
-  const missingRequiredFields = getMissingGuestProfileRequirements(profile);
   const savedAvatarUrl = getSafeAvatarUrl(resolvedForm.avatarUrl);
   const displayedAvatarUrl = photoPreviewUrl || (!avatarPreviewFailed ? savedAvatarUrl : null);
 
@@ -349,7 +346,6 @@ export function ProfileCompletionForm({
 
       await refreshAuth();
       if (onSuccess) await onSuccess();
-      setManualEditMode(false);
       setMessage({
         type: "success",
         text: "Profile saved. You can continue to booking now.",
@@ -364,157 +360,40 @@ export function ProfileCompletionForm({
     }
   }
 
-  if (profileComplete && !manualEditMode) {
-    return (
-      <section
-        className="panel detail-box account-verification-form"
-        style={{
-          padding: compact ? "20px" : "28px",
-          display: "grid",
-          gap: "20px",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-          <div>
-            <h2 style={{ margin: 0 }}>{title}</h2>
-            <p style={{ margin: "8px 0 0", color: "#64748b", lineHeight: 1.7 }}>{description}</p>
-          </div>
-          <span
-            style={{
-              padding: "8px 12px",
-              borderRadius: 999,
-              background: "#dcfce7",
-              color: "#166534",
-              fontSize: 12,
-              fontWeight: 800,
-            }}
-          >
-            Profile saved
-          </span>
-        </div>
-
-        <div className="dashboard-form-grid">
-          <div>
-            <span className="eyebrow">Username</span>
-            <p style={{ margin: "8px 0 0" }}>@{resolvedForm.username}</p>
-          </div>
-          <div>
-            <span className="eyebrow">Name</span>
-            <p style={{ margin: "8px 0 0" }}>{resolvedForm.name || "Not added"}</p>
-          </div>
-          <div>
-            <span className="eyebrow">Phone</span>
-            <p style={{ margin: "8px 0 0" }}>
-              {resolvedForm.phone || "Not added"} · {profile?.phone_verified_at ? "Verified" : "Not verified"}
-            </p>
-          </div>
-          <div>
-            <span className="eyebrow">Email</span>
-            <p style={{ margin: "8px 0 0" }}>
-              {resolvedForm.email || "Not added"} · {profile?.email_verified_at ? "Verified" : "Not verified"}
-            </p>
-          </div>
-          <div>
-            <span className="eyebrow">Location</span>
-            <p style={{ margin: "8px 0 0" }}>{[resolvedForm.city, resolvedForm.state].filter(Boolean).join(", ") || "Not added"}</p>
-          </div>
-          <div>
-            <span className="eyebrow">Gender</span>
-            <p style={{ margin: "8px 0 0" }}>{resolvedForm.gender || "Not added"}</p>
-          </div>
-          <div>
-            <span className="eyebrow">Date of birth</span>
-            <p style={{ margin: "8px 0 0" }}>
-              {resolvedForm.dob
-                ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" })
-                    .format(new Date(`${resolvedForm.dob}T00:00:00Z`))
-                : "Not added"}
-            </p>
-          </div>
-          <div style={{ gridColumn: "1 / -1" }}>
-            <span className="eyebrow">About you</span>
-            <p style={{ margin: "8px 0 0", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{resolvedForm.about || "Not added"}</p>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <button className="button-like account-submit-btn" type="button" onClick={() => setManualEditMode(true)}>
-            Edit profile
-          </button>
-        </div>
-
-        {message ? (
-          <div
-            style={{
-              borderRadius: 14,
-              padding: "12px 14px",
-              background: message.type === "success" ? "#dcfce7" : "#fee2e2",
-              color: message.type === "success" ? "#166534" : "#b91c1c",
-              fontWeight: 700,
-            }}
-          >
-            {message.text}
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
   return (
     <form
       className="panel detail-box account-verification-form"
       onSubmit={(event) => void handleSubmit(event)}
       style={{
-        padding: compact ? "8px" : "12px",
+        padding: compact ? "20px" : "clamp(22px, 4vw, 32px)",
         display: "grid",
-        gap: "8px",
-        borderRadius: "10px",
-        border: "1px solid #f1f5f9",
+        gap: "24px",
+        borderRadius: "20px",
+        border: "1px solid #e5eaf2",
         background: "#ffffff",
-        boxShadow: "0 2px 8px rgba(14, 43, 87, 0.01)",
+        boxShadow: "0 14px 40px rgba(15, 23, 42, 0.06)",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start", flexWrap: "wrap" }}>
+      <div className="form-heading">
         <div>
-          <h2 style={{ margin: 0, fontSize: "14px", fontWeight: 800, color: "#1e40af" }}>{title}</h2>
-          <p style={{ margin: "1px 0 0", color: "#64748b", fontSize: "11px", lineHeight: 1.3 }}>{description}</p>
+          <h2>{title}</h2>
+          <p>{description}</p>
         </div>
-        <span
-          style={{
-            padding: "2px 6px",
-            borderRadius: 999,
-            background: profileComplete ? "#dcfce7" : "#eff6ff",
-            color: profileComplete ? "#166534" : "#1e40af",
-            fontSize: 8,
-            fontWeight: 800,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em"
-          }}
-        >
-          {profileComplete ? "Saved" : "Req"}
+        <span className={profileComplete ? "complete" : "incomplete"}>
+          {profileComplete ? "Complete" : "Required"}
         </span>
       </div>
 
-      {!profileComplete ? (
-        <div className="profile-requirements" role="status">
-          <strong>Complete your profile to book stays</strong>
-          <span>Email: {emailVerified ? "Verified" : "Not verified"}</span>
-          <span>Phone: {phoneVerified ? "Verified" : "Not verified"}</span>
-          {missingRequiredFields.length > 0 ? (
-            <span>Missing: {missingRequiredFields.join(", ")}</span>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="account-avatar-stage" style={{ padding: "0 2px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-        <div className="account-avatar-picker" style={{ width: "56px", height: "56px" }}>
+      <div className="profile-editor-layout">
+        <aside className="avatar-panel">
+          <div className="account-avatar-picker">
           {displayedAvatarUrl ? (
             <Image
               src={displayedAvatarUrl}
               alt="Guest profile preview"
-              width={112}
-              height={112}
-              sizes="56px"
+              width={240}
+              height={240}
+              sizes="120px"
               unoptimized
               onError={() => setAvatarPreviewFailed(true)}
               className="account-avatar-preview"
@@ -529,42 +408,43 @@ export function ProfileCompletionForm({
           )}
           {uploading ? (
             <div className="account-avatar-overlay">
-              <strong style={{ fontSize: "7px" }}>...</strong>
+              <strong>Uploading...</strong>
             </div>
           ) : null}
-        </div>
-        <input
-          ref={avatarInputRef}
-          className="account-hidden-file"
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-          onChange={(event) => selectPhoto(event.target.files?.[0])}
-        />
-        <input
-          ref={cameraInputRef}
-          className="account-hidden-file"
-          type="file"
-          accept="image/*"
-          capture="user"
-          onChange={(event) => selectPhoto(event.target.files?.[0])}
-        />
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <button className="photo-action" type="button" onClick={() => avatarInputRef.current?.click()}>
-            <Upload size={13} /> Choose photo
-          </button>
-          <button className="photo-action mobile-camera" type="button" onClick={() => cameraInputRef.current?.click()}>
-            <Camera size={13} /> Take photo
-          </button>
-          {selectedPhoto ? (
-            <button className="photo-action upload-photo" type="button" disabled={uploading} onClick={() => void uploadSelectedPhoto()}>
-              {uploading ? "Uploading..." : "Use this photo"}
+          </div>
+          <input
+            ref={avatarInputRef}
+            className="account-hidden-file"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+            onChange={(event) => selectPhoto(event.target.files?.[0])}
+          />
+          <input
+            ref={cameraInputRef}
+            className="account-hidden-file"
+            type="file"
+            accept="image/*"
+            capture="user"
+            onChange={(event) => selectPhoto(event.target.files?.[0])}
+          />
+          <div className="photo-actions">
+            <button className="photo-action" type="button" onClick={() => avatarInputRef.current?.click()}>
+              <Upload size={15} /> Choose photo
             </button>
-          ) : null}
-        </div>
-        {fieldErrors.avatarUrl ? <small className="field-error">{fieldErrors.avatarUrl}</small> : null}
-      </div>
+            <button className="photo-action mobile-camera" type="button" onClick={() => cameraInputRef.current?.click()}>
+              <Camera size={15} /> Take photo
+            </button>
+            {selectedPhoto ? (
+              <button className="photo-action upload-photo" type="button" disabled={uploading} onClick={() => void uploadSelectedPhoto()}>
+                {uploading ? "Uploading..." : "Use this photo"}
+              </button>
+            ) : null}
+          </div>
+          <p>JPG, PNG, WebP, HEIC or HEIF. {formatImageUploadLimitLabel()} maximum.</p>
+          {fieldErrors.avatarUrl ? <small className="field-error">{fieldErrors.avatarUrl}</small> : null}
+        </aside>
 
-      <div className="compact-form-grid">
+        <div className="compact-form-grid">
         <label className="full-span">
           <span>Username</span>
           <div className="username-row">
@@ -733,17 +613,18 @@ export function ProfileCompletionForm({
           />
           {fieldErrors.about ? <small className="field-error">{fieldErrors.about}</small> : null}
         </label>
+        </div>
       </div>
 
       {message ? (
         <div
           style={{
-            borderRadius: 6,
-            padding: "4px 8px",
+            borderRadius: 12,
+            padding: "12px 14px",
             background: message.type === "success" ? "#dcfce7" : "#fee2e2",
             color: message.type === "success" ? "#166534" : "#b91c1c",
             fontWeight: 700,
-            fontSize: "10px"
+            fontSize: "13px"
           }}
         >
           {message.text}
@@ -751,72 +632,126 @@ export function ProfileCompletionForm({
       ) : null}
 
       <button className="button-like account-submit-btn compact-btn" disabled={saving || uploading} type="submit">
-        {saving ? "..." : buttonLabel}
+        {saving ? "Saving..." : buttonLabel}
       </button>
 
       <style jsx>{`
+        .form-heading {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+        }
+        .form-heading h2 {
+          margin: 0;
+          color: #0f172a;
+          font-size: 21px;
+        }
+        .form-heading p {
+          margin: 6px 0 0;
+          color: #64748b;
+          font-size: 14px;
+          line-height: 1.55;
+        }
+        .form-heading > span {
+          flex: 0 0 auto;
+          padding: 7px 11px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 800;
+        }
+        .form-heading > span.complete {
+          color: #166534;
+          background: #dcfce7;
+        }
+        .form-heading > span.incomplete {
+          color: #8a4b08;
+          background: #fff3d6;
+        }
+        .profile-editor-layout {
+          display: grid;
+          grid-template-columns: 180px minmax(0, 1fr);
+          gap: clamp(24px, 4vw, 42px);
+          align-items: start;
+        }
+        .avatar-panel {
+          display: grid;
+          justify-items: center;
+          gap: 12px;
+          padding: 10px 0;
+          text-align: center;
+        }
+        .avatar-panel :global(.account-avatar-picker) {
+          width: 120px;
+          height: 120px;
+          border: 3px solid #dbeafe;
+          box-shadow: 0 12px 28px rgba(37, 99, 235, 0.12);
+        }
+        .avatar-panel p {
+          margin: 0;
+          max-width: 170px;
+          color: #94a3b8;
+          font-size: 11px;
+          line-height: 1.5;
+        }
+        .photo-actions {
+          display: grid;
+          gap: 8px;
+          width: 100%;
+        }
         .compact-form-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
-          gap: 4px 8px;
+          gap: 18px 16px;
         }
 
         .compact-form-grid label {
           display: grid;
-          gap: 0;
+          gap: 7px;
         }
 
         .compact-form-grid label span {
-          font-size: 8px;
-          font-weight: 800;
-          color: #94a3b8;
-          text-transform: uppercase;
-          letter-spacing: 0.03em;
-          margin-bottom: 0;
+          color: #334155;
+          font-size: 12px;
+          font-weight: 700;
         }
 
         .field-error {
           color: #b91c1c;
-          font-size: 9px;
-          line-height: 1.2;
+          font-size: 11px;
+          line-height: 1.4;
         }
 
         .field-success {
           color: #166534;
-          font-size: 9px;
+          font-size: 11px;
         }
 
         .verification-note {
-          color: #64748b;
-          font-size: 8px;
-        }
-
-        .profile-requirements {
-          display: grid;
-          gap: 3px;
-          padding: 8px 10px;
-          border: 1px solid #bfdbfe;
-          border-radius: 6px;
-          background: #eff6ff;
-          color: #1e3a8a;
+          width: max-content;
+          padding: 4px 8px;
+          border-radius: 999px;
+          color: #475569;
+          background: #f1f5f9;
           font-size: 10px;
-          line-height: 1.4;
+          font-weight: 700;
         }
 
         .phone-otp-row {
           display: grid;
           grid-template-columns: 1fr auto;
-          gap: 6px;
+          gap: 8px;
         }
 
         .phone-otp-row button,
         .verify-phone-action {
-          min-height: 28px;
+          min-height: 40px;
           border: 1px solid #bfdbfe;
-          border-radius: 4px;
+          border-radius: 10px;
           background: #fff;
           color: #1d4ed8;
-          font-size: 9px;
+          padding: 0 12px;
+          font-size: 12px;
           font-weight: 800;
           cursor: pointer;
         }
@@ -824,26 +759,44 @@ export function ProfileCompletionForm({
         .username-row {
           display: grid;
           grid-template-columns: 1fr auto;
-          gap: 6px;
+          gap: 8px;
         }
 
         .username-row button,
         .photo-action {
           border: 1px solid #bfdbfe;
-          border-radius: 4px;
+          border-radius: 11px;
           background: #fff;
           color: #1d4ed8;
-          font-size: 9px;
+          font-size: 12px;
           font-weight: 800;
           cursor: pointer;
         }
+        .username-row button {
+          min-width: 76px;
+          padding: 0 12px;
+        }
 
         .photo-action {
-          min-height: 28px;
-          padding: 4px 8px;
+          min-height: 38px;
+          padding: 8px 12px;
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 4px;
+        }
+        .photo-action:hover,
+        .username-row button:hover,
+        .verify-phone-action:hover {
+          background: #eff6ff;
+        }
+        .photo-action:focus-visible,
+        .username-row button:focus-visible,
+        .verify-phone-action:focus-visible,
+        .phone-otp-row button:focus-visible,
+        .mini-input:focus-visible {
+          outline: 3px solid rgba(59, 130, 246, 0.2);
+          outline-offset: 2px;
         }
 
         .upload-photo {
@@ -858,27 +811,28 @@ export function ProfileCompletionForm({
 
         .mini-input {
           width: 100%;
-          padding: 2px 6px;
-          border-radius: 4px;
-          border: 1px solid #e2e8f0;
-          font-size: 10px;
+          height: 46px;
+          padding: 0 13px;
+          border-radius: 12px;
+          border: 1px solid #dbe2ea;
+          font-size: 14px;
           color: #1e293b;
-          background: #f8fafc;
-          transition: all 0.2s ease;
+          background: #fff;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
           box-sizing: border-box;
-          height: 24px;
         }
 
         .mini-input:focus {
           outline: none;
           border-color: #3b82f6;
-          background: #fff;
-          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.05);
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
         textarea.mini-input {
           height: auto;
-          min-height: 36px;
+          min-height: 96px;
+          padding-top: 12px;
+          line-height: 1.5 !important;
         }
 
         .calendar-field {
@@ -888,17 +842,17 @@ export function ProfileCompletionForm({
         }
 
         .calendar-input {
-          padding-right: 24px;
+          padding-right: 44px;
         }
 
         .calendar-icon-pills {
           position: absolute;
-          right: 2px;
-          width: 18px;
-          height: 18px;
+          right: 8px;
+          width: 30px;
+          height: 30px;
           background: #eff6ff;
           color: #3b82f6;
-          border-radius: 3px;
+          border-radius: 8px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -910,20 +864,46 @@ export function ProfileCompletionForm({
         }
 
         .compact-btn {
-          padding: 4px;
-          font-size: 10px;
-          border-radius: 4px;
+          width: max-content;
+          min-width: 150px;
+          min-height: 44px;
+          padding: 10px 22px;
+          font-size: 14px;
+          border-radius: 12px;
           font-weight: 800;
-          min-height: 30px;
-          margin-top: 4px;
+          justify-self: end;
         }
 
+        @media (max-width: 760px) {
+          .profile-editor-layout {
+            grid-template-columns: 1fr;
+          }
+          .avatar-panel {
+            justify-items: start;
+            text-align: left;
+          }
+          .photo-actions {
+            display: flex;
+            flex-wrap: wrap;
+            width: auto;
+          }
+          .avatar-panel p {
+            max-width: 320px;
+          }
+        }
         @media (max-width: 640px) {
           .compact-form-grid {
             grid-template-columns: 1fr;
           }
+          .form-heading {
+            align-items: center;
+          }
           .mobile-camera {
             display: inline-flex;
+          }
+          .compact-btn {
+            width: 100%;
+            justify-self: stretch;
           }
         }
       `}</style>

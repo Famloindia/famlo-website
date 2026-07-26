@@ -38,7 +38,18 @@ export function SavedHomesSection(): React.JSX.Element {
 
   if (!user) {
     return (
-      <section className="panel account-page-panel" style={{ padding: "24px", gap: "12px" }}>
+      <section
+        className="saved-homes-card"
+        style={{
+          padding: "24px",
+          display: "grid",
+          gap: "12px",
+          border: "1px solid #e5eaf2",
+          borderRadius: "18px",
+          background: "#fff",
+          boxShadow: "0 10px 30px rgba(15, 23, 42, 0.05)",
+        }}
+      >
         <h2 style={{ margin: 0 }}>Saved homes</h2>
         <p style={{ margin: 0, color: "#5A6A85" }}>Sign in to keep homestays saved on your profile.</p>
       </section>
@@ -46,7 +57,7 @@ export function SavedHomesSection(): React.JSX.Element {
   }
 
   return (
-    <section className="panel account-page-panel" style={{ padding: "24px", gap: "16px" }}>
+    <section className="saved-homes-card">
       <div style={{ display: "grid", gap: "6px" }}>
         <h2 style={{ margin: 0 }}>Saved homes</h2>
         <p style={{ margin: 0, color: "#5A6A85" }}>
@@ -55,7 +66,7 @@ export function SavedHomesSection(): React.JSX.Element {
       </div>
 
       {savedHomes.length === 0 ? (
-        <div style={{ padding: "16px", borderRadius: "16px", background: "#f8fafc", color: "#64748b" }}>
+        <div className="saved-homes-empty">
           No saved homes yet.
         </div>
       ) : (
@@ -70,9 +81,9 @@ export function SavedHomesSection(): React.JSX.Element {
                 gap: "14px",
                 alignItems: "center",
                 padding: "12px",
-                borderRadius: "18px",
+                borderRadius: "14px",
                 background: "white",
-                border: "1px solid #dbeafe",
+                border: "1px solid #e5eaf2",
               }}
             >
               <div
@@ -96,6 +107,30 @@ export function SavedHomesSection(): React.JSX.Element {
           ))}
         </div>
       )}
+      <style jsx>{`
+        .saved-homes-card {
+          padding: 24px;
+          display: grid;
+          gap: 16px;
+          border: 1px solid #e5eaf2;
+          border-radius: 18px;
+          background: #fff;
+          box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+        }
+        .saved-homes-empty {
+          padding: 18px;
+          border: 1px dashed #dbe2ea;
+          border-radius: 13px;
+          color: #64748b;
+          background: #f8fafc;
+          font-size: 14px;
+        }
+        @media (max-width: 640px) {
+          .saved-homes-card {
+            padding: 20px;
+          }
+        }
+      `}</style>
     </section>
   );
 }
