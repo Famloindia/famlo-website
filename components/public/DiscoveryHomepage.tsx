@@ -467,9 +467,8 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: (mode: "login" | "signup") => 
             )}
           </>
         ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center" }}>
             <button className="homepage-auth-login" type="button" onClick={() => onAuthOpen("login")}>Log in</button>
-            <button className="homepage-auth-signup" type="button" onClick={() => onAuthOpen("signup")}>Sign up</button>
           </div>
         )}
       </div>
@@ -1638,6 +1637,32 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
         .hide-scroll::-webkit-scrollbar { display:none; }
         *, *::before, *::after { box-sizing:border-box; }
         body { margin:0; }
+        .homepage-auth-login {
+          height: 46px;
+          padding: 0 28px;
+          border: none;
+          border-radius: 999px;
+          background: var(--accent-primary);
+          color: #fff;
+          font: inherit;
+          font-weight: 600;
+          line-height: 1;
+          cursor: pointer;
+          box-shadow: 0 6px 18px rgba(24,144,255,0.18);
+          transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+        }
+        .homepage-auth-login:hover {
+          background: var(--accent-hover);
+          box-shadow: 0 8px 22px rgba(24,144,255,0.24);
+          transform: translateY(-1px);
+        }
+        .homepage-auth-login:active {
+          transform: translateY(0) scale(0.98);
+        }
+        .homepage-auth-login:focus-visible {
+          outline: 3px solid color-mix(in srgb, var(--accent-primary) 28%, transparent);
+          outline-offset: 3px;
+        }
         .homepage-section {
           padding: 44px 0 24px;
         }

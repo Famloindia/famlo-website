@@ -93,16 +93,9 @@ export function Navbar() {
 
           <Link
             href="/?auth=login"
-            className="hidden rounded-[8px] border-[0.5px] border-[#E8EEF5] px-4 py-2 text-[14px] font-medium text-[#1A1A2E] transition hover:border-[#1A6EBB] sm:inline-flex"
+            className="inline-flex h-[46px] items-center rounded-full border-0 bg-[var(--accent-primary)] px-7 text-[14px] font-semibold text-white shadow-[0_6px_18px_rgba(24,144,255,0.18)] transition hover:-translate-y-px hover:bg-[var(--accent-hover)] hover:shadow-[0_8px_22px_rgba(24,144,255,0.24)] active:translate-y-0 active:scale-[0.98] focus-visible:outline-[3px] focus-visible:outline-offset-3 focus-visible:outline-[var(--accent-light)]"
           >
             Log in
-          </Link>
-
-          <Link
-            href="/?auth=signup"
-            className="hidden rounded-[8px] bg-[#1A6EBB] px-4 py-2 text-[14px] font-medium text-white transition hover:bg-[#155d9f] sm:inline-flex"
-          >
-            Sign up
           </Link>
 
           <button

@@ -480,35 +480,37 @@ export function AuthModal({
 
       <style jsx>{`
         .auth-overlay { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 16px; background: rgba(15, 23, 42, .62); backdrop-filter: blur(8px); overflow-y: auto; }
-        .auth-dialog { position: relative; width: min(100%, 460px); max-height: calc(100dvh - 32px); overflow-y: auto; background: #fff; border: 1px solid #dbeafe; border-radius: 8px; box-shadow: 0 24px 70px rgba(15, 23, 42, .24); padding: 28px; }
-        .icon-close { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; display: grid; place-items: center; border: 0; background: #f1f5f9; color: #334155; cursor: pointer; }
+        .auth-dialog { position: relative; width: min(100%, 460px); max-height: calc(100dvh - 32px); overflow-y: auto; background: #fff; border: 1px solid #dbeafe; border-radius: 22px; box-shadow: 0 24px 64px rgba(15, 38, 80, .18); padding: 28px; }
+        .icon-close { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 12px; background: #f1f5f9; color: #334155; cursor: pointer; }
         header { display: grid; gap: 5px; margin-bottom: 22px; padding-right: 38px; }
         h2 { margin: 0; font-size: 25px; color: #0f2650; }
         .auth-kicker { color: #2563eb; font-size: 11px; font-weight: 800; text-transform: uppercase; }
         .auth-stack { display: grid; gap: 13px; }
         label { display: grid; gap: 6px; color: #334155; font-size: 12px; font-weight: 800; }
-        input { width: 100%; height: 46px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 12px; font: inherit; font-size: 14px; color: #0f172a; box-sizing: border-box; }
+        input { width: 100%; height: 46px; border: 1px solid #cbd5e1; border-radius: 13px; padding: 0 12px; font: inherit; font-size: 14px; color: #0f172a; box-sizing: border-box; }
         input:focus { outline: 2px solid #bfdbfe; border-color: #2563eb; }
         .password-field { position: relative; }
         .password-field input { padding-right: 48px; }
-        .password-field button { position: absolute; right: 4px; top: 4px; width: 38px; height: 38px; border: 0; background: transparent; color: #475569; cursor: pointer; }
-        .primary-action, .secondary-action, .text-action { min-height: 46px; border-radius: 6px; font-weight: 800; cursor: pointer; }
-        .primary-action { border: 1px solid #1769e0; background: #1769e0; color: #fff; }
+        .password-field button { position: absolute; right: 4px; top: 4px; width: 38px; height: 38px; border: 0; border-radius: 10px; background: transparent; color: #475569; cursor: pointer; }
+        .primary-action, .secondary-action, .text-action { min-height: 46px; border-radius: 13px; font-weight: 800; cursor: pointer; }
+        .primary-action { border: 1px solid var(--accent-primary); background: var(--accent-primary); color: #fff; }
+        .primary-action:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
         .secondary-action { border: 1px solid #bfdbfe; background: #fff; color: #174ea6; }
         .text-action { border: 0; background: transparent; color: #2563eb; }
+        .primary-action:focus-visible, .secondary-action:focus-visible, .text-action:focus-visible, .icon-close:focus-visible, .password-field button:focus-visible, .link-button:focus-visible, .switch-copy button:focus-visible { outline: 3px solid var(--accent-light); outline-offset: 2px; }
         button:disabled { opacity: .6; cursor: not-allowed; }
         .text-link { color: #1d4ed8; font-size: 12px; font-weight: 700; text-decoration: none; }
         .link-button { border: 0; padding: 0; background: transparent; cursor: pointer; }
         .align-right { justify-self: end; }
         .switch-copy { margin: 3px 0 0; text-align: center; color: #64748b; font-size: 13px; }
         .switch-copy button { border: 0; background: transparent; color: #1d4ed8; font-weight: 800; cursor: pointer; }
-        .auth-error, .auth-success, .auth-note { margin: 0; border-radius: 6px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+        .auth-error, .auth-success, .auth-note { margin: 0; border-radius: 11px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
         .auth-error { background: #fef2f2; color: #b91c1c; }
         .auth-success { background: #ecfdf5; color: #166534; }
         .auth-note { background: #eff6ff; color: #1e40af; }
         .show-password { display: flex; align-items: center; gap: 8px; }
         .show-password input { width: 16px; height: 16px; }
-        @media (max-width: 520px) { .auth-overlay { padding: 0; align-items: end; } .auth-dialog { width: 100%; max-height: 94dvh; border-radius: 8px 8px 0 0; padding: 24px 18px max(24px, env(safe-area-inset-bottom)); } }
+        @media (max-width: 520px) { .auth-overlay { padding: 0; align-items: end; } .auth-dialog { width: 100%; max-height: 94dvh; border-radius: 22px 22px 0 0; padding: 24px 18px max(24px, env(safe-area-inset-bottom)); } }
       `}</style>
     </div>
   );

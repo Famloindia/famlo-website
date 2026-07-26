@@ -214,22 +214,13 @@ function HeaderContent() {
             ) : (
               <div className="auth-btns">
                 <button
-                  className="btn-secondary"
+                  className="btn-primary header-login-button"
                   onClick={() => {
                     setAuthMode("login");
                     setAuthModalOpen(true);
                   }}
                 >
                   Log in
-                </button>
-                <button
-                  className="btn-primary"
-                  onClick={() => {
-                    setAuthMode("signup");
-                    setAuthModalOpen(true);
-                  }}
-                >
-                  Sign up
                 </button>
               </div>
             )
@@ -313,7 +304,34 @@ function HeaderContent() {
 
         .auth-btns {
           display: flex;
-          gap: 12px;
+          align-items: center;
+        }
+
+        .header-login-button {
+          height: 46px;
+          padding: 0 28px;
+          border: none;
+          border-radius: 999px;
+          background: var(--accent-primary);
+          color: #fff;
+          font-weight: 600;
+          line-height: 1;
+          box-shadow: 0 6px 18px rgba(24, 144, 255, 0.18);
+        }
+
+        .header-login-button:hover {
+          background: var(--accent-hover);
+          box-shadow: 0 8px 22px rgba(24, 144, 255, 0.24);
+          transform: translateY(-1px);
+        }
+
+        .header-login-button:active {
+          transform: translateY(0) scale(0.98);
+        }
+
+        .header-login-button:focus-visible {
+          outline: 3px solid color-mix(in srgb, var(--accent-primary) 28%, transparent);
+          outline-offset: 3px;
         }
 
         .auth-row {
