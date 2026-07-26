@@ -179,7 +179,7 @@ export function AuthModal({
       const response = await fetch("/api/auth/otp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "phone", value: phone, intent: mode }),
+        body: JSON.stringify({ type: "phone", value: phone, intent: "signup" }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.sessionId) throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
@@ -205,7 +205,7 @@ export function AuthModal({
           value: phone,
           otp,
           sessionId,
-          intent: mode,
+          intent: "signup",
         }),
       });
       const payload = await response.json();
@@ -370,8 +370,9 @@ export function AuthModal({
             {error ? <p className="auth-error">{error}</p> : null}
             <button className="primary-action" type="submit" disabled={loading}>{loading ? "Logging in..." : "Log in"}</button>
             <button className="secondary-action" type="button" disabled={loading} onClick={() => void handleGoogle()}>Continue with Google</button>
-            <button className="secondary-action" type="button" onClick={() => { setStep("phone"); setError(""); }}>Continue with phone OTP</button>
-            <p className="switch-copy">New to Famlo? <button type="button" onClick={() => switchMode("signup")}>Sign up</button></p>
+            <button className="secondary-action" type="button" onClick={() => { setStep("phone"); setError(""); }}>Continue with phone</button>
+            <p className="provider-note">First time using Google or phone? Your Famlo account will be created automatically.</p>
+            <p className="switch-copy">New to Famlo? <button type="button" onClick={() => switchMode("signup")}>Sign up with email</button></p>
           </form>
         ) : null}
 
@@ -399,7 +400,7 @@ export function AuthModal({
 
         {step === "phone" ? (
           <form className="auth-stack" onSubmit={(event) => void handleSendPhoneOtp(event)}>
-            <p className="auth-note">{mode === "login" ? "Use the phone number already linked to your account." : "We will verify your phone before creating the account."}</p>
+            <p className="auth-note">We will verify your phone and reopen or create your Famlo account.</p>
             <label><span>Phone number</span><input type="tel" autoComplete="tel" placeholder="+91 98765 43210" value={phone} onChange={(event) => setPhone(event.target.value)} required /></label>
             {error ? <p className="auth-error">{error}</p> : null}
             <button className="primary-action" type="submit" disabled={loading}>{loading ? "Sending..." : "Send verification code"}</button>
@@ -503,6 +504,7 @@ export function AuthModal({
         .link-button { border: 0; padding: 0; background: transparent; cursor: pointer; }
         .align-right { justify-self: end; }
         .switch-copy { margin: 3px 0 0; text-align: center; color: #64748b; font-size: 13px; }
+        .provider-note { margin: 0; color: #64748b; font-size: 12px; line-height: 1.5; text-align: center; }
         .switch-copy button { border: 0; background: transparent; color: #1d4ed8; font-weight: 800; cursor: pointer; }
         .auth-error, .auth-success, .auth-note { margin: 0; border-radius: 11px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
         .auth-error { background: #fef2f2; color: #b91c1c; }

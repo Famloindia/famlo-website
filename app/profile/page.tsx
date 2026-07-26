@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { useUser } from "@/components/auth/UserContext";
@@ -9,10 +9,17 @@ import { ProfileCompletionForm } from "@/components/account/ProfileCompletionFor
 import { PasswordManagementCard } from "@/components/account/PasswordManagementCard";
 import { SavedHomesSection } from "@/components/account/SavedHomesSection";
 import { getSafeReturnPath } from "@/lib/site-url";
+import { getSafeAvatarUrl } from "@/lib/avatar-url";
 import { isGuestProfileComplete } from "@/lib/user-profile";
 
 function ProfileSummaryCard(): React.JSX.Element | null {
   const { user, profile } = useUser();
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const avatarUrl = getSafeAvatarUrl(profile?.avatar_url);
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatarUrl]);
 
   if (!user && !profile) return null;
 
@@ -48,14 +55,15 @@ function ProfileSummaryCard(): React.JSX.Element | null {
             fontWeight: 800,
           }}
         >
-          {profile?.avatar_url ? (
+          {avatarUrl && !avatarFailed ? (
             <Image
-              src={profile.avatar_url}
+              src={avatarUrl}
               alt={profile?.name || "Profile"}
               width={144}
               height={144}
               sizes="72px"
               unoptimized
+              onError={() => setAvatarFailed(true)}
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
           ) : (

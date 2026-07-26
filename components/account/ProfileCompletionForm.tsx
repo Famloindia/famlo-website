@@ -13,6 +13,7 @@ import {
   validateGuestProfileInput,
 } from "@/lib/user-profile";
 import { normalizeGuestEmail, normalizeGuestPhone } from "@/lib/guest-identity";
+import { getSafeAvatarUrl } from "@/lib/avatar-url";
 import { MAX_IMAGE_UPLOAD_BYTES, formatImageUploadLimitLabel } from "@/lib/upload-limits";
 
 interface ProfileCompletionFormProps {
@@ -81,6 +82,7 @@ export function ProfileCompletionForm({
   const [phoneOtpState, setPhoneOtpState] = useState<"idle" | "sending" | "sent" | "verifying">("idle");
   const [phoneOtp, setPhoneOtp] = useState("");
   const [phoneOtpSessionId, setPhoneOtpSessionId] = useState("");
+  const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<GuestProfileFieldErrors>({});
 
@@ -105,12 +107,18 @@ export function ProfileCompletionForm({
     Boolean(profile?.phone_verified_at) &&
     normalizeGuestPhone(profile?.phone) === normalizeGuestPhone(resolvedForm.phone);
   const missingRequiredFields = getMissingGuestProfileRequirements(profile);
+  const savedAvatarUrl = getSafeAvatarUrl(resolvedForm.avatarUrl);
+  const displayedAvatarUrl = photoPreviewUrl || (!avatarPreviewFailed ? savedAvatarUrl : null);
 
   useEffect(() => {
     return () => {
       if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
     };
   }, [photoPreviewUrl]);
+
+  useEffect(() => {
+    setAvatarPreviewFailed(false);
+  }, [savedAvatarUrl]);
 
   function selectPhoto(file: File | undefined): void {
     if (!file) return;
@@ -500,14 +508,15 @@ export function ProfileCompletionForm({
 
       <div className="account-avatar-stage" style={{ padding: "0 2px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
         <div className="account-avatar-picker" style={{ width: "56px", height: "56px" }}>
-          {photoPreviewUrl || resolvedForm.avatarUrl ? (
+          {displayedAvatarUrl ? (
             <Image
-              src={photoPreviewUrl || resolvedForm.avatarUrl}
+              src={displayedAvatarUrl}
               alt="Guest profile preview"
               width={112}
               height={112}
               sizes="56px"
               unoptimized
+              onError={() => setAvatarPreviewFailed(true)}
               className="account-avatar-preview"
             />
           ) : (

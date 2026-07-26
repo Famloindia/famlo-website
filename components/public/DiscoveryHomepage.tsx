@@ -10,6 +10,7 @@ import type { HomeCardRecord, CompanionRecord, AdRecord, StoryRecord, HomepageRe
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
 import { recordPublicReelView } from "@/lib/public-reel-view";
 import { buildHomestayPath } from "@/lib/slug";
+import { getSafeAvatarUrl } from "@/lib/avatar-url";
 import { readRecentViews, type RecentViewItem } from "@/lib/recent-views";
 import { HomePageCard } from "@/components/public/HomePageCard";
 import DestinationAutocomplete from "@/components/public/DestinationAutocomplete";
@@ -310,13 +311,18 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: (mode: "login" | "signup") => 
   const { user, profile, signingOut, signOut } = useUser();
   const [scrolled, setScrolled] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
+  const avatarUrl = getSafeAvatarUrl(profile?.avatar_url);
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 10);
     window.addEventListener("scroll", fn, { passive: true });
     return () => window.removeEventListener("scroll", fn);
   }, []);
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatarUrl]);
   useEffect(() => {
     const fn = (e: MouseEvent) => {
       if (dropRef.current && !dropRef.current.contains(e.target as Node)) setDropOpen(false);
@@ -367,13 +373,15 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: (mode: "login" | "signup") => 
               onMouseEnter={e => (e.currentTarget.style.transform = "scale(1.07)")}
               onMouseLeave={e => (e.currentTarget.style.transform = "scale(1)")}
             >
-              {profile?.avatar_url ? (
+              {avatarUrl && !avatarFailed ? (
                 <Image
-                  src={profile.avatar_url}
+                  src={avatarUrl}
                   alt={profile?.name || "Profile"}
                   width={80}
                   height={80}
                   sizes="40px"
+                  unoptimized
+                  onError={() => setAvatarFailed(true)}
                   style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", borderRadius: "50%" }}
                 />
               ) : initial}

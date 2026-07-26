@@ -17,6 +17,7 @@ function buildRemotePatternHostnames() {
   const hostnames = new Set([
     "wokjtntnbkwdsxbkotcr.supabase.co",
     "images.unsplash.com",
+    "lh3.googleusercontent.com",
     "pub-8e2cb60fdd79431fa41db047fa09d02b.r2.dev",
     "pub-a8f558db1d7747be8a4f1745c4df2207.r2.dev",
   ]);

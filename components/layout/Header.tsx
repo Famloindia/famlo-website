@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useUser } from "@/components/auth/UserContext";
+import { getSafeAvatarUrl } from "@/lib/avatar-url";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const AuthModal = dynamic(
@@ -32,7 +33,9 @@ function HeaderContent() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [dismissedAuthToken, setDismissedAuthToken] = useState<string | null>(null);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const avatarUrl = getSafeAvatarUrl(profile?.avatar_url);
 
   const authToken = `${pathname}?${searchParams.toString()}`;
   const requestedAuthMode = searchParams.get("auth") === "signup" ? "signup" : "login";
@@ -51,6 +54,10 @@ function HeaderContent() {
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatarUrl]);
 
   // Outside click listener
   useEffect(() => {
@@ -110,14 +117,16 @@ function HeaderContent() {
                     className="avatar-btn"
                     onClick={() => setDropdownOpen(!dropdownOpen)}
                   >
-                    {profile?.avatar_url ? (
+                    {avatarUrl && !avatarFailed ? (
                       <Image
-                        src={profile.avatar_url}
+                        src={avatarUrl}
                         alt={profile?.name || "Profile"}
                         width={80}
                         height={80}
                         sizes="40px"
                         className="avatar-image"
+                        unoptimized
+                        onError={() => setAvatarFailed(true)}
                       />
                     ) : (
                       profile?.name?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase()
