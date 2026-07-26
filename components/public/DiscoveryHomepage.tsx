@@ -367,11 +367,9 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: (mode: "login" | "signup") => 
               border: "2px solid #dbeafe", color: "#fff",
               fontWeight: 700, fontSize: "15px", cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: "0 2px 8px rgba(26,86,219,0.3)", transition: "transform 0.15s",
+              boxShadow: "0 2px 8px rgba(26,86,219,0.3)",
               overflow: "hidden",
             }}
-              onMouseEnter={e => (e.currentTarget.style.transform = "scale(1.07)")}
-              onMouseLeave={e => (e.currentTarget.style.transform = "scale(1)")}
             >
               {avatarUrl && !avatarFailed ? (
                 <Image
@@ -382,7 +380,7 @@ function SiteHeader({ onAuthOpen }: { onAuthOpen: (mode: "login" | "signup") => 
                   sizes="40px"
                   unoptimized
                   onError={() => setAvatarFailed(true)}
-                  style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", borderRadius: "50%" }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 20%", borderRadius: "50%" }}
                 />
               ) : initial}
             </button>

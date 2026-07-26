@@ -398,8 +398,8 @@ function HeaderContent() {
           min-height: 100% !important;
           aspect-ratio: 1/1 !important;
           border-radius: 50% !important;
-          object-fit: contain !important;
-          object-position: center !important;
+          object-fit: cover !important;
+          object-position: center 20% !important;
           display: block !important;
           image-rendering: -webkit-optimize-contrast;
         }
