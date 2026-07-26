@@ -907,7 +907,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           </button>
         )}
 
-        <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+        <AuthModal isOpen={showAuthModal} initialMode="login" onClose={() => setShowAuthModal(false)} />
       </section>
 
       <style jsx>{`

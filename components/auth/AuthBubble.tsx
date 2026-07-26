@@ -37,7 +37,7 @@ export function AuthBubble() {
         )}
       </div>
 
-      {showModal && <AuthModal isOpen={showModal} onClose={() => setShowModal(false)} />}
+      {showModal && <AuthModal isOpen={showModal} initialMode="login" onClose={() => setShowModal(false)} />}
 
       <style jsx>{`
         .auth-bubble-container {

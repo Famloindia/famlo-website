@@ -8,7 +8,18 @@ import { buildOAuthCallbackUrl, getSafeGuestAuthReturnPath } from "@/lib/site-ur
 import { useUser } from "./UserContext";
 
 type AuthMode = "login" | "signup";
-type AuthStep = "main" | "email_signup" | "phone" | "phone_verify" | "email_sent";
+type AuthStep =
+  | "main"
+  | "email_signup"
+  | "phone"
+  | "phone_verify"
+  | "email_sent"
+  | "recovery"
+  | "recovery_email"
+  | "recovery_email_sent"
+  | "recovery_phone"
+  | "recovery_phone_verify"
+  | "recovery_phone_password";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -41,12 +52,26 @@ export function AuthModal({
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const safeReturnTo = getSafeGuestAuthReturnPath(
     returnTo ?? (typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "/")
   );
 
   useEffect(() => {
     if (!isOpen) return;
+    setMode(initialMode);
+    setStep("main");
+    setIdentifier("");
+    setEmail("");
+    setPhone("");
+    setPassword("");
+    setConfirmPassword("");
+    setOtp("");
+    setSessionId("");
+    setShowPassword(false);
+    setLoading(false);
+    setError("");
+    setMessage("");
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = "";
@@ -59,6 +84,7 @@ export function AuthModal({
     setMode(initialMode);
     setStep("main");
     setError("");
+    setMessage("");
     setOtp("");
     setSessionId("");
     onClose();
@@ -68,6 +94,7 @@ export function AuthModal({
     setMode(nextMode);
     setStep("main");
     setError("");
+    setMessage("");
     setOtp("");
     setSessionId("");
   }
@@ -191,7 +218,106 @@ export function AuthModal({
     }
   }
 
-  const title = mode === "login" ? "Log in to Famlo" : "Create your Famlo account";
+  async function handleRecoveryEmail(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/password/forgot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const payload = await response.json();
+      setMessage(
+        payload.message ??
+          "If an eligible account exists, password reset instructions have been sent."
+      );
+      setStep("recovery_email_sent");
+    } catch {
+      setError("Password recovery could not be started. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRecoveryPhoneOtp(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/otp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "phone", value: phone, intent: "login" }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.sessionId) throw new Error();
+      setSessionId(payload.sessionId);
+      setStep("recovery_phone_verify");
+    } catch {
+      setError("Password recovery could not be started. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRecoveryPhoneVerify(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "phone",
+          value: phone,
+          otp,
+          sessionId,
+          intent: "login",
+        }),
+      });
+      if (!response.ok) throw new Error();
+      setPassword("");
+      setConfirmPassword("");
+      setStep("recovery_phone_password");
+    } catch {
+      setError("The verification code is invalid or expired.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRecoveryPhonePassword(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/password/change", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, confirmPassword }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
+      setMessage("Your password has been updated. You can now log in.");
+      setPassword("");
+      setConfirmPassword("");
+      setStep("main");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : GENERIC_AUTH_ERROR);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const title =
+    step.startsWith("recovery")
+      ? "Reset your password"
+      : mode === "login"
+        ? "Welcome back"
+        : "Create your Famlo account";
 
   return (
     <div className="auth-overlay" role="presentation" onMouseDown={(event) => {
@@ -202,7 +328,9 @@ export function AuthModal({
           <X size={18} />
         </button>
         <header>
-          <span className="auth-kicker">{mode === "login" ? "Welcome back" : "Join Famlo"}</span>
+          <span className="auth-kicker">
+            {step.startsWith("recovery") ? "Account recovery" : mode === "login" ? "Log in" : "Sign up"}
+          </span>
           <h2 id="guest-auth-title">{title}</h2>
         </header>
 
@@ -227,20 +355,31 @@ export function AuthModal({
                 </button>
               </div>
             </label>
-            <a className="text-link align-right" href="/auth/forgot-password">Forgot password?</a>
+            <button
+              className="text-link align-right link-button"
+              type="button"
+              onClick={() => {
+                setStep("recovery");
+                setError("");
+                setMessage("");
+              }}
+            >
+              Forgot password?
+            </button>
+            {message ? <p className="auth-success">{message}</p> : null}
             {error ? <p className="auth-error">{error}</p> : null}
             <button className="primary-action" type="submit" disabled={loading}>{loading ? "Logging in..." : "Log in"}</button>
             <button className="secondary-action" type="button" disabled={loading} onClick={() => void handleGoogle()}>Continue with Google</button>
-            <button className="secondary-action" type="button" onClick={() => { setStep("phone"); setError(""); }}>Log in with phone OTP</button>
+            <button className="secondary-action" type="button" onClick={() => { setStep("phone"); setError(""); }}>Continue with phone OTP</button>
             <p className="switch-copy">New to Famlo? <button type="button" onClick={() => switchMode("signup")}>Sign up</button></p>
           </form>
         ) : null}
 
         {step === "main" && mode === "signup" ? (
           <div className="auth-stack">
-            <button className="primary-action" type="button" onClick={() => setStep("email_signup")}>Continue with email</button>
-            <button className="secondary-action" type="button" onClick={() => setStep("phone")}>Continue with phone</button>
             <button className="secondary-action" type="button" disabled={loading} onClick={() => void handleGoogle()}>Continue with Google</button>
+            <button className="secondary-action" type="button" onClick={() => setStep("phone")}>Continue with phone</button>
+            <button className="primary-action" type="button" onClick={() => setStep("email_signup")}>Continue with email</button>
             {error ? <p className="auth-error">{error}</p> : null}
             <p className="switch-copy">Already have an account? <button type="button" onClick={() => switchMode("login")}>Log in</button></p>
           </div>
@@ -284,6 +423,59 @@ export function AuthModal({
             <button className="primary-action" type="button" onClick={closeModal}>Done</button>
           </div>
         ) : null}
+
+        {step === "recovery" ? (
+          <div className="auth-stack">
+            <button className="primary-action" type="button" onClick={() => setStep("recovery_email")}>Reset using Email</button>
+            <button className="secondary-action" type="button" onClick={() => setStep("recovery_phone")}>Reset using Phone</button>
+            <button className="text-action" type="button" onClick={() => setStep("main")}>Back to log in</button>
+          </div>
+        ) : null}
+
+        {step === "recovery_email" ? (
+          <form className="auth-stack" onSubmit={(event) => void handleRecoveryEmail(event)}>
+            <label><span>Registered email</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={loading}>{loading ? "Sending..." : "Send recovery link"}</button>
+            <button className="text-action" type="button" onClick={() => setStep("recovery")}>Back</button>
+          </form>
+        ) : null}
+
+        {step === "recovery_email_sent" ? (
+          <div className="auth-stack">
+            <p className="auth-success">{message}</p>
+            <p className="auth-note">Open the secure link in your email to choose and confirm a new password.</p>
+            <button className="primary-action" type="button" onClick={() => setStep("main")}>Back to log in</button>
+          </div>
+        ) : null}
+
+        {step === "recovery_phone" ? (
+          <form className="auth-stack" onSubmit={(event) => void handleRecoveryPhoneOtp(event)}>
+            <label><span>Registered phone</span><input type="tel" autoComplete="tel" placeholder="+91 98765 43210" value={phone} onChange={(event) => setPhone(event.target.value)} required /></label>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={loading}>{loading ? "Sending..." : "Send secure OTP"}</button>
+            <button className="text-action" type="button" onClick={() => setStep("recovery")}>Back</button>
+          </form>
+        ) : null}
+
+        {step === "recovery_phone_verify" ? (
+          <form className="auth-stack" onSubmit={(event) => void handleRecoveryPhoneVerify(event)}>
+            <label><span>Secure OTP</span><input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ""))} required /></label>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={loading}>{loading ? "Verifying..." : "Verify phone"}</button>
+            <button className="text-action" type="button" onClick={() => setStep("recovery_phone")}>Change phone number</button>
+          </form>
+        ) : null}
+
+        {step === "recovery_phone_password" ? (
+          <form className="auth-stack" onSubmit={(event) => void handleRecoveryPhonePassword(event)}>
+            <label><span>New password</span><input type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+            <label><span>Confirm password</span><input type={showPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>
+            <label className="show-password"><input type="checkbox" checked={showPassword} onChange={(event) => setShowPassword(event.target.checked)} /> Show passwords</label>
+            {error ? <p className="auth-error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={loading}>{loading ? "Updating..." : "Update password"}</button>
+          </form>
+        ) : null}
       </section>
 
       <style jsx>{`
@@ -306,6 +498,7 @@ export function AuthModal({
         .text-action { border: 0; background: transparent; color: #2563eb; }
         button:disabled { opacity: .6; cursor: not-allowed; }
         .text-link { color: #1d4ed8; font-size: 12px; font-weight: 700; text-decoration: none; }
+        .link-button { border: 0; padding: 0; background: transparent; cursor: pointer; }
         .align-right { justify-self: end; }
         .switch-copy { margin: 3px 0 0; text-align: center; color: #64748b; font-size: 13px; }
         .switch-copy button { border: 0; background: transparent; color: #1d4ed8; font-weight: 800; cursor: pointer; }

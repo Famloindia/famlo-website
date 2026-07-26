@@ -239,6 +239,7 @@ function HeaderContent() {
 
       {isAuthOpen ? (
         <AuthModal
+          key={`header-auth-${autoAuthOpen ? requestedAuthMode : authMode}`}
           isOpen={isAuthOpen}
           initialMode={autoAuthOpen ? requestedAuthMode : authMode}
           returnTo={`${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}

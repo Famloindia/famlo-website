@@ -1625,7 +1625,7 @@ export default function DiscoveryHomepage({ homes, companions, ads, stories, her
       ) : null}
 
       {showAuth && (
-        <AuthModal isOpen={showAuth} onClose={() => {
+        <AuthModal key={`discovery-auth-${authMode}`} isOpen={showAuth} initialMode={authMode} onClose={() => {
           setShowAuth(false);
           if (user && pending) { pending(); setPending(null); }
         }} />

@@ -703,6 +703,7 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
       {showAuth ? (
         <AuthModal
           isOpen={showAuth}
+          initialMode="login"
           onClose={() => {
             setShowAuth(false);
           }}

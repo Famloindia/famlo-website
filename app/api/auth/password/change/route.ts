@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { validateGuestPassword } from "@/lib/auth/guest-credentials";
+import { normalizeGuestPhone } from "@/lib/guest-identity";
 import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient, createEphemeralPublicSupabaseClient } from "@/lib/supabase";
 
@@ -35,7 +36,12 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     const providers = new Set(
       (authRecord.user.identities ?? []).map((identity) => identity.provider)
     );
-    if (providers.has("email")) {
+    const verifiedPhoneRecovery =
+      authUser.authKind === "guest_cookie" &&
+      Boolean(authRecord.user.phone_confirmed_at) &&
+      normalizeGuestPhone(authRecord.user.phone) === normalizeGuestPhone(authUser.phone);
+
+    if (!verifiedPhoneRecovery && providers.has("email")) {
       if (!authRecord.user.email || !currentPassword) {
         return NextResponse.json({ error: "Enter your current password." }, { status: 400 });
       }
@@ -47,7 +53,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       if (error) {
         return NextResponse.json({ error: "Current password is incorrect." }, { status: 400 });
       }
-    } else if (!authRecord.user.email_confirmed_at) {
+    } else if (!verifiedPhoneRecovery && !authRecord.user.email_confirmed_at) {
       return NextResponse.json(
         { error: "Verify an email address before creating a password." },
         { status: 400 }

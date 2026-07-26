@@ -1640,6 +1640,7 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
       {showAuthModal ? (
         <AuthModal
           isOpen={showAuthModal}
+          initialMode="login"
           onClose={() => {
             setShowAuthModal(false);
             void syncAuthState();

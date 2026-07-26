@@ -566,6 +566,7 @@ export function HommieBookingFlow({
       {showAuthModal ? (
         <AuthModal
           isOpen={showAuthModal}
+          initialMode="login"
           onClose={() => {
             setShowAuthModal(false);
             void syncAuthState();
