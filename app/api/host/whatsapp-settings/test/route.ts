@@ -9,7 +9,10 @@ import {
 import { enqueueNotificationRecord } from "@/lib/notifications/enqueue";
 import { assertSameOrigin, getRequestIp } from "@/lib/request-security";
 import { createAdminSupabaseClient } from "@/lib/supabase";
-import { getWhatsAppRuntimeConfig } from "@/lib/whatsapp-config";
+import {
+  getWhatsAppRuntimeConfig,
+  isStagingExplicitWhatsAppDeliveryAllowed,
+} from "@/lib/whatsapp-config";
 import { resolveEligibleHostWhatsApp } from "@/lib/whatsapp-eligibility";
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -18,7 +21,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     assertSameOrigin(request);
     const session = await requireHostSettingsSession(supabase, request);
     const ipHash = hashRequestIp(getRequestIp(request));
-    if (!whatsappDeliveryEnabled()) {
+    const testDeliveryAllowed =
+      whatsappDeliveryEnabled() || isStagingExplicitWhatsAppDeliveryAllowed();
+    if (!testDeliveryAllowed) {
       await recordBlockedTestMessage(supabase, { hostUserId: session.hostUserId, ipHash });
       return NextResponse.json(
         { ok: false, code: "whatsapp_delivery_disabled", message: "WhatsApp delivery is not active yet." },
@@ -26,7 +31,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const eligible = await resolveEligibleHostWhatsApp(supabase, session.hostUserId);
+    const eligible = await resolveEligibleHostWhatsApp(
+      supabase,
+      session.hostUserId,
+      { allowStagingExplicitDelivery: true }
+    );
     if (!eligible) {
       return NextResponse.json(
         { ok: false, code: "whatsapp_not_eligible", message: "Verify your number, consent, and enable alerts first." },

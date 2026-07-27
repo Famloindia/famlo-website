@@ -2,7 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { asString } from "@/lib/platform-utils";
 import { loadUserProfileCompatibility } from "@/lib/user-profile";
-import { getWhatsAppRuntimeConfig, normalizeMetaPhone } from "@/lib/whatsapp-config";
+import {
+  getWhatsAppRuntimeConfig,
+  isStagingExplicitWhatsAppDeliveryAllowed,
+  normalizeMetaPhone,
+} from "@/lib/whatsapp-config";
 
 export type EligibleHostWhatsApp = {
   hostUserId: string;
@@ -12,10 +16,16 @@ export type EligibleHostWhatsApp = {
 
 export async function resolveEligibleHostWhatsApp(
   supabase: SupabaseClient,
-  hostUserId: string
+  hostUserId: string,
+  options: { allowStagingExplicitDelivery?: boolean } = {}
 ): Promise<EligibleHostWhatsApp | null> {
   const config = getWhatsAppRuntimeConfig();
-  if (!config.enabled) return null;
+  if (
+    !config.enabled &&
+    !(options.allowStagingExplicitDelivery && isStagingExplicitWhatsAppDeliveryAllowed())
+  ) {
+    return null;
+  }
   const { data, error } = await supabase
     .from("host_whatsapp_settings")
     .select("host_user_id,phone_e164,language,enabled,ownership_verified_at,opted_in_at")

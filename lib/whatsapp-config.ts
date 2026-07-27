@@ -196,6 +196,18 @@ export function getWhatsAppRuntimeConfig(): WhatsAppRuntimeConfig {
   };
 }
 
+export function isStagingExplicitWhatsAppDeliveryAllowed(): boolean {
+  const config = getWhatsAppRuntimeConfig();
+  const appEnv = process.env.APP_ENV?.trim().toLowerCase();
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
+  return (
+    appEnv === "staging" &&
+    supabaseUrl.includes("nsanahmopvwrlwvmxdmf.supabase.co") &&
+    config.stagingRealDeliveryAllowed &&
+    Boolean(config.stagingTesterPhone)
+  );
+}
+
 export function requireWhatsAppDeliveryConfig(kind: WhatsAppTemplateKind): WhatsAppRuntimeConfig & {
   accessToken: string;
   phoneNumberId: string;
@@ -236,6 +248,32 @@ export function requireWhatsAppVerificationDeliveryConfig(): WhatsAppRuntimeConf
     phoneNumberId: config.phoneNumberId,
     templateName,
     templateLanguage,
+  };
+}
+
+export function requireStagingExplicitWhatsAppDeliveryConfig(
+  kind: WhatsAppTemplateKind
+): WhatsAppRuntimeConfig & {
+  accessToken: string;
+  phoneNumberId: string;
+  templateName: string;
+} {
+  const config = getWhatsAppRuntimeConfig();
+  if (kind !== "setupConfirmation" || !isStagingExplicitWhatsAppDeliveryAllowed()) {
+    throw new Error("Explicit staging WhatsApp delivery is disabled.");
+  }
+  if (!config.accessToken) throw new Error("WHATSAPP_API_KEY is not configured.");
+  if (!config.phoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is not configured.");
+  const templateName = config.templates[kind];
+  if (!templateName) throw new Error("WhatsApp setup confirmation template is not configured.");
+  if (!config.templateLanguages[kind]) {
+    throw new Error("WhatsApp setup confirmation template language is not configured.");
+  }
+  return {
+    ...config,
+    accessToken: config.accessToken,
+    phoneNumberId: config.phoneNumberId,
+    templateName,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   verifyHostWhatsappOtp,
   type HostWhatsAppOtpProvider,
 } from "@/lib/host-whatsapp-otp-provider";
+import { isStagingExplicitWhatsAppDeliveryAllowed } from "@/lib/whatsapp-config";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -21,6 +22,7 @@ export type HostWhatsappSettingsResponse = {
   lastDeliveryAt: string | null;
   hasDeliveryIssue: boolean;
   deliveryGloballyEnabled: boolean;
+  testMessageAvailable: boolean;
 };
 
 const SETTINGS_SELECT =
@@ -76,6 +78,8 @@ function responseFromRow(row: JsonRecord | null): HostWhatsappSettingsResponse {
     lastDeliveryAt: asString(row?.last_delivery_at),
     hasDeliveryIssue,
     deliveryGloballyEnabled: whatsappDeliveryEnabled(),
+    testMessageAvailable:
+      whatsappDeliveryEnabled() || isStagingExplicitWhatsAppDeliveryAllowed(),
   };
 }
 

@@ -1,6 +1,7 @@
 import type { NotificationDeliveryResult } from "@/lib/notifications/types";
 import {
   getWhatsAppRuntimeConfig,
+  requireStagingExplicitWhatsAppDeliveryConfig,
   normalizeMetaPhone,
   requireWhatsAppDeliveryConfig,
   requireWhatsAppVerificationDeliveryConfig,
@@ -133,6 +134,7 @@ async function sendWhatsAppPayload(
     templateKind: WhatsAppTemplateKind;
     templateName?: string | null;
     verificationDelivery?: boolean;
+    stagingExplicitDelivery?: boolean;
   },
   payload: Record<string, unknown>
 ): Promise<NotificationDeliveryResult> {
@@ -150,7 +152,9 @@ async function sendWhatsAppPayload(
   try {
     const config = input.verificationDelivery
       ? requireWhatsAppVerificationDeliveryConfig()
-      : requireWhatsAppDeliveryConfig(input.templateKind);
+      : input.stagingExplicitDelivery
+        ? requireStagingExplicitWhatsAppDeliveryConfig(input.templateKind)
+        : requireWhatsAppDeliveryConfig(input.templateKind);
     if (input.templateName && input.templateName !== config.templateName) {
       throw new WhatsAppProviderError({
         message: "WhatsApp template does not match the configured event template.",
@@ -277,6 +281,7 @@ export async function sendWhatsAppTemplateNotification(input: {
   languageCode?: string | null;
   bodyVariables?: string[];
   buttons?: WhatsAppTemplateButton[];
+  stagingExplicitDelivery?: boolean;
 }): Promise<NotificationDeliveryResult> {
   const components: Array<Record<string, unknown>> = [];
   const bodyVariables = (input.bodyVariables ?? []).map((value) => value.trim());
@@ -302,7 +307,12 @@ export async function sendWhatsAppTemplateNotification(input: {
     });
   }
   return sendWhatsAppPayload(
-    { phone: input.phone, templateKind: input.templateKind, templateName: input.templateName },
+    {
+      phone: input.phone,
+      templateKind: input.templateKind,
+      templateName: input.templateName,
+      stagingExplicitDelivery: input.stagingExplicitDelivery,
+    },
     {
       type: "template",
       template: {

@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, MessageCircle, X } from "lucide-react";
+
+import {
+  canSendHostWhatsAppTestMessage,
+  createSingleFlightGuard,
+  queueHostWhatsAppTestMessage,
+} from "@/lib/host-whatsapp-test-message-client";
 
 type Settings = {
   phoneMasked: string | null;
@@ -15,6 +21,7 @@ type Settings = {
   lastDeliveryAt: string | null;
   hasDeliveryIssue: boolean;
   deliveryGloballyEnabled: boolean;
+  testMessageAvailable: boolean;
 };
 
 const emptySettings: Settings = {
@@ -29,6 +36,7 @@ const emptySettings: Settings = {
   lastDeliveryAt: null,
   hasDeliveryIssue: false,
   deliveryGloballyEnabled: false,
+  testMessageAvailable: false,
 };
 
 export function HostWhatsAppSettingsCard(): React.JSX.Element {
@@ -36,6 +44,8 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
   const [settings, setSettings] = useState<Settings>(emptySettings);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testSending, setTestSending] = useState(false);
+  const testMessageGuard = useRef(createSingleFlightGuard());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [phone, setPhone] = useState("");
   const [consent, setConsent] = useState(false);
@@ -66,7 +76,7 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!settings.deliveryGloballyEnabled) return;
+    if (!settings.deliveryGloballyEnabled && !settings.testMessageAvailable) return;
     const interval = window.setInterval(() => {
       void fetch("/api/host/whatsapp-settings", { cache: "no-store" })
         .then(async (response) => {
@@ -76,7 +86,7 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
         .catch(() => undefined);
     }, 15_000);
     return () => window.clearInterval(interval);
-  }, [settings.deliveryGloballyEnabled]);
+  }, [settings.deliveryGloballyEnabled, settings.testMessageAvailable]);
 
   function openEditor(): void {
     setPhone("");
@@ -160,19 +170,19 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
   }
 
   async function sendTestMessage(): Promise<void> {
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const response = await fetch("/api/host/whatsapp-settings/test", { method: "POST" });
-      const payload = (await response.json()) as { message?: string; error?: string; status?: string };
-      if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Unable to send a test message.");
-      setMessage(payload.status === "queued" ? "Test message queued." : payload.message ?? "Test message queued.");
-    } catch (testError) {
-      setError(testError instanceof Error ? testError.message : "Unable to send a test message.");
-    } finally {
-      setSaving(false);
-    }
+    if (testMessageGuard.current.isActive()) return;
+    await testMessageGuard.current.run(async () => {
+      setTestSending(true);
+      setError(null);
+      setMessage(null);
+      try {
+        setMessage(await queueHostWhatsAppTestMessage());
+      } catch (testError) {
+        setError(testError instanceof Error ? testError.message : "Unable to send a test message.");
+      } finally {
+        setTestSending(false);
+      }
+    });
   }
 
   const status = loading
@@ -262,16 +272,14 @@ export function HostWhatsAppSettingsCard(): React.JSX.Element {
             type="button"
             className="button-like secondary"
             disabled={
-              !settings.deliveryGloballyEnabled ||
-              !settings.enabled ||
-              !settings.verified ||
-              !settings.optedIn ||
-              saving
+              !canSendHostWhatsAppTestMessage(settings) ||
+              saving ||
+              testSending
             }
-            title={!settings.deliveryGloballyEnabled ? "WhatsApp delivery is not active yet." : undefined}
+            title={!settings.testMessageAvailable ? "WhatsApp test delivery is not active yet." : undefined}
             onClick={() => void sendTestMessage()}
           >
-            Send Test Message
+            {testSending ? "Sending..." : "Send Test Message"}
           </button>
         </div>
         {message ? <p role="status" style={{ color: "#166534", margin: "12px 0 0", fontWeight: 700 }}>{message}</p> : null}

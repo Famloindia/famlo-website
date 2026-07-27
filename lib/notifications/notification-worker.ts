@@ -17,6 +17,7 @@ import { loadUserProfileCompatibility } from "@/lib/user-profile";
 import {
   getBookingTemplateParameterOrder,
   getWhatsAppRuntimeConfig,
+  isStagingExplicitWhatsAppDeliveryAllowed,
   type WhatsAppTemplateKind,
 } from "@/lib/whatsapp-config";
 
@@ -148,7 +149,10 @@ async function deliverWhatsApp(
     };
   }
   const config = getWhatsAppRuntimeConfig();
-  if (!config.enabled) {
+  const stagingExplicitDelivery =
+    eventType === "host_whatsapp_test" &&
+    isStagingExplicitWhatsAppDeliveryAllowed();
+  if (!config.enabled && !stagingExplicitDelivery) {
     return {
       status: "failed",
       errorMessage: "WhatsApp notifications are disabled.",
@@ -199,6 +203,7 @@ async function deliverWhatsApp(
     languageCode: config.templateLanguages[kind],
     bodyVariables,
     buttons,
+    stagingExplicitDelivery,
   });
 
   const actionToken = asString(payload.action_token);
