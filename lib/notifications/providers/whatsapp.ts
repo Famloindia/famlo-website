@@ -3,6 +3,7 @@ import {
   getWhatsAppRuntimeConfig,
   normalizeMetaPhone,
   requireWhatsAppDeliveryConfig,
+  requireWhatsAppVerificationDeliveryConfig,
   type WhatsAppTemplateKind,
 } from "@/lib/whatsapp-config";
 
@@ -80,7 +81,11 @@ function resultFromError(error: unknown): NotificationDeliveryResult {
   }
   if (
     error instanceof Error &&
-    (error.message.includes("not configured") || error.message.includes("notifications are disabled"))
+    (
+      error.message.includes("not configured") ||
+      error.message.includes("delivery is disabled") ||
+      error.message.includes("notifications are disabled")
+    )
   ) {
     return {
       status: "failed",
@@ -127,6 +132,7 @@ async function sendWhatsAppPayload(
     phone: string;
     templateKind: WhatsAppTemplateKind;
     templateName?: string | null;
+    verificationDelivery?: boolean;
   },
   payload: Record<string, unknown>
 ): Promise<NotificationDeliveryResult> {
@@ -142,7 +148,9 @@ async function sendWhatsAppPayload(
   }
 
   try {
-    const config = requireWhatsAppDeliveryConfig(input.templateKind);
+    const config = input.verificationDelivery
+      ? requireWhatsAppVerificationDeliveryConfig()
+      : requireWhatsAppDeliveryConfig(input.templateKind);
     if (input.templateName && input.templateName !== config.templateName) {
       throw new WhatsAppProviderError({
         message: "WhatsApp template does not match the configured event template.",
@@ -301,6 +309,59 @@ export async function sendWhatsAppTemplateNotification(input: {
         name: input.templateName,
         language: { code: getWhatsAppRuntimeConfig().templateLanguages[input.templateKind] },
         ...(components.length ? { components } : {}),
+      },
+    }
+  );
+}
+
+export async function sendWhatsAppAuthenticationOtp(input: {
+  phone: string;
+  code: string;
+}): Promise<NotificationDeliveryResult> {
+  if (!/^\d{6}$/.test(input.code)) {
+    return {
+      status: "failed",
+      errorMessage: "WhatsApp verification code must contain six digits.",
+      errorCode: "invalid_verification_code",
+      errorCategory: "payload",
+      retryable: false,
+    };
+  }
+  const config = getWhatsAppRuntimeConfig();
+  const templateName = config.templates.verificationCode;
+  if (!templateName) {
+    return {
+      status: "failed",
+      errorMessage: "WhatsApp verification code template is not configured.",
+      errorCode: "provider_not_configured",
+      errorCategory: "configuration",
+      retryable: false,
+    };
+  }
+  return sendWhatsAppPayload(
+    {
+      phone: input.phone,
+      templateKind: "verificationCode",
+      templateName,
+      verificationDelivery: true,
+    },
+    {
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: config.templateLanguages.verificationCode },
+        components: [
+          {
+            type: "body",
+            parameters: [{ type: "text", text: input.code }],
+          },
+          {
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: input.code }],
+          },
+        ],
       },
     }
   );

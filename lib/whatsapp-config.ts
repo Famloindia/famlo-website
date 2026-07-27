@@ -3,6 +3,10 @@ const DEFAULT_GRAPH_VERSION = "v22.0";
 const DEFAULT_TEMPLATE_LANGUAGE = "en_US";
 
 export const WHATSAPP_TEMPLATE_ENV = {
+  verificationCode: {
+    name: "WHATSAPP_VERIFICATION_CODE_TEMPLATE_NAME",
+    language: "WHATSAPP_VERIFICATION_CODE_TEMPLATE_LANGUAGE",
+  },
   setupConfirmation: {
     name: "WHATSAPP_SETUP_CONFIRMATION_TEMPLATE_NAME",
     language: "WHATSAPP_SETUP_CONFIRMATION_TEMPLATE_LANGUAGE",
@@ -122,6 +126,9 @@ function templateName(kind: WhatsAppTemplateKind): string | null {
 }
 
 function templateLanguage(kind: WhatsAppTemplateKind): string {
+  if (kind === "verificationCode") {
+    return value(WHATSAPP_TEMPLATE_ENV[kind].language) ?? "";
+  }
   return value(WHATSAPP_TEMPLATE_ENV[kind].language) ?? DEFAULT_TEMPLATE_LANGUAGE;
 }
 
@@ -203,6 +210,35 @@ export function requireWhatsAppDeliveryConfig(kind: WhatsAppTemplateKind): Whats
   return { ...config, accessToken: config.accessToken, phoneNumberId: config.phoneNumberId, templateName };
 }
 
+export function requireWhatsAppVerificationDeliveryConfig(): WhatsAppRuntimeConfig & {
+  accessToken: string;
+  phoneNumberId: string;
+  templateName: string;
+  templateLanguage: string;
+} {
+  const config = getWhatsAppRuntimeConfig();
+  const stagingOverride =
+    process.env.APP_ENV?.trim().toLowerCase() === "staging" &&
+    config.stagingRealDeliveryAllowed &&
+    Boolean(config.stagingTesterPhone);
+  if (!config.enabled && !stagingOverride) {
+    throw new Error("WhatsApp verification delivery is disabled.");
+  }
+  if (!config.accessToken) throw new Error("WHATSAPP_API_KEY is not configured.");
+  if (!config.phoneNumberId) throw new Error("WHATSAPP_PHONE_NUMBER_ID is not configured.");
+  const templateName = config.templates.verificationCode;
+  if (!templateName) throw new Error("WhatsApp verification code template is not configured.");
+  const templateLanguage = config.templateLanguages.verificationCode;
+  if (!templateLanguage) throw new Error("WhatsApp verification code template language is not configured.");
+  return {
+    ...config,
+    accessToken: config.accessToken,
+    phoneNumberId: config.phoneNumberId,
+    templateName,
+    templateLanguage,
+  };
+}
+
 export function getBookingTemplateParameterOrder(): string[] {
   const configured = value("WHATSAPP_BOOKING_APPROVAL_PARAMETER_ORDER");
   return (configured ??
@@ -224,6 +260,11 @@ export function validateWhatsAppEnvironment(): {
     ["WHATSAPP_BUSINESS_ACCOUNT_ID", config.businessAccountId],
     ["WHATSAPP_APP_SECRET", config.appSecret],
     ["WHATSAPP_WEBHOOK_VERIFY_TOKEN", config.webhookVerifyToken],
+    [WHATSAPP_TEMPLATE_ENV.verificationCode.name, config.templates.verificationCode],
+    [
+      WHATSAPP_TEMPLATE_ENV.verificationCode.language,
+      value(WHATSAPP_TEMPLATE_ENV.verificationCode.language),
+    ],
     [WHATSAPP_TEMPLATE_ENV.setupConfirmation.name, config.templates.setupConfirmation],
     [WHATSAPP_TEMPLATE_ENV.setupConfirmation.language, value(WHATSAPP_TEMPLATE_ENV.setupConfirmation.language)],
     [WHATSAPP_TEMPLATE_ENV.bookingApproval.name, config.templates.bookingApproval],

@@ -1,6 +1,8 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 
-export type HostWhatsAppOtpProvider = "twofactor" | "staging_test";
+import { sendWhatsAppAuthenticationOtp } from "@/lib/notifications/providers/whatsapp";
+
+export type HostWhatsAppOtpProvider = "meta_whatsapp" | "twofactor" | "staging_test";
 
 type OtpSendResult = {
   provider: HostWhatsAppOtpProvider;
@@ -13,7 +15,10 @@ function stagingProjectSelected(): boolean {
   return url.includes("nsanahmopvwrlwvmxdmf.supabase.co");
 }
 export function isStagingTestOtpEnabled(): boolean {
+  const appEnv = process.env.APP_ENV?.trim().toLowerCase();
   return (
+    process.env.NODE_ENV !== "production" &&
+    (appEnv === "local" || appEnv === "test") &&
     stagingProjectSelected() &&
     String(process.env.FAMLO_ENABLE_STAGING_TEST_OTP ?? "").trim().toLowerCase() === "true"
   );
@@ -60,6 +65,10 @@ async function callTwoFactor(url: string): Promise<Record<string, unknown>> {
   throw new Error(typeof payload?.Details === "string" ? payload.Details : "OTP provider request failed.");
 }
 
+function generateOtpCode(): string {
+  return String(randomInt(100_000, 1_000_000));
+}
+
 export async function sendHostWhatsappOtp(input: {
   challengeId?: string;
   phoneE164: string;
@@ -78,17 +87,25 @@ export async function sendHostWhatsappOtp(input: {
     };
   }
 
-  const apiKey = process.env.TWO_FACTOR_API_KEY?.trim();
-  if (!apiKey) throw new Error("Phone verification is not configured.");
-  const digits = input.phoneE164.replace(/\D/g, "");
-  const result = await callTwoFactor(`https://2factor.in/API/V1/${apiKey}/SMS/${digits}/AUTOGEN`);
-  const sessionId = typeof result.Details === "string" ? result.Details : "";
-  if (!sessionId) throw new Error("OTP provider did not return a verification session.");
+  const code = generateOtpCode();
+  const result = await sendWhatsAppAuthenticationOtp({
+    phone: input.phoneE164,
+    code,
+  });
+  if (result.status !== "processed" || !result.providerMessageId) {
+    const error = new Error(result.errorMessage ?? "WhatsApp could not send the verification code.");
+    Object.assign(error, { code: result.errorCode ?? "whatsapp_otp_send_failed" });
+    throw error;
+  }
   return {
     challengeId,
-    provider: "twofactor",
-    providerSessionId: sessionId,
-    codeHash: null,
+    provider: "meta_whatsapp",
+    providerSessionId: result.providerMessageId,
+    codeHash: hashHostWhatsappOtp({
+      challengeId,
+      phoneE164: input.phoneE164,
+      code,
+    }),
   };
 }
 
@@ -102,8 +119,9 @@ export async function verifyHostWhatsappOtp(input: {
 }): Promise<boolean> {
   if (!/^\d{6}$/.test(input.code)) return false;
 
-  if (input.provider === "staging_test") {
-    if (!isStagingTestOtpEnabled() || !input.codeHash) return false;
+  if (input.provider === "staging_test" || input.provider === "meta_whatsapp") {
+    if (input.provider === "staging_test" && !isStagingTestOtpEnabled()) return false;
+    if (!input.codeHash) return false;
     return constantTimeMatch(
       hashHostWhatsappOtp({
         challengeId: input.challengeId,

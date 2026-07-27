@@ -280,7 +280,7 @@ test("booking approval buttons enforce Approve at index 0 and Decline at index 1
 
 test("every created template has a distinct environment-backed name and language", () => {
   const contracts = Object.values(WHATSAPP_TEMPLATE_ENV);
-  assert.equal(contracts.length, 15);
+  assert.equal(contracts.length, 16);
   assert.equal(new Set(contracts.map((contract) => contract.name)).size, contracts.length);
   assert.equal(new Set(contracts.map((contract) => contract.language)).size, contracts.length);
 });

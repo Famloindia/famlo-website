@@ -23,6 +23,7 @@ type Row = Record<string, any>;
 type Tables = Record<string, Row[]>;
 
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://nsanahmopvwrlwvmxdmf.supabase.co";
+process.env.APP_ENV = "test";
 process.env.FAMLO_ENABLE_STAGING_TEST_OTP = "true";
 process.env.FAMLO_STAGING_TEST_OTP_CODE = "654321";
 process.env.FAMLO_ENABLE_WHATSAPP_NOTIFICATIONS = "false";
