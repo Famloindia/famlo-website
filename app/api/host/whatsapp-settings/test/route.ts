@@ -64,6 +64,35 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
+    const [{ data: host, error: hostError }, { data: family, error: familyError }] = await Promise.all([
+      supabase
+        .from("hosts")
+        .select("display_name")
+        .eq("user_id", session.hostUserId)
+        .eq("legacy_family_id", session.familyId)
+        .maybeSingle(),
+      supabase
+        .from("families")
+        .select("property_name,name")
+        .eq("id", session.familyId)
+        .maybeSingle(),
+    ]);
+    if (hostError) throw hostError;
+    if (familyError) throw familyError;
+    if (!family) {
+      return NextResponse.json(
+        { ok: false, code: "property_not_found", message: "The selected property could not be loaded." },
+        { status: 404 }
+      );
+    }
+    const hostDisplayName =
+      String((host as { display_name?: string | null } | null)?.display_name ?? "").trim() ||
+      "Famlo host";
+    const propertyName =
+      String((family as { property_name?: string | null }).property_name ?? "").trim() ||
+      String((family as { name?: string | null }).name ?? "").trim() ||
+      "Famlo property";
+
     const bucket = Math.floor(Date.now() / (10 * 60 * 1000));
     const queued = await enqueueNotificationRecord(supabase, {
       eventType: "host_whatsapp_test",
@@ -75,7 +104,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       recipientPhone: eligible.phoneE164,
       templateName: config.templates.setupConfirmation,
       payload: {
-        template_variables: ["Famlo host"],
+        template_variables: [hostDisplayName, propertyName],
       },
     });
     await supabase.from("host_whatsapp_audit_log").insert({

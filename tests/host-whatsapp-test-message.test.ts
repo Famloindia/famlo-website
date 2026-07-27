@@ -99,6 +99,9 @@ test("setup test API queues the configured event without calling Meta directly",
   const source = readFileSync("app/api/host/whatsapp-settings/test/route.ts", "utf8");
   assert.match(source, /eventType: "host_whatsapp_test"/);
   assert.match(source, /templateName: config\.templates\.setupConfirmation/);
+  assert.match(source, /template_variables: \[hostDisplayName, propertyName\]/);
+  assert.match(source, /\.eq\("legacy_family_id", session\.familyId\)/);
+  assert.match(source, /\.eq\("id", session\.familyId\)/);
   assert.match(source, /enqueueNotificationRecord/);
   assert.doesNotMatch(source, /sendWhatsAppTemplateNotification|graph\.facebook/);
 });
@@ -129,12 +132,21 @@ test("worker sends the Vercel-configured setup template and language under stagi
     templateKind: "setupConfirmation",
     templateName: "configured_setup_template",
     languageCode: "configured_language",
-    bodyVariables: ["Famlo host"],
+    bodyVariables: ["Aryan Krishan", "Aryan Krishan's Home"],
     stagingExplicitDelivery: true,
   });
   assert.equal(result.providerMessageId, "wamid.setup-real");
   assert.equal(requestBody?.template?.name, "configured_setup_template");
   assert.equal(requestBody?.template?.language?.code, "configured_language");
+  assert.deepEqual(requestBody?.template?.components, [
+    {
+      type: "body",
+      parameters: [
+        { type: "text", text: "Aryan Krishan" },
+        { type: "text", text: "Aryan Krishan's Home" },
+      ],
+    },
+  ]);
 
   const worker = readFileSync("lib/notifications/notification-worker.ts", "utf8");
   assert.match(worker, /eventType === "host_whatsapp_test"/);
