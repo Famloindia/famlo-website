@@ -118,6 +118,7 @@ export function ProfileCompletionForm({
     "idle" | "sending" | "sent" | "verifying"
   >("idle");
   const [emailOtp, setEmailOtp] = useState("");
+  const [emailConflict, setEmailConflict] = useState(false);
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<GuestProfileFieldErrors>({});
@@ -455,6 +456,12 @@ export function ProfileCompletionForm({
         }),
       });
       const payload = await response.json();
+      if (!response.ok && payload.code === "EMAIL_ALREADY_LINKED") {
+        setEmailConflict(true);
+        setEmailOtpState("idle");
+        setMessage(null);
+        return;
+      }
       if (!response.ok) throw new Error(payload.error ?? "Unable to verify this email.");
       setEmailOtpState("sent");
       setMessage({ type: "success", text: "Check your email for the verification code." });
@@ -465,6 +472,32 @@ export function ProfileCompletionForm({
         text: error instanceof Error ? error.message : "Unable to verify this email.",
       });
     }
+  }
+
+  function useAnotherEmail(): void {
+    setDraft((current) => ({ ...current, email: "" }));
+    setEmailConflict(false);
+    setEmailOtp("");
+    setEmailOtpState("idle");
+    setFieldErrors((current) => ({ ...current, email: undefined }));
+    setMessage(null);
+  }
+
+  async function logInWithLinkedEmail(): Promise<void> {
+    const currentReturn = new URL(window.location.href);
+    currentReturn.searchParams.set("auth", "login");
+    const { error } = await supabase.auth.signOut({ scope: "local" });
+    if (error) {
+      setMessage({
+        type: "error",
+        text: "The login handoff could not be started. Please try again.",
+      });
+      return;
+    }
+    await fetch("/api/auth/session", { method: "DELETE", cache: "no-store" });
+    window.location.replace(
+      `${currentReturn.pathname}${currentReturn.search}${currentReturn.hash}`
+    );
   }
 
   async function verifyEmailOtp(): Promise<void> {
@@ -1041,6 +1074,7 @@ export function ProfileCompletionForm({
               setDraft((current) => ({ ...current, email: event.target.value }));
               setEmailOtp("");
               setEmailOtpState("idle");
+              setEmailConflict(false);
             }}
             placeholder="name@example.com"
           />
@@ -1089,6 +1123,31 @@ export function ProfileCompletionForm({
               >
                 {emailOtpState === "verifying" ? "Checking..." : "Verify"}
               </button>
+            </div>
+          ) : null}
+          {emailConflict ? (
+            <div className="phone-conflict" role="alert">
+              <strong>This email is already linked to another Famlo account.</strong>
+              <p>
+                Log in to that account to prove ownership, or use a different email
+                for this profile.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  className="conflict-primary"
+                  onClick={() => void logInWithLinkedEmail()}
+                >
+                  Log in with this email
+                </button>
+                <button
+                  type="button"
+                  className="conflict-secondary"
+                  onClick={useAnotherEmail}
+                >
+                  Use another email
+                </button>
+              </div>
             </div>
           ) : null}
         </label>

@@ -228,6 +228,17 @@ test("email already linked to another account enters linking flow", () => {
   );
 });
 
+test("email conflict UI offers ownership login without automatic merging", async () => {
+  const form = await readFile(
+    "components/account/ProfileCompletionForm.tsx",
+    "utf8"
+  );
+  assert.match(form, /Log in with this email/);
+  assert.match(form, /Use another email/);
+  assert.match(form, /supabase\.auth\.signOut/);
+  assert.doesNotMatch(form, /auth\.admin\.(?:deleteUser|updateUserById)/);
+});
+
 test("basic profile details save before contact verification", () => {
   const errors = validateGuestProfileDetailsInput({
     userId: "user-1",
