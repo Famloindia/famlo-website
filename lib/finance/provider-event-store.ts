@@ -48,6 +48,7 @@ function mapRow(row: Record<string, unknown>): PaymentProviderEventRecord {
     rawPayload: (row.raw_payload as JsonRecord | null) ?? {},
     signatureValid: row.signature_valid === true,
     processingStatus: String(row.processing_status ?? "received") as PaymentProviderEventProcessingStatus,
+    processingAttempts: Number(row.processing_attempts ?? 0),
     processedAt: asString(row.processed_at),
     errorMessage: asString(row.error_message),
     createdAt: String(row.created_at ?? ""),
@@ -92,8 +93,10 @@ export async function storePaymentProviderEvent(
     raw_payload: input.rawPayload,
     signature_valid: input.signatureValid,
     processing_status: input.processingStatus,
+    processing_attempts: 1,
     processed_at: input.processedAt ?? null,
     error_message: input.errorMessage ?? null,
+    updated_at: new Date().toISOString(),
   };
 
   const insertResult = await supabase
@@ -125,8 +128,21 @@ export async function storePaymentProviderEvent(
     throw insertResult.error;
   }
 
+  const existingRecord = mapRow(existingResult.data as Record<string, unknown>);
+  if (existingRecord.processingStatus === "failed" && input.signatureValid) {
+    const { error: retryUpdateError } = await supabase
+      .from("payment_provider_events")
+      .update({
+        processing_attempts: existingRecord.processingAttempts + 1,
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("provider", input.provider)
+      .eq("event_id", input.eventId);
+    if (retryUpdateError) throw retryUpdateError;
+  }
+
   return {
-    record: mapRow(existingResult.data as Record<string, unknown>),
+    record: existingRecord,
     isDuplicate: true,
   };
 }
@@ -147,6 +163,7 @@ export async function updatePaymentProviderEventStatus(
       processing_status: input.processingStatus,
       processed_at: input.processedAt ?? null,
       error_message: input.errorMessage ?? null,
+      updated_at: new Date().toISOString(),
     } as never)
     .eq("provider", input.provider)
     .eq("event_id", input.eventId);

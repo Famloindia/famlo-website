@@ -41,6 +41,11 @@ import { AuthModal } from "@/components/auth/AuthModal";
 import { getCurrentInternalPath, redirectForIncompleteBookingProfile } from "@/lib/booking-profile-gate-client";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
+import {
+  openCashfreeCheckout,
+  sendCashfreeReturnAdvisory,
+  type CashfreeCheckoutOrder,
+} from "@/lib/cashfree-checkout-client";
 
 type RazorpayOrderPayload = {
   provider: "razorpay";
@@ -345,7 +350,6 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
           hostUserId: hostUserId ?? null,
           welcomeMessage,
           requestPaymentIntent: true,
-          gateway: "razorpay",
           returnTo: getCurrentInternalPath(),
         }),
       });
@@ -484,6 +488,31 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         });
 
         checkout.open();
+        return;
+      }
+
+      if (paymentIntentPayload.integrationStatus === "cashfree_ready" && paymentIntentPayload.order) {
+        const order = paymentIntentPayload.order as CashfreeCheckoutOrder;
+        const result = await openCashfreeCheckout(order);
+
+        if (result.error) {
+          setFeedback({
+            type: "error",
+            text: "Payment was not completed. If money was debited, Famlo will update this booking after Cashfree confirms it.",
+          });
+          return;
+        }
+
+        if (result.paymentDetails) {
+          await sendCashfreeReturnAdvisory(order).catch(() => null);
+          router.push(`/bookings?bookingId=${encodeURIComponent(order.bookingId)}&payment_status=pending_webhook`);
+          return;
+        }
+
+        setFeedback({
+          type: "success",
+          text: "Payment confirmation is pending. Famlo will update the booking after Cashfree sends its signed confirmation.",
+        });
         return;
       }
 

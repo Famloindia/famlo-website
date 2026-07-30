@@ -49,7 +49,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (shouldCreatePaymentIntent) {
       const paymentIntent = await createPaymentIntentForBooking(supabase, {
         bookingId: result.bookingId,
-        gateway: body.gateway ?? "razorpay",
       });
 
       return NextResponse.json({

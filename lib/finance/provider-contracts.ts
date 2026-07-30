@@ -43,6 +43,7 @@ export type PaymentProviderEventRecord = {
   rawPayload: Record<string, unknown>;
   signatureValid: boolean;
   processingStatus: PaymentProviderEventProcessingStatus;
+  processingAttempts: number;
   processedAt: string | null;
   errorMessage: string | null;
   createdAt: string;

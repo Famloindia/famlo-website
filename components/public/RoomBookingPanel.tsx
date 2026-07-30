@@ -11,6 +11,11 @@ import { isGuestProfileComplete } from "@/lib/user-profile";
 import { useUser } from "@/components/auth/UserContext";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
+import {
+  openCashfreeCheckout,
+  sendCashfreeReturnAdvisory,
+  type CashfreeCheckoutOrder,
+} from "@/lib/cashfree-checkout-client";
 import type { StayUnitRecord } from "@/lib/stay-units";
 
 type RoomBookingPanelProps = {
@@ -517,7 +522,6 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           hostUserId: home.hostUserId,
           welcomeMessage: `Welcome to ${home.listingTitle ?? home.name}. Booking created from the room page.`,
           requestPaymentIntent: true,
-          gateway: "razorpay",
           returnTo: getCurrentInternalPath(),
         }),
       });
@@ -635,6 +639,28 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           checkout.open();
           setReceipt(null);
           setSuccessMessage("Complete payment in the Razorpay window to confirm this booking.");
+        } else if (paymentIntentPayload.integrationStatus === "cashfree_ready" && paymentIntentPayload.order) {
+          const order = paymentIntentPayload.order as CashfreeCheckoutOrder;
+          const result = await openCashfreeCheckout(order);
+          setBookingPhase("idle");
+          setReceipt(null);
+
+          if (result.error) {
+            setSuccessMessage(null);
+            setBookingError(
+              "Payment was not completed. If money was debited, Famlo will update this booking after Cashfree confirms it."
+            );
+          } else if (result.paymentDetails) {
+            await sendCashfreeReturnAdvisory(order).catch(() => null);
+            setSuccessMessage("Payment received by Cashfree. Famlo is waiting for the signed confirmation.");
+            window.location.assign(
+              `/bookings?bookingId=${encodeURIComponent(order.bookingId)}&payment_status=pending_webhook`
+            );
+          } else {
+            setSuccessMessage(
+              "Payment confirmation is pending. Famlo will update the booking after Cashfree sends its signed confirmation."
+            );
+          }
         } else {
           setBookingPhase("idle");
           setReceipt(null);
@@ -672,7 +698,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             <div className="famlo-booking-loader-copy">
               {bookingPhase === "verifying"
                 ? "Please wait while we confirm your payment and move you to My Bookings."
-                : "We are setting up Razorpay for this room."}
+                : "We are setting up secure payment for this room."}
             </div>
           </div>
         </div>

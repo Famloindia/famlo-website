@@ -165,6 +165,23 @@ export function isRazorpayRefundsEnabled(): boolean {
   return isEnabled(process.env.RAZORPAY_REFUNDS_ENABLED, false);
 }
 
+export function getFamloPaymentProvider(): "razorpay" | "cashfree" {
+  const normalized = String(process.env.FAMLO_PAYMENT_PROVIDER ?? "razorpay").trim().toLowerCase();
+  return normalized === "cashfree" ? "cashfree" : "razorpay";
+}
+
+export function isCashfreeEasySplitEnabled(): boolean {
+  return isEnabled(process.env.CASHFREE_EASY_SPLIT_ENABLED, false);
+}
+
+export function isCashfreeDeferredSettlementEnabled(): boolean {
+  return isEnabled(process.env.CASHFREE_DEFERRED_SETTLEMENT_ENABLED, false);
+}
+
+export function isCashfreeRefundsEnabled(): boolean {
+  return isEnabled(process.env.CASHFREE_REFUNDS_ENABLED, false);
+}
+
 export function isRazorpayXEnabled(): boolean {
   return isEnabled(process.env.RAZORPAYX_ENABLED, false) && isRuntimeSafetySatisfied("razorpayx");
 }

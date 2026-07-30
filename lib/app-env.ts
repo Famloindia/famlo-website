@@ -4,6 +4,7 @@ export type RuntimeSafetyScope =
   | "supabase"
   | "razorpay"
   | "razorpayx"
+  | "cashfree"
   | "channex"
   | "email_execution"
   | "whatsapp_execution"
@@ -22,8 +23,11 @@ export type RuntimeSafetyCode =
   | "unsafe_whatsapp_execution_outside_production"
   | "razorpay_not_configured"
   | "razorpayx_not_configured"
+  | "cashfree_not_configured"
   | "live_key_not_allowed_outside_production"
   | "test_key_not_allowed_in_production"
+  | "cashfree_production_not_allowed_outside_production"
+  | "cashfree_sandbox_not_allowed_in_production"
   | "production_supabase_url_not_allowed_outside_production"
   | "non_production_supabase_url_not_allowed_in_production"
   | "production_channex_not_allowed_outside_production"
@@ -90,6 +94,13 @@ export function detectRazorpayKeyMode(keyId: string | null): ProviderKeyMode {
   if (!keyId) return "missing";
   if (keyId.startsWith("rzp_test_")) return "test";
   if (keyId.startsWith("rzp_live_")) return "live";
+  return "unknown";
+}
+
+function detectCashfreeStage(env: NodeJS.ProcessEnv): DeploymentStage {
+  const explicit = String(env.CASHFREE_ENV ?? "sandbox").trim().toLowerCase();
+  if (explicit === "production" || explicit === "prod" || explicit === "live") return "production";
+  if (explicit === "sandbox" || explicit === "test" || explicit === "staging") return "staging";
   return "unknown";
 }
 
@@ -205,6 +216,7 @@ export function evaluateRuntimeSafety(
   const appEnv = getAppEnv(env);
   const razorpayKeyMode = detectRazorpayKeyMode(asTrimmedString(env.RAZORPAY_KEY_ID));
   const razorpayXKeyMode = detectRazorpayKeyMode(asTrimmedString(env.RAZORPAYX_KEY_ID));
+  const cashfreeStage = detectCashfreeStage(env);
   const supabaseStage = detectSupabaseStage(asTrimmedString(env.NEXT_PUBLIC_SUPABASE_URL), env);
   const channexStage = detectChannexStage(resolveChannexBaseUrl(env), env);
 
@@ -242,6 +254,29 @@ export function evaluateRuntimeSafety(
     }
     if (appEnv === "production" && razorpayXKeyMode === "test") {
       return blocked(scope, appEnv, "test_key_not_allowed_in_production", "Production cannot use RazorpayX test keys.");
+    }
+    return ok(scope, appEnv);
+  }
+
+  if (scope === "cashfree") {
+    if (!asTrimmedString(env.CASHFREE_CLIENT_ID) || !asTrimmedString(env.CASHFREE_CLIENT_SECRET)) {
+      return blocked(scope, appEnv, "cashfree_not_configured", "Cashfree is not fully configured.");
+    }
+    if (appEnv !== "production" && cashfreeStage === "production") {
+      return blocked(
+        scope,
+        appEnv,
+        "cashfree_production_not_allowed_outside_production",
+        "Cashfree production mode is not allowed outside production."
+      );
+    }
+    if (appEnv === "production" && cashfreeStage !== "production") {
+      return blocked(
+        scope,
+        appEnv,
+        "cashfree_sandbox_not_allowed_in_production",
+        "Production cannot use Cashfree sandbox mode."
+      );
     }
     return ok(scope, appEnv);
   }

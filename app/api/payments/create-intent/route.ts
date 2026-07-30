@@ -6,16 +6,15 @@ import { createAdminSupabaseClient } from "@/lib/supabase";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const body = (await req.json()) as { bookingId?: string; gateway?: string };
+    const body = (await req.json()) as { bookingId?: string };
     const bookingId = String(body.bookingId ?? "").trim();
-    const gateway = String(body.gateway ?? "razorpay").trim();
 
     if (!bookingId) {
       return NextResponse.json({ error: "bookingId is required." }, { status: 400 });
     }
 
     const supabase = createAdminSupabaseClient();
-    const result = await createPaymentIntentForBooking(supabase, { bookingId, gateway });
+    const result = await createPaymentIntentForBooking(supabase, { bookingId });
 
     return NextResponse.json({
       payment: result.payment,

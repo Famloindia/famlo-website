@@ -6,7 +6,15 @@ import { calculateSection95FinanceContract } from "@/lib/finance/section-9-5-eng
 import { getFinanceSettings } from "@/lib/finance/settings";
 import { upsertPaymentIntentAudit } from "@/lib/finance/payment-audit";
 import { ensureBookingFinancialSnapshot } from "@/lib/finance/runtime";
-import { createRazorpayOrder, isRazorpayConfigured } from "@/lib/razorpay";
+import {
+  createProviderPaymentOrder,
+  fetchProviderPaymentOrder,
+  getSelectedPaymentProvider,
+  isProviderConfigured,
+  type ProviderCheckoutPayload,
+} from "@/lib/payments/provider";
+import { getPublicSiteUrl } from "@/lib/site-url";
+import { loadUserProfileCompatibility } from "@/lib/user-profile";
 
 type PaymentIntentRow = {
   id: string;
@@ -34,7 +42,7 @@ type ResolvedCheckoutPricing = {
 
 export type PaymentIntentResult = {
   payment: PaymentIntentRow;
-  order: Record<string, unknown> | null;
+  order: ProviderCheckoutPayload | null;
   integrationStatus: string;
   nextStep: string;
 };
@@ -250,7 +258,7 @@ export async function createPaymentIntentForBooking(
   input: { bookingId: string; gateway?: string | null }
 ): Promise<PaymentIntentResult> {
   const bookingId = String(input.bookingId ?? "").trim();
-  const gateway = String(input.gateway ?? "razorpay").trim() || "razorpay";
+  const gateway = getSelectedPaymentProvider(input.gateway);
 
   if (!bookingId) {
     throw new Error("bookingId is required.");
@@ -258,7 +266,7 @@ export async function createPaymentIntentForBooking(
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings_v2")
-    .select("id,booking_type,total_price,partner_payout_amount,pricing_snapshot,payment_id,host_id,stay_unit_id")
+    .select("id,booking_type,total_price,partner_payout_amount,pricing_snapshot,payment_id,host_id,stay_unit_id,user_id")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -284,12 +292,12 @@ export async function createPaymentIntentForBooking(
   const existingPaymentResult = booking.payment_id
     ? await supabase
         .from("payments_v2")
-        .select("id,gateway_order_id,raw_response")
+        .select("id,booking_id,gateway,gateway_order_id,raw_response,amount_total,platform_fee,tax_amount,partner_payout_amount,status,created_at,payment_attempt_number")
         .eq("id", booking.payment_id)
         .maybeSingle()
     : await supabase
         .from("payments_v2")
-        .select("id,gateway_order_id,raw_response")
+        .select("id,booking_id,gateway,gateway_order_id,raw_response,amount_total,platform_fee,tax_amount,partner_payout_amount,status,created_at,payment_attempt_number")
         .eq("booking_id", bookingId)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -300,24 +308,44 @@ export async function createPaymentIntentForBooking(
   }
 
   const existingPayment = existingPaymentResult.data;
-  const manualFallback = !isRazorpayConfigured() || gateway !== "razorpay";
+  const existingStatus = String(existingPayment?.status ?? "").trim().toLowerCase();
+  if (existingPayment && ["paid", "captured", "refunded", "partially_refunded"].includes(existingStatus)) {
+    return {
+      payment: existingPayment as PaymentIntentRow,
+      order: null,
+      integrationStatus: "already_paid",
+      nextStep: "Use the existing canonical payment and booking state.",
+    };
+  }
+
+  const manualFallback = !isProviderConfigured(gateway);
+  const existingGateway = String(existingPayment?.gateway ?? "").trim().toLowerCase();
+  const reuseExistingPayment = Boolean(existingPayment && existingGateway === gateway);
+  const paymentAttemptNumber = reuseExistingPayment
+    ? Number(existingPayment?.payment_attempt_number ?? 1)
+    : Math.max(1, Number(existingPayment?.payment_attempt_number ?? 0) + 1);
+  const paymentIdempotencyKey = `booking-payment:${bookingId}:${gateway}:${paymentAttemptNumber}`;
 
   const { data: payment, error: paymentError } = await supabase
     .from("payments_v2")
     .upsert(
       {
-        id: existingPayment?.id ?? booking.payment_id ?? undefined,
+        id: reuseExistingPayment ? existingPayment?.id : undefined,
         booking_id: bookingId,
         gateway,
+        provider: gateway,
         amount_total: amountTotal,
+        amount_minor: amountTotal * 100,
         platform_fee: platformFee,
         tax_amount: taxAmount,
         partner_payout_amount:
           resolvedPricing.partnerPayoutAmount,
+        payment_attempt_number: paymentAttemptNumber,
+        idempotency_key: paymentIdempotencyKey,
         status: "created",
         raw_response: {
-          ...((existingPayment?.raw_response as Record<string, unknown> | null) ?? {}),
-          intent_type: manualFallback ? "manual_integration_pending" : "razorpay_order_pending",
+          ...((reuseExistingPayment ? existingPayment?.raw_response : null) as Record<string, unknown> | null),
+          intent_type: manualFallback ? "manual_integration_pending" : `${gateway}_order_pending`,
           internal_guest_payable_amount: amountTotal,
         },
       },
@@ -328,10 +356,10 @@ export async function createPaymentIntentForBooking(
 
   if (paymentError) throw paymentError;
 
-  let orderPayload: Record<string, unknown> | null = null;
+  let orderPayload: ProviderCheckoutPayload | null = null;
   let integrationStatus = "ready_for_gateway";
   let nextStep =
-    "Create your Razorpay or Stripe order from this pricing payload, then write the gateway IDs back into payments_v2 on capture.";
+    "Create your provider order from this pricing payload, then write the gateway IDs back into payments_v2 on capture.";
 
   if (!manualFallback) {
     const checkoutBreakdown = extractCheckoutPricingBreakdown(pricingSnapshot);
@@ -339,32 +367,66 @@ export async function createPaymentIntentForBooking(
       asString(pricingSnapshot.property_id) ??
       asString(pricingSnapshot.propertyId) ??
       asString(booking.stay_unit_id);
-    const order =
+    const customerProfile =
+      typeof booking.user_id === "string" && booking.user_id.trim().length > 0
+        ? await loadUserProfileCompatibility(supabase, booking.user_id)
+        : null;
+    const baseUrl = getPublicSiteUrl();
+    const returnUrl = `${baseUrl}/api/payments/cashfree/return?bookingId=${encodeURIComponent(
+      bookingId
+    )}&paymentRowId=${encodeURIComponent(payment.id)}&order_id={order_id}`;
+    const notifyUrl = new URL("/api/payments/cashfree/webhook", baseUrl);
+    const orderResult =
       typeof payment.gateway_order_id === "string" && payment.gateway_order_id.length > 0
-        ? {
-            id: payment.gateway_order_id,
-            amount: amountTotal * 100,
+        ? await fetchProviderPaymentOrder({
+            provider: gateway,
+            externalOrderId: payment.gateway_order_id,
+            bookingId,
+            paymentId: payment.id,
+            amountMinor: amountTotal * 100,
             currency: "INR",
-          }
-        : await createRazorpayOrder({
-            amountRupees: amountTotal,
-            receipt: payment.id,
-            notes: buildRazorpayOrderNotes({
-              bookingId,
-              hostId: asString(booking.host_id),
-              propertyId,
-              paymentIntentId: payment.id,
-            }),
+            checkoutBreakdown,
+          })
+        : await createProviderPaymentOrder({
+            provider: gateway,
+            bookingId,
+            paymentId: payment.id,
+            amountMinor: amountTotal * 100,
+            currency: "INR",
+            hostId: asString(booking.host_id),
+            propertyId,
+            customer: {
+              id: asString(booking.user_id) ?? bookingId,
+              name: customerProfile?.name ?? null,
+              email: customerProfile?.email ?? null,
+              phone: customerProfile?.phone ?? null,
+            },
+            returnUrl: gateway === "cashfree" ? returnUrl : null,
+            notifyUrl: gateway === "cashfree" ? notifyUrl.toString() : null,
+            checkoutBreakdown,
           });
+    const externalOrderId = orderResult?.externalOrderId ?? payment.gateway_order_id;
+    if (!externalOrderId) {
+      throw new Error("Payment provider order id was not created.");
+    }
 
     const { error: orderUpdateError } = await supabase
       .from("payments_v2")
       .update({
-        gateway: "razorpay",
-        gateway_order_id: order.id,
+        gateway,
+        provider: gateway,
+        gateway_order_id: externalOrderId,
+        external_order_id: externalOrderId,
+        amount_minor: amountTotal * 100,
+        idempotency_key: paymentIdempotencyKey,
+        provider_status: "ACTIVE",
+        order_expires_at:
+          typeof orderResult?.raw.order_expiry_time === "string"
+            ? orderResult.raw.order_expiry_time
+            : null,
         raw_response: {
           ...((payment.raw_response as Record<string, unknown> | null) ?? {}),
-          razorpay_order: order,
+          provider_order: orderResult?.raw ?? {},
         },
       } as never)
       .eq("id", payment.id);
@@ -373,18 +435,12 @@ export async function createPaymentIntentForBooking(
       throw orderUpdateError;
     }
 
-    orderPayload = {
-      provider: "razorpay",
-      keyId: process.env.RAZORPAY_KEY_ID ?? "",
-      orderId: order.id,
-      amount: order.amount,
-      currency: "INR",
-      bookingId,
-      paymentRowId: payment.id,
-      checkoutBreakdown,
-    };
-    integrationStatus = "razorpay_ready";
-    nextStep = "Open Razorpay Checkout with this order payload, then call /api/payments/verify on success.";
+    orderPayload = orderResult.checkout;
+    integrationStatus = `${gateway}_ready`;
+    nextStep =
+      gateway === "cashfree"
+        ? "Open Cashfree Hosted Checkout with the payment session id. Treat return callbacks as advisory and wait for the verified webhook."
+        : "Open Razorpay Checkout with this order payload, then call /api/payments/verify on success.";
   }
 
   await Promise.all([

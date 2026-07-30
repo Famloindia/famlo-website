@@ -12,6 +12,16 @@ declare global {
         }) => void
       ) => void;
     };
+    Cashfree?: (options: { mode: "sandbox" | "production" }) => {
+      checkout: (options: {
+        paymentSessionId: string;
+        redirectTarget?: "_self" | "_blank" | "_top" | "_modal" | HTMLElement;
+      }) => Promise<{
+        error?: unknown;
+        redirect?: boolean;
+        paymentDetails?: { paymentMessage?: string };
+      }> | void;
+    };
   }
 }
 

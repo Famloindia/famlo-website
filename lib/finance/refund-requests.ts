@@ -1,12 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  isCashfreeRefundsEnabled,
   isRazorpayRefundsEnabled,
   isRefundAdminApprovalRequired,
   isRefundProviderExecutionEnabled,
 } from "@/lib/finance/feature-flags";
 import { calculateRefundPolicy, type RefundPolicyCase, type RefundPolicyInput } from "@/lib/finance/refund-policy";
 import { clampMoney } from "@/lib/finance/money";
+import { createCashfreeRefund, isCashfreeConfigured } from "@/lib/cashfree";
 import { createRazorpayRefund, isRazorpayConfigured } from "@/lib/razorpay";
 
 type JsonRecord = Record<string, unknown>;
@@ -17,6 +19,7 @@ export type RefundablePaymentRecord = {
   amount_total: number;
   tax_amount?: number | null;
   gateway?: string | null;
+  gateway_order_id?: string | null;
   gateway_payment_id?: string | null;
   refund_status?: string | null;
   status?: string | null;
@@ -54,7 +57,7 @@ export function shouldRequireAdminRefundApproval(): boolean {
 }
 
 export function canExecuteRefundProvider(): boolean {
-  return isRefundProviderExecutionEnabled() && isRazorpayRefundsEnabled();
+  return isRefundProviderExecutionEnabled() && (isRazorpayRefundsEnabled() || isCashfreeRefundsEnabled());
 }
 
 export function resolveRefundWebhookTransition(eventName: string): {
@@ -180,7 +183,7 @@ export async function approveAndMaybeInitiateRefund(
 
   const { data: payment, error: paymentError } = await supabase
     .from("payments_v2")
-    .select("id,booking_id,amount_total,tax_amount,gateway,gateway_payment_id,refund_status,status")
+    .select("id,booking_id,amount_total,tax_amount,gateway,gateway_order_id,gateway_payment_id,refund_status,status")
     .eq("id", request.payment_id)
     .maybeSingle();
   if (paymentError) throw paymentError;
@@ -193,6 +196,7 @@ export async function approveAndMaybeInitiateRefund(
     typeof input.providerExecutionEnabledOverride === "boolean"
       ? !input.providerExecutionEnabledOverride
       : !canExecuteRefundProvider();
+  const providerExecutionOverrideEnabled = input.providerExecutionEnabledOverride === true;
 
   if (providerExecutionBlocked) {
     const { error } = await supabase
@@ -215,12 +219,64 @@ export async function approveAndMaybeInitiateRefund(
     };
   }
 
+  const paymentGateway = String(payment.gateway ?? "").trim().toLowerCase();
   const providerConfigured =
     typeof input.providerConfiguredOverride === "boolean"
       ? input.providerConfiguredOverride
-      : isRazorpayConfigured();
+      : paymentGateway === "cashfree"
+        ? isCashfreeConfigured()
+        : isRazorpayConfigured();
 
-  if (String(payment.gateway ?? "").trim().toLowerCase() !== "razorpay" || !payment.gateway_payment_id || !providerConfigured) {
+  if (paymentGateway === "cashfree") {
+    if (!payment.gateway_order_id || !providerConfigured || (!providerExecutionOverrideEnabled && !isCashfreeRefundsEnabled())) {
+      throw new Error("Cashfree refund execution is not available for this payment.");
+    }
+
+    const merchantRefundId = `refund_${String(request.id).replace(/-/g, "").slice(0, 32)}`;
+    const refund = await createCashfreeRefund({
+      orderId: String(payment.gateway_order_id),
+      refundId: merchantRefundId,
+      amountMinor: Number(request.refund_amount ?? 0) * 100,
+      note: asString(request.reason) ?? "admin_refund_request",
+      idempotencyKey: String(request.id),
+    });
+
+    const providerRefundId = String(refund.cf_refund_id ?? refund.refund_id);
+    const { data: attempt, error: attemptError } = await supabase
+      .from("refund_attempts")
+      .insert({
+        refund_request_id: request.id,
+        provider: "cashfree",
+        provider_refund_id: providerRefundId,
+        amount: Number(request.refund_amount ?? 0),
+        status: "submitted",
+        raw_response: refund as unknown as JsonRecord,
+      })
+      .select("id")
+      .single();
+    if (attemptError) throw attemptError;
+
+    const { error: requestUpdateError } = await supabase
+      .from("refund_requests")
+      .update({
+        status: "processing",
+        approved_by: input.actorUserId ?? null,
+        approved_at: approvedAt,
+      } as never)
+      .eq("id", request.id);
+    if (requestUpdateError) throw requestUpdateError;
+
+    return {
+      refundRequestId: String(request.id),
+      status: "processing",
+      providerExecutionAttempted: true,
+      providerExecutionBlocked: false,
+      refundAttemptId: String(attempt.id),
+      providerRefundId,
+    };
+  }
+
+  if (paymentGateway !== "razorpay" || !payment.gateway_payment_id || !providerConfigured || (!providerExecutionOverrideEnabled && !isRazorpayRefundsEnabled())) {
     throw new Error("Razorpay refund execution is not available for this payment.");
   }
 

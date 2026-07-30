@@ -16,6 +16,7 @@ type JsonRecord = Record<string, unknown>;
 type FinalizablePaymentRecord = {
   id: string;
   booking_id: string;
+  gateway?: string | null;
   status?: string | null;
   amount_total?: number | string | null;
   tax_amount?: number | string | null;
@@ -697,7 +698,8 @@ export async function finalizeCapturedBookingPayment(
     providerPaymentStatus: string;
     providerAmountPaise: number;
     paidAt: string;
-    source: "payments.verify" | "payments.webhook";
+    source: string;
+    provider?: string | null;
     providerEventName: string;
     rawResponsePatch?: JsonRecord;
   }
@@ -742,13 +744,19 @@ export async function finalizeCapturedBookingPayment(
   const approvalRequired = await resolveBookingApprovalRequirement(supabase, booking);
   const nextStatus = approvalRequired ? "pending_host_approval" : "confirmed";
   const currentRawResponse = (input.payment.raw_response as JsonRecord | null) ?? {};
+  const provider = asString(input.provider) ?? asString(input.payment.gateway) ?? "razorpay";
 
   const { error: paymentUpdateError } = await supabase
     .from("payments_v2")
     .update({
-      gateway: "razorpay",
+      gateway: provider,
+      provider,
       gateway_order_id: input.gatewayOrderId,
+      external_order_id: input.gatewayOrderId,
       gateway_payment_id: input.gatewayPaymentId,
+      external_payment_id: input.gatewayPaymentId,
+      amount_minor: input.providerAmountPaise,
+      provider_status: input.providerPaymentStatus,
       status: "paid",
       paid_at: input.paidAt,
       raw_response: {
@@ -836,7 +844,7 @@ export async function finalizeCapturedBookingPayment(
     referenceType: input.source === "payments.verify" ? "payment_verify" : "payment_webhook",
     referenceId: `${input.providerEventName}:${input.gatewayPaymentId}`,
     metadata: {
-      provider: "razorpay",
+      provider,
       source: input.source,
     },
   });
@@ -851,7 +859,7 @@ export async function finalizeCapturedBookingPayment(
     referenceType: input.source === "payments.verify" ? "payment_verify_tax" : "payment_webhook_tax",
     referenceId: `tax:${input.providerEventName}:${input.gatewayPaymentId}`,
     metadata: {
-      provider: "razorpay",
+      provider,
       source: input.source,
     },
   });
@@ -909,7 +917,7 @@ export async function finalizeCapturedBookingPayment(
         referenceType: "payout_schedule",
         referenceId: payoutId,
         metadata: {
-          provider: "razorpay",
+          provider,
           source: input.source,
         },
       });

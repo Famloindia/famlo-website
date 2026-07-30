@@ -44,6 +44,11 @@ import type { HomeCardRecord } from "@/lib/discovery";
 import { getTodayInIndia } from "@/lib/booking-time";
 import { recordHostInteractionEvent } from "@/lib/host-interactions";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
+import {
+  openCashfreeCheckout,
+  sendCashfreeReturnAdvisory,
+  type CashfreeCheckoutOrder,
+} from "@/lib/cashfree-checkout-client";
 import { buildHostStayOccupancy, type HostStayBookingRecord } from "@/lib/host-stay-availability";
 import type { StayUnitRecord } from "@/lib/stay-units";
 
@@ -1104,7 +1109,6 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
           hostUserId: home.hostUserId,
           welcomeMessage,
           requestPaymentIntent: true,
-          gateway: "razorpay",
           returnTo: getCurrentInternalPath(),
         }),
       });
@@ -1254,9 +1258,24 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
 
           checkout.open();
           paymentMessage = `Complete payment in the Razorpay window to confirm your ${selectedQuarter.label.toLowerCase()} stay with ${home.name}.`;
+        } else if (paymentIntentPayload.integrationStatus === "cashfree_ready" && paymentIntentPayload.order) {
+          const order = paymentIntentPayload.order as CashfreeCheckoutOrder;
+          const result = await openCashfreeCheckout(order);
+
+          if (result && "error" in result && result.error) {
+            setBookingError("Payment was not completed. If money was debited, Famlo will update this booking after Cashfree confirms the payment.");
+          }
+
+          if (result && "paymentDetails" in result && result.paymentDetails) {
+            await sendCashfreeReturnAdvisory(order).catch(() => null);
+            window.location.assign(`/bookings?bookingId=${encodeURIComponent(order.bookingId)}&payment_status=pending_webhook`);
+          }
+
+          paymentMessage =
+            "Complete payment in the Cashfree window. Famlo will confirm the booking after the secure payment webhook arrives.";
         } else {
           paymentMessage =
-            "Your booking is created and the payment record is ready, but live Razorpay keys are not configured yet.";
+            "Your booking is created and the payment record is ready, but the active payment provider is not configured yet.";
         }
       }
       setSuccessMessage(paymentMessage);

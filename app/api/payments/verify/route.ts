@@ -9,6 +9,7 @@ import {
   loadBookingForPaymentFinalization,
   markBookingPaymentInventoryConflict,
 } from "@/lib/payment-booking-finalization";
+import { verifyProviderPayment } from "@/lib/payments/provider";
 import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from "@/lib/razorpay";
 import { syncReservationFromBooking } from "@/lib/reservations";
 import { createAdminSupabaseClient } from "@/lib/supabase";
@@ -19,6 +20,9 @@ type VerifyBody = {
   razorpay_order_id?: string;
   razorpay_payment_id?: string;
   razorpay_signature?: string;
+  provider?: "razorpay" | "cashfree";
+  order_id?: string;
+  cf_payment_id?: string;
 };
 
 function asString(value: unknown): string | null {
@@ -60,9 +64,82 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const body = (await req.json()) as VerifyBody;
     const bookingId = String(body.bookingId ?? "").trim();
     const paymentRowId = String(body.paymentRowId ?? "").trim();
-    const orderId = String(body.razorpay_order_id ?? "").trim();
-    const gatewayPaymentId = String(body.razorpay_payment_id ?? "").trim();
+    const provider = String(body.provider ?? "razorpay").trim().toLowerCase();
+    const orderId = String(body.razorpay_order_id ?? body.order_id ?? "").trim();
+    const gatewayPaymentId = String(body.razorpay_payment_id ?? body.cf_payment_id ?? "").trim();
     const signature = String(body.razorpay_signature ?? "").trim();
+
+    if (provider === "cashfree") {
+      if (!bookingId || !orderId) {
+        return NextResponse.json({ error: "Missing required Cashfree verification fields." }, { status: 400 });
+      }
+
+      const supabase = createAdminSupabaseClient();
+      const paymentLookup = paymentRowId
+        ? await supabase
+            .from("payments_v2")
+            .select("id,booking_id,status,gateway,raw_response,amount_total,tax_amount,currency,gateway_order_id,gateway_payment_id")
+            .eq("id", paymentRowId)
+            .eq("booking_id", bookingId)
+            .eq("gateway", "cashfree")
+            .eq("gateway_order_id", orderId)
+            .maybeSingle()
+        : await supabase
+            .from("payments_v2")
+            .select("id,booking_id,status,gateway,raw_response,amount_total,tax_amount,currency,gateway_order_id,gateway_payment_id")
+            .eq("booking_id", bookingId)
+            .eq("gateway", "cashfree")
+            .eq("gateway_order_id", orderId)
+            .maybeSingle();
+
+      if (paymentLookup.error) throw paymentLookup.error;
+      if (!paymentLookup.data) {
+        return NextResponse.json({ error: "Payment record not found." }, { status: 404 });
+      }
+
+      const providerPayment = await verifyProviderPayment({
+        provider: "cashfree",
+        orderId,
+        paymentId: gatewayPaymentId || null,
+      });
+      const now = new Date().toISOString();
+      await supabase
+        .from("payments_v2")
+        .update({
+          gateway: "cashfree",
+          gateway_order_id: orderId,
+          ...(providerPayment?.paymentId ? { gateway_payment_id: providerPayment.paymentId } : {}),
+          raw_response: {
+            ...((paymentLookup.data.raw_response as Record<string, unknown> | null) ?? {}),
+            cashfree_client_return_verification: providerPayment?.raw ?? null,
+            cashfree_client_return_verified_at: now,
+          },
+        } as never)
+        .eq("id", paymentLookup.data.id);
+
+      await appendPaymentEventAudit(supabase, {
+        paymentId: paymentLookup.data.id,
+        provider: "cashfree",
+        eventName: "client.verify.advisory",
+        providerEventId: providerPayment?.paymentId || orderId,
+        idempotencyKey: `cashfree_client_verify:${orderId}:${providerPayment?.paymentId || "order"}`,
+        payload: {
+          bookingId,
+          paymentRowId: paymentLookup.data.id,
+          orderId,
+          providerPayment,
+        },
+        processingStatus: "processed",
+      });
+
+      return NextResponse.json({
+        success: true,
+        bookingId: paymentLookup.data.booking_id,
+        paymentId: paymentLookup.data.id,
+        paymentStatus: providerPayment?.status ?? "unknown",
+        canonicalConfirmation: "webhook",
+      });
+    }
 
     if (!bookingId || !orderId || !gatewayPaymentId || !signature) {
       return NextResponse.json({ error: "Missing required Razorpay verification fields." }, { status: 400 });
@@ -89,12 +166,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const paymentLookup = paymentRowId
       ? await supabase
           .from("payments_v2")
-          .select("id,booking_id,status,raw_response,amount_total,tax_amount,currency")
+          .select("id,booking_id,status,gateway,raw_response,amount_total,tax_amount,currency")
           .eq("id", paymentRowId)
           .maybeSingle()
       : await supabase
           .from("payments_v2")
-          .select("id,booking_id,status,raw_response,amount_total,tax_amount,currency")
+          .select("id,booking_id,status,gateway,raw_response,amount_total,tax_amount,currency")
           .eq("booking_id", bookingId)
           .eq("gateway_order_id", orderId)
           .maybeSingle();
@@ -156,6 +233,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         providerAmountPaise: providerPayment.amount,
         paidAt: now,
         source: "payments.verify",
+        provider: "razorpay",
         providerEventName: "client.verify.paid",
         rawResponsePatch: {
           razorpay_signature: signature,
