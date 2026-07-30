@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { type SupabaseClient, type User } from "@supabase/supabase-js";
 import type { GuestSessionSnapshot } from "@/lib/guest-session";
+import type { ContactEvidence } from "@/lib/auth/contact-evidence";
 import { fetchGuestSessionSnapshot } from "@/lib/guest-session-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import { type UserProfileRecord } from "@/lib/user-profile";
@@ -19,6 +20,7 @@ interface UserContextType {
   profile: UserProfile | null;
   loading: boolean;
   signingOut: boolean;
+  contactEvidence: ContactEvidence;
   applyProfile: (profile: UserProfile) => void;
   refreshProfile: () => Promise<GuestSessionSnapshot | null>;
   refreshAuth: () => Promise<GuestSessionSnapshot | null>;
@@ -32,6 +34,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
+  const [contactEvidence, setContactEvidence] = useState<ContactEvidence>({
+    email: { value: null, verified: false, readOnly: false, source: "none" },
+    phone: { value: null, verified: false, source: "none" },
+    providers: [],
+  });
   const signOutInFlight = useRef(false);
   const supabase = useMemo<SupabaseClient>(() => createBrowserSupabaseClient(), []);
 
@@ -40,11 +47,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const { snapshot, user: nextUser } = await fetchGuestSessionSnapshot(supabase);
       setUser(nextUser);
       setProfile(snapshot.profile);
+      setContactEvidence(snapshot.contactEvidence);
       return snapshot;
     } catch (err) {
       console.error("Error loading auth session:", err);
       setUser(null);
       setProfile(null);
+      setContactEvidence({
+        email: { value: null, verified: false, readOnly: false, source: "none" },
+        phone: { value: null, verified: false, source: "none" },
+        providers: [],
+      });
       return null;
     }
   }, [supabase]);
@@ -100,6 +113,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         });
         setUser(null);
         setProfile(null);
+        setContactEvidence({
+          email: { value: null, verified: false, readOnly: false, source: "none" },
+          phone: { value: null, verified: false, source: "none" },
+          providers: [],
+        });
       },
       redirectHome: () => window.location.replace(redirectTo),
     });
@@ -150,7 +168,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [supabase, loadAuthState]);
 
   return (
-    <UserContext.Provider value={{ user, profile, loading, signingOut, applyProfile, refreshProfile, refreshAuth, signOut }}>
+    <UserContext.Provider value={{ user, profile, loading, signingOut, contactEvidence, applyProfile, refreshProfile, refreshAuth, signOut }}>
       {children}
     </UserContext.Provider>
   );

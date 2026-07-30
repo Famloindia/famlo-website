@@ -9,8 +9,9 @@ import {
   isGuestProfileComplete,
   loadUserProfileCompatibility,
   upsertUserProfileCompatibility,
-  validateGuestProfileInput,
+  validateGuestProfileDetailsInput,
 } from "@/lib/user-profile";
+import { findAuthUserByPhone, hasGoogleIdentity } from "@/lib/auth/account-linking";
 
 export async function GET(request: Request) {
   try {
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
     if (typeof userId === "string" && userId.trim().length > 0 && userId !== authUser.id) {
       return NextResponse.json({ error: "You can only update your own profile." }, { status: 403 });
     }
-    const fieldErrors = validateGuestProfileInput({
+    const fieldErrors = validateGuestProfileDetailsInput({
       userId: authUser.id,
       username,
       name,
@@ -69,13 +70,53 @@ export async function POST(request: Request) {
     }
     const authEmail = normalizeGuestEmail(authRecord.user.email);
     const authPhone = normalizeGuestPhone(authRecord.user.phone);
+    const googleAuthenticated = hasGoogleIdentity(authRecord.user);
+    const verifiedAuthEmail =
+      authEmail && authRecord.user.email_confirmed_at ? authEmail : null;
+    const verifiedAuthPhone =
+      authPhone && authRecord.user.phone_confirmed_at ? authPhone : null;
+    const phoneOwner = normalizedPhone
+      ? await findAuthUserByPhone(supabase, normalizedPhone)
+      : null;
+    if (phoneOwner && phoneOwner.id !== authUser.id) {
+      return NextResponse.json(
+        {
+          error: "This phone number is already linked to another Famlo account.",
+          code: "PHONE_ALREADY_LINKED",
+        },
+        { status: 409 }
+      );
+    }
 
-    const profile = await upsertUserProfileCompatibility(supabase, {
+    if (
+      googleAuthenticated &&
+      normalizedEmail &&
+      verifiedAuthEmail &&
+      normalizedEmail !== verifiedAuthEmail
+    ) {
+      return NextResponse.json(
+        {
+          error: "Your Google email is managed by your authenticated account.",
+          code: "AUTH_EMAIL_READ_ONLY",
+          fieldErrors: { email: "Use the verified Google email shown here." },
+        },
+        { status: 409 }
+      );
+    }
+
+    await upsertUserProfileCompatibility(supabase, {
       userId: authUser.id,
       username: normalizeGuestUsername(username),
       name,
-      email: normalizedEmail,
-      phone: normalizedPhone,
+      email:
+        verifiedAuthEmail &&
+        (googleAuthenticated || verifiedAuthEmail === normalizedEmail)
+          ? verifiedAuthEmail
+          : undefined,
+      phone:
+        verifiedAuthPhone && verifiedAuthPhone === normalizedPhone
+          ? verifiedAuthPhone
+          : normalizedPhone,
       city,
       state,
       about,
@@ -83,16 +124,32 @@ export async function POST(request: Request) {
       gender,
       avatarUrl,
       emailVerifiedAt:
-        normalizedEmail && normalizedEmail === authEmail && authRecord.user.email_confirmed_at
+        verifiedAuthEmail &&
+        (googleAuthenticated || normalizedEmail === verifiedAuthEmail)
           ? authRecord.user.email_confirmed_at
           : undefined,
       phoneVerifiedAt:
-        normalizedPhone && normalizedPhone === authPhone && authRecord.user.phone_confirmed_at
+        verifiedAuthPhone && normalizedPhone === verifiedAuthPhone
           ? authRecord.user.phone_confirmed_at
           : undefined,
     });
 
-    const verifiedProfile = profile ?? (await loadUserProfileCompatibility(supabase, authUser.id));
+    const pendingEmail =
+      !googleAuthenticated &&
+      normalizedEmail &&
+      normalizedEmail !== verifiedAuthEmail
+        ? normalizedEmail
+        : null;
+    const { error: pendingEmailError } = await supabase
+      .from("users")
+      .update({
+        pending_email: pendingEmail,
+        pending_email_requested_at: null,
+      })
+      .eq("id", authUser.id);
+    if (pendingEmailError) throw pendingEmailError;
+
+    const verifiedProfile = await loadUserProfileCompatibility(supabase, authUser.id);
 
     if (!verifiedProfile) {
       throw new Error("Profile save could not be verified.");
@@ -107,6 +164,28 @@ export async function POST(request: Request) {
   } catch (error: any) {
     console.error("Profile update failed", { name: error instanceof Error ? error.name : "Error" });
     if (error && typeof error === "object" && error.code === "23505") {
+      const constraint =
+        "constraint" in error && typeof error.constraint === "string"
+          ? error.constraint
+          : "";
+      if (constraint === "users_verified_email_owner_key") {
+        return NextResponse.json(
+          {
+            error: "This email is already linked to another Famlo account.",
+            code: "EMAIL_ALREADY_LINKED",
+          },
+          { status: 409 }
+        );
+      }
+      if (constraint === "users_verified_phone_owner_key") {
+        return NextResponse.json(
+          {
+            error: "This phone number is already linked to another Famlo account.",
+            code: "PHONE_ALREADY_LINKED",
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         {
           error: "That username is not available.",

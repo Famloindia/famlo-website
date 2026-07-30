@@ -6,6 +6,7 @@ import {
   requireTwoFactorApiKey,
   sendTwoFactorOtp,
 } from "@/lib/auth/guest-otp";
+import { findAuthUserByPhone } from "@/lib/auth/account-linking";
 import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
 
@@ -19,6 +20,16 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const body = (await request.json()) as { phone?: unknown };
     const phone = normalizeIndianOtpPhone(body.phone);
+    const owner = await findAuthUserByPhone(supabase, `+${phone}`);
+    if (owner && owner.id !== authUser.id) {
+      return NextResponse.json(
+        {
+          error: "This phone number is already linked to another Famlo account.",
+          code: "PHONE_ALREADY_LINKED",
+        },
+        { status: 409 }
+      );
+    }
     const cooldownStart = new Date(Date.now() - OTP_RESEND_COOLDOWN_SECONDS * 1000).toISOString();
     const { data: recent, error: cooldownError } = await supabase
       .from("phone_otps")

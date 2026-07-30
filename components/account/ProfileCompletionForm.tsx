@@ -11,17 +11,21 @@ import {
   isGuestProfileComplete,
   type GuestProfileFieldErrors,
   type UserProfileRecord,
-  validateGuestProfileInput,
+  validateGuestProfileDetailsInput,
 } from "@/lib/user-profile";
 import { normalizeGuestEmail, normalizeGuestPhone } from "@/lib/guest-identity";
 import { getSafeAvatarUrl } from "@/lib/avatar-url";
 import { MAX_IMAGE_UPLOAD_BYTES, formatImageUploadLimitLabel } from "@/lib/upload-limits";
+import type { ContactEvidence } from "@/lib/auth/contact-evidence";
+import { getSafeGuestAuthReturnPath } from "@/lib/site-url";
 
 interface ProfileCompletionFormProps {
   title?: string;
   description?: string;
   buttonLabel?: string;
   compact?: boolean;
+  returnTo?: string;
+  accountLinkRequestId?: string | null;
   onSuccess?: () => Promise<void> | void;
   onPhoneConflictChange?: (hasConflict: boolean) => void;
 }
@@ -39,10 +43,19 @@ type ProfileDraft = {
   avatarUrl: string;
 };
 
-function createProfileDraft(profile: UserProfileRecord | null, user: User | null): ProfileDraft {
+function createProfileDraft(
+  profile: UserProfileRecord | null,
+  user: User | null,
+  contactEvidence?: ContactEvidence
+): ProfileDraft {
   return {
     username: profile?.username ?? "",
-    email: profile?.email ?? user?.email ?? "",
+    email:
+      contactEvidence?.email.value ??
+      profile?.pending_email ??
+      profile?.email ??
+      user?.email ??
+      "",
     phone: profile?.phone ?? user?.phone ?? "",
     name: profile?.name ?? "",
     city: profile?.city ?? "",
@@ -72,16 +85,20 @@ export function ProfileCompletionForm({
   description = "Add your details once so Famlo hosts know who is arriving before you book.",
   buttonLabel = "Save profile",
   compact = false,
+  returnTo = "/profile",
+  accountLinkRequestId: activeAccountLinkRequestId = null,
   onSuccess,
   onPhoneConflictChange,
 }: Readonly<ProfileCompletionFormProps>): React.JSX.Element {
-  const { user, profile, applyProfile, refreshAuth, signOut } = useUser();
+  const { user, profile, contactEvidence, applyProfile, refreshAuth } = useUser();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const initializedUserId = useRef<string | null>(null);
   const [editMode, setEditMode] = useState(() => !isGuestProfileComplete(profile));
-  const [draft, setDraft] = useState<ProfileDraft>(() => createProfileDraft(profile, user));
+  const [draft, setDraft] = useState<ProfileDraft>(() =>
+    createProfileDraft(profile, user, contactEvidence)
+  );
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
@@ -91,7 +108,17 @@ export function ProfileCompletionForm({
   const [phoneOtp, setPhoneOtp] = useState("");
   const [phoneOtpSessionId, setPhoneOtpSessionId] = useState("");
   const [phoneConflict, setPhoneConflict] = useState<string | null>(null);
-  const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
+  const [accountLinkRequestId, setAccountLinkRequestId] = useState("");
+  const [accountLinkSessionId, setAccountLinkSessionId] = useState("");
+  const [accountLinkOtp, setAccountLinkOtp] = useState("");
+  const [accountLinkState, setAccountLinkState] = useState<
+    "idle" | "sending" | "sent" | "verifying"
+  >("idle");
+  const [emailOtpState, setEmailOtpState] = useState<
+    "idle" | "sending" | "sent" | "verifying"
+  >("idle");
+  const [emailOtp, setEmailOtp] = useState("");
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<GuestProfileFieldErrors>({});
 
@@ -99,30 +126,29 @@ export function ProfileCompletionForm({
 
   const profileComplete = isGuestProfileComplete(profile);
   const emailVerified =
-    Boolean(profile?.email_verified_at) &&
-    normalizeGuestEmail(profile?.email) === normalizeGuestEmail(resolvedForm.email);
+    contactEvidence.email.verified &&
+    normalizeGuestEmail(contactEvidence.email.value) ===
+      normalizeGuestEmail(resolvedForm.email);
   const phoneVerified =
-    Boolean(profile?.phone_verified_at) &&
-    normalizeGuestPhone(profile?.phone) === normalizeGuestPhone(resolvedForm.phone);
+    contactEvidence.phone.verified &&
+    normalizeGuestPhone(contactEvidence.phone.value) ===
+      normalizeGuestPhone(resolvedForm.phone);
   const savedAvatarUrl = getSafeAvatarUrl(resolvedForm.avatarUrl);
-  const displayedAvatarUrl = photoPreviewUrl || (!avatarPreviewFailed ? savedAvatarUrl : null);
+  const displayedAvatarUrl =
+    photoPreviewUrl || (failedAvatarUrl !== savedAvatarUrl ? savedAvatarUrl : null);
 
   useEffect(() => {
     if (!user?.id || initializedUserId.current === user.id) return;
     initializedUserId.current = user.id;
-    setDraft(createProfileDraft(profile, user));
+    setDraft(createProfileDraft(profile, user, contactEvidence));
     setEditMode(!isGuestProfileComplete(profile));
-  }, [profile, user]);
+  }, [contactEvidence, profile, user]);
 
   useEffect(() => {
     return () => {
       if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
     };
   }, [photoPreviewUrl]);
-
-  useEffect(() => {
-    setAvatarPreviewFailed(false);
-  }, [savedAvatarUrl]);
 
   function selectPhoto(file: File | undefined): void {
     if (!file) return;
@@ -207,6 +233,13 @@ export function ProfileCompletionForm({
         body: JSON.stringify({ phone: resolvedForm.phone }),
       });
       const payload = await response.json();
+      if (!response.ok && payload.code === "PHONE_ALREADY_LINKED") {
+        setPhoneConflict(resolvedForm.phone);
+        setPhoneOtpState("idle");
+        setFieldErrors((current) => ({ ...current, phone: undefined }));
+        onPhoneConflictChange?.(true);
+        return;
+      }
       if (!response.ok || typeof payload.sessionId !== "string") {
         throw new Error(payload.error ?? "Unable to send a verification code.");
       }
@@ -271,12 +304,15 @@ export function ProfileCompletionForm({
   }
 
   function useAnotherPhone(): void {
-    const persistedVerifiedPhone = profile?.phone_verified_at ? profile.phone ?? "" : "";
-    setDraft((current) => ({ ...current, phone: persistedVerifiedPhone }));
+    setDraft((current) => ({ ...current, phone: "" }));
     setPhoneOtp("");
     setPhoneOtpSessionId("");
     setPhoneOtpState("idle");
     setPhoneConflict(null);
+    setAccountLinkRequestId("");
+    setAccountLinkSessionId("");
+    setAccountLinkOtp("");
+    setAccountLinkState("idle");
     setMessage(null);
     setFieldErrors((current) => ({ ...current, phone: undefined }));
     onPhoneConflictChange?.(false);
@@ -284,19 +320,200 @@ export function ProfileCompletionForm({
 
   async function logInWithLinkedPhone(): Promise<void> {
     if (!phoneConflict) return;
-    const confirmed = window.confirm(
-      "You will be logged out of this Famlo account and switch to the account linked to this phone number."
-    );
-    if (!confirmed) return;
-    window.sessionStorage.setItem("famlo:account-switch-phone", phoneConflict);
-    await signOut({
-      redirectTo: "/?auth=login&auth_step=phone&account_switch=phone",
-    });
+    setAccountLinkState("sending");
+    setMessage(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const response = await fetch("/api/user/account-link/phone/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          phone: phoneConflict,
+          returnTo: getSafeGuestAuthReturnPath(returnTo),
+        }),
+      });
+      const payload = await response.json();
+      if (
+        !response.ok ||
+        typeof payload.requestId !== "string" ||
+        typeof payload.sessionId !== "string"
+      ) {
+        throw new Error(payload.error ?? "Unable to send a verification code.");
+      }
+      setAccountLinkRequestId(payload.requestId);
+      setAccountLinkSessionId(payload.sessionId);
+      setAccountLinkOtp("");
+      setAccountLinkState("sent");
+      setMessage({ type: "success", text: "Verification code sent." });
+    } catch (error) {
+      setAccountLinkState("idle");
+      setMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Unable to send a verification code.",
+      });
+    }
+  }
+
+  async function verifyLinkedPhone(): Promise<void> {
+    if (!phoneConflict || !accountLinkRequestId || !accountLinkSessionId) return;
+    setAccountLinkState("verifying");
+    setMessage(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const response = await fetch("/api/user/account-link/phone/verify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          requestId: accountLinkRequestId,
+          phone: phoneConflict,
+          otp: accountLinkOtp,
+          sessionId: accountLinkSessionId,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          payload.error ??
+            "This account requires an audited support review before it can be linked."
+        );
+      }
+
+      const {
+        data: { user: sourceUser },
+      } = await supabase.auth.getUser();
+      const googleIdentity = sourceUser?.identities?.find(
+        (identity) => identity.provider === "google"
+      );
+      if (!sourceUser || !googleIdentity || (sourceUser.identities?.length ?? 0) < 2) {
+        throw new Error(
+          "Google identity transfer requires an audited support review for this account."
+        );
+      }
+      const { error: unlinkError } = await supabase.auth.unlinkIdentity(
+        googleIdentity
+      );
+      if (unlinkError) throw unlinkError;
+
+      window.sessionStorage.setItem(
+        `famlo:account-link-source:${accountLinkRequestId}`,
+        sourceUser.id
+      );
+      const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+      if (signOutError) throw signOutError;
+      const profileUrl = new URL("/profile", window.location.origin);
+      profileUrl.searchParams.set("link_request", accountLinkRequestId);
+      profileUrl.searchParams.set("next", getSafeGuestAuthReturnPath(returnTo));
+      window.location.replace(`${profileUrl.pathname}${profileUrl.search}`);
+    } catch (error) {
+      setAccountLinkState("sent");
+      setMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "The verification code is invalid or expired.",
+      });
+    }
+  }
+
+  async function sendEmailVerificationOtp(): Promise<void> {
+    setEmailOtpState("sending");
+    setEmailOtp("");
+    setMessage(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const response = await fetch("/api/user/profile/email/send-otp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          email: resolvedForm.email,
+          returnTo: getSafeGuestAuthReturnPath(returnTo),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Unable to verify this email.");
+      setEmailOtpState("sent");
+      setMessage({ type: "success", text: "Check your email for the verification code." });
+    } catch (error) {
+      setEmailOtpState("idle");
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Unable to verify this email.",
+      });
+    }
+  }
+
+  async function verifyEmailOtp(): Promise<void> {
+    setEmailOtpState("verifying");
+    setMessage(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const response = await fetch("/api/user/profile/email/verify-otp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          email: resolvedForm.email,
+          otp: emailOtp,
+          accountLinkRequestId: activeAccountLinkRequestId,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.session) {
+        throw new Error(payload.error ?? "The verification code is invalid or expired.");
+      }
+      const { error: sessionError } = await supabase.auth.setSession(payload.session);
+      if (sessionError) throw sessionError;
+      if (payload.profile) applyProfile(payload.profile as UserProfileRecord);
+      await refreshAuth();
+      setEmailOtp("");
+      setEmailOtpState("idle");
+      setMessage({ type: "success", text: "Email verified successfully." });
+    } catch (error) {
+      setEmailOtpState("sent");
+      setMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "The verification code is invalid or expired.",
+      });
+    }
   }
 
   function cancelEditing(): void {
     if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
-    setDraft(createProfileDraft(profile, user));
+    setDraft(createProfileDraft(profile, user, contactEvidence));
     setSelectedPhoto(null);
     setPhotoPreviewUrl("");
     setUsernameStatus("idle");
@@ -318,23 +535,9 @@ export function ProfileCompletionForm({
       return;
     }
 
-    if (!resolvedForm.phone || !resolvedForm.email) {
-      setMessage({ type: "error", text: "Add both your phone number and email." });
-      return;
-    }
-    if (!emailVerified || !phoneVerified) {
-      setFieldErrors((current) => ({
-        ...current,
-        email: emailVerified ? undefined : "Use your verified account email.",
-        phone: phoneVerified ? undefined : "Verify this phone number before saving.",
-      }));
-      setMessage({ type: "error", text: "Verify your email and phone before completing your profile." });
-      return;
-    }
-
     setSaving(true);
     setMessage(null);
-    const validationErrors = validateGuestProfileInput({
+    const validationErrors = validateGuestProfileDetailsInput({
       userId: user.id,
       ...resolvedForm,
     });
@@ -387,26 +590,24 @@ export function ProfileCompletionForm({
         throw new Error("Profile save could not be verified.");
       }
 
-      if (data.profileComplete !== true || !isGuestProfileComplete(savedProfile as never)) {
-        throw new Error("Profile save could not be verified. Please try again.");
-      }
-
       const canonicalProfile = savedProfile as unknown as UserProfileRecord;
       applyProfile(canonicalProfile);
-      setDraft(createProfileDraft(canonicalProfile, user));
+      setDraft(createProfileDraft(canonicalProfile, user, contactEvidence));
       setSelectedPhoto(null);
       if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
       setPhotoPreviewUrl("");
       if (avatarInputRef.current) avatarInputRef.current.value = "";
       if (cameraInputRef.current) cameraInputRef.current.value = "";
       await refreshAuth();
-      if (onSuccess) await onSuccess();
       setPhoneConflict(null);
       onPhoneConflictChange?.(false);
-      setEditMode(false);
+      setEditMode(true);
       setMessage({
         type: "success",
-        text: profileComplete ? "Profile changes saved." : "Profile saved. You can continue to booking now.",
+        text:
+          data.profileComplete === true
+            ? "Profile details saved. You can continue to booking."
+            : "Profile details saved. Verify both contact methods before booking.",
       });
     } catch (error) {
       setMessage({
@@ -442,7 +643,7 @@ export function ProfileCompletionForm({
         <div className="profile-view-layout">
           <aside className="profile-view-avatar">
             <div className="account-avatar-picker">
-              {persistedAvatarUrl && !avatarPreviewFailed ? (
+              {persistedAvatarUrl && failedAvatarUrl !== persistedAvatarUrl ? (
                 <Image
                   src={persistedAvatarUrl}
                   alt={profile?.name || "Guest profile"}
@@ -450,7 +651,7 @@ export function ProfileCompletionForm({
                   height={240}
                   sizes="120px"
                   unoptimized
-                  onError={() => setAvatarPreviewFailed(true)}
+                  onError={() => setFailedAvatarUrl(persistedAvatarUrl)}
                   className="account-avatar-preview"
                 />
               ) : (
@@ -471,12 +672,12 @@ export function ProfileCompletionForm({
             <div>
               <span>Phone</span>
               <strong>{profile?.phone}</strong>
-              <small>{profile?.phone_verified_at ? "Verified" : "Not verified"}</small>
+              <small>{contactEvidence.phone.verified ? "Verified" : "Not verified"}</small>
             </div>
             <div>
               <span>Email</span>
-              <strong>{profile?.email}</strong>
-              <small>{profile?.email_verified_at ? "Verified" : "Not verified"}</small>
+              <strong>{contactEvidence.email.value ?? profile?.email}</strong>
+              <small>{contactEvidence.email.verified ? "Verified" : "Not verified"}</small>
             </div>
             <div className="full-span">
               <span>About you</span>
@@ -486,17 +687,28 @@ export function ProfileCompletionForm({
         </div>
 
         {message ? <p className={message.type}>{message.text}</p> : null}
-        <button
-          type="button"
-          className="button-like edit-profile"
-          onClick={() => {
-            setDraft(createProfileDraft(profile, user));
-            setMessage(null);
-            setEditMode(true);
-          }}
-        >
-          Edit profile
-        </button>
+        <div className="profile-view-actions">
+          <button
+            type="button"
+            className="button-like edit-profile"
+            onClick={() => {
+              setDraft(createProfileDraft(profile, user, contactEvidence));
+              setMessage(null);
+              setEditMode(true);
+            }}
+          >
+            Edit profile
+          </button>
+          {onSuccess ? (
+            <button
+              type="button"
+              className="button-like edit-profile"
+              onClick={() => void onSuccess()}
+            >
+              Continue to booking
+            </button>
+          ) : null}
+        </div>
 
         <style jsx>{`
           .profile-view-card {
@@ -526,6 +738,7 @@ export function ProfileCompletionForm({
           p.success { color: #166534; background: #dcfce7; }
           p.error { color: #b91c1c; background: #fee2e2; }
           .edit-profile { width: max-content; min-width: 140px; min-height: 44px; border-radius: 12px; }
+          .profile-view-actions { display: flex; flex-wrap: wrap; gap: 10px; }
           @media (max-width: 760px) {
             .profile-view-layout { grid-template-columns: 1fr; }
             .profile-view-avatar { justify-items: start; }
@@ -533,7 +746,7 @@ export function ProfileCompletionForm({
           @media (max-width: 640px) {
             .profile-view-grid { grid-template-columns: 1fr; }
             .profile-view-grid .full-span { grid-column: auto; }
-            .edit-profile { width: 100%; }
+            .profile-view-actions, .edit-profile { width: 100%; }
           }
         `}</style>
       </section>
@@ -575,7 +788,7 @@ export function ProfileCompletionForm({
               height={240}
               sizes="120px"
               unoptimized
-              onError={() => setAvatarPreviewFailed(true)}
+              onError={() => setFailedAvatarUrl(displayedAvatarUrl)}
               className="account-avatar-preview"
             />
           ) : (
@@ -769,13 +982,47 @@ export function ProfileCompletionForm({
               <strong>This phone number is already linked to another Famlo account.</strong>
               <p>Log in with this phone number to access that account, or use a different number for this profile.</p>
               <div>
-                <button type="button" className="conflict-primary" onClick={() => void logInWithLinkedPhone()}>
-                  Log in with this phone
+                <button
+                  type="button"
+                  className="conflict-primary"
+                  disabled={accountLinkState === "sending" || accountLinkState === "verifying"}
+                  onClick={() => void logInWithLinkedPhone()}
+                >
+                  {accountLinkState === "sending"
+                    ? "Sending..."
+                    : accountLinkState === "sent"
+                      ? "Resend OTP"
+                      : "Log in with this phone"}
                 </button>
                 <button type="button" className="conflict-secondary" onClick={useAnotherPhone}>
                   Use another number
                 </button>
               </div>
+              {accountLinkState === "sent" || accountLinkState === "verifying" ? (
+                <div className="phone-otp-row">
+                  <input
+                    className="mini-input"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={accountLinkOtp}
+                    onChange={(event) =>
+                      setAccountLinkOtp(event.target.value.replace(/\D/g, ""))
+                    }
+                    placeholder="6-digit OTP"
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      accountLinkOtp.length !== 6 ||
+                      accountLinkState === "verifying"
+                    }
+                    onClick={() => void verifyLinkedPhone()}
+                  >
+                    {accountLinkState === "verifying" ? "Checking..." : "Verify"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </label>
@@ -786,12 +1033,64 @@ export function ProfileCompletionForm({
             className="mini-input"
             type="email"
             required
+            readOnly={contactEvidence.email.readOnly}
+            aria-readonly={contactEvidence.email.readOnly}
             value={resolvedForm.email}
-            onChange={(event) => setDraft((current) => ({ ...current, email: event.target.value }))}
+            onChange={(event) => {
+              if (contactEvidence.email.readOnly) return;
+              setDraft((current) => ({ ...current, email: event.target.value }));
+              setEmailOtp("");
+              setEmailOtpState("idle");
+            }}
             placeholder="name@example.com"
           />
           {fieldErrors.email ? <small className="field-error">{fieldErrors.email}</small> : null}
           <small className="verification-note">Email: {emailVerified ? "Verified" : "Not verified"}</small>
+          {(!emailVerified || activeAccountLinkRequestId) &&
+          !contactEvidence.email.readOnly ? (
+            <button
+              className="verify-phone-action"
+              type="button"
+              disabled={
+                !resolvedForm.email ||
+                emailOtpState === "sending" ||
+                emailOtpState === "verifying"
+              }
+              onClick={() => void sendEmailVerificationOtp()}
+            >
+              {emailOtpState === "sending"
+                ? "Sending..."
+                : emailOtpState === "sent"
+                  ? "Resend code"
+                  : activeAccountLinkRequestId && emailVerified
+                    ? "Confirm email to link Google"
+                    : "Verify email"}
+            </button>
+          ) : null}
+          {emailOtpState === "sent" || emailOtpState === "verifying" ? (
+            <div className="phone-otp-row">
+              <input
+                className="mini-input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={8}
+                value={emailOtp}
+                onChange={(event) =>
+                  setEmailOtp(event.target.value.replace(/\D/g, ""))
+                }
+                placeholder="Email code"
+              />
+              <button
+                type="button"
+                disabled={
+                  emailOtp.length < 6 || emailOtpState === "verifying"
+                }
+                onClick={() => void verifyEmailOtp()}
+              >
+                {emailOtpState === "verifying" ? "Checking..." : "Verify"}
+              </button>
+            </div>
+          ) : null}
         </label>
 
         <label className="full-span">
@@ -826,8 +1125,18 @@ export function ProfileCompletionForm({
 
       <div className="profile-form-actions">
         <button className="button-like account-submit-btn compact-btn" disabled={saving || uploading || Boolean(phoneConflict)} type="submit">
-          {uploading ? "Uploading photo..." : saving ? "Saving..." : profileComplete ? "Save changes" : buttonLabel}
+          {uploading ? "Uploading photo..." : saving ? "Saving..." : "Save details"}
         </button>
+        {profileComplete && onSuccess ? (
+          <button
+            className="button-like continue-booking"
+            disabled={saving || uploading}
+            type="button"
+            onClick={() => void onSuccess()}
+          >
+            {buttonLabel === "Save profile" ? "Continue to booking" : buttonLabel.replace(/^Save( profile)?( and)?/i, "Continue")}
+          </button>
+        ) : null}
         {profileComplete ? (
           <button className="cancel-edit" disabled={saving || uploading} type="button" onClick={cancelEditing}>
             Cancel
@@ -977,6 +1286,7 @@ export function ProfileCompletionForm({
         }
         .conflict-primary { border: 1px solid #1d4ed8; background: #1d4ed8; color: #fff; }
         .conflict-secondary { border: 1px solid #d8b36a; background: #fff; color: #7c4208; }
+        .continue-booking { min-height: 44px; }
 
         .username-row {
           display: grid;

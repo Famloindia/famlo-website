@@ -60,7 +60,9 @@ test("profile completion requires every persisted professional field", () => {
     username: "famlo_guest",
     name: "Famlo Guest",
     phone: "+917400000001",
+    phone_verified_at: "2026-07-30T10:00:00.000Z",
     email: "guest@example.com",
+    email_verified_at: "2026-07-30T10:00:00.000Z",
     city: "Hisar",
     state: "Haryana",
     onboarding_completed: false,
@@ -74,7 +76,8 @@ test("profile completion requires every persisted professional field", () => {
   };
   assert.equal(isGuestProfileComplete(complete), true);
   assert.equal(isGuestProfileComplete({ ...complete, username: null }), false);
-  assert.equal(isGuestProfileComplete({ ...complete, avatar_url: null }), false);
+  assert.equal(isGuestProfileComplete({ ...complete, avatar_url: null, about: null }), true);
+  assert.equal(isGuestProfileComplete({ ...complete, email_verified_at: null }), false);
   assert.equal(isGuestProfileComplete({ ...complete, phone: null }), false);
 });
 
@@ -82,7 +85,7 @@ test("login and signup are separate and login never creates an account", async (
   const modal = await readFile("components/auth/AuthModal.tsx", "utf8");
   const login = await readFile("app/api/auth/password/login/route.ts", "utf8");
   const signup = await readFile("app/api/auth/signup/email/route.ts", "utf8");
-  assert.match(modal, /Log in to Famlo/);
+  assert.match(modal, /Welcome back/);
   assert.match(modal, /Create your Famlo account/);
   assert.match(login, /signInWithPassword/);
   assert.doesNotMatch(login, /signUp|createUser/);
@@ -118,11 +121,11 @@ test("password recovery and authenticated change routes use genuine Supabase ope
 
 test("booking creation enforces persisted completion before side effects", async () => {
   const route = await readFile("app/api/bookings/create/route.ts", "utf8");
-  const gateIndex = route.indexOf("isGuestProfileComplete(profile)");
+  const gateIndex = route.indexOf("if (!session.profileComplete)");
   const createIndex = route.indexOf("await createBookingCompatibility");
   assert.ok(gateIndex > 0);
   assert.ok(createIndex > gateIndex);
-  assert.match(route, /profile_incomplete/);
+  assert.match(route, /PROFILE_INCOMPLETE/);
   assert.match(route, /status:\s*428/);
 });
 

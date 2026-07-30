@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import { getSafeReturnPath } from "@/lib/site-url";
+import { migrateSavedHomesAfterIdentityLink } from "@/lib/auth/saved-homes-linking";
 
 export default function AuthCallbackPage(): React.JSX.Element {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -19,6 +20,8 @@ export default function AuthCallbackPage(): React.JSX.Element {
       const nextPath = getSafeReturnPath(currentUrl.searchParams.get("next"), "/");
       const profileUrl = new URL("/profile", window.location.origin);
       const code = currentUrl.searchParams.get("code");
+      const linkRequestId = currentUrl.searchParams.get("link_request");
+      const isGoogleLink = currentUrl.searchParams.get("link_mode") === "google";
       const oauthError =
         currentUrl.searchParams.get("error_description") ??
         hashParams.get("error_description") ??
@@ -41,6 +44,37 @@ export default function AuthCallbackPage(): React.JSX.Element {
         }
 
         if (!active) {
+          return;
+        }
+
+        if (isGoogleLink && linkRequestId) {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const response = await fetch("/api/user/account-link/complete", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(session?.access_token
+                ? { Authorization: `Bearer ${session.access_token}` }
+                : {}),
+            },
+            body: JSON.stringify({ requestId: linkRequestId }),
+          });
+          if (!response.ok) {
+            throw new Error("Account linking did not complete.");
+          }
+          const sourceStorageKey = `famlo:account-link-source:${linkRequestId}`;
+          const sourceUserId = window.sessionStorage.getItem(sourceStorageKey);
+          if (sourceUserId && session?.user.id) {
+            migrateSavedHomesAfterIdentityLink(
+              window.localStorage,
+              sourceUserId,
+              session.user.id
+            );
+            window.sessionStorage.removeItem(sourceStorageKey);
+          }
+          window.location.replace(nextPath);
           return;
         }
 

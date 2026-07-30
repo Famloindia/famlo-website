@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { normalizeGuestEmail, normalizeGuestPhone } from "@/lib/guest-identity";
+import { deriveContactEvidence, type ContactEvidence } from "@/lib/auth/contact-evidence";
 import { isGuestProfileComplete, loadUserProfileCompatibility, type UserProfileRecord, upsertUserProfileCompatibility } from "@/lib/user-profile";
 
 export type AuthenticatedGuestUser = {
@@ -21,16 +22,19 @@ export type GuestSessionSnapshot = {
   } | null;
   profile: UserProfileRecord | null;
   profileComplete: boolean;
+  contactEvidence: ContactEvidence;
 };
 
 export function createGuestSessionSnapshot(
   user: GuestSessionSnapshot["user"],
-  profile: UserProfileRecord | null
+  profile: UserProfileRecord | null,
+  contactEvidence: ContactEvidence = deriveContactEvidence(null, profile)
 ): GuestSessionSnapshot {
   return {
     user,
     profile,
     profileComplete: isGuestProfileComplete(profile),
+    contactEvidence,
   };
 }
 
@@ -44,13 +48,14 @@ export async function loadGuestSessionSnapshot(
 
   let profile = await loadUserProfileCompatibility(supabase, authUser.id);
 
+  const authRecord =
+    supabase.auth?.admin?.getUserById
+      ? (await supabase.auth.admin.getUserById(authUser.id)).data
+      : null;
+
   if (authUser.authKind !== "guest_cookie") {
     let confirmedEmailAt = profile?.email_verified_at ?? null;
     let confirmedPhoneAt = profile?.phone_verified_at ?? null;
-    const authRecord =
-      supabase.auth?.admin?.getUserById
-        ? (await supabase.auth.admin.getUserById(authUser.id)).data
-        : null;
     if (authRecord?.user) {
       const authEmail = normalizeGuestEmail(authRecord.user.email);
       const authPhone = normalizeGuestPhone(authRecord.user.phone);
@@ -87,6 +92,7 @@ export async function loadGuestSessionSnapshot(
     profile = await loadUserProfileCompatibility(supabase, authUser.id);
   }
 
+  const canonicalAuthUser = authRecord?.user ?? null;
   return createGuestSessionSnapshot(
     {
       id: authUser.id,
@@ -95,6 +101,7 @@ export async function loadGuestSessionSnapshot(
       provider: authUser.provider ?? null,
       authKind: authUser.authKind ?? "supabase",
     },
-    profile
+    profile,
+    deriveContactEvidence(canonicalAuthUser, profile)
   );
 }

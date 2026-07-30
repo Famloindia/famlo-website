@@ -6,7 +6,7 @@ import { createPaymentIntentForBooking } from "@/lib/payment-intent";
 import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { getSafeGuestAuthReturnPath } from "@/lib/site-url";
 import { createAdminSupabaseClient } from "@/lib/supabase";
-import { isGuestProfileComplete, loadUserProfileCompatibility } from "@/lib/user-profile";
+import { loadGuestSessionSnapshot } from "@/lib/guest-session";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
@@ -29,8 +29,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "You can only create bookings for your own account." }, { status: 403 });
     }
 
-    const profile = await loadUserProfileCompatibility(supabase, authUser.id);
-    if (!isGuestProfileComplete(profile)) {
+    const session = await loadGuestSessionSnapshot(supabase, authUser);
+    if (!session.profileComplete) {
       const profileUrl = new URL("/profile", req.url);
       profileUrl.searchParams.set("next", getSafeGuestAuthReturnPath(body.returnTo));
       return NextResponse.json(

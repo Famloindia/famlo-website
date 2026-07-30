@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import type { User } from "@supabase/supabase-js";
 
+import { findAuthUserByPhone } from "@/lib/auth/account-linking";
 import {
   consumeOtpVerificationAttempt,
   GENERIC_OTP_ERROR,
@@ -12,23 +12,7 @@ import {
 } from "@/lib/auth/guest-otp";
 import { resolveStrictAuthenticatedUser } from "@/lib/request-user";
 import { createAdminSupabaseClient } from "@/lib/supabase";
-import { normalizeGuestPhone } from "@/lib/guest-identity";
 import { isGuestProfileComplete, upsertUserProfileCompatibility } from "@/lib/user-profile";
-
-async function findAuthUserByPhone(
-  supabase: ReturnType<typeof createAdminSupabaseClient>,
-  phone: string
-): Promise<User | null> {
-  const normalizedPhone = normalizeGuestPhone(phone);
-  for (let page = 1; page <= 100; page += 1) {
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) throw error;
-    const match = data.users.find((user) => normalizeGuestPhone(user.phone) === normalizedPhone);
-    if (match) return match;
-    if (data.users.length < 1000) return null;
-  }
-  throw new Error("Unable to resolve the verified phone.");
-}
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {

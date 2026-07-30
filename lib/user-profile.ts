@@ -11,6 +11,11 @@ export interface UserProfileRecord {
   phone_verified_at?: string | null;
   email_verified_at?: string | null;
   profile_completed_at?: string | null;
+  pending_email?: string | null;
+  pending_email_requested_at?: string | null;
+  account_status?: "active" | "linking" | "merged" | "manual_review";
+  merged_into_user_id?: string | null;
+  merged_at?: string | null;
   city: string | null;
   state: string | null;
   onboarding_completed: boolean;
@@ -58,6 +63,16 @@ function mapLegacyUserRow(userId: string, row: JsonRecord | null): UserProfileRe
     phone_verified_at: asString(row.phone_verified_at),
     email_verified_at: asString(row.email_verified_at),
     profile_completed_at: asString(row.profile_completed_at),
+    pending_email: normalizeGuestEmail(asString(row.pending_email)),
+    pending_email_requested_at: asString(row.pending_email_requested_at),
+    account_status:
+      row.account_status === "linking" ||
+      row.account_status === "merged" ||
+      row.account_status === "manual_review"
+        ? row.account_status
+        : "active",
+    merged_into_user_id: asString(row.merged_into_user_id),
+    merged_at: asString(row.merged_at),
     city: asString(row.city),
     state: asString(row.state),
     onboarding_completed: asBoolean(row.onboarding_completed),
@@ -82,6 +97,11 @@ export function createEmptyUserProfile(userId: string): UserProfileRecord {
     phone_verified_at: null,
     email_verified_at: null,
     profile_completed_at: null,
+    pending_email: null,
+    pending_email_requested_at: null,
+    account_status: "active",
+    merged_into_user_id: null,
+    merged_at: null,
     city: null,
     state: null,
     onboarding_completed: false,
@@ -98,6 +118,7 @@ export function createEmptyUserProfile(userId: string): UserProfileRecord {
 export function isGuestProfileComplete(profile: UserProfileRecord | null | undefined): boolean {
   if (!profile) return false;
   return Boolean(
+    (profile.account_status ?? "active") === "active" &&
     profile.username &&
     profile.name &&
     profile.phone &&
@@ -154,6 +175,11 @@ function mergeUserProfile(
     phone_verified_at: base?.phone_verified_at ?? null,
     email_verified_at: base?.email_verified_at ?? null,
     profile_completed_at: base?.profile_completed_at ?? null,
+    pending_email: base?.pending_email ?? null,
+    pending_email_requested_at: base?.pending_email_requested_at ?? null,
+    account_status: base?.account_status ?? "active",
+    merged_into_user_id: base?.merged_into_user_id ?? null,
+    merged_at: base?.merged_at ?? null,
     city: base?.city ?? asString(v2Row?.home_city) ?? null,
     state: base?.state ?? asString(v2Row?.home_state) ?? null,
     onboarding_completed: Boolean(base?.onboarding_completed) || isGuestProfileComplete(base),
@@ -178,7 +204,7 @@ export async function loadUserProfileCompatibility(
     supabase
       .from("users")
       .select(
-        "id, username, name, phone, email, phone_verified_at, email_verified_at, profile_completed_at, city, state, onboarding_completed, avatar_url, about, date_of_birth, gender, kyc_status, kyc_submitted_at, id_document_url, id_document_type, verification_url, verification_type"
+        "id, username, name, phone, email, phone_verified_at, email_verified_at, profile_completed_at, pending_email, pending_email_requested_at, account_status, merged_into_user_id, merged_at, city, state, onboarding_completed, avatar_url, about, date_of_birth, gender, kyc_status, kyc_submitted_at, id_document_url, id_document_type, verification_url, verification_type"
       )
       .eq("id", userId)
       .maybeSingle(),
@@ -218,6 +244,17 @@ export type GuestProfileFieldErrors = Partial<
 >;
 
 export function validateGuestProfileInput(input: UserProfilePatch): GuestProfileFieldErrors {
+  return validateGuestProfileFields(input, true);
+}
+
+export function validateGuestProfileDetailsInput(input: UserProfilePatch): GuestProfileFieldErrors {
+  return validateGuestProfileFields(input, false);
+}
+
+function validateGuestProfileFields(
+  input: UserProfilePatch,
+  requireContacts: boolean
+): GuestProfileFieldErrors {
   const errors: GuestProfileFieldErrors = {};
   const username = normalizeGuestUsername(input.username);
   const name = typeof input.name === "string" ? input.name.trim() : "";
@@ -232,8 +269,8 @@ export function validateGuestProfileInput(input: UserProfilePatch): GuestProfile
   const usernameError = validateGuestUsername(username);
   if (usernameError) errors.username = usernameError;
   if (name.length < 2 || name.length > 100) errors.name = "Enter your full name.";
-  if (!email) errors.email = "Add your email address.";
-  if (!phone) errors.phone = "Add your phone number.";
+  if (requireContacts && !email) errors.email = "Add your email address.";
+  if (requireContacts && !phone) errors.phone = "Add your phone number.";
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = "Enter a valid email address.";
   if (phone && !normalizeGuestPhone(phone)) errors.phone = "Enter a valid phone number.";
   if (!city || city.length > 100) errors.city = "Enter your city.";

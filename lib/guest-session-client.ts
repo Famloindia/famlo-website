@@ -3,12 +3,14 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import type { GuestSessionSnapshot } from "@/lib/guest-session";
+import type { ContactEvidence } from "@/lib/auth/contact-evidence";
 import type { UserProfileRecord } from "@/lib/user-profile";
 
 type GuestSessionResponse = {
   user?: GuestSessionSnapshot["user"];
   profile?: UserProfileRecord | null;
   profileComplete?: boolean;
+  contactEvidence?: ContactEvidence;
   error?: string;
 };
 
@@ -39,6 +41,11 @@ export function normalizeGuestSessionResponse(payload: GuestSessionResponse | nu
       : null,
     profile: (payload?.profile as UserProfileRecord | null) ?? null,
     profileComplete: payload?.profileComplete === true,
+    contactEvidence: payload?.contactEvidence ?? {
+      email: { value: null, verified: false, readOnly: false, source: "none" },
+      phone: { value: null, verified: false, source: "none" },
+      providers: [],
+    },
   };
 }
 

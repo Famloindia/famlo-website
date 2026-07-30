@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, CheckCircle2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { useUser } from "@/components/auth/UserContext";
@@ -10,14 +10,17 @@ import { PasswordManagementCard } from "@/components/account/PasswordManagementC
 import { SavedHomesSection } from "@/components/account/SavedHomesSection";
 import { getSafeReturnPath } from "@/lib/site-url";
 import { getMissingGuestProfileRequirements, isGuestProfileComplete } from "@/lib/user-profile";
+import { createBrowserSupabaseClient } from "@/lib/supabase";
 
 export default function ProfilePage(): React.JSX.Element {
   const { user, profile, loading } = useUser();
+  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = getSafeReturnPath(searchParams.get("next"));
   const authReturn = searchParams.get("auth_return");
   const isGoogleOnboarding = authReturn === "google";
+  const linkRequestId = searchParams.get("link_request");
   const profileComplete = isGuestProfileComplete(profile);
   const [phoneConflict, setPhoneConflict] = useState(false);
   const displayedProfileComplete = profileComplete && !phoneConflict;
@@ -25,18 +28,63 @@ export default function ProfilePage(): React.JSX.Element {
     ? ["Verified phone"]
     : getMissingGuestProfileRequirements(profile);
   const accountHasPassword = user?.app_metadata?.provider === "email";
+  const [linkStatus, setLinkStatus] = useState<{
+    status: string;
+    targetSupabaseSessionVerified: boolean;
+  } | null>(null);
+  const [linkMessage, setLinkMessage] = useState<string | null>(null);
+  const [linkingGoogle, setLinkingGoogle] = useState(false);
+
+  const refreshLinkStatus = useCallback(async (): Promise<void> => {
+    if (!linkRequestId) return;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const response = await fetch(
+      `/api/user/account-link/status?requestId=${encodeURIComponent(linkRequestId)}`,
+      {
+        cache: "no-store",
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {},
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    if (response.ok && payload) {
+      setLinkStatus({
+        status: String(payload.status ?? ""),
+        targetSupabaseSessionVerified:
+          payload.targetSupabaseSessionVerified === true,
+      });
+    }
+  }, [linkRequestId, supabase]);
 
   useEffect(() => {
-    if (!isGoogleOnboarding || loading) {
-      return;
-    }
+    const handle = window.setTimeout(() => {
+      void refreshLinkStatus();
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [refreshLinkStatus, user?.id]);
 
-    if (!profileComplete) {
-      return;
+  async function linkGoogleIdentity(): Promise<void> {
+    if (!linkRequestId || !linkStatus?.targetSupabaseSessionVerified) return;
+    setLinkingGoogle(true);
+    setLinkMessage(null);
+    const callbackUrl = new URL("/auth/callback", window.location.origin);
+    callbackUrl.searchParams.set("next", nextPath);
+    callbackUrl.searchParams.set("link_request", linkRequestId);
+    callbackUrl.searchParams.set("link_mode", "google");
+    const { error } = await supabase.auth.linkIdentity({
+      provider: "google",
+      options: { redirectTo: callbackUrl.toString() },
+    });
+    if (error) {
+      setLinkingGoogle(false);
+      setLinkMessage(
+        "Google linking could not be completed. Your existing account remains unchanged."
+      );
     }
-
-    router.replace(nextPath);
-  }, [isGoogleOnboarding, loading, nextPath, profileComplete, router]);
+  }
 
   if (loading && !user && !profile) {
     return (
@@ -92,15 +140,37 @@ export default function ProfilePage(): React.JSX.Element {
           </div>
         </section>
 
+        {linkRequestId && linkStatus?.status !== "linked" ? (
+          <section className="identity-link-panel">
+            <div>
+              <h2>Link your Google sign-in</h2>
+              <p>
+                Phone ownership is confirmed. Verify this account&apos;s email, then
+                link Google to use either sign-in method.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={
+                !linkStatus?.targetSupabaseSessionVerified || linkingGoogle
+              }
+              onClick={() => void linkGoogleIdentity()}
+            >
+              {linkingGoogle ? "Opening Google..." : "Link Google"}
+            </button>
+            {linkMessage ? <p className="link-error">{linkMessage}</p> : null}
+          </section>
+        ) : null}
+
         <ProfileCompletionForm
           title="Profile details"
           description="Your verified contact details help Famlo keep every booking secure."
           buttonLabel={isGoogleOnboarding ? "Save and continue" : "Save profile"}
+          returnTo={nextPath}
+          accountLinkRequestId={linkRequestId}
           onPhoneConflictChange={setPhoneConflict}
           onSuccess={async () => {
-            if (isGoogleOnboarding) {
-              router.replace(nextPath);
-            }
+            router.replace(nextPath);
           }}
         />
 
@@ -178,6 +248,34 @@ export default function ProfilePage(): React.JSX.Element {
           color: #64748b;
           font-size: 13px;
           line-height: 1.5;
+        }
+        .identity-link-panel {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 12px 20px;
+          align-items: center;
+          padding: 18px 20px;
+          border: 1px solid #bfdbfe;
+          border-radius: 8px;
+          background: #eff6ff;
+        }
+        .identity-link-panel h2 { margin: 0; color: #1e3a8a; font-size: 16px; }
+        .identity-link-panel p { margin: 5px 0 0; color: #475569; font-size: 13px; line-height: 1.5; }
+        .identity-link-panel button {
+          min-height: 42px;
+          padding: 0 16px;
+          border: 0;
+          border-radius: 8px;
+          background: #1d4ed8;
+          color: #fff;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .identity-link-panel button:disabled { cursor: not-allowed; opacity: 0.55; }
+        .identity-link-panel .link-error { grid-column: 1 / -1; color: #b91c1c; font-weight: 700; }
+        @media (max-width: 640px) {
+          .identity-link-panel { grid-template-columns: 1fr; }
+          .identity-link-panel button { width: 100%; }
         }
         .profile-status .missing-summary {
           color: inherit;
