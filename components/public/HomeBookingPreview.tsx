@@ -92,23 +92,6 @@ async function ensureRazorpayCheckout(): Promise<void> {
   });
 }
 
-function warmRazorpayCheckout(): void {
-  if (typeof window === "undefined") return;
-
-  const scheduleWarmup = () => {
-    void ensureRazorpayCheckout().catch(() => {
-      // Ignore warmup failures and retry on the real checkout tap.
-    });
-  };
-
-  if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(scheduleWarmup, { timeout: 1500 });
-    return;
-  }
-
-  window.setTimeout(scheduleWarmup, 250);
-}
-
 export function HomeBookingPreview({
   homeId,
   hostId,
@@ -141,13 +124,6 @@ export function HomeBookingPreview({
   const [showProfileGate, setShowProfileGate] = useState(false);
   const [profileUnlocked, setProfileUnlocked] = useState(false);
   const resumeAfterProfileSaveRef = useRef(false);
-  const checkoutWarmedRef = useRef(false);
-
-  const warmCheckoutIntent = useCallback(() => {
-    if (checkoutWarmedRef.current) return;
-    checkoutWarmedRef.current = true;
-    warmRazorpayCheckout();
-  }, []);
 
   const releasePendingBooking = useCallback(
     async (bookingId: string): Promise<void> => {
@@ -373,15 +349,9 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         },
       });
 
-      const bookingSavedMessage = "Booking created and saved in Famlo. Opening secure payment now.";
       const paymentIntentPayload = bookingPayload.paymentIntent;
       if (!paymentIntentPayload) {
-        setFeedback({
-          type: "success",
-          text: `${bookingSavedMessage} Payment setup needs one more retry, so please complete it from your bookings dashboard.`,
-        });
-        router.push("/bookings");
-        return;
+        throw new Error("We couldn’t prepare checkout. Your stay has not been booked. Please try again.");
       }
 
       if (paymentIntentPayload.integrationStatus === "razorpay_ready" && paymentIntentPayload.order) {
@@ -498,7 +468,7 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         if (result.error) {
           setFeedback({
             type: "error",
-            text: "Payment was not completed. If money was debited, Famlo will update this booking after Cashfree confirms it.",
+            text: "Your payment was not completed. You can try again while Famlo waits for the signed payment update.",
           });
           return;
         }
@@ -517,8 +487,8 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
       }
 
       setFeedback({
-        type: "success",
-        text: "Booking created. Live payment keys are not fully configured, so payment is pending for now.",
+        type: "error",
+        text: "We couldn’t prepare checkout. Your stay has not been booked. Please try again.",
       });
     } catch (error) {
       setFeedback({
@@ -570,11 +540,6 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
     resumeAfterProfileSaveRef.current = false;
     void handleContinue(true);
   }, [handleContinue, profileUnlocked]);
-
-  useEffect(() => {
-    if (!selectedQuarter || !selectedDate || selectedDateHasExpired) return;
-    warmCheckoutIntent();
-  }, [selectedDate, selectedDateHasExpired, selectedQuarter, warmCheckoutIntent]);
 
   return (
     <div
@@ -700,9 +665,6 @@ Need help during your stay? Use the Famlo assistance path from your booking thre
         className="famlo-preview-cta"
         disabled={!canBook || submitting}
         onClick={() => void handleContinue()}
-        onMouseEnter={warmCheckoutIntent}
-        onFocus={warmCheckoutIntent}
-        onTouchStart={warmCheckoutIntent}
       >
         {submitting ? "Processing..." : "Get it now"}
       </button>

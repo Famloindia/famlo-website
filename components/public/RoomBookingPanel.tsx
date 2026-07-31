@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { CalendarDays, ChevronRight, IndianRupee, MapPin, ShieldCheck, Users } from "lucide-react";
 
 import { AuthModal } from "@/components/auth/AuthModal";
@@ -171,23 +171,6 @@ function ensureRazorpayCheckout(): Promise<void> {
   });
 }
 
-function warmRazorpayCheckout(): void {
-  if (typeof window === "undefined") return;
-
-  const scheduleWarmup = () => {
-    void ensureRazorpayCheckout().catch(() => {
-      // Ignore warmup failures and retry on the real checkout tap.
-    });
-  };
-
-  if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(scheduleWarmup, { timeout: 1500 });
-    return;
-  }
-
-  window.setTimeout(scheduleWarmup, 250);
-}
-
 export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBookingPanelProps>): React.JSX.Element {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const { user, profile, loading, refreshProfile } = useUser();
@@ -203,14 +186,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
   const [receipt, setReceipt] = useState<BookingReceipt | null>(null);
   const [bookHovered, setBookHovered] = useState(false);
   const [optimisticBlockedDates, setOptimisticBlockedDates] = useState<string[]>([]);
-  const checkoutWarmedRef = useRef(false);
   const isBusy = bookingPhase !== "idle";
-
-  const warmCheckoutIntent = useCallback(() => {
-    if (checkoutWarmedRef.current) return;
-    checkoutWarmedRef.current = true;
-    warmRazorpayCheckout();
-  }, []);
 
   const releasePendingBooking = async (bookingId: string): Promise<void> => {
     const normalizedBookingId = bookingId.trim();
@@ -292,12 +268,6 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
   const monthOne = anchorMonth;
 
   const selectedGuests = Math.min(Math.max(1, guests), guestLimit);
-
-  useEffect(() => {
-    if (calendarTouched) {
-      warmCheckoutIntent();
-    }
-  }, [calendarTouched, warmCheckoutIntent]);
 
   function pickDate(dateString: string): void {
     const today = getTodayInIndia();
@@ -536,7 +506,8 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         const paymentIntentPayload = payload.paymentIntent;
         if (!paymentIntentPayload) {
           setReceipt(null);
-          setSuccessMessage("Payment setup needs one more retry, so this room has not been booked yet.");
+          setSuccessMessage(null);
+          setBookingError("We couldn’t prepare checkout. Your room has not been booked. Please try again.");
         } else if (paymentIntentPayload.integrationStatus === "razorpay_ready" && paymentIntentPayload.order) {
           await ensureRazorpayCheckout();
           if (!window.Razorpay) {
@@ -648,7 +619,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           if (result.error) {
             setSuccessMessage(null);
             setBookingError(
-              "Payment was not completed. If money was debited, Famlo will update this booking after Cashfree confirms it."
+              "Your payment was not completed. You can try again while Famlo waits for the signed payment update."
             );
           } else if (result.paymentDetails) {
             await sendCashfreeReturnAdvisory(order).catch(() => null);
@@ -664,7 +635,8 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         } else {
           setBookingPhase("idle");
           setReceipt(null);
-          setSuccessMessage("Payment setup is pending on the server, so this room is not booked yet.");
+          setSuccessMessage(null);
+          setBookingError("We couldn’t prepare checkout. Your room has not been booked. Please try again.");
         }
       } else {
         setBookingPhase("idle");
@@ -698,7 +670,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             <div className="famlo-booking-loader-copy">
               {bookingPhase === "verifying"
                 ? "Please wait while we confirm your payment and move you to My Bookings."
-                : "We are setting up secure payment for this room."}
+                : "We’re securely preparing payment for this room."}
             </div>
           </div>
         </div>
@@ -899,13 +871,8 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
           <button
             type="button"
             onClick={() => void handleBooking()}
-            onMouseEnter={() => {
-              setBookHovered(true);
-              warmCheckoutIntent();
-            }}
+            onMouseEnter={() => setBookHovered(true)}
             onMouseLeave={() => setBookHovered(false)}
-            onFocus={warmCheckoutIntent}
-            onTouchStart={warmCheckoutIntent}
             disabled={isBusy || loading || !room.isActive}
             style={{
               border: "none",

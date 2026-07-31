@@ -153,7 +153,7 @@ export async function expireBookingHolds(supabase: SupabaseClient): Promise<{ ex
   try {
     rowsResult = await supabase
       .from("bookings_v2")
-      .select("id,host_id,stay_unit_id,start_date,end_date,quarter_type")
+      .select("id,payment_id,host_id,stay_unit_id,start_date,end_date,quarter_type")
       .eq("status", "awaiting_payment")
       .not("hold_expires_at", "is", null)
       .lte("hold_expires_at", now);
@@ -163,7 +163,7 @@ export async function expireBookingHolds(supabase: SupabaseClient): Promise<{ ex
     }
     rowsResult = await supabase
       .from("bookings_v2")
-      .select("id,host_id,start_date,end_date,quarter_type")
+      .select("id,payment_id,host_id,start_date,end_date,quarter_type")
       .eq("status", "awaiting_payment")
       .not("hold_expires_at", "is", null)
       .lte("hold_expires_at", now);
@@ -172,7 +172,7 @@ export async function expireBookingHolds(supabase: SupabaseClient): Promise<{ ex
   if (rowsResult?.error && isMissingColumnError(rowsResult.error, "stay_unit_id")) {
     rowsResult = await supabase
       .from("bookings_v2")
-      .select("id,host_id,start_date,end_date,quarter_type")
+      .select("id,payment_id,host_id,start_date,end_date,quarter_type")
       .eq("status", "awaiting_payment")
       .not("hold_expires_at", "is", null)
       .lte("hold_expires_at", now);
@@ -196,6 +196,16 @@ export async function expireBookingHolds(supabase: SupabaseClient): Promise<{ ex
       } as never)
       .eq("id", bookingId);
     if (updateError) throw updateError;
+
+    const paymentId = asString((row as JsonRecord).payment_id);
+    if (paymentId) {
+      const paymentUpdate = await supabase
+        .from("payments_v2")
+        .update({ status: "expired", provider_status: "ORDER_EXPIRED", updated_at: now } as never)
+        .eq("id", paymentId)
+        .in("status", ["created", "pending"]);
+      if (paymentUpdate.error) throw paymentUpdate.error;
+    }
 
     await supabase.from("booking_status_history_v2").insert({
       booking_id: bookingId,

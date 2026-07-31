@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { releasePaymentAttemptBookingHold } from "@/lib/booking-payment-holds";
 import { isCheckoutSection95PricingEnabled } from "@/lib/finance/feature-flags";
 import { isSection95TaxMode } from "@/lib/finance/finance-contracts";
 import { calculateSection95FinanceContract } from "@/lib/finance/section-9-5-engine";
@@ -82,6 +83,18 @@ export function buildRazorpayOrderNotes(input: {
   if (hostId) notes.host_id = hostId;
   if (propertyId) notes.property_id = propertyId;
   return notes;
+}
+
+export function shouldReusePaymentAttempt(input: {
+  existingGateway: string | null | undefined;
+  selectedGateway: string;
+  existingStatus: string | null | undefined;
+}): boolean {
+  const existingGateway = String(input.existingGateway ?? "").trim().toLowerCase();
+  const selectedGateway = String(input.selectedGateway ?? "").trim().toLowerCase();
+  const existingStatus = String(input.existingStatus ?? "").trim().toLowerCase();
+  if (["failed", "abandoned", "expired", "cancelled"].includes(existingStatus)) return false;
+  return existingGateway === selectedGateway || existingGateway === "pending_gateway";
 }
 
 type CheckoutPricingBreakdown = {
@@ -320,7 +333,14 @@ export async function createPaymentIntentForBooking(
 
   const manualFallback = !isProviderConfigured(gateway);
   const existingGateway = String(existingPayment?.gateway ?? "").trim().toLowerCase();
-  const reuseExistingPayment = Boolean(existingPayment && existingGateway === gateway);
+  const reuseExistingPayment = Boolean(
+    existingPayment &&
+      shouldReusePaymentAttempt({
+        existingGateway,
+        selectedGateway: gateway,
+        existingStatus,
+      })
+  );
   const paymentAttemptNumber = reuseExistingPayment
     ? Number(existingPayment?.payment_attempt_number ?? 1)
     : Math.max(1, Number(existingPayment?.payment_attempt_number ?? 0) + 1);
@@ -356,12 +376,19 @@ export async function createPaymentIntentForBooking(
 
   if (paymentError) throw paymentError;
 
+  const bookingPaymentUpdate = await supabase
+    .from("bookings_v2")
+    .update({ payment_id: payment.id, payment_status: "pending" } as never)
+    .eq("id", bookingId);
+  if (bookingPaymentUpdate.error) throw bookingPaymentUpdate.error;
+
   let orderPayload: ProviderCheckoutPayload | null = null;
   let integrationStatus = "ready_for_gateway";
   let nextStep =
     "Create your provider order from this pricing payload, then write the gateway IDs back into payments_v2 on capture.";
 
   if (!manualFallback) {
+    try {
     const checkoutBreakdown = extractCheckoutPricingBreakdown(pricingSnapshot);
     const propertyId =
       asString(pricingSnapshot.property_id) ??
@@ -441,6 +468,28 @@ export async function createPaymentIntentForBooking(
       gateway === "cashfree"
         ? "Open Cashfree Hosted Checkout with the payment session id. Treat return callbacks as advisory and wait for the verified webhook."
         : "Open Razorpay Checkout with this order payload, then call /api/payments/verify on success.";
+    } catch (error) {
+      await supabase
+        .from("payments_v2")
+        .update({
+          status: "failed",
+          provider_status: "ORDER_SETUP_FAILED",
+          raw_response: {
+            ...((payment.raw_response as Record<string, unknown> | null) ?? {}),
+            order_setup_failed_at: new Date().toISOString(),
+          },
+        } as never)
+        .eq("id", payment.id)
+        .neq("status", "paid");
+      await releasePaymentAttemptBookingHold(supabase, {
+        bookingId,
+        paymentId: payment.id,
+        reason: "payment_setup_failed",
+        paymentStatus: "failed",
+        source: "payment_intent.order_setup_failed",
+      });
+      throw error;
+    }
   }
 
   await Promise.all([

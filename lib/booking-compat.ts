@@ -10,6 +10,7 @@ import { computeHoldExpiry, enforceInventoryRules } from "@/lib/booking-platform
 import { getCalendarEventStayUnitId, loadCanonicalCalendar } from "@/lib/calendar";
 import { ensureHostProfileForFamily } from "@/lib/family-approval";
 import { toPctFromBps } from "@/lib/finance/money";
+import { isHostBookingInventoryBlocking } from "@/lib/host-booking-state";
 import { buildHostStayOccupancy } from "@/lib/host-stay-availability";
 import {
   appendInventoryEvent,
@@ -97,6 +98,14 @@ export interface BookingCreateResult {
   pricingSnapshot: Record<string, unknown>;
 }
 
+export type ReusableGuestHoldRow = {
+  id: string;
+  status: string | null;
+  payment_status: string | null;
+  hold_expires_at: string | null;
+  cancellation_reason: string | null;
+};
+
 type CouponRow = {
   id: string;
   code: string;
@@ -138,6 +147,51 @@ function resolveStayUnitIdFromRecord(row: JsonRecord): string | null {
 
   const snapshot = (row.pricing_snapshot as JsonRecord | null) ?? null;
   return asString(snapshot?.stay_unit_id);
+}
+
+export function isPublicHostStayBookingBlocking(
+  row: { status: unknown; paymentStatus: unknown }
+): boolean {
+  return isHostBookingInventoryBlocking(row.status, row.paymentStatus);
+}
+
+export function isReusableGuestBookingHold(row: ReusableGuestHoldRow): boolean {
+  const status = asString(row.status)?.toLowerCase();
+  const paymentStatus = asString(row.payment_status)?.toLowerCase();
+  const cancellationReason = asString(row.cancellation_reason)?.toLowerCase();
+  if (["paid", "refund_pending", "refunded", "partially_refunded"].includes(paymentStatus ?? "")) {
+    return false;
+  }
+  if (status === "awaiting_payment") {
+    return true;
+  }
+  if (status === "payment_failed") return true;
+  return (
+    status === "cancelled" &&
+    ["hold_expired", "payment_failed", "user_dropped", "payment_setup_failed", "order_expired"].includes(
+      cancellationReason ?? ""
+    )
+  );
+}
+
+async function findReusableGuestHold(
+  supabase: SupabaseClient,
+  input: Pick<BookingCreateInput, "userId" | "stayUnitId" | "startDate" | "endDate">
+): Promise<ReusableGuestHoldRow | null> {
+  const stayUnitId = asString(input.stayUnitId);
+  if (!stayUnitId) return null;
+  const endDate = input.endDate ?? input.startDate;
+  const { data, error } = await supabase
+    .from("bookings_v2")
+    .select("id,status,payment_status,hold_expires_at,cancellation_reason")
+    .eq("user_id", input.userId)
+    .eq("stay_unit_id", stayUnitId)
+    .eq("start_date", input.startDate)
+    .eq("end_date", endDate)
+    .order("created_at", { ascending: false })
+    .limit(5);
+  if (error) throw error;
+  return ((data ?? []) as ReusableGuestHoldRow[]).find((row) => isReusableGuestBookingHold(row)) ?? null;
 }
 
 function inferLegacyStatus(status: string): string {
@@ -466,6 +520,8 @@ export async function assertHostStayAvailability(
       throw new Error(
         firstBlocked.blockReason === "manual_block"
           ? "This room is manually blocked for the selected date."
+          : firstBlocked.holdUnits > 0 && firstBlocked.confirmedUnits === 0
+            ? "This room is temporarily unavailable while another checkout is in progress. Please try again shortly."
           : firstBlocked.blockReason === "sold_out"
             ? "This room is already booked for the selected date."
             : "This room is not available for the selected date."
@@ -1441,7 +1497,9 @@ export async function loadHostStayBookingRecordsCompatibility(
     source: "legacy" as const,
   }));
 
-  return [...v2Rows, ...legacyRows].filter((row) => Boolean(row.startDate));
+  return [...v2Rows, ...legacyRows].filter(
+    (row) => Boolean(row.startDate) && isPublicHostStayBookingBlocking(row)
+  );
 }
 
 export async function createBookingCompatibility(
@@ -1462,7 +1520,12 @@ export async function createBookingCompatibility(
     throw new Error("This booking date has already passed. Please choose another date.");
   }
 
-  await assertHostStayAvailability(supabase, input);
+  const reusableGuestHold =
+    input.bookingType === "host_stay" ? await findReusableGuestHold(supabase, input) : null;
+
+  await assertHostStayAvailability(supabase, input, {
+    excludeBookingId: reusableGuestHold?.id ?? null,
+  });
 
   const quote = await buildBookingQuote(supabase, input, { skipAvailabilityCheck: true });
 
@@ -1535,20 +1598,31 @@ export async function createBookingCompatibility(
     bookingPayload.stay_unit_id = resolvedStayUnitId;
   }
 
+  let bookingWasReused = false;
   let v2Result;
-  try {
-    v2Result = await supabase.from("bookings_v2").insert(bookingPayload).select("id").single();
-  } catch (error) {
-    if (!isMissingColumnError(error, "stay_unit_id") || !("stay_unit_id" in bookingPayload)) {
-      throw error;
+  if (input.bookingType === "host_stay") {
+    if (!resolvedStayUnitId || !holdExpiresAt) {
+      throw new Error("A room and hold expiry are required for guest checkout.");
     }
-    const { stay_unit_id: _ignored, ...fallbackPayload } = bookingPayload;
-    v2Result = await supabase.from("bookings_v2").insert(fallbackPayload).select("id").single();
-  }
-
-  if (v2Result?.error && isMissingColumnError(v2Result.error, "stay_unit_id") && "stay_unit_id" in bookingPayload) {
-    const { stay_unit_id: _ignored, ...fallbackPayload } = bookingPayload;
-    v2Result = await supabase.from("bookings_v2").insert(fallbackPayload).select("id").single();
+    const holdResult = await supabase
+      .rpc("acquire_guest_booking_hold_v1", {
+        p_user_id: input.userId,
+        p_stay_unit_id: resolvedStayUnitId,
+        p_start_date: input.startDate,
+        p_end_date: input.endDate ?? input.startDate,
+        p_hold_expires_at: holdExpiresAt,
+        p_booking_payload: bookingPayload,
+      })
+      .single();
+    bookingWasReused = Boolean((holdResult.data as JsonRecord | null)?.reused);
+    v2Result = {
+      data: (holdResult.data as JsonRecord | null)?.booking_id
+        ? { id: (holdResult.data as JsonRecord).booking_id }
+        : null,
+      error: holdResult.error,
+    };
+  } else {
+    v2Result = await supabase.from("bookings_v2").insert(bookingPayload).select("id").single();
   }
 
   const { data: v2Booking, error: v2Error } = v2Result;
@@ -1594,6 +1668,36 @@ export async function createBookingCompatibility(
     source: "booking_create",
     sourceKind: "direct",
   });
+
+  if (bookingWasReused) {
+    const bookingId = asString((v2Booking as JsonRecord).id) ?? "";
+    const { data: existingBooking, error: existingBookingError } = await supabase
+      .from("bookings_v2")
+      .select("legacy_booking_id,conversation_id,payment_id,payment_status,total_price,partner_payout_amount,pricing_snapshot")
+      .eq("id", bookingId)
+      .single();
+    if (existingBookingError) throw existingBookingError;
+
+    const legacyBookingId = asString(existingBooking.legacy_booking_id);
+    if (legacyBookingId) {
+      await supabase.from("bookings").update({ status: "pending" } as never).eq("id", legacyBookingId);
+    }
+    await syncBookingCalendarIndexBestEffort(supabase, bookingId, "reuse_guest_booking_hold");
+
+    return {
+      bookingId,
+      legacyBookingId,
+      conversationId: asString(existingBooking.conversation_id),
+      paymentId: asString(existingBooking.payment_id),
+      paymentStatus: asString(existingBooking.payment_status) ?? "pending",
+      totalPrice: asNumber(existingBooking.total_price, quote.totalPrice),
+      partnerPayoutAmount: asNumber(existingBooking.partner_payout_amount, quote.partnerPayoutAmount),
+      pricingSnapshot:
+        existingBooking.pricing_snapshot && typeof existingBooking.pricing_snapshot === "object"
+          ? (existingBooking.pricing_snapshot as Record<string, unknown>)
+          : quote.pricingSnapshot,
+    };
+  }
 
   await processFinanceEventContract(supabase, {
     bookingId: asString((v2Booking as JsonRecord).id) ?? "",

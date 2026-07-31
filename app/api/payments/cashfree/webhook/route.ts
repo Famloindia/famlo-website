@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { releasePaymentAttemptBookingHold } from "@/lib/booking-payment-holds";
 import {
   cashfreeAmountToMinor,
   isCashfreeFailureStatus,
@@ -460,13 +461,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         } as never)
         .eq("id", payment.id);
 
-      await supabase
-        .from("bookings_v2")
-        .update({
-          payment_status: bookingPaymentStatus,
-          updated_at: now,
-        } as never)
-        .eq("id", payment.booking_id);
+      const holdRelease = await releasePaymentAttemptBookingHold(supabase, {
+        bookingId: payment.booking_id,
+        paymentId: payment.id,
+        reason: isCashfreeUserDroppedStatus(paymentStatus) ? "user_dropped" : "payment_failed",
+        paymentStatus: bookingPaymentStatus,
+        source: "payments.cashfree.webhook",
+      });
 
       await appendPaymentEventAudit(supabase, {
         paymentId: payment.id,
@@ -486,7 +487,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         errorMessage: null,
       });
 
-      return NextResponse.json({ received: true, paymentId: payment.id, bookingId: payment.booking_id });
+      return NextResponse.json({
+        received: true,
+        paymentId: payment.id,
+        bookingId: payment.booking_id,
+        holdReleased: holdRelease.released,
+      });
     }
 
     await updatePaymentProviderEventStatus(supabase, {
