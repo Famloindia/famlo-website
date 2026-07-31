@@ -182,6 +182,18 @@ export function isCashfreeRefundsEnabled(): boolean {
   return isEnabled(process.env.CASHFREE_REFUNDS_ENABLED, false);
 }
 
+export function isCashfreeSandboxRefundExecutionEnabled(): boolean {
+  return getFamloPaymentProvider() === "cashfree"
+    && String(process.env.CASHFREE_ENV ?? "").trim().toLowerCase() === "sandbox"
+    && isEnabled(process.env.REFUND_PROVIDER_EXECUTION_ENABLED, false)
+    && isCashfreeRefundsEnabled();
+}
+
+export function isConfiguredPaymentRefundExecutionEnabled(): boolean {
+  if (getFamloPaymentProvider() === "cashfree") return isCashfreeSandboxRefundExecutionEnabled();
+  return isRefundProviderExecutionEnabled() && isRazorpayRefundsEnabled();
+}
+
 export function isRazorpayXEnabled(): boolean {
   return isEnabled(process.env.RAZORPAYX_ENABLED, false) && isRuntimeSafetySatisfied("razorpayx");
 }

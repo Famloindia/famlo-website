@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  isConfiguredPaymentRefundExecutionEnabled,
   isCashfreeRefundsEnabled,
   isRazorpayRefundsEnabled,
   isRefundAdminApprovalRequired,
-  isRefundProviderExecutionEnabled,
 } from "@/lib/finance/feature-flags";
 import { calculateRefundPolicy, type RefundPolicyCase, type RefundPolicyInput } from "@/lib/finance/refund-policy";
 import { clampMoney } from "@/lib/finance/money";
@@ -57,7 +57,7 @@ export function shouldRequireAdminRefundApproval(): boolean {
 }
 
 export function canExecuteRefundProvider(): boolean {
-  return isRefundProviderExecutionEnabled() && (isRazorpayRefundsEnabled() || isCashfreeRefundsEnabled());
+  return isConfiguredPaymentRefundExecutionEnabled();
 }
 
 export function resolveRefundWebhookTransition(eventName: string): {

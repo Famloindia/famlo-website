@@ -8,7 +8,9 @@ import {
   getTempUnsafeLocalProductionSupabaseWarning,
 } from "@/lib/app-env";
 import {
+  isCashfreeSandboxRefundExecutionEnabled,
   isChannexSyncExecutionEnabled,
+  isConfiguredPaymentRefundExecutionEnabled,
   isRefundProviderExecutionEnabled,
   isSettlementPayoutExecutionEnabled,
 } from "@/lib/finance/feature-flags";
@@ -222,6 +224,34 @@ test("payout, refund, and Channex execution stay blocked unless the correct env 
       assert.equal(isRefundProviderExecutionEnabled(), false);
       assert.equal(isSettlementPayoutExecutionEnabled(), false);
       assert.equal(isChannexSyncExecutionEnabled(), true);
+    }
+  );
+});
+
+test("Cashfree refund execution is enabled only for the explicitly enabled sandbox provider", () => {
+  withEnv(
+    {
+      FAMLO_PAYMENT_PROVIDER: "cashfree",
+      CASHFREE_ENV: "sandbox",
+      CASHFREE_REFUNDS_ENABLED: "true",
+      REFUND_PROVIDER_EXECUTION_ENABLED: "true",
+    },
+    () => {
+      assert.equal(isCashfreeSandboxRefundExecutionEnabled(), true);
+      assert.equal(isConfiguredPaymentRefundExecutionEnabled(), true);
+    }
+  );
+
+  withEnv(
+    {
+      FAMLO_PAYMENT_PROVIDER: "cashfree",
+      CASHFREE_ENV: "production",
+      CASHFREE_REFUNDS_ENABLED: "true",
+      REFUND_PROVIDER_EXECUTION_ENABLED: "true",
+    },
+    () => {
+      assert.equal(isCashfreeSandboxRefundExecutionEnabled(), false);
+      assert.equal(isConfiguredPaymentRefundExecutionEnabled(), false);
     }
   );
 });

@@ -60,6 +60,9 @@ const hostDecision = readFileSync(new URL("../lib/host-booking-decision.ts", imp
 const adminRoute = readFileSync(new URL("../app/api/admin/finance/cancellations/route.ts", import.meta.url), "utf8");
 const webhook = readFileSync(new URL("../app/api/payments/cashfree/webhook/route.ts", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../supabase/migrations/20260731230000_cancellation_requests_cashfree_refunds.sql", import.meta.url), "utf8");
+const financeSettingsGrantMigration = readFileSync(new URL("../supabase/migrations/20260731233000_finance_settings_service_role_read.sql", import.meta.url), "utf8");
+const refundAdminGrantMigration = readFileSync(new URL("../supabase/migrations/20260731233500_refund_admin_service_role_reads.sql", import.meta.url), "utf8");
+const refundCompatibilityMigration = readFileSync(new URL("../supabase/migrations/20260731234000_refunds_v2_created_at_compat.sql", import.meta.url), "utf8");
 
 test("guest route uses request RPC", () => assert.match(cancelRoute, /requestGuestCancellation/));
 test("guest route does not set booking cancelled", () => assert.doesNotMatch(cancelRoute, /status:\s*[\"']cancelled/));
@@ -71,3 +74,19 @@ test("migration prevents duplicate active cases", () => assert.match(migration, 
 test("migration prevents duplicate refund idempotency keys", () => assert.match(migration, /refund_requests_idempotency_uidx/));
 test("migration revokes guest financial table access", () => assert.match(migration, /revoke all on table public\.cancellation_requests_v2 from anon, authenticated/));
 test("migration schedules 12-hour SLA processor", () => assert.match(migration, /famlo-host-approval-sla/));
+test("finance settings remain private and readable by the admin service role", () => {
+  assert.match(financeSettingsGrantMigration, /revoke all on table public\.finance_settings from anon, authenticated/i);
+  assert.match(financeSettingsGrantMigration, /grant select on table public\.finance_settings to service_role/i);
+});
+test("refund admin dependencies remain private and readable by the service role", () => {
+  assert.match(refundAdminGrantMigration, /revoke all on table public\.credit_notes from anon, authenticated/i);
+  assert.match(refundAdminGrantMigration, /revoke all on table public\.payouts_v2 from anon, authenticated/i);
+  assert.match(refundAdminGrantMigration, /grant select on table public\.credit_notes to service_role/i);
+  assert.match(refundAdminGrantMigration, /grant select on table public\.payouts_v2 to service_role/i);
+});
+test("refund history exposes a provider-neutral created timestamp without rewriting history", () => {
+  assert.match(refundCompatibilityMigration, /add column if not exists created_at timestamptz/i);
+  assert.match(refundCompatibilityMigration, /coalesce\(created_at, initiated_at\)/i);
+  assert.match(refundCompatibilityMigration, /grant select on table[\s\S]*public\.refunds_v2[\s\S]*to service_role/i);
+  assert.doesNotMatch(refundCompatibilityMigration, /drop\s+(table|column)/i);
+});

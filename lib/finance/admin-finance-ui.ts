@@ -17,8 +17,7 @@ import {
   isGstInvoiceGenerationEnabled,
   isInvoiceEmailDeliveryEnabled,
   isPlatformFeeInvoiceGenerationEnabled,
-  isRefundProviderExecutionEnabled,
-  isRazorpayRefundsEnabled,
+  isConfiguredPaymentRefundExecutionEnabled,
   isSettlementApprovalFlowEnabled,
   isSettlementPayoutExecutionEnabled,
 } from "@/lib/finance/feature-flags";
@@ -326,7 +325,7 @@ export function getAdminFinanceBlockedReasons(settingsTaxMode: string) {
       : !isCreditNoteGenerationEnabled()
         ? "Credit-note generation flag is disabled."
         : null,
-    refundExecution: !isRefundProviderExecutionEnabled() || !isRazorpayRefundsEnabled()
+    refundExecution: !isConfiguredPaymentRefundExecutionEnabled()
       ? "Provider refund execution is disabled by rollout flags."
       : null,
     payoutTrigger: !isSettlementPayoutExecutionEnabled()
