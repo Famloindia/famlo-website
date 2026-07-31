@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -188,6 +189,16 @@ test("guest booking surfaces do not eagerly load Razorpay", async () => {
   }
   assert.match(files[2] ?? "", /We’re securely preparing payment for this room/);
   assert.doesNotMatch(files[2] ?? "", /setting up Razorpay/i);
+});
+
+test("compiled JavaScript cannot shadow canonical guest booking components", () => {
+  for (const path of [
+    "components/public/HomeBookingFlow.js",
+    "components/public/HomeBookingPreview.js",
+    "components/public/RoomBookingPanel.js",
+  ]) {
+    assert.equal(existsSync(path), false, `${path} must not shadow its TypeScript source`);
+  }
 });
 
 test("guest surfaces present payment setup failure as one error state", async () => {
