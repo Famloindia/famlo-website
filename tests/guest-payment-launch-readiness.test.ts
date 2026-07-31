@@ -165,14 +165,16 @@ test("order setup failure records failure and releases inventory", async () => {
   assert.match(source, /releasePaymentAttemptBookingHold/);
 });
 
-test("hold expiry worker updates payment state and runs every five minutes", async () => {
-  const [platform, vercel] = await Promise.all([
+test("hold expiry is enforced at read time and the archival worker fits Vercel Hobby", async () => {
+  const [platform, inventory, vercel] = await Promise.all([
     readFile("lib/booking-platform.ts", "utf8"),
+    readFile("lib/inventory.ts", "utf8"),
     readFile("vercel.json", "utf8"),
   ]);
   assert.match(platform, /provider_status: "ORDER_EXPIRED"/);
   assert.match(platform, /eventType: "booking_hold_released"/);
-  assert.equal(JSON.parse(vercel).crons[0].schedule, "*/5 * * * *");
+  assert.match(inventory, /Date\.parse\(holdExpiresAt\) > now\.getTime\(\)/);
+  assert.equal(JSON.parse(vercel).crons[0].schedule, "0 4 * * *");
 });
 
 test("guest booking surfaces do not eagerly load Razorpay", async () => {
