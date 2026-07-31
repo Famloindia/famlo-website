@@ -14,11 +14,13 @@ import AuditTrail from "@/components/teams/AuditTrail";
 import CancellationTrail from "@/components/teams/CancellationTrail";
 import SupportManager from "@/components/admin/SupportManager";
 import PromotionsBoard from "@/components/teams/PromotionsBoard";
-import RefundsReviewDashboard from "@/components/admin/RefundsReviewDashboard";
+import CancellationOperationsQueue from "@/components/operations/CancellationOperationsQueue";
+import HostSlaQueue from "@/components/operations/HostSlaQueue";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { getSupabaseAccessTokenCookieName } from "@/lib/auth-constants";
 import { fetchCancellationHistory } from "@/lib/cancellation-history";
+import { listCancellationCases, listOpenHostSlaIncidents } from "@/lib/cancellations/operations";
 
 export const dynamic = "force-dynamic";
 
@@ -318,8 +320,8 @@ export default async function TeamsPage({ searchParams }: TeamsPageProps) {
     );
 
   } else if (activeTab === "refunds") {
-    const cancellationEntries = await fetchCancellationHistory(supabase, { limit: 250 });
-    content = <RefundsReviewDashboard entries={cancellationEntries} variant="light" showBookingLinks={false} />;
+    const [cancellationCases, slaIncidents] = await Promise.all([listCancellationCases(supabase), listOpenHostSlaIncidents(supabase)]);
+    content = <><HostSlaQueue initialIncidents={slaIncidents as never[]} /><CancellationOperationsQueue initialCases={cancellationCases as never[]} mode="team" /></>;
 
   } else if (activeTab === "shadow") {
     // SHADOW: Administrative "Watch Session" to assist partners in real-time

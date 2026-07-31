@@ -43,6 +43,12 @@ type BookingRow = {
     state: string | null;
     avatar_url: string | null;
   } | null;
+  cancellation_request?: {
+    id: string;
+    status: string;
+    suggested_refund_amount_minor: number;
+    approved_refund_amount_minor: number | null;
+  } | null;
 };
 
 type SupportDraft = {
@@ -66,10 +72,9 @@ type ExistingStory = {
 };
 
 type CancellationQuote = {
-  refundableAmount: number;
-  penaltyAmount: number;
-  bookingAmount: number;
-  penaltyPercent?: number;
+  refundableAmountMinor: number;
+  bookingAmountMinor: number;
+  refundPercent: number;
   refundRule?: string;
 };
 
@@ -77,6 +82,8 @@ type PendingCancellation = {
   booking: BookingRow;
   hostName: string;
   quote: CancellationQuote;
+  reason: "guest_change_of_plans" | "guest_travel_issue" | "guest_other";
+  notes: string;
 };
 
 function getBookingStatusMeta(status: string | null, canLeaveStory: boolean): {
@@ -170,30 +177,6 @@ function getCancellationHostName(booking: BookingRow): string {
 function formatCheckInCode(code: string): string {
   const normalized = code.replace(/\D/g, "").slice(0, 5).padStart(5, "0");
   return `${normalized.slice(0, 3)} ${normalized.slice(3)}`;
-}
-
-function buildCancellationQuote(booking: BookingRow): CancellationQuote {
-  const bookingAmount = Math.max(0, Math.round(Number(booking.total_price ?? 0)));
-  const createdAt = booking.created_at ? new Date(booking.created_at) : new Date();
-  const stayDate = booking.date_from || booking.date_to || null;
-  const checkInTime = stayDate ? new Date(`${stayDate}T00:00:00+05:30`).getTime() : Date.now();
-  const createdAtTime = Number.isNaN(createdAt.getTime()) ? Date.now() : createdAt.getTime();
-  const hoursToCheckIn = Math.round((checkInTime - Date.now()) / 36_00_000);
-  const hoursSinceBooking = Math.max(0, Math.round((Date.now() - createdAtTime) / 36_00_000));
-  const penaltyPercent = hoursSinceBooking <= 24 ? 0 : hoursToCheckIn <= 24 ? 20 : 10;
-  const penaltyAmount = Math.round((bookingAmount * penaltyPercent) / 100);
-  return {
-    bookingAmount,
-    penaltyAmount,
-    refundableAmount: Math.max(0, bookingAmount - penaltyAmount),
-    penaltyPercent,
-    refundRule:
-      hoursSinceBooking <= 24
-        ? "Free cancellation within 24 hours of booking."
-        : hoursToCheckIn <= 24
-          ? "20% service and owner preparation penalty because cancellation is within 24 hours of check-in."
-          : "10% penalty because cancellation is after 24 hours of booking.",
-  };
 }
 
 function formatDateRange(booking: BookingRow): string {
@@ -1011,17 +994,36 @@ export function BookingsDashboard(): React.JSX.Element {
       delete next[booking.id];
       return next;
     });
-    setPendingCancellation({
-      booking,
-      hostName: getCancellationHostName(booking),
-      quote: buildCancellationQuote(booking),
-    });
+    setCancelLoadingByBookingId((current) => ({ ...current, [booking.id]: true }));
+    try {
+      const response = await fetch("/api/bookings/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await getAuthHeaders()) },
+        body: JSON.stringify({ bookingId: booking.id, action: "quote", reason: "guest_other" }),
+      });
+      const payload = (await response.json()) as { error?: string; quote?: CancellationQuote };
+      if (!response.ok || !payload.quote) throw new Error(payload.error ?? "Could not calculate the cancellation estimate.");
+      setPendingCancellation({
+        booking,
+        hostName: getCancellationHostName(booking),
+        quote: payload.quote,
+        reason: "guest_change_of_plans",
+        notes: "",
+      });
+    } catch (error) {
+      setCancelMessageByBookingId((current) => ({
+        ...current,
+        [booking.id]: { type: "error", text: error instanceof Error ? error.message : "Could not start the cancellation request." },
+      }));
+    } finally {
+      setCancelLoadingByBookingId((current) => ({ ...current, [booking.id]: false }));
+    }
   }
 
   async function confirmCancelBooking(): Promise<void> {
     if (!pendingCancellation) return;
 
-    const { booking, quote } = pendingCancellation;
+    const { booking, quote, reason, notes } = pendingCancellation;
     setCancelLoadingByBookingId((current) => ({ ...current, [booking.id]: true }));
 
     try {
@@ -1031,21 +1033,30 @@ export function BookingsDashboard(): React.JSX.Element {
           "Content-Type": "application/json",
           ...(await getAuthHeaders()),
         },
-        body: JSON.stringify({ bookingId: booking.id, action: "cancel" }),
+        body: JSON.stringify({ bookingId: booking.id, action: "request", reason, notes }),
       });
-      const cancelPayload = (await cancelResponse.json()) as { error?: string; quote?: CancellationQuote };
+      const cancelPayload = (await cancelResponse.json()) as {
+        error?: string;
+        cancellationRequest?: { requestId: string; status: string; policy: { suggestedRefundAmountMinor: number } };
+      };
       if (!cancelResponse.ok || cancelPayload.error) {
         throw new Error(cancelPayload.error ?? "Could not cancel booking.");
       }
 
-      setBookings((current) =>
-        current.map((row) => (row.id === booking.id ? { ...row, status: "cancelled_by_user" } : row))
-      );
+      setBookings((current) => current.map((row) => row.id === booking.id ? {
+        ...row,
+        cancellation_request: {
+          id: cancelPayload.cancellationRequest?.requestId ?? `pending-${booking.id}`,
+          status: cancelPayload.cancellationRequest?.status ?? "requested",
+          suggested_refund_amount_minor: cancelPayload.cancellationRequest?.policy.suggestedRefundAmountMinor ?? quote.refundableAmountMinor,
+          approved_refund_amount_minor: null,
+        },
+      } : row));
       setCancelMessageByBookingId((current) => ({
         ...current,
         [booking.id]: {
           type: "success",
-          text: `Booking cancelled. Refund review amount: ${formatInr(cancelPayload.quote?.refundableAmount ?? quote.refundableAmount)}.`,
+          text: `Cancellation requested. Estimated refund: ${formatInr(quote.refundableAmountMinor / 100)}. Our team will contact you shortly.`,
         },
       }));
       setPendingCancellation(null);
@@ -1057,6 +1068,26 @@ export function BookingsDashboard(): React.JSX.Element {
           text: error instanceof Error ? error.message : "Could not cancel booking.",
         },
       }));
+    } finally {
+      setCancelLoadingByBookingId((current) => ({ ...current, [booking.id]: false }));
+    }
+  }
+
+  async function withdrawCancellation(booking: BookingRow): Promise<void> {
+    if (!booking.cancellation_request) return;
+    setCancelLoadingByBookingId((current) => ({ ...current, [booking.id]: true }));
+    try {
+      const response = await fetch("/api/bookings/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await getAuthHeaders()) },
+        body: JSON.stringify({ action: "withdraw", cancellationRequestId: booking.cancellation_request.id }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Could not withdraw the request.");
+      setBookings((current) => current.map((row) => row.id === booking.id ? { ...row, cancellation_request: null } : row));
+      setCancelMessageByBookingId((current) => ({ ...current, [booking.id]: { type: "success", text: "Cancellation request withdrawn. Your booking remains unchanged." } }));
+    } catch (error) {
+      setCancelMessageByBookingId((current) => ({ ...current, [booking.id]: { type: "error", text: error instanceof Error ? error.message : "Could not withdraw the request." } }));
     } finally {
       setCancelLoadingByBookingId((current) => ({ ...current, [booking.id]: false }));
     }
@@ -1152,7 +1183,8 @@ export function BookingsDashboard(): React.JSX.Element {
                   booking.status === "completed";
                 const statusMeta = getBookingStatusMeta(booking.status, canLeaveStory);
                 const canOpenChat = Boolean(booking.conversation_id) && isChatUnlocked(booking.status);
-                const canCancel = canGuestCancelBooking(booking);
+                const cancellationOpen = Boolean(booking.cancellation_request && !["rejected", "withdrawn", "completed"].includes(booking.cancellation_request.status));
+                const canCancel = canGuestCancelBooking(booking) && !cancellationOpen;
 
                 return (
                   <article key={booking.id} className="panel" style={{ 
@@ -1332,7 +1364,17 @@ export function BookingsDashboard(): React.JSX.Element {
                       }} type="button" onClick={() => void downloadReceipt(booking.id)} disabled={Boolean(receiptLoadingByBookingId[booking.id])}>
                         {receiptLoadingByBookingId[booking.id] ? "Preparing receipt..." : "Download receipt"}
                       </button>
-                      {canCancel ? (
+                      {cancellationOpen ? (
+                        <button
+                          className="btn-ghost"
+                          type="button"
+                          onClick={() => void withdrawCancellation(booking)}
+                          disabled={Boolean(cancelLoadingByBookingId[booking.id]) || !["requested", "under_review", "guest_contact_pending", "guest_contacted", "recommended_approve", "recommended_reject", "on_hold"].includes(booking.cancellation_request?.status ?? "")}
+                          style={{ height: 48, padding: "0 20px", borderRadius: 14, background: "#FFF", borderColor: "#CBD5E1", color: "#475569", fontWeight: 700 }}
+                        >
+                          {cancelLoadingByBookingId[booking.id] ? "Withdrawing..." : "Withdraw cancellation request"}
+                        </button>
+                      ) : canCancel ? (
                         <button
                           className="btn-ghost"
                           style={{
@@ -1353,7 +1395,7 @@ export function BookingsDashboard(): React.JSX.Element {
                           onClick={() => void cancelBooking(booking)}
                           disabled={Boolean(cancelLoadingByBookingId[booking.id])}
                         >
-                          {cancelLoadingByBookingId[booking.id] ? "Cancelling..." : "Cancel booking"}
+                          {cancelLoadingByBookingId[booking.id] ? "Loading..." : "Request cancellation"}
                         </button>
                       ) : null}
                       {canOpenChat ? (
@@ -1455,6 +1497,13 @@ export function BookingsDashboard(): React.JSX.Element {
                         {cancelMessageByBookingId[booking.id].text}
                       </div>
                     ) : null}
+                    {booking.cancellation_request && !["withdrawn", "rejected"].includes(booking.cancellation_request.status) ? (
+                      <div style={{ padding: 16, borderRadius: 12, background: "#EFF6FF", border: "1px solid #BFDBFE", color: "#1E3A8A", display: "grid", gap: 5 }}>
+                        <strong>Cancellation requested</strong>
+                        <span style={{ fontSize: 14 }}>Our team will contact you shortly to review your request.</span>
+                        <span style={{ fontSize: 13 }}>Estimated refund: {formatInr(booking.cancellation_request.suggested_refund_amount_minor / 100)}</span>
+                      </div>
+                    ) : null}
 
                     {expandedSupport === booking.id ? (
                       <BookingSupportCard
@@ -1519,10 +1568,10 @@ export function BookingsDashboard(): React.JSX.Element {
           >
             <div style={{ display: "grid", gap: 8 }}>
               <h2 id="cancel-booking-title" style={{ margin: 0, fontSize: 22, fontWeight: 900, color: "#0F1F3D" }}>
-                Cancel booking?
+                Request cancellation
               </h2>
               <p style={{ margin: 0, color: "#334155", fontSize: 15, lineHeight: 1.6 }}>
-                {pendingCancellation.hostName} is preparing for your stay and planning for you. Do you really want to cancel?
+                Your cancellation request will be reviewed by Team Famlo. Our service executive may contact you before the cancellation is processed.
               </p>
             </div>
             <div
@@ -1539,9 +1588,32 @@ export function BookingsDashboard(): React.JSX.Element {
               }}
             >
               <span>{pendingCancellation.quote.refundRule ?? "Famlo will calculate the cancellation amount."}</span>
-              <span>Penalty: {pendingCancellation.quote.penaltyPercent ?? 0}% ({formatInr(pendingCancellation.quote.penaltyAmount)})</span>
-              <span>Refundable amount: {formatInr(pendingCancellation.quote.refundableAmount)}</span>
+              <span>Current policy estimate: {pendingCancellation.quote.refundPercent}%</span>
+              <span>Estimated refund: {formatInr(pendingCancellation.quote.refundableAmountMinor / 100)}</span>
             </div>
+            <label style={{ display: "grid", gap: 7, color: "#334155", fontWeight: 700, fontSize: 14 }}>
+              Reason
+              <select
+                className="text-input"
+                value={pendingCancellation.reason}
+                onChange={(event) => setPendingCancellation((current) => current ? { ...current, reason: event.target.value as PendingCancellation["reason"] } : current)}
+              >
+                <option value="guest_change_of_plans">Change of plans</option>
+                <option value="guest_travel_issue">Travel issue</option>
+                <option value="guest_other">Other</option>
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 7, color: "#334155", fontWeight: 700, fontSize: 14 }}>
+              Notes (optional)
+              <textarea
+                className="text-input"
+                rows={3}
+                maxLength={1000}
+                value={pendingCancellation.notes}
+                onChange={(event) => setPendingCancellation((current) => current ? { ...current, notes: event.target.value } : current)}
+                placeholder="Share anything our team should know"
+              />
+            </label>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, flexWrap: "wrap" }}>
               <button
                 type="button"
@@ -1550,7 +1622,7 @@ export function BookingsDashboard(): React.JSX.Element {
                 disabled={Boolean(cancelLoadingByBookingId[pendingCancellation.booking.id])}
                 style={{ height: 46, padding: "0 18px", borderRadius: 12, background: "#FFFFFF" }}
               >
-                No, keep booking
+                Keep booking
               </button>
               <button
                 type="button"
@@ -1559,7 +1631,7 @@ export function BookingsDashboard(): React.JSX.Element {
                 disabled={Boolean(cancelLoadingByBookingId[pendingCancellation.booking.id])}
                 style={{ height: 46, padding: "0 20px", borderRadius: 12, background: "#DC2626" }}
               >
-                {cancelLoadingByBookingId[pendingCancellation.booking.id] ? "Cancelling..." : "Yes, cancel booking"}
+                {cancelLoadingByBookingId[pendingCancellation.booking.id] ? "Submitting..." : "Submit cancellation request"}
               </button>
             </div>
           </div>

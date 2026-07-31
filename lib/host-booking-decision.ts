@@ -12,6 +12,7 @@ import { recordBookingInventoryTransition } from "@/lib/payment-booking-finaliza
 import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
 import { getWhatsAppRuntimeConfig } from "@/lib/whatsapp-config";
 import { resolveEligibleGuestWhatsApp } from "@/lib/whatsapp-eligibility";
+import { requestHostDeclineCancellation } from "@/lib/cancellations/service";
 
 export type HostBookingDecision = "approve" | "decline";
 export type HostBookingDecisionSource = "dashboard" | "signed_link" | "whatsapp";
@@ -33,7 +34,7 @@ export type HostBookingDecisionResult = {
   status: "applied" | "already_processed";
   decision: HostBookingDecision;
   bookingId: string;
-  bookingStatus: "confirmed" | "rejected";
+  bookingStatus: "confirmed" | "rejected" | "pending_host_approval";
   refundRequestId: string | null;
 };
 
@@ -432,5 +433,20 @@ export async function applyHostBookingDecision(
   supabase: SupabaseClient,
   input: HostBookingDecisionInput
 ): Promise<HostBookingDecisionResult> {
+  if (input.decision === "decline") {
+    const cancellation = await requestHostDeclineCancellation(supabase, {
+      bookingId: input.bookingId,
+      hostId: input.hostId,
+      actorId: input.actor.userId,
+      idempotencyKey: `host-decline:${input.idempotencyKey}`,
+    });
+    return {
+      status: cancellation.created ? "applied" : "already_processed",
+      decision: "decline",
+      bookingId: input.bookingId,
+      bookingStatus: "pending_host_approval",
+      refundRequestId: null,
+    };
+  }
   return executeHostBookingDecision(createSupabaseRuntime(supabase), input);
 }

@@ -178,6 +178,7 @@ const sourceFiles = {
   modify: readFileSync(path.join(repoRoot, "lib/reservation-modifications.ts"), "utf8"),
   reassign: readFileSync(path.join(repoRoot, "lib/reservation-reassignment.ts"), "utf8"),
   cancel: readFileSync(path.join(repoRoot, "app/api/bookings/cancel/route.ts"), "utf8"),
+  approvedCancellation: readFileSync(path.join(repoRoot, "lib/cancellations/service.ts"), "utf8"),
   importPreview: readFileSync(path.join(repoRoot, "app/api/host/pro/channel/channex/bookings/import-preview/route.ts"), "utf8"),
   applyModification: readFileSync(path.join(repoRoot, "app/api/host/pro/channel/channex/bookings/apply-modification/route.ts"), "utf8"),
   applyCancellation: readFileSync(path.join(repoRoot, "app/api/host/pro/channel/channex/bookings/apply-cancellation/route.ts"), "utf8"),
@@ -343,7 +344,9 @@ test("canonical booking write paths all call the additive booking calendar index
   assert.match(sourceFiles.finalization, /syncBookingCalendarIndexBestEffort/);
   assert.match(sourceFiles.modify, /syncBookingCalendarIndexBestEffort/);
   assert.match(sourceFiles.reassign, /syncBookingCalendarIndexBestEffort/);
-  assert.match(sourceFiles.cancel, /syncBookingCalendarIndexBestEffort/);
+  assert.doesNotMatch(sourceFiles.cancel, /syncBookingCalendarIndexBestEffort/);
+  assert.match(sourceFiles.cancel, /requestGuestCancellation/);
+  assert.match(sourceFiles.approvedCancellation, /syncBookingCalendarIndexBestEffort/);
   assert.match(sourceFiles.importPreview, /syncBookingCalendarIndexBestEffort/);
   assert.match(sourceFiles.applyModification, /syncBookingCalendarIndexBestEffort/);
   assert.match(sourceFiles.applyCancellation, /syncBookingCalendarIndexBestEffort/);

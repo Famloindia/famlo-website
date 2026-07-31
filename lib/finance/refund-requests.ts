@@ -8,7 +8,7 @@ import {
 } from "@/lib/finance/feature-flags";
 import { calculateRefundPolicy, type RefundPolicyCase, type RefundPolicyInput } from "@/lib/finance/refund-policy";
 import { clampMoney } from "@/lib/finance/money";
-import { createCashfreeRefund, isCashfreeConfigured } from "@/lib/cashfree";
+import { createCashfreeRefund, fetchCashfreeRefund, isCashfreeConfigured } from "@/lib/cashfree";
 import { createRazorpayRefund, isRazorpayConfigured } from "@/lib/razorpay";
 
 type JsonRecord = Record<string, unknown>;
@@ -175,7 +175,7 @@ export async function approveAndMaybeInitiateRefund(
 }> {
   const { data: request, error: requestError } = await supabase
     .from("refund_requests")
-    .select("id,booking_id,payment_id,reason,refund_amount,status")
+    .select("id,booking_id,payment_id,reason,refund_amount,refund_amount_minor,idempotency_key,status,retry_count")
     .eq("id", input.refundRequestId)
     .maybeSingle();
   if (requestError) throw requestError;
@@ -233,28 +233,61 @@ export async function approveAndMaybeInitiateRefund(
     }
 
     const merchantRefundId = `refund_${String(request.id).replace(/-/g, "").slice(0, 32)}`;
-    const refund = await createCashfreeRefund({
-      orderId: String(payment.gateway_order_id),
-      refundId: merchantRefundId,
-      amountMinor: Number(request.refund_amount ?? 0) * 100,
-      note: asString(request.reason) ?? "admin_refund_request",
-      idempotencyKey: String(request.id),
-    });
-
-    const providerRefundId = String(refund.cf_refund_id ?? refund.refund_id);
-    const { data: attempt, error: attemptError } = await supabase
-      .from("refund_attempts")
-      .insert({
+    const idempotencyKey = asString(request.idempotency_key) ?? String(request.id);
+    const amountMinor = Number(request.refund_amount_minor ?? Number(request.refund_amount ?? 0) * 100);
+    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error("Refund amount must be a positive integer in minor units.");
+    const existingAttempt = await supabase.from("refund_attempts").select("id,provider_refund_id,status")
+      .eq("provider", "cashfree").eq("merchant_refund_id", merchantRefundId).maybeSingle();
+    if (existingAttempt.error) throw existingAttempt.error;
+    let attemptId = asString(existingAttempt.data?.id);
+    if (!attemptId) {
+      const reserved = await supabase.from("refund_attempts").insert({
         refund_request_id: request.id,
         provider: "cashfree",
-        provider_refund_id: providerRefundId,
-        amount: Number(request.refund_amount ?? 0),
-        status: "submitted",
-        raw_response: refund as unknown as JsonRecord,
-      })
-      .select("id")
-      .single();
-    if (attemptError) throw attemptError;
+        merchant_refund_id: merchantRefundId,
+        idempotency_key: idempotencyKey,
+        amount: Math.floor(amountMinor / 100),
+        status: "pending",
+        raw_response: { state: "reserved_before_provider_call" },
+      }).select("id").single();
+      if (reserved.error) throw reserved.error;
+      attemptId = String(reserved.data.id);
+    }
+
+    let refund: Awaited<ReturnType<typeof createCashfreeRefund>>;
+    try {
+      if (existingAttempt.data?.provider_refund_id || existingAttempt.data?.status === "submitted") {
+        refund = await fetchCashfreeRefund(String(payment.gateway_order_id), merchantRefundId);
+      } else {
+        refund = await createCashfreeRefund({
+          orderId: String(payment.gateway_order_id),
+          refundId: merchantRefundId,
+          amountMinor,
+          note: asString(request.reason) ?? "admin_refund_request",
+          idempotencyKey,
+        });
+      }
+    } catch (error) {
+      try {
+        refund = await fetchCashfreeRefund(String(payment.gateway_order_id), merchantRefundId);
+      } catch {
+        const message = error instanceof Error ? error.message : "Cashfree refund status is uncertain.";
+        await supabase.from("refund_attempts").update({ status: "pending", last_error: message, retry_count: Number(request.retry_count ?? 0) + 1, updated_at: new Date().toISOString() } as never).eq("id", attemptId);
+        await supabase.from("refund_requests").update({ status: "retry_required", last_error: message, retry_count: Number(request.retry_count ?? 0) + 1, updated_at: new Date().toISOString() } as never).eq("id", request.id);
+        throw new Error("Cashfree refund status is uncertain and requires reconciliation before retry.");
+      }
+    }
+
+    const providerRefundId = String(refund.cf_refund_id ?? refund.refund_id ?? merchantRefundId);
+    const attemptUpdate = await supabase.from("refund_attempts").update({
+      provider_refund_id: providerRefundId,
+      status: "submitted",
+      submitted_at: new Date().toISOString(),
+      last_error: null,
+      raw_response: refund as unknown as JsonRecord,
+      updated_at: new Date().toISOString(),
+    } as never).eq("id", attemptId);
+    if (attemptUpdate.error) throw attemptUpdate.error;
 
     const { error: requestUpdateError } = await supabase
       .from("refund_requests")
@@ -262,6 +295,9 @@ export async function approveAndMaybeInitiateRefund(
         status: "processing",
         approved_by: input.actorUserId ?? null,
         approved_at: approvedAt,
+        submitted_at: new Date().toISOString(),
+        last_error: null,
+        updated_at: new Date().toISOString(),
       } as never)
       .eq("id", request.id);
     if (requestUpdateError) throw requestUpdateError;
@@ -271,7 +307,7 @@ export async function approveAndMaybeInitiateRefund(
       status: "processing",
       providerExecutionAttempted: true,
       providerExecutionBlocked: false,
-      refundAttemptId: String(attempt.id),
+      refundAttemptId: attemptId,
       providerRefundId,
     };
   }

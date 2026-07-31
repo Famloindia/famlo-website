@@ -239,12 +239,30 @@ export async function GET(request: Request): Promise<NextResponse> {
         }
       }
     }
+    const bookingIds = (bookings ?? []).map((booking) => String(booking.id ?? "")).filter(Boolean);
+    const { data: cancellationRequests, error: cancellationError } = bookingIds.length
+      ? await supabase
+          .from("cancellation_requests_v2")
+          .select("id,booking_id,status,suggested_refund_amount_minor,approved_refund_amount_minor,requested_at,withdrawn_at,completed_at")
+          .in("booking_id", bookingIds)
+          .order("created_at", { ascending: false })
+      : { data: [], error: null };
+    if (cancellationError) throw cancellationError;
+    const cancellationByBooking = new Map<string, Record<string, unknown>>();
+    for (const row of cancellationRequests ?? []) {
+      if (!cancellationByBooking.has(String(row.booking_id))) cancellationByBooking.set(String(row.booking_id), row);
+    }
+    const bookingsWithCancellation = (bookings ?? []).map((booking) => ({
+      ...booking,
+      cancellation_request: cancellationByBooking.get(String(booking.id)) ?? null,
+    }));
+
     console.info("[guest.bookings.route] load:success", {
       userId: bookingsUserId,
-      count: Array.isArray(bookings) ? bookings.length : 0,
+      count: bookingsWithCancellation.length,
     });
 
-    return NextResponse.json(bookings ?? [], {
+    return NextResponse.json(bookingsWithCancellation, {
       headers: {
         "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
         Pragma: "no-cache",

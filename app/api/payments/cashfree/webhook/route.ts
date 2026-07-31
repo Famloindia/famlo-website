@@ -17,7 +17,7 @@ import {
   storePaymentProviderEvent,
   updatePaymentProviderEventStatus,
 } from "@/lib/finance/provider-event-store";
-import { buildBookingReceiptDocument } from "@/lib/booking-platform";
+import { buildBookingReceiptDocument, enqueueNotification } from "@/lib/booking-platform";
 import {
   finalizeCapturedBookingPayment,
   loadBookingForPaymentFinalization,
@@ -179,7 +179,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             ? "paid"
             : "refund_pending";
 
-      const { data: existingAttempt } = providerRefundId
+      const merchantRefundId = asString(refundEntity.refund_id);
+      let { data: existingAttempt } = providerRefundId
         ? await supabase
             .from("refund_attempts")
             .select("id,refund_request_id,status")
@@ -187,6 +188,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             .eq("provider_refund_id", providerRefundId)
             .maybeSingle()
         : { data: null };
+      if (!existingAttempt && merchantRefundId) {
+        const fallbackAttempt = await supabase.from("refund_attempts").select("id,refund_request_id,status")
+          .eq("provider", "cashfree").eq("merchant_refund_id", merchantRefundId).maybeSingle();
+        if (fallbackAttempt.error) throw fallbackAttempt.error;
+        existingAttempt = fallbackAttempt.data;
+      }
 
       const { data: refundRow, error: refundUpsertError } = await supabase
         .from("refunds_v2")
@@ -249,8 +256,43 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           .from("refund_requests")
           .update({
             status: refundStatus === "processed" ? "processed" : refundStatus === "failed" ? "failed" : "processing",
+            successful_at: refundStatus === "processed" ? now : null,
+            failed_at: refundStatus === "failed" ? now : null,
+            last_error: refundStatus === "failed" ? "Cashfree reported refund failure." : null,
+            updated_at: now,
           } as never)
           .eq("id", existingAttempt.refund_request_id);
+
+        const { data: linkedRequest } = await supabase.from("refund_requests")
+          .select("cancellation_request_id").eq("id", existingAttempt.refund_request_id).maybeSingle();
+        if (linkedRequest?.cancellation_request_id) {
+          const { data: linkedCancellation } = await supabase.from("cancellation_requests_v2")
+            .select("guest_user_id").eq("id", linkedRequest.cancellation_request_id).maybeSingle();
+          const cancellationStatus = refundStatus === "processed" ? "completed" : refundStatus === "failed" ? "refund_failed" : "refund_processing";
+          await supabase.from("cancellation_requests_v2").update({
+            status: cancellationStatus,
+            completed_at: refundStatus === "processed" ? now : null,
+            updated_at: now,
+          } as never).eq("id", linkedRequest.cancellation_request_id);
+          if (refundStatus === "processed") {
+            await supabase.from("booking_settlement_holds_v2").update({
+              is_active: false,
+              released_at: now,
+              released_by: "cashfree_refund_webhook",
+              updated_at: now,
+            } as never).eq("cancellation_request_id", linkedRequest.cancellation_request_id).eq("is_active", true);
+          }
+          await enqueueNotification(supabase, {
+            eventType: refundStatus === "processed" ? "guest_refund_successful" : refundStatus === "failed" ? "refund_requires_attention" : "guest_refund_processing",
+            channel: "email",
+            userId: refundStatus === "failed" ? null : linkedCancellation?.guest_user_id ?? null,
+            bookingId: payment.booking_id,
+            dedupeKey: `cashfree_refund:${providerRefundId}:${refundStatus}:notification`,
+            subject: refundStatus === "processed" ? "Your Famlo refund is complete" : refundStatus === "failed" ? "Cashfree refund requires attention" : "Your Famlo refund is processing",
+            recipientRole: refundStatus === "failed" ? "admin" : "guest",
+            payload: { message: refundStatus === "processed" ? "Your approved refund has been completed." : refundStatus === "failed" ? "An approved refund needs finance review." : "Your approved refund is processing." },
+          });
+        }
       }
 
       await appendPaymentEventAudit(supabase, {

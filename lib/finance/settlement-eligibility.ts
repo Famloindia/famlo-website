@@ -18,6 +18,7 @@ export type SettlementEligibilityInput = {
   reservationCheckOutDate?: string | null;
   requiredLineCodes: Set<string>;
   existingActiveSettlementId?: string | null;
+  activeCancellationHold?: boolean;
   otaIncluded: boolean;
   requireCheckoutCompleted: boolean;
 };
@@ -87,6 +88,7 @@ export function evaluateSettlementEligibility(input: SettlementEligibilityInput)
   if (asString(input.existingActiveSettlementId)) {
     reasons.push("already_in_active_settlement");
   }
+  if (input.activeCancellationHold) reasons.push("cancellation_under_review");
 
   if (asNumber(input.hostPayoutAmount, 0) <= 0) {
     reasons.push("non_positive_host_payout");

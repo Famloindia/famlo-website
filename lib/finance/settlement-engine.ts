@@ -224,6 +224,7 @@ async function loadSettlementCandidates(
   lineCodesByFolioId: Map<string, Set<string>>;
   payoutByBookingId: Map<string, string>;
   activeSettlementByFolioId: Map<string, string>;
+  activeCancellationHoldBookingIds: Set<string>;
 }> {
   let folioQuery = supabase
     .from("reservation_folios_v2")
@@ -242,7 +243,7 @@ async function loadSettlementCandidates(
   const bookingIds = Array.from(new Set(folios.map((folio) => asString(folio.booking_id)).filter(Boolean))) as string[];
   const folioIds = folios.map((folio) => folio.id);
 
-  const [reservationsRes, bookingsRes, linesRes, payoutsRes, activeRes] = await Promise.all([
+  const [reservationsRes, bookingsRes, linesRes, payoutsRes, activeRes, holdsRes] = await Promise.all([
     reservationIds.length > 0
       ? supabase
           .from("reservations_v2")
@@ -268,6 +269,9 @@ async function loadSettlementCandidates(
           .eq("is_active", true)
           .in("folio_id", folioIds)
       : Promise.resolve({ data: [], error: null }),
+    bookingIds.length > 0
+      ? supabase.from("booking_settlement_holds_v2").select("booking_id").eq("is_active", true).in("booking_id", bookingIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (reservationsRes.error) throw reservationsRes.error;
@@ -275,6 +279,7 @@ async function loadSettlementCandidates(
   if (linesRes.error) throw linesRes.error;
   if (payoutsRes.error) throw payoutsRes.error;
   if (activeRes.error) throw activeRes.error;
+  if (holdsRes.error) throw holdsRes.error;
 
   const reservationsById = new Map<string, ReservationRow>();
   for (const row of (reservationsRes.data ?? []) as ReservationRow[]) {
@@ -314,6 +319,7 @@ async function loadSettlementCandidates(
     const settlementId = asString(row.settlement_id);
     if (folioId && settlementId) activeSettlementByFolioId.set(folioId, settlementId);
   }
+  const activeCancellationHoldBookingIds = new Set<string>((holdsRes.data ?? []).map((row) => String(row.booking_id)));
 
   return {
     folios: filteredFolios,
@@ -322,6 +328,7 @@ async function loadSettlementCandidates(
     lineCodesByFolioId,
     payoutByBookingId,
     activeSettlementByFolioId,
+    activeCancellationHoldBookingIds,
   };
 }
 
@@ -373,6 +380,7 @@ export async function listSettlementCandidates(
       reservationCheckOutDate: asString(reservation.check_out_date),
       requiredLineCodes: lineCodes,
       existingActiveSettlementId: loaded.activeSettlementByFolioId.get(folio.id) ?? null,
+      activeCancellationHold: Boolean(folio.booking_id && loaded.activeCancellationHoldBookingIds.has(String(folio.booking_id))),
       otaIncluded: includeOta,
       requireCheckoutCompleted,
     });
