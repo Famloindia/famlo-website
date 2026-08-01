@@ -59,6 +59,7 @@ export function AuthModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [accountExists, setAccountExists] = useState(false);
   const safeReturnTo = getSafeGuestAuthReturnPath(
     returnTo ?? (typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "/")
   );
@@ -82,6 +83,7 @@ export function AuthModal({
     setLoading(false);
     setError("");
     setMessage("");
+    setAccountExists(false);
     if (accountSwitchPhone) {
       window.sessionStorage.removeItem("famlo:account-switch-phone");
     }
@@ -98,6 +100,7 @@ export function AuthModal({
     setStep(initialStep);
     setError("");
     setMessage("");
+    setAccountExists(false);
     setOtp("");
     setSessionId("");
     onClose();
@@ -108,6 +111,7 @@ export function AuthModal({
     setStep("main");
     setError("");
     setMessage("");
+    setAccountExists(false);
     setOtp("");
     setSessionId("");
   }
@@ -127,6 +131,7 @@ export function AuthModal({
     event.preventDefault();
     setLoading(true);
     setError("");
+    setAccountExists(false);
     try {
       const response = await fetch("/api/auth/password/login", {
         method: "POST",
@@ -149,6 +154,7 @@ export function AuthModal({
     event.preventDefault();
     setLoading(true);
     setError("");
+    setAccountExists(false);
     try {
       const response = await fetch("/api/auth/signup/email", {
         method: "POST",
@@ -156,7 +162,10 @@ export function AuthModal({
         body: JSON.stringify({ email, password, confirmPassword, returnTo: safeReturnTo }),
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
+      if (!response.ok) {
+        setAccountExists(payload.code === "ACCOUNT_EXISTS");
+        throw new Error(payload.error ?? GENERIC_AUTH_ERROR);
+      }
       if (payload.session) {
         const { error: sessionError } = await supabase.auth.setSession(payload.session);
         if (sessionError) throw sessionError;
@@ -406,6 +415,12 @@ export function AuthModal({
             <label><span>Confirm password</span><input type={showPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>
             <label className="show-password"><input type="checkbox" checked={showPassword} onChange={(event) => setShowPassword(event.target.checked)} /> Show passwords</label>
             {error ? <p className="auth-error">{error}</p> : null}
+            {accountExists ? (
+              <div className="auth-inline-actions">
+                <button type="button" className="secondary-action" onClick={() => { setIdentifier(email); switchMode("login"); }}>Sign in</button>
+                <button type="button" className="text-action" onClick={() => { setStep("recovery_email"); setError(""); }}>Reset password</button>
+              </div>
+            ) : null}
             <button className="primary-action" type="submit" disabled={loading}>{loading ? "Creating account..." : "Create account"}</button>
             <button className="text-action" type="button" onClick={() => setStep("main")}>Back</button>
           </form>

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, ChevronRight, IndianRupee, MapPin, ShieldCheck, Users } from "lucide-react";
 
 import { AuthModal } from "@/components/auth/AuthModal";
@@ -12,6 +12,7 @@ import { useUser } from "@/components/auth/UserContext";
 import { addIndiaDays, getTodayInIndia } from "@/lib/booking-time";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import {
+  ensureCashfreeCheckout,
   openCashfreeCheckout,
   sendCashfreeReturnAdvisory,
   type CashfreeCheckoutOrder,
@@ -187,6 +188,23 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
   const [bookHovered, setBookHovered] = useState(false);
   const [optimisticBlockedDates, setOptimisticBlockedDates] = useState<string[]>([]);
   const isBusy = bookingPhase !== "idle";
+  const bookingDraftKey = `famlo:booking-draft:${room.id}`;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const raw = window.sessionStorage.getItem(bookingDraftKey);
+      if (!raw) return;
+      try {
+        const saved = JSON.parse(raw) as { checkIn?: string; checkOut?: string; guests?: number };
+        if (saved.checkIn) setCheckIn(saved.checkIn);
+        if (saved.checkOut) setCheckOut(saved.checkOut);
+        if (typeof saved.guests === "number") setGuests(Math.max(1, Math.min(room.maxGuests || 1, saved.guests)));
+      } finally {
+        window.sessionStorage.removeItem(bookingDraftKey);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [bookingDraftKey, room.maxGuests]);
 
   const releasePendingBooking = async (bookingId: string): Promise<void> => {
     const normalizedBookingId = bookingId.trim();
@@ -455,6 +473,7 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
     setSuccessMessage(null);
 
     try {
+      const clickStartedAt = window.performance.now();
       const { data: session } = await supabase.auth.getUser();
       const currentUserId = session.user?.id ?? user?.id;
       if (!currentUserId) {
@@ -613,6 +632,11 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         } else if (paymentIntentPayload.integrationStatus === "cashfree_ready" && paymentIntentPayload.order) {
           const order = paymentIntentPayload.order as CashfreeCheckoutOrder;
           const result = await openCashfreeCheckout(order);
+          console.info("[checkout.performance] opened", {
+            provider: "cashfree",
+            elapsedMs: Math.round(window.performance.now() - clickStartedAt),
+            serverTiming: response.headers.get("Server-Timing"),
+          });
           setBookingPhase("idle");
           setReceipt(null);
 
@@ -815,6 +839,27 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
         {bookingError ? (
           <div style={{ borderRadius: 16, padding: "12px 14px", background: "#fef2f2", color: "#991b1b", fontSize: 13, fontWeight: 700, lineHeight: 1.6 }}>
             {bookingError}
+            {!profileComplete ? (
+              <Link
+                href={`/profile?complete=1&next=${encodeURIComponent(getCurrentInternalPath())}`}
+                onClick={() => {
+                  window.sessionStorage.setItem(bookingDraftKey, JSON.stringify({ checkIn, checkOut, guests: selectedGuests }));
+                }}
+                style={{
+                  display: "flex",
+                  width: "fit-content",
+                  marginTop: 10,
+                  padding: "9px 13px",
+                  borderRadius: 10,
+                  background: "#991b1b",
+                  color: "#fff",
+                  textDecoration: "none",
+                  fontWeight: 900,
+                }}
+              >
+                Complete Profile
+              </Link>
+            ) : null}
           </div>
         ) : null}
 
@@ -872,6 +917,8 @@ export function RoomBookingPanel({ home, room, areaLabel }: Readonly<RoomBooking
             type="button"
             onClick={() => void handleBooking()}
             onMouseEnter={() => setBookHovered(true)}
+            onPointerEnter={() => { if (profileComplete) void ensureCashfreeCheckout().catch(() => null); }}
+            onFocus={() => { if (profileComplete) void ensureCashfreeCheckout().catch(() => null); }}
             onMouseLeave={() => setBookHovered(false)}
             disabled={isBusy || loading || !room.isActive}
             style={{

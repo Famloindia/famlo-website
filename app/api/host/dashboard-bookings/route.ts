@@ -166,7 +166,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     if (summaryOnly) {
       const result = await supabase
         .from("bookings_v2")
-        .select("status,payment_status,total_price,partner_payout_amount")
+        .select("host_id,status,payment_status,total_price,partner_payout_amount")
         .in("host_id", hostIds)
         .order("start_date", { ascending: false })
         .limit(200);
@@ -209,7 +209,28 @@ export async function GET(request: Request): Promise<NextResponse> {
     if (bookingError) throw bookingError;
 
     if (summaryOnly) {
-      const familyRows = await loadFamilyRows(supabase, uniqueFamilyIds);
+      const [familyRows, conversationsResult, notificationResult] = await Promise.all([
+        loadFamilyRows(supabase, uniqueFamilyIds),
+        hostAccess.hostUserId
+          ? supabase
+              .from("conversations")
+              .select("host_unread")
+              .eq("family_id", familyId)
+              .limit(100)
+          : Promise.resolve({ data: [], error: null }),
+        hostAccess.hostUserId
+          ? supabase
+              .from("operational_notifications")
+              .select("id", { count: "exact", head: true })
+              .eq("recipient_role", "host")
+              .eq("recipient_user_id", hostAccess.hostUserId)
+              .eq("family_id", familyId)
+              .is("read_at", null)
+              .lte("visible_after", new Date().toISOString())
+          : Promise.resolve({ count: 0, error: null }),
+      ]);
+      if (conversationsResult.error) throw conversationsResult.error;
+      if (notificationResult.error) throw notificationResult.error;
       const familyCommissionById = new Map(
         familyRows.map((row) => [
           firstString(row.id),
@@ -239,6 +260,14 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json({
         totalStays: revenueRows.length,
         totalEarnings,
+        pendingBookingCount: (bookingRowsV2 ?? []).filter(
+          (row) => row.status === "pending_host_approval" && row.payment_status === "paid"
+        ).length,
+        unreadMessageCount: (conversationsResult.data ?? []).reduce(
+          (sum, row) => sum + Math.max(0, Number(row.host_unread) || 0),
+          0
+        ),
+        unreadNotificationCount: Math.max(0, notificationResult.count ?? 0),
       });
     }
 

@@ -360,6 +360,15 @@ async function reconcileDecision(
     },
   });
 
+  const resolvedAt = new Date().toISOString();
+  const { error: resolveNotificationError } = await supabase
+    .from("operational_notifications")
+    .update({ resolved_at: resolvedAt, read_at: resolvedAt })
+    .eq("booking_id", input.bookingId)
+    .in("event_type", ["booking_host_action_required", "paid_booking_awaiting_host", "host_approval_sla"])
+    .is("resolved_at", null);
+  if (resolveNotificationError) throw resolveNotificationError;
+
   await syncBookingCalendarIndexBestEffort(
     supabase,
     input.bookingId,

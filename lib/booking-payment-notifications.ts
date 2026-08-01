@@ -7,6 +7,7 @@ import {
 import { enqueueNotification } from "@/lib/booking-platform";
 import { asNumber, asString, type JsonRecord } from "@/lib/platform-utils";
 import { getWhatsAppRuntimeConfig } from "@/lib/whatsapp-config";
+import { enqueuePaidBookingOperationalNotifications } from "@/lib/operational-notifications";
 import {
   resolveEligibleGuestWhatsApp,
   resolveEligibleHostWhatsApp,
@@ -106,8 +107,6 @@ export async function enqueuePostPaymentBookingNotifications(
   }
   const host = firstRecord(input.booking.hosts);
   const hostUserId = asString(host?.user_id);
-  if (!hostUserId) return;
-
   const stayUnitId = resolveStayUnitId(input.booking);
   let stayUnitName = asString(input.stayUnitName);
   if (!stayUnitName && stayUnitId) {
@@ -130,6 +129,18 @@ export async function enqueuePostPaymentBookingNotifications(
     asString(input.booking.start_date),
     asString(input.booking.end_date) ?? asString(input.booking.start_date)
   );
+
+  if (input.approvalRequired) {
+    await enqueuePaidBookingOperationalNotifications(supabase, {
+      bookingId,
+      hostUserId,
+      familyId,
+      dashboardUrl,
+      message: `${hostListingLabel} has a paid booking request for ${bookingDateLabel}.`,
+      metadata: { source: input.source },
+    });
+  }
+  if (!hostUserId) return;
 
   if (input.approvalRequired) {
     const eligibleWhatsApp = await resolveEligibleHostWhatsApp(supabase, hostUserId);

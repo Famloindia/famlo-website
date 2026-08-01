@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { createBrowserSupabaseClient } from "@/lib/supabase";
+import { bucketHostBookings, type HostBookingBucket } from "@/lib/host-booking-dashboard";
 import { toSupabaseImageUrl } from "@/lib/supabase-image";
 import styles from "../dashboard.module.css";
 import { MessageCircle, Compass, User, Clock, CheckCircle2, ShieldCheck, MapPin, Sparkles, Loader2 } from "lucide-react";
@@ -85,14 +86,21 @@ export default function BookingsTab({
   const [feedback, setFeedback] = useState<Record<string, { type: "success" | "error"; text: string }>>({});
   const [checkInCodeById, setCheckInCodeById] = useState<Record<string, string>>({});
   const [guestFeedbackDraftById, setGuestFeedbackDraftById] = useState<Record<string, { wouldHostAgain: boolean; tags: string[]; note: string }>>({});
+  const [activeBucket, setActiveBucket] = useState<HostBookingBucket>("new_requests");
 
   useEffect(() => {
     setLocalRows(bookingRows);
   }, [bookingRows]);
 
   const sortedRows = sortBookingsByNearestDate(localRows);
-  const pendingApprovalRows = sortedRows.filter((booking) => normalizeStatus(booking) === "pending");
-  const otherRows = sortedRows.filter((booking) => normalizeStatus(booking) !== "pending");
+  const buckets = bucketHostBookings(sortedRows, { timeZone: "Asia/Kolkata" });
+  const visibleRows = buckets[activeBucket];
+  const bucketTabs: Array<{ id: HostBookingBucket; label: string; primary: boolean }> = [
+    { id: "new_requests", label: "New Requests", primary: true },
+    { id: "upcoming", label: "Upcoming Bookings", primary: true },
+    { id: "arrivals_today", label: "Arrivals Today", primary: true },
+    { id: "history", label: "History", primary: false },
+  ];
 
   if (loading && localRows.length === 0) {
     return (
@@ -347,7 +355,28 @@ export default function BookingsTab({
       </div>
 
       <div className={styles.flexCol} style={{ gap: "20px" }}>
-        {sortedRows.length === 0 ? (
+        <div role="tablist" aria-label="Booking views" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {bucketTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeBucket === tab.id}
+              onClick={() => setActiveBucket(tab.id)}
+              style={{
+                border: activeBucket === tab.id ? "1px solid #165dcc" : "1px solid #dbeafe",
+                background: activeBucket === tab.id ? "#165dcc" : "#fff",
+                color: activeBucket === tab.id ? "#fff" : "#0e2b57",
+                padding: "10px 13px",
+                borderRadius: tab.primary ? 8 : 6,
+                fontWeight: 900,
+              }}
+            >
+              {tab.label} {buckets[tab.id].length}
+            </button>
+          ))}
+        </div>
+        {visibleRows.length === 0 ? (
           <div className={styles.glassCard} style={{ textAlign: "center", padding: "80px 20px" }}>
             <div style={{ color: "#cbd5e1", display: "flex", justifyContent: "center", marginBottom: "24px" }}>
               <Compass size={64} />
@@ -362,7 +391,7 @@ export default function BookingsTab({
           </div>
         ) : (
           <>
-            {pendingApprovalRows.length > 0 ? (
+            {activeBucket === "new_requests" && visibleRows.length > 0 ? (
               <div
                 className={styles.glassCard}
                 style={{
@@ -377,7 +406,7 @@ export default function BookingsTab({
                       Pending Approval
                     </div>
                     <h3 style={{ margin: 0, fontSize: "20px", fontWeight: 900, color: "#0e2b57" }}>
-                      {pendingApprovalRows.length} booking{pendingApprovalRows.length === 1 ? "" : "s"} waiting for your action
+                      {visibleRows.length} booking{visibleRows.length === 1 ? "" : "s"} waiting for your action
                     </h3>
                   </div>
                   <div style={{ padding: "8px 14px", borderRadius: "999px", background: "#fff7ed", color: "#9a3412", fontSize: "12px", fontWeight: 800, border: "1px solid #fed7aa" }}>
@@ -387,7 +416,7 @@ export default function BookingsTab({
               </div>
             ) : null}
 
-            {[...pendingApprovalRows, ...otherRows].map((booking) => {
+            {visibleRows.map((booking) => {
             const userData = (booking.users as Record<string, unknown>) || {};
             const realName = String(userData.name || "Verified Guest");
             const propertyName = typeof booking.property_name === "string" && booking.property_name.length > 0 ? booking.property_name : "Famlo Stay";

@@ -6,10 +6,19 @@ import {
   validateGuestPassword,
 } from "@/lib/auth/guest-credentials";
 import { normalizeGuestEmail } from "@/lib/guest-identity";
+import { findAuthUserByEmail } from "@/lib/auth/account-linking";
 import { buildOAuthCallbackUrl } from "@/lib/site-url";
 import { createAdminSupabaseClient, createEphemeralPublicSupabaseClient } from "@/lib/supabase";
 
 const SIGNUP_ERROR = "Account creation could not be completed. Check your details and try again.";
+const ACCOUNT_EXISTS_ERROR = "An account already exists with this email. Sign in or reset your password.";
+
+function accountExistsResponse(): NextResponse {
+  return NextResponse.json(
+    { error: ACCOUNT_EXISTS_ERROR, code: "ACCOUNT_EXISTS" },
+    { status: 409 }
+  );
+}
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
@@ -41,6 +50,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
+    const admin = createAdminSupabaseClient();
+    if (await findAuthUserByEmail(admin, email)) return accountExistsResponse();
+
     const returnTo = typeof body.returnTo === "string" ? body.returnTo : "/";
     const supabase = createEphemeralPublicSupabaseClient();
     const { data, error } = await supabase.auth.signUp({
@@ -52,10 +64,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       },
     });
     if (error || !data.user) {
+      if (await findAuthUserByEmail(admin, email)) return accountExistsResponse();
       return NextResponse.json({ error: SIGNUP_ERROR }, { status: 400 });
     }
 
-    const admin = createAdminSupabaseClient();
+    if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      return accountExistsResponse();
+    }
+
     const { error: profileError } = await admin.from("users").upsert(
       {
         id: data.user.id,

@@ -78,9 +78,22 @@ export default function AuthCallbackPage(): React.JSX.Element {
           return;
         }
 
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const profileResponse = await fetch("/api/user/profile", {
+          cache: "no-store",
+          headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+        });
+        const profilePayload = (await profileResponse.json().catch(() => ({}))) as { profileComplete?: boolean };
+        if (profileResponse.ok && profilePayload.profileComplete) {
+          window.location.replace(nextPath);
+          return;
+        }
         setMessage("Opening your profile...");
+        profileUrl.searchParams.set("complete", "1");
         profileUrl.searchParams.set("next", nextPath);
-        profileUrl.searchParams.set("auth_return", "google");
+        profileUrl.searchParams.set("auth_return", "authenticated");
         window.location.replace(`${profileUrl.pathname}${profileUrl.search}${profileUrl.hash}`);
       } catch {
         window.location.replace(`${nextPath}${nextPath.includes("?") ? "&" : "?"}auth_error=authentication_failed`);

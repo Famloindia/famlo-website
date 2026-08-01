@@ -21,6 +21,7 @@ const tabs = [
   { id: "test-properties", label: "Test Properties", icon: LayoutDashboard, group: "Operations" },
   { id: "pro-channel-summary", label: "Channels & Sync", icon: ShieldAlert, group: "Famlo Pro" },
   { id: "vetting", label: "Vetting Queue", icon: LayoutDashboard, group: "Operations" },
+  { id: "operational-notifications", label: "Booking & Link Reviews", icon: ShieldAlert, group: "Operations", href: "/admin/operations/notifications" },
   { id: "coupons", label: "Coupons", icon: TicketPercent, group: "Finance" },
   { id: "commission", label: "Commission Control", icon: Percent, group: "Finance Operations" },
   { id: "finance", label: "Finance Operations", icon: Landmark, group: "Finance Operations", href: "/admin/finance" },

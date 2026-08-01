@@ -18,7 +18,7 @@ import {
   Home, BookmarkCheck, Calendar as CalendarIcon, IndianRupee,
   UserCircle2, MessagesSquare, CheckCircle2, AlertCircle,
   BedDouble,
-  MessageCircle, ShieldCheck, Sparkles
+  MessageCircle, ShieldCheck, Sparkles, Bell
 } from "lucide-react";
 import DashboardTab from "./tabs/DashboardTab";
 
@@ -27,6 +27,7 @@ const CalendarTab = dynamic(() => import("./tabs/CalendarTab"));
 const EarningsTab = dynamic(() => import("./tabs/EarningsTab"));
 const ProfileTab = dynamic(() => import("./tabs/ProfileTab"));
 const MessagesTab = dynamic(() => import("./tabs/MessagesTab"));
+const NotificationsTab = dynamic(() => import("./tabs/NotificationsTab"));
 const DocumentsTab = dynamic(() => import("./tabs/DocumentsTab"));
 const SupportTab = dynamic(() => import("./tabs/SupportTab"));
 const FamloPlusTab = dynamic(() => import("./tabs/FamloPlusTab"));
@@ -105,6 +106,9 @@ export type PropertyReelItem = {
 type BookingSummary = {
   totalStays: number;
   totalEarnings: number;
+  pendingBookingCount: number;
+  unreadMessageCount: number;
+  unreadNotificationCount: number;
 };
 
 const ALLOWED_DASHBOARD_TABS = new Set([
@@ -112,6 +116,7 @@ const ALLOWED_DASHBOARD_TABS = new Set([
   "rooms",
   "bookings",
   "messages",
+  "notifications",
   "calendar",
   "earnings",
   "profile",
@@ -310,7 +315,7 @@ export function HostDashboardEditor({
     () => new Set(["bookings", "calendar", "earnings"]).has(activeTab),
     [activeTab]
   );
-  const needsBookingSummary = activeTab === "dashboard";
+  const needsBookingSummary = true;
 
   const loadBookingRows = useCallback(
     async (familyIdToLoad: string, options?: { silent?: boolean }): Promise<void> => {
@@ -383,7 +388,8 @@ export function HostDashboardEditor({
         if (
           !response.ok ||
           typeof (payload as BookingSummary).totalStays !== "number" ||
-          typeof (payload as BookingSummary).totalEarnings !== "number"
+          typeof (payload as BookingSummary).totalEarnings !== "number" ||
+          typeof (payload as BookingSummary).pendingBookingCount !== "number"
         ) {
           throw new Error(("error" in payload && payload.error) || "Failed to load dashboard summary.");
         }
@@ -437,6 +443,22 @@ export function HostDashboardEditor({
       client.removeChannel(channel);
     };
   }, [activeFamily, activeFamilyId, loadBookingRows, loadBookingSummary, needsBookingSummary, needsDetailedBookingRows, supabaseClient]);
+
+  useEffect(() => {
+    const refreshAuthoritativeState = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadBookingSummary(activeFamilyId, { silent: true });
+      if (needsDetailedBookingRows) void loadBookingRows(activeFamilyId, { silent: true });
+    };
+    const interval = window.setInterval(refreshAuthoritativeState, 15_000);
+    window.addEventListener("focus", refreshAuthoritativeState);
+    document.addEventListener("visibilitychange", refreshAuthoritativeState);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshAuthoritativeState);
+      document.removeEventListener("visibilitychange", refreshAuthoritativeState);
+    };
+  }, [activeFamilyId, loadBookingRows, loadBookingSummary, needsDetailedBookingRows]);
 
   const complianceRef = useRef(compliance);
   useEffect(() => { complianceRef.current = compliance; }, [compliance]);
@@ -720,6 +742,13 @@ export function HostDashboardEditor({
           />
         )}
 
+        {activeTab === "notifications" && (
+          <NotificationsTab
+            familyId={activeFamilyId}
+            onRead={() => void loadBookingSummary(activeFamilyId, { silent: true })}
+          />
+        )}
+
         {activeTab === "calendar" && (
           <CalendarTab
             familyId={activeFamilyId}
@@ -817,8 +846,9 @@ export function HostDashboardEditor({
         <nav className={styles.navMenu}>
           {[
             { id: "dashboard",  label: "Dashboard",    icon: <Home size={20} /> },
-            { id: "bookings",   label: "Booking",       icon: <BookmarkCheck size={20} /> },
-            { id: "messages",   label: "Messages",      icon: <MessageCircle size={20} /> },
+            { id: "bookings",   label: "Bookings",      icon: <BookmarkCheck size={20} />, badge: bookingSummary?.pendingBookingCount ?? 0 },
+            { id: "messages",   label: "Messages",      icon: <MessageCircle size={20} />, badge: bookingSummary?.unreadMessageCount ?? 0 },
+            { id: "notifications", label: "Notifications", icon: <Bell size={20} />, badge: bookingSummary?.unreadNotificationCount ?? 0 },
             { id: "rooms",      label: "Room",          icon: <BedDouble size={20} /> },
             { id: "calendar",   label: "Calendar",      icon: <CalendarIcon size={20} /> },
             { id: "earnings",   label: "Earnings",      icon: <IndianRupee size={20} /> },
@@ -837,6 +867,9 @@ export function HostDashboardEditor({
             >
               <span className={styles.navItemIcon}>{tab.icon}</span>
               <span>{tab.label}</span>
+              {"badge" in tab && Number(tab.badge) > 0 ? (
+                <span className={styles.navBadge}>{Math.min(99, Number(tab.badge))}</span>
+              ) : null}
             </button>
           ))}
         </nav>

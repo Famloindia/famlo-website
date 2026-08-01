@@ -125,19 +125,33 @@ async function callCashfree<T>(
   init: RequestInit & { idempotencyKey?: string | null } = {}
 ): Promise<T> {
   const { clientId, clientSecret, apiVersion, baseUrl } = getCashfreeConfig();
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "x-api-version": apiVersion,
-      "x-client-id": clientId,
-      "x-client-secret": clientSecret,
-      ...(init.idempotencyKey ? { "x-idempotency-key": init.idempotencyKey } : {}),
-      ...(init.headers ?? {}),
-    },
-    cache: "no-store",
-  });
+  const timeoutMs = Math.max(3_000, Math.min(Number(process.env.CASHFREE_REQUEST_TIMEOUT_MS) || 8_000, 15_000));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "x-api-version": apiVersion,
+        "x-client-id": clientId,
+        "x-client-secret": clientSecret,
+        ...(init.idempotencyKey ? { "x-idempotency-key": init.idempotencyKey } : {}),
+        ...(init.headers ?? {}),
+      },
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Cashfree did not respond in time. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const payload = (await response.json().catch(() => ({}))) as T & { message?: string; error?: string };
   if (!response.ok) {

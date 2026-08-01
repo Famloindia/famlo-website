@@ -114,6 +114,7 @@ export function ProfileCompletionForm({
   const [accountLinkState, setAccountLinkState] = useState<
     "idle" | "sending" | "sent" | "verifying"
   >("idle");
+  const [accountLinkReview, setAccountLinkReview] = useState<{ requestId: string; returnTo: string } | null>(null);
   const [emailOtpState, setEmailOtpState] = useState<
     "idle" | "sending" | "sent" | "verifying"
   >("idle");
@@ -314,6 +315,7 @@ export function ProfileCompletionForm({
     setAccountLinkSessionId("");
     setAccountLinkOtp("");
     setAccountLinkState("idle");
+    setAccountLinkReview(null);
     setMessage(null);
     setFieldErrors((current) => ({ ...current, phone: undefined }));
     onPhoneConflictChange?.(false);
@@ -389,6 +391,19 @@ export function ProfileCompletionForm({
         }),
       });
       const payload = await response.json();
+      if (
+        response.status === 409 &&
+        payload.status === "blocked_business_data" &&
+        typeof payload.requestId === "string"
+      ) {
+        setAccountLinkReview({
+          requestId: payload.requestId,
+          returnTo: getSafeGuestAuthReturnPath(payload.returnTo),
+        });
+        setAccountLinkState("idle");
+        setMessage(null);
+        return;
+      }
       if (!response.ok) {
         throw new Error(
           payload.error ??
@@ -432,6 +447,22 @@ export function ProfileCompletionForm({
             : "The verification code is invalid or expired.",
       });
     }
+  }
+
+  async function continueWithPhoneAccount(): Promise<void> {
+    if (!phoneConflict || !accountLinkReview) return;
+    window.sessionStorage.setItem("famlo:account-switch-phone", phoneConflict);
+    const { error } = await supabase.auth.signOut({ scope: "local" });
+    if (error) {
+      setMessage({ type: "error", text: "The secure account switch could not be started." });
+      return;
+    }
+    await fetch("/api/auth/session", { method: "DELETE", cache: "no-store" });
+    const target = new URL(accountLinkReview.returnTo, window.location.origin);
+    target.searchParams.set("auth", "login");
+    target.searchParams.set("auth_step", "phone");
+    target.searchParams.set("account_switch", "phone");
+    window.location.replace(`${target.pathname}${target.search}${target.hash}`);
   }
 
   async function sendEmailVerificationOtp(): Promise<void> {
@@ -879,7 +910,7 @@ export function ProfileCompletionForm({
                 setDraft((current) => ({ ...current, username: event.target.value.toLowerCase().trimStart() }));
                 setUsernameStatus("idle");
               }}
-              placeholder="aryan_krishan"
+              placeholder="Choose a username"
             />
             <button type="button" disabled={usernameStatus === "checking"} onClick={() => void checkUsernameAvailability()}>
               {usernameStatus === "checking" ? "Checking..." : "Check"}
@@ -896,7 +927,7 @@ export function ProfileCompletionForm({
             required
             value={resolvedForm.name}
             onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Aryan Krishan"
+            placeholder="Enter your full name"
           />
           {fieldErrors.name ? <small className="field-error">{fieldErrors.name}</small> : null}
         </label>
@@ -946,7 +977,7 @@ export function ProfileCompletionForm({
             required
             value={resolvedForm.city}
             onChange={(event) => setDraft((current) => ({ ...current, city: event.target.value }))}
-            placeholder="Hisar"
+            placeholder="Enter your city"
           />
           {fieldErrors.city ? <small className="field-error">{fieldErrors.city}</small> : null}
         </label>
@@ -958,7 +989,7 @@ export function ProfileCompletionForm({
             required
             value={resolvedForm.state}
             onChange={(event) => setDraft((current) => ({ ...current, state: event.target.value }))}
-            placeholder="Haryana"
+            placeholder="Enter your state"
           />
           {fieldErrors.state ? <small className="field-error">{fieldErrors.state}</small> : null}
         </label>
@@ -1054,6 +1085,27 @@ export function ProfileCompletionForm({
                   >
                     {accountLinkState === "verifying" ? "Checking..." : "Verify"}
                   </button>
+                </div>
+              ) : null}
+              {accountLinkReview ? (
+                <div className="account-link-review">
+                  <strong>Famlo Support needs to review these accounts before linking.</strong>
+                  <p>Reference: {accountLinkReview.requestId.slice(0, 8).toUpperCase()}</p>
+                  <div>
+                    <button
+                      type="button"
+                      className="conflict-primary"
+                      onClick={() => void continueWithPhoneAccount()}
+                    >
+                      Continue with phone account
+                    </button>
+                    <button type="button" className="conflict-secondary" onClick={useAnotherPhone}>
+                      Use another number
+                    </button>
+                    <a href="mailto:support@famlo.in?subject=Famlo%20account%20link%20review">
+                      Contact Famlo Support
+                    </a>
+                  </div>
                 </div>
               ) : null}
             </div>
