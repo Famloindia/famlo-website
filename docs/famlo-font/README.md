@@ -1,43 +1,58 @@
-# Famlo Font
+# Famlo Font — Official Famlo Typeface
 
-**Famlo** is a friendly rounded display typeface created for the Famlo travel and homestay brand.
+**Famlo Font** is the official rounded type family created for Famlo by **FAMLO TRAVELTECH PRIVATE LIMITED**.
 
-## Current release
+## Famlo Font v1.1
 
 - Family: **Famlo**
-- Style: **SemiBold**
-- Weight: **600**
-- Version: **1.000**
-- Formats published here: OTF + WOFF2
+- Famlo Light — **300**
+- Famlo Regular — **400**
+- Famlo Medium — **500**
+- Famlo SemiBold — **600**
+- Famlo Bold — **700**
+- Version: **1.100**
 - Character set: A–Z, a–z, 0–9, common punctuation and symbols, ₹, €, £
 - License: SIL Open Font License 1.1
 - Reserved Font Name: **Famlo**
+- Copyright holder / owner: **FAMLO TRAVELTECH PRIVATE LIMITED**
 
-## Desktop install
+## Download Famlo Font
 
-Download `Famlo-SemiBold.otf` and install it through Font Book on macOS or the Fonts settings on Windows.
+The complete family package contains OTF, TTF and WOFF2 files for all five weights:
+
+`releases/Famlo-Font-v1.1.0-family.zip`
 
 ## Web use
 
 ```css
 @font-face {
   font-family: "Famlo";
-  src: url("/fonts/Famlo-SemiBold.woff2") format("woff2");
-  font-weight: 600;
+  src: url("/fonts/Famlo-Regular.woff2") format("woff2");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 ```
 
-Then use:
+Register the remaining files at weights 300, 500, 600 and 700, then use:
 
 ```css
-font-family: "Famlo", sans-serif;
-font-weight: 600;
+body {
+  font-family: "Famlo", sans-serif;
+  font-weight: 400;
+}
 ```
 
-## License
+## Official page
 
-Famlo is released under the SIL Open Font License 1.1. The Reserved Font Name is **Famlo**.
+The canonical public page for the type family is intended to be:
 
-Copyright © 2026 Famlo Traveltech Private Limited.
+**https://famlo.in/font**
+
+## Ownership & license
+
+Copyright © 2026 **FAMLO TRAVELTECH PRIVATE LIMITED**. Reserved Font Name: **Famlo**.
+
+Famlo Font is released under the SIL Open Font License 1.1. The font may be used, embedded and redistributed under the license terms. Modified versions may not use the reserved name **Famlo** without permission from the copyright holder.
+
+Search terms: Famlo Font, Famlo typeface, Famlo font download, official Famlo font, Famlo Traveltech font.
