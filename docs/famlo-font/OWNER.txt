@@ -3,4 +3,5 @@ Official owner and copyright holder of Famlo Font:
 FAMLO TRAVELTECH PRIVATE LIMITED
 
 Reserved Font Name: Famlo
-Version family: 1.100
+Version: 1.100
+Official page: https://famlo.in/font

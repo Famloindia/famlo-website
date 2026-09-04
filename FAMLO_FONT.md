@@ -1,20 +1,19 @@
 # Famlo Font — Official Typeface by FAMLO TRAVELTECH PRIVATE LIMITED
 
-**Famlo Font** is the official rounded type family created for Famlo, a travel and homestay brand by **FAMLO TRAVELTECH PRIVATE LIMITED**.
+**Famlo Font** is the official custom rounded type family of Famlo.
 
-## Official family
+Official owner and copyright holder: **FAMLO TRAVELTECH PRIVATE LIMITED**  
+Reserved Font Name: **Famlo**  
+Official page: **https://famlo.in/font**
 
-- Famlo Light — 300
-- Famlo Regular — 400
-- Famlo Medium — 500
-- Famlo SemiBold — 600
-- Famlo Bold — 700
+## Weights
 
-The font family is intended for websites, apps, brand communication, travel products, homestay interfaces, presentations and design work.
+- Famlo Light 300
+- Famlo Regular 400
+- Famlo Medium 500
+- Famlo SemiBold 600
+- Famlo Bold 700
 
-**Copyright holder / owner:** FAMLO TRAVELTECH PRIVATE LIMITED  
-**Reserved Font Name:** Famlo  
-**License:** SIL Open Font License 1.1  
-**Official website:** https://famlo.in/font
+The public webfont files are in `public/fonts/` and documentation is in `docs/famlo-font/`.
 
-Search terms: Famlo Font, Famlo typeface, Famlo font download, Famlo Traveltech font, official Famlo font, rounded travel font.
+Search terms: Famlo Font, Famlo typeface, Famlo font download, official Famlo font, Famlo Traveltech font, rounded travel font.
