@@ -1,0 +1,12 @@
+@font-face {
+  font-family: "Famlo";
+  src: url("/fonts/Famlo-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+.font-famlo {
+  font-family: "Famlo", system-ui, sans-serif;
+  font-weight: 600;
+}
